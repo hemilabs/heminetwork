@@ -53,20 +53,11 @@ import (
 
 var (
 	defaultPort = "49152"
-	// seed1       = "seed.bark.gfy."
+	// seed1       = "seed.bark.gfy." // XXX implement this
 
 	// wellKnownSeeds = []string{seed1}
 
 	inAddrArpa = "in-addr.arpa"
-	// node1A     = "node1.meow.gfy."
-	// node1Ptr   = "101.0.0.127.in-addr.arpa."
-	// node1Priv  = "0daf6bf4928ccf2d1e19400a4ab088c854a2d8de3bb11eac899137d0591405ad"
-	// node1ID    = "33a10c33e612a491dd1de98aff56e875d70a48e1"
-
-	// node2Priv = "632cc339c0e7961b65bf539604c0326083ccd69ab8d57483b41cae839b94a803"
-	// node3Priv = "94379ce360385c925a5bcd029db541f6fd1b8ac78143dabeac2357c43a531540"
-	// node4Priv = "f642dea0fc0627aceb6c371a9ebb242dd3c9a42ab59a760d9d2e2a692cc5e716"
-	// node5Priv = "6d353152c25824f96df7ce55b2d3d85c0c1591ec2a3b195554e7055bcf78162f"
 )
 
 type node struct {
@@ -135,79 +126,6 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 			},
 		}
 }
-
-//type Node struct {
-//	Identity // Identity
-//	Name     string   // DNS name
-//	Listen   string   // Listen adddress
-//
-//	private *secp256k1.PrivateKey // Private key
-//	ip      net.IP                // DNS IP address
-//}
-
-// var domainsToAddresses map[string][]dns.RR = map[string][]dns.RR{
-//seed1: {
-//	&dns.A{
-//		Hdr: dns.Header{
-//			Name:  seed1,
-//			Class: dns.ClassINET,
-//		},
-//		A: net.IPv4(127, 0, 0, 1),
-//	},
-//	&dns.AAAA{
-//		Hdr: dns.Header{
-//			Name:  seed1,
-//			Class: dns.ClassINET,
-//		},
-//		AAAA: net.IPv6loopback,
-//	},
-//},
-//node1R: {
-//	&dns.A{
-//		Hdr: dns.Header{
-//			Name:  node1R,
-//			Class: dns.ClassINET,
-//		},
-//		A: net.IPv4(127, 0, 0, 1),
-//	},
-//	&dns.TXT{
-//		Hdr: dns.Header{
-//			Name:  node1R,
-//			Class: dns.ClassINET,
-//		},
-//		Txt: []string{"identity=" + node1 + " port=9999"},
-//	},
-//},
-//node1A: {
-//	&dns.A{
-//		Hdr: dns.Header{
-//			Name:  node1A,
-//			Class: dns.ClassINET,
-//		},
-//		A: net.IPv4(127, 0, 0, 101),
-//	},
-//	&dns.TXT{
-//		Hdr: dns.Header{
-//			Name:  node1A,
-//			Class: dns.ClassINET,
-//		},
-//		Txt: []string{"identity=" + node1ID + " port=9999"},
-//	},
-//},
-//node1Ptr: {
-//	&dns.PTR{
-//		Hdr: dns.Header{
-//			Name:  node1Ptr,
-//			Class: dns.ClassINET,
-//		},
-//		Ptr: "127-0-0-101.meow.gfy.",
-//	},
-//},
-//"node2.test.gfy.": "127.0.0.1",
-//"node3.test.gfy.": "127.0.0.1",
-//"node4.test.gfy.": "::1",
-//"node5.test.gfy.": "::1",
-//}
 
 type dnsHandler struct {
 	lookup map[string][]dns.RR
@@ -291,41 +209,31 @@ func TestDNSServer(t *testing.T) {
 	}
 }
 
-type Command struct {
-	Tag         [4]byte
-	PayloadHint [2]byte
-	Sender      *Identity // Optional
-	Receiver    *Identity // Optional
-	Path        string    // XXX do we want this
-	TTL         byte
-}
-
-//// Hello challenges the other side to sign the challenge.
-//type Hello struct {
-//	Identity  `json:"identity"`
-//	Challenge [chainhash.HashSize]byte // Challenge them
-//}
-//
-//// HelloReply returns the signed response. The Identity of the other side can
-//// be recovered from the challenge response.
-//type HelloReply struct {
-//	ChallengeResponse []byte
-//}
+// type Command struct {
+// 	Tag         [4]byte
+// 	PayloadHint [2]byte
+// 	Sender      *Identity // Optional
+// 	Receiver    *Identity // Optional
+// 	Path        string    // XXX do we want this
+// 	TTL         byte
+// }
 
 func TestID(t *testing.T) {
+	// XXX not sure if we need this test; it's a roadmap of how the code is
+	// written and thus maybe useful for folks to read prior to reading the
+	// rest.
+	//
 	// Create DNS record with identity + ip + port
 	// Client challenges Server with random(32)
 	// Server signs challenge with privkey
 	// Client recover pubkey from sig of challenge and verifies identity
 	//
-	// ID is a compressed pubkey
-	//for i := 0; i < 5; i++ {
+	// Identity is a compressed pubkey
 	priv, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("secp256k1 %x", priv.Serialize())
-	//}
 	pub := priv.PubKey()
 	t.Logf("pub: %x", pub.SerializeCompressed())
 	t.Logf("identity: %x", Hash160(pub.SerializeCompressed()))
@@ -354,53 +262,6 @@ func TestID(t *testing.T) {
 	}
 }
 
-func TestIdentity(t *testing.T) {
-	s1, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s2, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var c1 [32]byte
-	_, err = rand.Read(c1[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var c2 [32]byte
-	_, err = rand.Read(c2[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sig1 := s1.Sign(c2[:])
-	sig2 := s2.Sign(c1[:])
-
-	rec1, err := Verify(c1[:], sig2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec2, err := Verify(c2[:], sig1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Logf("id1: %v", s1)
-	t.Logf("id2: %v", s2)
-	t.Logf("rec1: %v", NewIdentityFromPub(rec1))
-	t.Logf("rec2: %v", NewIdentityFromPub(rec2))
-
-	if s1.String() != NewIdentityFromPub(rec2).String() {
-		t.Fatal("recovery failed in 1")
-	}
-	if s2.String() != NewIdentityFromPub(rec1).String() {
-		t.Fatal("recovery failed in 2")
-	}
-}
-
 func newNonce(key [32]byte, counter uint64) (nonce [24]byte) {
 	var c [8]byte
 	binary.BigEndian.PutUint64(c[:], counter)
@@ -415,6 +276,9 @@ func newNonce(key [32]byte, counter uint64) (nonce [24]byte) {
 }
 
 func TestECDHSecretBox(t *testing.T) {
+	// XXX not sure if we need this test; it's a roadmap of how the code is
+	// written and thus maybe useful for folks to read prior to reading the
+	// rest.
 	curve := ecdh.P521()
 	priv1, _ := curve.GenerateKey(rand.Reader)
 	priv2, _ := curve.GenerateKey(rand.Reader)
@@ -483,6 +347,52 @@ func TestECDHSecretBox(t *testing.T) {
 }
 
 // Below this line should be all retained
+func TestIdentity(t *testing.T) {
+	s1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var c1 [32]byte
+	_, err = rand.Read(c1[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var c2 [32]byte
+	_, err = rand.Read(c2[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sig1 := s1.Sign(c2[:])
+	sig2 := s2.Sign(c1[:])
+
+	rec1, err := Verify(c1[:], sig2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec2, err := Verify(c2[:], sig1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("id1: %v", s1)
+	t.Logf("id2: %v", s2)
+	t.Logf("rec1: %v", NewIdentityFromPub(rec1))
+	t.Logf("rec2: %v", NewIdentityFromPub(rec2))
+
+	if s1.String() != NewIdentityFromPub(rec2).String() {
+		t.Fatal("recovery failed in 1")
+	}
+	if s2.String() != NewIdentityFromPub(rec1).String() {
+		t.Fatal("recovery failed in 2")
+	}
+}
 
 func TestTransportHandshake(t *testing.T) {
 	// XXX make this table driven and test all possible permutations.
