@@ -59,23 +59,6 @@ type HelloResponse struct {
 	Signature []byte `json:"signature"` // Signature of Challenge and identity is derived
 }
 
-//type Server struct {
-//	address *net.TCPAddr
-//	lc      net.ListenConfig
-//}
-//
-//func NewServer(o Options, address string) (*Server, error) {
-//	a, err := net.ResolveTCPAddr("tcp", address)
-//	if err != nil {
-//		return nil, err
-//	}
-//	s := &Server{
-//		address: a,
-//		lc:      net.ListenConfig{},
-//	}
-//	return s, nil
-//}
-
 const (
 	TransportVersion = 1
 
@@ -417,7 +400,7 @@ func (t *Transport) readBlob() ([]byte, error) {
 		return nil, err
 	}
 	if n != 3 {
-		return nil, fmt.Errorf("shor read size: %v != 3", n)
+		return nil, fmt.Errorf("short read size: %v != 3", n)
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
 
