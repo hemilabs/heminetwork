@@ -137,7 +137,7 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 }
 
 //type Node struct {
-//	Identity Identity // Identity
+//	Identity // Identity
 //	Name     string   // DNS name
 //	Listen   string   // Listen adddress
 //
@@ -226,7 +226,9 @@ func (h *dnsHandler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.
 	if ok {
 		m.Answer = rr
 	}
-	io.Copy(w, m)
+	if _, err := io.Copy(w, m); err != nil {
+		panic(err)
+	}
 }
 
 func newDNSServer(host string, port uint16, handler dns.Handler) *dns.Server {
@@ -248,7 +250,7 @@ func TestDNSServer(t *testing.T) {
 		}
 		n, err := createNode("node2", "moop.gfy", net.IPv4(111, 222, 0, 1), 9321)
 		if err != nil {
-			t.Fatal(err)
+			panic(err)
 		}
 		dnsf, dnsr := nodeToDNS(n)
 		handler.insertDNS(n, dnsf, dnsr)
@@ -300,12 +302,12 @@ type Command struct {
 
 //// Hello challenges the other side to sign the challenge.
 //type Hello struct {
-//	Identity  Identity                 `json:"identity"`
+//	Identity  `json:"identity"`
 //	Challenge [chainhash.HashSize]byte // Challenge them
 //}
 //
 //// HelloReply returns the signed response. The Identity of the other side can
-//// be recovered fomr the challenge response.
+//// be recovered from the challenge response.
 //type HelloReply struct {
 //	ChallengeResponse []byte
 //}
@@ -431,11 +433,15 @@ func TestECDHSecretBox(t *testing.T) {
 	// Derive encryption keys
 	var ek1 [32]byte
 	ek1R := hkdf.New(sha256.New, secret1, nil, nil)
-	io.ReadFull(ek1R, ek1[:])
+	if _, err := io.ReadFull(ek1R, ek1[:]); err != nil {
+		t.Fatal(err)
+	}
 
 	var ek2 [32]byte
 	ek2R := hkdf.New(sha256.New, secret2, nil, nil)
-	io.ReadFull(ek2R, ek2[:])
+	if _, err := io.ReadFull(ek2R, ek2[:]); err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Equal(ek1[:], ek2[:]) {
 		t.Fatal("bad derive")
 	}
@@ -500,14 +506,16 @@ func TestTransportHandshake(t *testing.T) {
 	}
 	t.Logf("them: %v", themSecret)
 
-	listener, err := net.Listen("tcp", ":0")
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	l := net.ListenConfig{}
+	listener, err := l.Listen(ctx, "tcp", ":0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
 
-	ctx := context.TODO()
 	var wg sync.WaitGroup
 	wg.Add(2) // Wait for both key exchanges to complete
 	go func() {
@@ -540,8 +548,9 @@ func TestTransportHandshake(t *testing.T) {
 		}
 	}()
 
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1",
-		strconv.Itoa(port)), 5*time.Second)
+	d := &net.Dialer{}
+	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1",
+		strconv.Itoa(port)))
 	if err != nil {
 		t.Fatal(err)
 	}

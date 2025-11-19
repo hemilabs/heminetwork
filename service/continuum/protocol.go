@@ -134,7 +134,7 @@ func (i Identity) String() string {
 }
 
 func (i Identity) Bytes() []byte {
-	return append(i[:])
+	return append([]byte{}, i[:]...) // Fucking linter rejects append(i[:])
 }
 
 func (i *Identity) UnmarshalJSON(data []byte) error {
@@ -415,6 +415,9 @@ func (t *Transport) readBlob() ([]byte, error) {
 	n, err := t.conn.Read(sizeRE[1:4])
 	if err != nil {
 		return nil, err
+	}
+	if n != 3 {
+		return nil, fmt.Errorf("shor read size: %v != 3", n)
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
 
