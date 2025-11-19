@@ -478,11 +478,14 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 
 		tx, err = testToken.Approve(auth, l1StandardBridge(t), big.NewInt(100))
 		if err != nil {
-			t.Fatal(err)
+			if i == abort {
+				t.Fatalf("retries exceeded: %s", err)
+			}
+			t.Log(err)
+			continue
 		}
 
 		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
-
 		if receipt == nil {
 			if i == abort {
 				t.Fatal("retries exceeded")
