@@ -186,6 +186,22 @@ services:
     networks:
       e2e:
 
+  prysm:
+    image: prysmaticlabs/prysm-beacon-chain:v7.0.0@sha256:1612637337ceb8ea38daf9f28650addbbf0548c132b3be953d73b70e2d3d465c
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+    command:
+      - "--execution-endpoint=http://geth-l1:8545"
+      - "--rpc-host=0.0.0.0"
+      - "--http-host=0.0.0.0"
+      - "--http-port=4001"
+      - "--datadir=/data"
+      - "--accept-terms-of-use"
+      - "--verbosity=trace"
+    networks:
+      e2e:
+
   op-geth-l2-setup:
     build:
       dockerfile: "optimism-stack.Dockerfile"
@@ -268,6 +284,8 @@ services:
     depends_on:
       geth-l1:
         condition: "service_started"
+      prysm:
+        condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
     healthcheck:
@@ -303,7 +321,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://prysm:4001"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
@@ -320,6 +338,8 @@ services:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
     depends_on:
+      prysm:
+        condition: "service_started"
       op-node:
         condition: "service_started"
     healthcheck:
@@ -352,7 +372,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://prysm:4001"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
