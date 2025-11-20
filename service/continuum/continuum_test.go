@@ -222,71 +222,71 @@ func waitForDNSServer(address string, t *testing.T) {
 	}
 }
 
-func TestDNSServer(t *testing.T) {
-	go func() {
-		handler := &dnsHandler{
-			lookup: make(map[string][]dns.RR),
-		}
-		n, err := createNode("node2", "moop.gfy", net.IPv4(111, 222, 0, 1), 9321)
-		if err != nil {
-			panic(err)
-		}
-		dnsf, dnsr := nodeToDNS(n)
-		handler.insertDNS(n, dnsf, dnsr)
-
-		newDNSServer("127.0.0.1:5353", handler)
-	}()
-	// time.Sleep(1 * time.Second)
-	// All of this to replace a sleep!
-	d := net.Dialer{}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	for {
-		conn, err := d.DialContext(ctx, "tcp", "127.0.0.1:5353")
-		if err == nil {
-			err = conn.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
-			break
-		}
-
-		if err.(*net.OpError).Err.(*os.SyscallError).Err == syscall.ECONNREFUSED {
-			continue
-		}
-	}
-
-	t.Logf("resolving")
-	r := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{
-				Timeout: time.Millisecond * time.Duration(10000),
-			}
-			return d.DialContext(ctx, "tcp", "127.0.0.1:5353")
-		},
-	}
-	addr, err := r.LookupAddr(t.Context(), "111.222.0.1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("%v", addr)
-
-	ip, err := r.LookupHost(t.Context(), "node2.moop.gfy.")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("%v", ip)
-
-	txtRecords, err := r.LookupTXT(t.Context(), "node2.moop.gfy.")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, txt := range txtRecords {
-		t.Logf("%v", txt)
-	}
-}
+//func TestDNSServer(t *testing.T) {
+//	go func() {
+//		handler := &dnsHandler{
+//			lookup: make(map[string][]dns.RR),
+//		}
+//		n, err := createNode("node2", "moop.gfy", net.IPv4(111, 222, 0, 1), 9321)
+//		if err != nil {
+//			panic(err)
+//		}
+//		dnsf, dnsr := nodeToDNS(n)
+//		handler.insertDNS(n, dnsf, dnsr)
+//
+//		newDNSServer("127.0.0.1:5353", handler)
+//	}()
+//	// time.Sleep(1 * time.Second)
+//	// All of this to replace a sleep!
+//	d := net.Dialer{}
+//	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+//	defer cancel()
+//	for {
+//		conn, err := d.DialContext(ctx, "tcp", "127.0.0.1:5353")
+//		if err == nil {
+//			err = conn.Close()
+//			if err != nil {
+//				t.Fatal(err)
+//			}
+//			break
+//		}
+//
+//		if err.(*net.OpError).Err.(*os.SyscallError).Err == syscall.ECONNREFUSED {
+//			continue
+//		}
+//	}
+//
+//	t.Logf("resolving")
+//	r := &net.Resolver{
+//		PreferGo: true,
+//		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+//			d := net.Dialer{
+//				Timeout: time.Millisecond * time.Duration(10000),
+//			}
+//			return d.DialContext(ctx, "tcp", "127.0.0.1:5353")
+//		},
+//	}
+//	addr, err := r.LookupAddr(t.Context(), "111.222.0.1")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	t.Logf("%v", addr)
+//
+//	ip, err := r.LookupHost(t.Context(), "node2.moop.gfy.")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	t.Logf("%v", ip)
+//
+//	txtRecords, err := r.LookupTXT(t.Context(), "node2.moop.gfy.")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	for _, txt := range txtRecords {
+//		t.Logf("%v", txt)
+//	}
+//}
 
 // type Command struct {
 // 	Tag         [4]byte
@@ -630,7 +630,7 @@ func TestTransportHandshake(t *testing.T) {
 	}
 }
 
-func TestTransportDNSVerification(t *testing.T) {
+func TestDNSServerSetup(t *testing.T) {
 	nodes := byte(200)
 	dnsAddress := "127.0.0.1:5353"
 	domain := "moop.gfy"
@@ -669,6 +669,14 @@ func TestTransportDNSVerification(t *testing.T) {
 			dnsAppName, v.Identity, defaultPort)
 		if txtRecords[0] != txtExpected {
 			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
+		}
+
+		ok, err := DNSVerifyIdentityByIP(t.Context(), v.IP, v.Identity, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatalf("not verified identity: %v", v.IP)
 		}
 	}
 }
