@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -518,4 +519,67 @@ func (t *Transport) Write(cmd any) error {
 		return err
 	}
 	return t.write(blob)
+}
+
+func NewResolver(resolverAddress string) *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := &net.Dialer{}
+			return d.DialContext(ctx, network, resolverAddress)
+		},
+	}
+}
+
+func DNSVerifyIdentityByAddress(ctx context.Context, address string, identity Identity, resolver *net.Resolver) (bool, error) {
+	if resolver == nil {
+		resolver = &net.Resolver{}
+	}
+
+	if !strings.HasSuffix(address, ".") {
+		address = address + "."
+	}
+
+	txts, err := resolver.LookupTXT(ctx, address)
+	if err != nil {
+		return false, fmt.Errorf("lookup txt: %w", err)
+	}
+	if len(txts) != 1 {
+		return false, errors.New("lookup txt: invalid response")
+	}
+
+	// XXX make this not this dumb
+	// expect v=transfunctioner and identity=hex
+	s := strings.Split(txts[0], " ")
+	m := make(map[string]string)
+	for _, v := range s {
+		kv := strings.Split(v, "=")
+		// XXX just panic for now if record is invalid, needs rewrite
+		m[kv[0]] = kv[1]
+	}
+	if m["v"] != dnsAppName {
+		return false, fmt.Errorf("invalid dns app name: '%v'", m["v"])
+	}
+	if m["identity"] == identity.String() {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func DNSVerifyIdentityByIP(ctx context.Context, ip net.IP, identity Identity, resolver *net.Resolver) (bool, error) {
+	if resolver == nil {
+		resolver = &net.Resolver{}
+	}
+	addr, err := resolver.LookupAddr(ctx, ip.String())
+	if err != nil {
+		return false, fmt.Errorf("reverse lookup: %w", err)
+	}
+	if len(addr) != 1 {
+		return false, errors.New("reverse lookup: invalid response")
+	}
+	// XXX fix for ipv6 and see if there is something nicer to parse records
+	expectedPrefix := strings.ReplaceAll(ip.String(), ".", "-") + "-"
+	expectedAddress := addr[0][len(expectedPrefix):]
+	return DNSVerifyIdentityByAddress(ctx, expectedAddress, identity, resolver)
 }
