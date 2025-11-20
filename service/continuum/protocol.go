@@ -51,6 +51,7 @@ import (
 //	encoding=json
 //	compression=no
 //
+// XXX describe the types a bit here and add a drawing if needed to tie it all together.
 
 type HelloRequest struct {
 	Version   uint32            `json:"version"`           // Version number
