@@ -62,6 +62,12 @@ var (
 			Help:         "address and port transfunctionerd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
+		// XXX add listen address
+		// XXX add DNS security toggle
+		// XXX add max connections
+		// XXX add max queue depth per connection
+		// XXX maybe add max commands / second
+		// XXX maybe add white/black list of ips/hosts
 	}
 )
 
@@ -92,7 +98,7 @@ func _main() error {
 	go func() {
 		// Stop receiving signals as soon as possible.
 		<-ctx.Done()
-		log.Infof("continuum service received signal")
+		log.Infof("continuum transfunctioner activated, ending universe.")
 		cancel()
 	}()
 

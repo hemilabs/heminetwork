@@ -304,6 +304,8 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	}()
 
+	log.Infof("Identity: %v", s.secret)
+
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()
