@@ -478,11 +478,14 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 
 		tx, err = testToken.Approve(auth, l1StandardBridge(t), big.NewInt(100))
 		if err != nil {
-			t.Fatal(err)
+			if i == abort {
+				t.Fatalf("retries exceeded: %s", err)
+			}
+			t.Log(err)
+			continue
 		}
 
 		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
-
 		if receipt == nil {
 			if i == abort {
 				t.Fatal("retries exceeded")
@@ -534,8 +537,8 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			t.Fatal(err)
 		}
 		auth.Nonce = big.NewInt(int64(nonce))
-		auth.Value = big.NewInt(0)       // in wei
-		auth.GasLimit = uint64(20000000) // in units
+		auth.Value = big.NewInt(0) // in wei
+		auth.GasLimit = uint64(0)  // in units
 		auth.GasFeeCap = gasPrice
 		auth.Value = big.NewInt(9000000000000000000)
 		value = auth.Value
