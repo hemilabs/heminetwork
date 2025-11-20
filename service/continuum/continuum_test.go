@@ -61,7 +61,6 @@ var (
 	// wellKnownSeeds = []string{seed1}
 
 	inAddrArpa = "in-addr.arpa"
-	dnsAppName = "transfunctioner"
 )
 
 type node struct {
