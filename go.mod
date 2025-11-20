@@ -5,7 +5,7 @@ go 1.25.0
 toolchain go1.25.4
 
 require (
-	codeberg.org/miekg/dns v0.5.25
+	codeberg.org/miekg/dns v0.5.26
 	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
 	github.com/btcsuite/btcd/btcec/v2 v2.3.6
 	github.com/btcsuite/btcd/btcutil v1.1.6
