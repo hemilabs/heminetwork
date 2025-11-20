@@ -80,6 +80,8 @@ const (
 	CurveP521   = "P521"
 	CurveX25519 = "x25519"
 	CurveClient = "none"
+
+	dnsAppName = "transfunctioner"
 )
 
 var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is invalid
