@@ -24,6 +24,9 @@ import (
 const (
 	logLevel = "INFO"
 	appName  = "cnt"
+
+	defaultListen         = "localhost:49152"
+	defaultTransportCurve = CurveP521
 )
 
 var log = loggo.GetLogger(appName)
@@ -99,7 +102,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	// on ctx cancel.
 	//
 	// XXX move this to a function so that we don't panic
-	transport, err := NewTransport("P521") // XXX make curve an option
+	transport, err := NewTransport(defaultTransportCurve) // XXX make curve an option
 	if err != nil {
 		panic(err)
 	}
@@ -274,7 +277,7 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		listener, err := s.listenConfig.Listen(ctx, "tcp", ":49152")
+		listener, err := s.listenConfig.Listen(ctx, "tcp", defaultListen)
 		if err != nil {
 			errC <- err
 			return

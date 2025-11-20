@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -350,7 +351,7 @@ func newNonce(key [32]byte, counter uint64) (nonce [24]byte) {
 	}
 	s := h.Sum(nil)
 	copy(nonce[:], s)
-	return
+	return nonce
 }
 
 func TestECDHSecretBox(t *testing.T) {
@@ -473,96 +474,159 @@ func TestIdentity(t *testing.T) {
 }
 
 func TestTransportHandshake(t *testing.T) {
-	// XXX make this table driven and test all possible permutations.
-	us, err := NewTransport("P521")
-	if err != nil {
-		t.Fatal(err)
+	type testTableItem struct {
+		name               string
+		usCurve, themCurve string
+		expectedError      error
 	}
-	usSecret, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("us: %v", usSecret)
-
-	them, err := NewTransport("P521")
-	if err != nil {
-		t.Fatal(err)
-	}
-	themSecret, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("them: %v", themSecret)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	l := net.ListenConfig{}
-	listener, err := l.Listen(ctx, "tcp", ":0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	port := listener.Addr().(*net.TCPAddr).Port
-
-	var wg sync.WaitGroup
-	wg.Add(2) // Wait for both key exchanges to complete
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			panic(err)
-		}
-		defer func() {
-			if err := them.Close(); err != nil {
-				panic(err)
+	curves := []string{CurveP521, CurveP384, CurveP256, CurveX25519}
+	testTable := make([]testTableItem, 0, 20)
+	for _, us := range curves {
+		for _, them := range append(curves, CurveClient) {
+			tti := testTableItem{
+				name:      fmt.Sprintf("%s - %s", us, them),
+				usCurve:   us,
+				themCurve: them,
 			}
-		}()
-		if err = them.KeyExchange(ctx, conn); err != nil {
-			panic(err)
+			if us != them && them != CurveClient {
+				tti.expectedError = ErrCurveDoesnotMatch
+			}
+			testTable = append(testTable, tti)
 		}
-		usRecovered, err := them.Handshake(ctx, themSecret)
-		if err != nil {
-			panic(err)
-		}
-		wg.Done()
+	}
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			us, err := NewTransport(tti.usCurve)
+			if err != nil {
+				t.Fatal(err)
+			}
+			usSecret, err := NewSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("us: %v", usSecret)
 
-		wg.Wait()
-		if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
-			panic(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
-		}
-		t.Logf("us recovered: %v", usRecovered)
-		if usRecovered.String() != usSecret.String() {
-			panic(fmt.Sprintf("us recovered not equal got %v, want %v",
-				usRecovered, usSecret))
-		}
-	}()
+			them, err := NewTransport(tti.themCurve)
+			if err != nil {
+				t.Fatal(err)
+			}
+			themSecret, err := NewSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("them: %v", themSecret)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			l := net.ListenConfig{}
+			listener, err := l.Listen(ctx, "tcp", ":0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			port := listener.Addr().(*net.TCPAddr).Port
 
-	d := &net.Dialer{}
-	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1",
-		strconv.Itoa(port)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := us.KeyExchange(ctx, conn); err != nil {
-		t.Fatal(err)
-	}
-	themRecovered, err := us.Handshake(ctx, usSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// spew.Dump(hr)
-	wg.Done()
+			var (
+				wg    sync.WaitGroup
+				msgCh = make(chan string)
+				errCh = make(chan error)
+			)
+			exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) error {
+				defer wg.Done()
+				if err = tr.KeyExchange(ctx, conn); err != nil {
+					return err
+				}
+				recovered, err := tr.Handshake(ctx, them)
+				if err != nil {
+					return err
+				}
+				if recovered.String() != us.String() {
+					return fmt.Errorf("recovered not equal got %v, want %v",
+						recovered, us)
+				}
+				return nil
+			}
 
-	wg.Wait()
-	if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
-		t.Fatal(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
-	}
-	t.Logf("them recovered: %v", themRecovered)
-	if themRecovered.String() != themSecret.String() {
-		t.Fatalf("them recovered not equal got %v, want %v",
-			themRecovered, themSecret)
-	}
-	if err := us.Close(); err != nil {
-		t.Fatal(err)
+			wg.Add(2) // Wait for both key exchanges to complete
+
+			// them
+			go func() {
+				d := &net.Dialer{}
+				conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1",
+					strconv.Itoa(port)))
+				if err != nil {
+					panic(err)
+				}
+				defer func() {
+					if err := them.Close(); err != nil {
+						return
+					}
+				}()
+				err = exchangeFunc(conn, them, themSecret, usSecret)
+				if err != nil {
+					select {
+					case <-ctx.Done():
+						return
+					case errCh <- err:
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case msgCh <- "done":
+				}
+			}()
+
+			// us
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					panic(err)
+				}
+				defer func() {
+					if err := us.Close(); err != nil {
+						return
+					}
+				}()
+				err = exchangeFunc(conn, us, usSecret, themSecret)
+				if err != nil {
+					select {
+					case <-ctx.Done():
+						return
+					case errCh <- err:
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case msgCh <- "done":
+				}
+			}()
+
+			wg.Wait()
+			if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
+				t.Fatal(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+			}
+
+			var (
+				done int
+				cerr error
+			)
+			for {
+				select {
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				case cerr = <-errCh:
+				case <-msgCh:
+					done++
+				}
+				if !errors.Is(cerr, tti.expectedError) {
+					t.Fatalf("expected error %v, got %v", tti.expectedError, cerr)
+				}
+				if done == 2 {
+					return
+				}
+			}
+		})
 	}
 }
 

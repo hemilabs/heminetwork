@@ -72,6 +72,13 @@ const (
 	TransportMaxSize   = 0x00ffffff // 24 bit, 3 bytes
 
 	ChallengeSize = 32 // 32 bytes random data
+
+	// Transport curves
+	CurveP256   = "P256"
+	CurveP384   = "P384"
+	CurveP521   = "P521"
+	CurveX25519 = "x25519"
+	CurveClient = "none"
 )
 
 var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is invalid
@@ -222,59 +229,89 @@ type Transport struct {
 }
 
 func NewTransport(curve string) (*Transport, error) {
-	t := &Transport{
-		curveName: curve,
+	t := &Transport{}
+	if err := t.begin(curve); err != nil {
+		return nil, err
 	}
+	return t, nil
+}
+
+func (t *Transport) begin(curve string) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	t.curveName = curve
+
 	var err error
-	// XXX make this an ordered list of more to less secure, client requests, server dictates.
 	switch curve {
-	case "P256":
-		t.curve = ecdh.P256()
-	case "P384":
-		t.curve = ecdh.P384()
-	case "P521":
+	case CurveClient:
+		return nil
+	case CurveP521:
 		t.curve = ecdh.P521()
-	case "x25519":
+	case CurveP384:
+		t.curve = ecdh.P384()
+	case CurveX25519:
 		t.curve = ecdh.X25519()
+	case CurveP256:
+		t.curve = ecdh.P256()
 	default:
-		return nil, ErrUnsupportedCurve
+		return ErrUnsupportedCurve
 	}
 
 	t.us, err = t.curve.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	t.nonce, err = NewNonce()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return t, nil
+	return nil
 }
 
 func (t *Transport) Close() error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
+	if t.conn == nil {
+		// didn't finish exchanging keys
+		return nil
+	}
 	err := t.conn.Close()
 	t.conn = nil // XXX should we do this?
 	return err
 }
 
 func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
-	err := json.NewEncoder(conn).Encode(TransportRequest{
-		Version:   TransportVersion,
-		Curve:     t.curveName,
-		PublicKey: t.us.PublicKey().Bytes(),
-	})
-	if err != nil {
-		return err
+	var (
+		tr  TransportRequest
+		err error
+	)
+	sendRequest := func() error {
+		return json.NewEncoder(conn).Encode(TransportRequest{
+			Version:   TransportVersion,
+			Curve:     t.curveName,
+			PublicKey: t.us.PublicKey().Bytes(),
+		})
 	}
-
-	var tr TransportRequest
-	err = json.NewDecoder(conn).Decode(&tr)
-	if err != nil {
-		return err
+	if t.curveName != CurveClient {
+		if err = sendRequest(); err != nil {
+			return err
+		}
+		if err = json.NewDecoder(conn).Decode(&tr); err != nil {
+			return err
+		}
+	} else {
+		if err = json.NewDecoder(conn).Decode(&tr); err != nil {
+			return err
+		}
+		if err := t.begin(tr.Curve); err != nil {
+			return err
+		}
+		if err := sendRequest(); err != nil {
+			return err
+		}
 	}
 
 	if tr.Version != TransportVersion {
