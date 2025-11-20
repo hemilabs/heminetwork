@@ -54,7 +54,7 @@ import (
 // node3 disconnects (should we brodcast that?)
 
 var (
-	defaultPort = "49152"
+	defaultPort = uint16(49152)
 	// seed1       = "seed.bark.gfy." // XXX implement this
 
 	// wellKnownSeeds = []string{seed1}
@@ -130,12 +130,14 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 }
 
 type dnsHandler struct {
-	lookup map[string][]dns.RR
+	lookup map[string][]dns.RR // DNS records
+	nodes  map[string]*node    // nodes, used for private keys
 }
 
 func (h *dnsHandler) insertDNS(n *node, forward, reverse []dns.RR) {
 	h.lookup[n.DNSName] = forward
 	h.lookup[n.ReverseDNSName] = reverse
+	h.nodes[n.DNSName] = n
 }
 
 func (h *dnsHandler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) {
@@ -151,9 +153,43 @@ func (h *dnsHandler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.
 	}
 }
 
-func newDNSServer(host string, port uint16, handler dns.Handler) *dns.Server {
+func newResolver(resolverAddress string, t *testing.T) *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := &net.Dialer{
+				Timeout: 10000 * time.Millisecond,
+			}
+			return d.DialContext(t.Context(), "tcp", resolverAddress)
+		},
+	}
+}
+
+func createDNSNodes(domain string, count byte) *dnsHandler {
+	if count >= 254 {
+		panic("too many")
+	}
+	handler := &dnsHandler{
+		lookup: make(map[string][]dns.RR),
+		nodes:  make(map[string]*node),
+	}
+	for i := byte(0); i < count; i++ {
+		nodename := fmt.Sprintf("node%v", i+1)
+		n, err := createNode(nodename, domain, net.IPv4(127, 0, 1, i+1),
+			defaultPort)
+		if err != nil {
+			panic(err)
+		}
+		dnsf, dnsr := nodeToDNS(n) // forward and reverse records
+		handler.insertDNS(n, dnsf, dnsr)
+	}
+
+	return handler
+}
+
+func newDNSServer(address string, handler dns.Handler) *dns.Server {
 	srv := &dns.Server{
-		Addr:    net.JoinHostPort(host, strconv.Itoa(int(port))),
+		Addr:    address,
 		Net:     "tcp",
 		Handler: handler,
 	}
@@ -161,6 +197,27 @@ func newDNSServer(host string, port uint16, handler dns.Handler) *dns.Server {
 		panic(err)
 	}
 	return srv
+}
+
+func waitForDNSServer(address string, t *testing.T) {
+	// All of this to replace a sleep!
+	d := net.Dialer{}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for {
+		conn, err := d.DialContext(ctx, "tcp", address)
+		if err == nil {
+			err = conn.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+
+		if err.(*net.OpError).Err.(*os.SyscallError).Err == syscall.ECONNREFUSED {
+			continue
+		}
+	}
 }
 
 func TestDNSServer(t *testing.T) {
@@ -175,7 +232,7 @@ func TestDNSServer(t *testing.T) {
 		dnsf, dnsr := nodeToDNS(n)
 		handler.insertDNS(n, dnsf, dnsr)
 
-		newDNSServer("127.0.0.1", 5353, handler)
+		newDNSServer("127.0.0.1:5353", handler)
 	}()
 	// time.Sleep(1 * time.Second)
 	// All of this to replace a sleep!
@@ -505,5 +562,35 @@ func TestTransportHandshake(t *testing.T) {
 	}
 	if err := us.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTransportDNSVerification(t *testing.T) {
+	nodes := byte(200)
+	dnsAddress := "127.0.0.1:5353"
+	handler := createDNSNodes("moop.gfy", nodes)
+	go func() { newDNSServer(dnsAddress, handler) }()
+	waitForDNSServer(dnsAddress, t)
+	r := newResolver(dnsAddress, t)
+
+	// Lookup all nodes
+	for k, v := range handler.nodes {
+		t.Logf("%v", k)
+		addr, err := r.LookupAddr(t.Context(), v.IP.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v", addr)
+
+		ip, err := r.LookupHost(t.Context(), k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v", ip)
+		txtRecords, err := r.LookupTXT(t.Context(), "node2.moop.gfy.")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v", txtRecords)
 	}
 }
