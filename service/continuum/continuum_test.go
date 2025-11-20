@@ -60,6 +60,7 @@ var (
 	// wellKnownSeeds = []string{seed1}
 
 	inAddrArpa = "in-addr.arpa"
+	dnsAppName = "transfunctioner"
 )
 
 type node struct {
@@ -115,7 +116,7 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 					Name:  n.DNSName,
 					Class: dns.ClassINET,
 				},
-				Txt: []string{"identity=" + n.Identity.String() + port},
+				Txt: []string{"v=" + dnsAppName + " identity=" + n.Identity.String() + port},
 			},
 		},
 		[]dns.RR{
@@ -568,29 +569,42 @@ func TestTransportHandshake(t *testing.T) {
 func TestTransportDNSVerification(t *testing.T) {
 	nodes := byte(200)
 	dnsAddress := "127.0.0.1:5353"
-	handler := createDNSNodes("moop.gfy", nodes)
+	domain := "moop.gfy"
+	handler := createDNSNodes(domain, nodes)
 	go func() { newDNSServer(dnsAddress, handler) }()
 	waitForDNSServer(dnsAddress, t)
 	r := newResolver(dnsAddress, t)
 
 	// Lookup all nodes
 	for k, v := range handler.nodes {
-		t.Logf("%v", k)
 		addr, err := r.LookupAddr(t.Context(), v.IP.String())
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("%v", addr)
+		// Verify reverse record
+		i := v.IP.To4()
+		rlExpected := fmt.Sprintf("%v-%v-%v-%v-node%v.%v.",
+			i[0], i[1], i[2], i[3], i[3], domain)
+		if rlExpected != addr[0] {
+			t.Fatalf("got %v wanted %v", addr[0], rlExpected)
+		}
 
 		ip, err := r.LookupHost(t.Context(), k)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("%v", ip)
-		txtRecords, err := r.LookupTXT(t.Context(), "node2.moop.gfy.")
+		if ip[0] != v.IP.String() {
+			t.Fatalf("got %v wanted %v", ip[0], v.IP.String())
+		}
+
+		txtRecords, err := r.LookupTXT(t.Context(), k)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("%v", txtRecords)
+		txtExpected := fmt.Sprintf("v=%v identity=%v port=%v",
+			dnsAppName, v.Identity, defaultPort)
+		if txtRecords[0] != txtExpected {
+			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
+		}
 	}
 }
