@@ -44,8 +44,9 @@ func Parse(c CfgMap) error {
 		}
 		// Make sure we are pointing to the same type
 		if reflect.TypeOf(v.Value).Elem() != reflect.TypeOf(v.DefaultValue) {
-			return fmt.Errorf("value not the same type as DefaultValue, "+
-				"wanted %v got %v", reflect.TypeOf(v.Value).Elem(),
+			return fmt.Errorf("value not the same type for %v as "+
+				"DefaultValue, wanted %v got %v",
+				k, reflect.TypeOf(v.Value).Elem(),
 				reflect.TypeOf(v.DefaultValue))
 		}
 
