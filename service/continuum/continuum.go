@@ -6,6 +6,8 @@ package continuum
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -51,6 +53,9 @@ type Server struct {
 
 	cfg *Config
 
+	// Sessions
+	sessions map[string]*Transport
+
 	// Secrets
 	secret *Secret
 
@@ -86,6 +91,52 @@ func NewServer(cfg *Config) (*Server, error) {
 	}, nil
 }
 
+func genID() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		panic(fmt.Errorf("read random: %w", err))
+	}
+	return hex.EncodeToString(buf)
+}
+
+func (s *Server) newSession(t *Transport) string {
+	for {
+		id := genID()
+		s.mtx.Lock()
+		if _, ok := s.sessions[id]; ok {
+			// ID is already used, retry.
+			continue
+		}
+		s.sessions[id] = t
+		s.mtx.Unlock()
+		return id
+	}
+}
+
+func (s *Server) deleteSession(id string) {
+	s.mtx.Lock()
+	t, ok := s.sessions[id]
+	delete(s.sessions, id)
+	s.mtx.Unlock()
+	if !ok {
+		log.Errorf("id not found in sessions %s", id)
+	}
+	if err := t.Close(); err != nil {
+		log.Errorf("close session %s: %v", id, err)
+	}
+}
+
+func (s *Server) deleteAllSessions() {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	for id, t := range s.sessions {
+		if err := t.Close(); err != nil {
+			log.Errorf("close session %s: %v", id, err)
+		}
+	}
+	s.sessions = nil
+}
+
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	log.Infof("handle: %v", conn.RemoteAddr())
 	defer log.Infof("handle exit: %v", conn.RemoteAddr())
@@ -98,14 +149,14 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		}
 	}()
 
-	// XXX move all transports into a session manager so we can close them
-	// on ctx cancel.
-	//
-	// XXX move this to a function so that we don't panic
-	transport, err := NewTransport(defaultTransportCurve) // XXX make curve an option
+	transport, err := NewTransport(defaultTransportCurve)
 	if err != nil {
-		panic(err)
+		log.Errorf("create new transport: %v", err)
+		return
 	}
+	id := s.newSession(transport)
+	defer s.deleteSession(id)
+
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -287,6 +338,7 @@ func (s *Server) Run(pctx context.Context) error {
 			if err := listener.Close(); err != nil {
 				log.Errorf("listner close: %v", err)
 			}
+			s.deleteAllSessions()
 		}()
 
 		for {

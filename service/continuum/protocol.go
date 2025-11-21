@@ -279,6 +279,7 @@ func (t *Transport) Close() error {
 	defer t.mtx.Unlock()
 	if t.conn == nil {
 		// didn't finish exchanging keys
+		// or was previously closed
 		return nil
 	}
 	err := t.conn.Close()
