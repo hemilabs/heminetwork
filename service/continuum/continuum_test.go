@@ -472,6 +472,9 @@ func TestIdentity(t *testing.T) {
 	}
 }
 
+// XXX this is racy. When one side receives a message
+// sometimes it differs from what is sent, or
+// perhaps is not properly decrypted.
 func TestTransportHandshake(t *testing.T) {
 	type testTableItem struct {
 		name               string
@@ -531,7 +534,7 @@ func TestTransportHandshake(t *testing.T) {
 			)
 			exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) error {
 				defer wg.Done()
-				if err = tr.KeyExchange(ctx, conn); err != nil {
+				if err := tr.KeyExchange(ctx, conn); err != nil {
 					return err
 				}
 				recovered, err := tr.Handshake(ctx, them)
@@ -562,6 +565,7 @@ func TestTransportHandshake(t *testing.T) {
 				}()
 				err = exchangeFunc(conn, them, themSecret, usSecret)
 				if err != nil {
+					t.Logf("them error: %v", err)
 					select {
 					case <-ctx.Done():
 						return
@@ -588,6 +592,7 @@ func TestTransportHandshake(t *testing.T) {
 				}()
 				err = exchangeFunc(conn, us, usSecret, themSecret)
 				if err != nil {
+					t.Logf("us error: %v", err)
 					select {
 					case <-ctx.Done():
 						return
