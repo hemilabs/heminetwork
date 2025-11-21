@@ -62,9 +62,19 @@ var (
 			Help:         "address and port transfunctionerd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
-		// XXX add listen address
+		"TRF_LISTEN_ADDRESS": config.Config{
+			Value:        &cfg.ListenAddress,
+			DefaultValue: "",
+			Help:         "address and port transfunctionerd listens on for incoming tcp connections",
+			Print:        config.PrintAll,
+		},
+		"TRF_MAX_CONNECTIONS": config.Config{
+			Value:        &cfg.PprofListenAddress,
+			DefaultValue: 1000, // XXX
+			Help:         "maximum allowed connections to transfuctionerd at a time",
+			Print:        config.PrintAll,
+		},
 		// XXX add DNS security toggle
-		// XXX add max connections
 		// XXX add max queue depth per connection
 		// XXX maybe add max commands / second
 		// XXX maybe add white/black list of ips/hosts

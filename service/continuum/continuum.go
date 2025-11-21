@@ -27,8 +27,9 @@ const (
 	logLevel = "INFO"
 	appName  = "cnt"
 
-	defaultListen         = "localhost:49152"
+	defaultListenAddress  = "localhost:49152"
 	defaultTransportCurve = CurveP521
+	defaultMaxConnections = 1000 // XXX
 )
 
 var log = loggo.GetLogger(appName)
@@ -46,6 +47,8 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	Secret                  string
+	ListenAddress           string
+	MaxConnections          int
 }
 type Server struct {
 	mtx sync.RWMutex
@@ -74,10 +77,11 @@ type Info struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Home:                "", // XXX
 		LogLevel:            logLevel,
 		PrometheusNamespace: appName,
 		Secret:              "",
+		ListenAddress:       defaultListenAddress,
+		MaxConnections:      defaultMaxConnections,
 	}
 }
 
@@ -328,7 +332,7 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		listener, err := s.listenConfig.Listen(ctx, "tcp", defaultListen)
+		listener, err := s.listenConfig.Listen(ctx, "tcp", s.cfg.ListenAddress)
 		if err != nil {
 			errC <- err
 			return
@@ -351,7 +355,18 @@ func (s *Server) Run(pctx context.Context) error {
 				continue
 			}
 
-			// XXX add max cons here and reject new ones with busy?
+			s.mtx.RLock()
+			conNum := len(s.sessions)
+			s.mtx.RUnlock()
+			if conNum >= s.cfg.MaxConnections {
+				// XXX send a "busy" message?
+				log.Debugf("server full, connection rejected: %s",
+					conn.RemoteAddr())
+				if err := conn.Close(); err != nil {
+					log.Errorf("close connection %s:  %v", err)
+				}
+				continue
+			}
 
 			// handle connection
 			s.wg.Add(1)
