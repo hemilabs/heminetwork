@@ -26,7 +26,7 @@ jobs:
           - "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     steps:
       - name: "Checkout repository"
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
 
       - name: generate key and addresses
         run: go run ./cmd/keygen/keygen.go -net=localnet | jq -r 'to_entries[] | "\(.key)=\(.value)"' | sed -n '2s/^private_key/POPM_BTC_PRIVATE_KEY/; 4s/^bitcoin_address/BTC_ADDRESS/; 5s/^ethereum_address/ETH_ADDRESS/; 2p; 4p; 5p' >> $GITHUB_ENV
