@@ -25,6 +25,8 @@ import (
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
+// XXX this needs to be rewritten to match new reality
+//
 // The continuum protocol is a simple gossipy P2P system.
 //
 // The continuum transfunctioner is a very mysterious and powerful device and
@@ -212,6 +214,7 @@ var (
 	ErrDecrypt            = errors.New("could not decrypt")
 	ErrInvalidChallenge   = errors.New("invalid challenge")
 	ErrInvalidPublicKey   = errors.New("invalid public key")
+	ErrInvalidTXTRecord   = errors.New("invalid TXT record")
 	ErrNotCompact         = errors.New("not a compact public key")
 	ErrUnsupportedCurve   = errors.New("unsupported cruve")
 	ErrUnsupportedVersion = errors.New("unsupported version")
@@ -534,6 +537,19 @@ func NewResolver(resolverAddress string) *net.Resolver {
 	}
 }
 
+func kvFomTxt(txt string) (map[string]string, error) {
+	s := strings.Split(txt, " ")
+	m := make(map[string]string)
+	for _, v := range s {
+		kv := strings.Split(v, "=")
+		if len(kv) != 2 {
+			return nil, ErrInvalidTXTRecord
+		}
+		m[kv[0]] = kv[1]
+	}
+	return m, nil
+}
+
 func DNSVerifyIdentityByAddress(ctx context.Context, address string, identity Identity, resolver *net.Resolver) (bool, error) {
 	if resolver == nil {
 		resolver = &net.Resolver{}
@@ -551,15 +567,11 @@ func DNSVerifyIdentityByAddress(ctx context.Context, address string, identity Id
 		return false, errors.New("lookup txt: invalid response")
 	}
 
-	// XXX make this not this dumb
-	// expect v=transfunctioner and identity=hex
-	s := strings.Split(txts[0], " ")
-	m := make(map[string]string)
-	for _, v := range s {
-		kv := strings.Split(v, "=")
-		// XXX just panic for now if record is invalid, needs rewrite
-		m[kv[0]] = kv[1]
+	m, err := kvFomTxt(txts[0])
+	if err != nil {
+		return false, err
 	}
+
 	if m["v"] != dnsAppName {
 		return false, fmt.Errorf("invalid dns app name: '%v'", m["v"])
 	}
@@ -571,9 +583,6 @@ func DNSVerifyIdentityByAddress(ctx context.Context, address string, identity Id
 }
 
 func DNSVerifyIdentityByIP(ctx context.Context, ip net.IP, identity Identity, resolver *net.Resolver) (bool, error) {
-	if resolver == nil {
-		resolver = &net.Resolver{}
-	}
 	addr, err := resolver.LookupAddr(ctx, ip.String())
 	if err != nil {
 		return false, fmt.Errorf("reverse lookup: %w", err)
@@ -581,8 +590,6 @@ func DNSVerifyIdentityByIP(ctx context.Context, ip net.IP, identity Identity, re
 	if len(addr) != 1 {
 		return false, errors.New("reverse lookup: invalid response")
 	}
-	// XXX fix for ipv6 and see if there is something nicer to parse records
-	expectedPrefix := strings.ReplaceAll(ip.String(), ".", "-") + "-"
-	expectedAddress := addr[0][len(expectedPrefix):]
-	return DNSVerifyIdentityByAddress(ctx, expectedAddress, identity, resolver)
+
+	return DNSVerifyIdentityByAddress(ctx, addr[0], identity, resolver)
 }
