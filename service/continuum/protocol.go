@@ -567,20 +567,11 @@ func (t *Transport) write(blob []byte) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
-	n, err := t.conn.Write(size)
+	n, err := t.conn.Write(append(size, request...))
 	if err != nil {
 		return err
 	}
-	if n != len(size) {
-		return fmt.Errorf("write error length: %v != %v",
-			n, len(size))
-	}
-
-	n, err = t.conn.Write(request)
-	if err != nil {
-		return err
-	}
-	if n != len(request) {
+	if n != len(size)+len(request) {
 		return fmt.Errorf("write error length: %v != %v",
 			n, len(blob))
 	}
