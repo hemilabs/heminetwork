@@ -536,13 +536,13 @@ func TestTransportHandshake(t *testing.T) {
 				if err := tr.KeyExchange(ctx, conn); err != nil {
 					return err
 				}
-				recovered, err := tr.Handshake(ctx, them)
+				recovered, err := tr.Handshake(ctx, us)
 				if err != nil {
 					return err
 				}
-				if recovered.String() != us.String() {
+				if recovered.String() != them.String() {
 					return fmt.Errorf("recovered not equal got %v, want %v",
-						recovered, us)
+						recovered, them)
 				}
 				return nil
 			}
@@ -635,7 +635,7 @@ func TestTransportHandshake(t *testing.T) {
 
 func TestDNSTransportHandshake(t *testing.T) {
 	nodes := byte(2)
-	dnsAddress := "127.0.1.53:5353"
+	dnsAddress := "127.0.1.1:5353"
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)
 	go func() { newDNSServer(dnsAddress, handler) }()
@@ -681,13 +681,13 @@ func TestDNSTransportHandshake(t *testing.T) {
 		if err := tr.KeyExchange(ctx, conn); err != nil {
 			return err
 		}
-		recovered, err := tr.Handshake(ctx, them)
+		recovered, err := tr.Handshake(ctx, us)
 		if err != nil {
 			return err
 		}
-		if recovered.String() != us.String() {
+		if recovered.String() != them.String() {
 			return fmt.Errorf("recovered not equal got %v, want %v",
-				recovered, us)
+				recovered, them)
 		}
 		return nil
 	}
@@ -761,6 +761,21 @@ func TestDNSTransportHandshake(t *testing.T) {
 	wg.Wait()
 	if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
 		t.Fatal(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+	}
+
+	var done int
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case err := <-errCh:
+			t.Fatal(err)
+		case <-msgCh:
+			done++
+		}
+		if done == 2 {
+			return
+		}
 	}
 }
 

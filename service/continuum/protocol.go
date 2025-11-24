@@ -414,10 +414,12 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 			return nil, fmt.Errorf("dns lookup: no records for %v", addr)
 		}
 		txts, err := t.resolver.LookupTXT(ctx, rl[0])
+		if err != nil {
+			return nil, err
+		}
 		if len(txts) != 1 {
 			return nil, fmt.Errorf("dns no txt records: %v", len(txts))
 		}
-
 		m, err := kvFomTxt(txts[0])
 		if err != nil {
 			return nil, fmt.Errorf("dns txt record: %w", err)
