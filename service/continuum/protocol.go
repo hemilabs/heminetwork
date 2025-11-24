@@ -151,6 +151,19 @@ func NewIdentityFromPub(pub *secp256k1.PublicKey) Identity {
 	return i
 }
 
+func NewIdentityFromString(identity string) (*Identity, error) {
+	id, err := hex.DecodeString(identity)
+	if err != nil {
+		return nil, err
+	}
+	i := Identity{}
+	if len(id) != len(i) {
+		return nil, errors.New("invalid identity")
+	}
+	copy(i[:], id)
+	return &i, nil
+}
+
 type Secret struct {
 	privateKey *secp256k1.PrivateKey
 
@@ -231,11 +244,18 @@ type Transport struct {
 	them          *ecdh.PublicKey // Their public key
 	encryptionKey [32]byte        // Shared ephemeral encryption key
 
+	// DNS lookup and verification
+	dns      string        // Validate identity using DNS
+	resolver *net.Resolver // only set to non default for test
+
 	conn net.Conn
 }
 
-func NewTransport(curve string) (*Transport, error) {
-	t := &Transport{}
+func NewTransport(curve, dns string) (*Transport, error) {
+	t := &Transport{
+		dns:      dns,
+		resolver: net.DefaultResolver,
+	}
 	if err := t.begin(curve); err != nil {
 		return nil, err
 	}
@@ -374,6 +394,45 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 
+	var remoteDNSID *Identity
+	if t.dns != "" {
+		// XXX should we not panic on conn == nil?
+		t.mtx.Lock()
+		addr := t.conn.RemoteAddr()
+		t.mtx.Unlock()
+
+		// XXX this needs to be a function of sorts
+		h, _, err := net.SplitHostPort(addr.String())
+		if err != nil {
+			return nil, fmt.Errorf("dns split: %w", err)
+		}
+		rl, err := t.resolver.LookupAddr(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("dns lookup: %w", err)
+		}
+		if len(rl) < 1 {
+			return nil, fmt.Errorf("dns lookup: no records for %v", addr)
+		}
+		txts, err := t.resolver.LookupTXT(ctx, rl[0])
+		if len(txts) != 1 {
+			return nil, fmt.Errorf("dns no txt records: %v", len(txts))
+		}
+
+		m, err := kvFomTxt(txts[0])
+		if err != nil {
+			return nil, fmt.Errorf("dns txt record: %w", err)
+		}
+
+		if m["v"] != dnsAppName {
+			return nil, fmt.Errorf("dns invalid app name: '%v'", m["v"])
+		}
+		remoteDNSID, err = NewIdentityFromString(m["identity"])
+		if err != nil {
+			return nil, fmt.Errorf("dns invalid identity: %w", err)
+		}
+		// XXX are we going to use port?
+	}
+
 	// Write HelloRequest
 	err = t.Write(HelloRequest{
 		Version:   ProtocolVersion,
@@ -435,6 +494,17 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 	themID := NewIdentityFromPub(themPub)
+
+	if t.dns != "" {
+		if remoteDNSID == nil {
+			return nil, errors.New("remote dns id not set")
+		}
+		if themID.String() != remoteDNSID.String() {
+			return nil, fmt.Errorf("dns identity does not match: got %v, want %v",
+				themID, remoteDNSID)
+		}
+	}
+
 	return &themID, nil
 }
 
@@ -550,6 +620,7 @@ func kvFomTxt(txt string) (map[string]string, error) {
 	return m, nil
 }
 
+// XXX this seems broken because the identity parameter is not necessarily known
 func DNSVerifyIdentityByAddress(ctx context.Context, address string, identity Identity, resolver *net.Resolver) (bool, error) {
 	if resolver == nil {
 		resolver = &net.Resolver{}

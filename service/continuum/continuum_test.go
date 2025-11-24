@@ -69,9 +69,10 @@ type node struct {
 	ReverseDNSPtrName string
 	IP                net.IP
 	Port              uint16
-	PrivateKey        *secp256k1.PrivateKey
-	PublicKey         *secp256k1.PublicKey
-	Identity          Identity
+	Secret            *Secret
+	// PrivateKey        *secp256k1.PrivateKey
+	// PublicKey         *secp256k1.PublicKey
+	// Identity          Identity
 }
 
 func createNode(name, domain string, ip net.IP, port uint16) (*node, error) {
@@ -86,12 +87,10 @@ func createNode(name, domain string, ip net.IP, port uint16) (*node, error) {
 	}
 	// panic(spew.Sdump(n.ReverseDNSPtrName))
 	var err error
-	n.PrivateKey, err = secp256k1.GeneratePrivateKey()
+	n.Secret, err = NewSecret()
 	if err != nil {
 		return nil, err
 	}
-	n.PublicKey = n.PrivateKey.PubKey()
-	n.Identity = NewIdentityFromPub(n.PublicKey)
 
 	return n, nil
 }
@@ -115,7 +114,8 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 					Name:  n.DNSName,
 					Class: dns.ClassINET,
 				},
-				Txt: []string{"v=" + dnsAppName + " identity=" + n.Identity.String() + port},
+				Txt: []string{"v=" + dnsAppName + " identity=" +
+					n.Secret.Identity.String() + port},
 			},
 		},
 		[]dns.RR{
@@ -497,7 +497,7 @@ func TestTransportHandshake(t *testing.T) {
 	}
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			us, err := NewTransport(tti.usCurve)
+			us, err := NewTransport(tti.usCurve, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -507,7 +507,7 @@ func TestTransportHandshake(t *testing.T) {
 			}
 			t.Logf("us: %v", usSecret)
 
-			them, err := NewTransport(tti.themCurve)
+			them, err := NewTransport(tti.themCurve, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -633,6 +633,137 @@ func TestTransportHandshake(t *testing.T) {
 	}
 }
 
+func TestDNSTransportHandshake(t *testing.T) {
+	nodes := byte(2)
+	dnsAddress := "127.0.0.1:5353"
+	domain := "moop.gfy"
+	handler := createDNSNodes(domain, nodes)
+	go func() { newDNSServer(dnsAddress, handler) }()
+	waitForDNSServer(dnsAddress, t)
+	r := newResolver(dnsAddress, t)
+
+	us, err := NewTransport(CurveX25519, "yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	us.resolver = r
+	node1 := handler.nodes["node1.moop.gfy."]
+	usSecret := node1.Secret
+	t.Logf("us: %v", usSecret)
+
+	them, err := NewTransport(CurveX25519, "yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	them.resolver = r
+	node2 := handler.nodes["node2.moop.gfy."]
+	themSecret := node2.Secret
+	t.Logf("them: %v", themSecret)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	l := net.ListenConfig{}
+	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	log.Infof("Listening: %v", node1.IP)
+
+	var (
+		wg    sync.WaitGroup
+		msgCh = make(chan string)
+		errCh = make(chan error)
+	)
+	exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) error {
+		defer wg.Done()
+		if err := tr.KeyExchange(ctx, conn); err != nil {
+			return err
+		}
+		recovered, err := tr.Handshake(ctx, them)
+		if err != nil {
+			return err
+		}
+		if recovered.String() != us.String() {
+			return fmt.Errorf("recovered not equal got %v, want %v",
+				recovered, us)
+		}
+		return nil
+	}
+
+	wg.Add(2) // Wait for both key exchanges to complete
+
+	// them
+	go func() {
+		// note that we connect to node1.
+		addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(node2.IP.String(), "0"))
+		if err != nil {
+			panic(err)
+		}
+
+		d := &net.Dialer{
+			LocalAddr: addr,
+		}
+		conn, err := d.DialContext(ctx, "tcp",
+			net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := them.Close(); err != nil {
+				return
+			}
+		}()
+		err = exchangeFunc(conn, them, themSecret, usSecret)
+		if err != nil {
+			t.Logf("them error: %v", err)
+			select {
+			case <-ctx.Done():
+				return
+			case errCh <- err:
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case msgCh <- "done":
+		}
+	}()
+
+	// us
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := us.Close(); err != nil {
+				return
+			}
+		}()
+		err = exchangeFunc(conn, us, usSecret, themSecret)
+		if err != nil {
+			t.Logf("us error: %v", err)
+			select {
+			case <-ctx.Done():
+				return
+			case errCh <- err:
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case msgCh <- "done":
+		}
+	}()
+
+	wg.Wait()
+	if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
+		t.Fatal(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+	}
+}
+
 func TestDNSServerSetup(t *testing.T) {
 	nodes := byte(200)
 	dnsAddress := "127.0.0.1:5353"
@@ -666,12 +797,12 @@ func TestDNSServerSetup(t *testing.T) {
 			t.Fatal(err)
 		}
 		txtExpected := fmt.Sprintf("v=%v identity=%v port=%v",
-			dnsAppName, v.Identity, defaultPort)
+			dnsAppName, v.Secret.Identity, defaultPort)
 		if txtRecords[0] != txtExpected {
 			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
 		}
 
-		ok, err := DNSVerifyIdentityByIP(t.Context(), v.IP, v.Identity, r)
+		ok, err := DNSVerifyIdentityByIP(t.Context(), v.IP, v.Secret.Identity, r)
 		if err != nil {
 			t.Fatal(err)
 		}
