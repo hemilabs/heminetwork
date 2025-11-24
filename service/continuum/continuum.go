@@ -153,7 +153,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		}
 	}()
 
-	transport, err := NewTransport(defaultTransportCurve)
+	transport, err := NewTransport(defaultTransportCurve, "") // XXX config option
 	if err != nil {
 		log.Errorf("create new transport: %v", err)
 		return
