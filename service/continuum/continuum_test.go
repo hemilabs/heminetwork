@@ -635,7 +635,7 @@ func TestTransportHandshake(t *testing.T) {
 
 func TestDNSTransportHandshake(t *testing.T) {
 	nodes := byte(2)
-	dnsAddress := "127.0.0.1:5353"
+	dnsAddress := "127.0.1.53:5353"
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)
 	go func() { newDNSServer(dnsAddress, handler) }()
