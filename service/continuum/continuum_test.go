@@ -80,10 +80,9 @@ func createNode(name, domain string, ip net.IP, port uint16) (*node, error) {
 		DNSName: fmt.Sprintf("%v.%v.", name, domain),
 		ReverseDNSName: fmt.Sprintf("%v.%v.%v.%v.%v.",
 			i[3], i[2], i[1], i[0], inAddrArpa),
-		ReverseDNSPtrName: fmt.Sprintf("%v-%v-%v-%v-%v.%v.",
-			i[0], i[1], i[2], i[3], name, domain),
-		IP:   ip,
-		Port: port,
+		ReverseDNSPtrName: fmt.Sprintf("%v.%v.", name, domain),
+		IP:                ip,
+		Port:              port,
 	}
 	// panic(spew.Sdump(n.ReverseDNSPtrName))
 	var err error
@@ -650,11 +649,8 @@ func TestDNSServerSetup(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Verify reverse record
-		i := v.IP.To4()
-		rlExpected := fmt.Sprintf("%v-%v-%v-%v-node%v.%v.",
-			i[0], i[1], i[2], i[3], i[3], domain)
-		if rlExpected != addr[0] {
-			t.Fatalf("got %v wanted %v", addr[0], rlExpected)
+		if v.DNSName != addr[0] {
+			t.Fatalf("got %v wanted %v", addr[0], v.DNSName)
 		}
 
 		ip, err := r.LookupHost(t.Context(), k)
