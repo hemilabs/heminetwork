@@ -476,18 +476,18 @@ func TestIdentity(t *testing.T) {
 // perhaps is not properly decrypted.
 func TestTransportHandshake(t *testing.T) {
 	type testTableItem struct {
-		name               string
-		usCurve, themCurve string
-		expectedError      error
+		name                     string
+		serverCurve, clientCurve string
+		expectedError            error
 	}
 	curves := []string{CurveP521, CurveP384, CurveP256, CurveX25519}
 	testTable := make([]testTableItem, 0, 20)
 	for _, us := range curves {
 		for _, them := range append(curves, CurveClient) {
 			tti := testTableItem{
-				name:      fmt.Sprintf("%s - %s", us, them),
-				usCurve:   us,
-				themCurve: them,
+				name:        fmt.Sprintf("%s - %s", us, them),
+				serverCurve: us,
+				clientCurve: them,
 			}
 			if us != them && them != CurveClient {
 				tti.expectedError = ErrCurveDoesnotMatch
@@ -497,25 +497,25 @@ func TestTransportHandshake(t *testing.T) {
 	}
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			us, err := NewTransport(tti.usCurve, "")
+			server, err := NewTransport(tti.serverCurve, "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			usSecret, err := NewSecret()
+			serverSecret, err := NewSecret()
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("us: %v", usSecret)
+			t.Logf("server: %v", serverSecret)
 
-			them, err := NewTransport(tti.themCurve, "")
+			client, err := NewTransport(tti.clientCurve, "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			themSecret, err := NewSecret()
+			clientSecret, err := NewSecret()
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("them: %v", themSecret)
+			t.Logf("client: %v", clientSecret)
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			l := net.ListenConfig{}
@@ -549,7 +549,7 @@ func TestTransportHandshake(t *testing.T) {
 
 			wg.Add(2) // Wait for both key exchanges to complete
 
-			// them
+			// client
 			go func() {
 				d := &net.Dialer{}
 				conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1",
@@ -558,13 +558,13 @@ func TestTransportHandshake(t *testing.T) {
 					panic(err)
 				}
 				defer func() {
-					if err := them.Close(); err != nil {
+					if err := client.Close(); err != nil {
 						return
 					}
 				}()
-				err = exchangeFunc(conn, them, themSecret, usSecret)
+				err = exchangeFunc(conn, client, clientSecret, serverSecret)
 				if err != nil {
-					t.Logf("them error: %v", err)
+					t.Logf("client error: %v", err)
 					select {
 					case <-ctx.Done():
 						return
@@ -578,20 +578,20 @@ func TestTransportHandshake(t *testing.T) {
 				}
 			}()
 
-			// us
+			// server
 			go func() {
 				conn, err := listener.Accept()
 				if err != nil {
 					panic(err)
 				}
 				defer func() {
-					if err := us.Close(); err != nil {
+					if err := server.Close(); err != nil {
 						return
 					}
 				}()
-				err = exchangeFunc(conn, us, usSecret, themSecret)
+				err = exchangeFunc(conn, server, serverSecret, clientSecret)
 				if err != nil {
-					t.Logf("us error: %v", err)
+					t.Logf("server error: %v", err)
 					select {
 					case <-ctx.Done():
 						return
@@ -606,8 +606,8 @@ func TestTransportHandshake(t *testing.T) {
 			}()
 
 			wg.Wait()
-			if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
-				t.Fatal(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+			if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+				t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
 			}
 
 			var (
@@ -642,23 +642,23 @@ func TestDNSTransportHandshake(t *testing.T) {
 	waitForDNSServer(dnsAddress, t)
 	r := newResolver(dnsAddress, t)
 
-	us, err := NewTransport(CurveX25519, "yes")
+	server, err := NewTransport(CurveX25519, "yes")
 	if err != nil {
 		t.Fatal(err)
 	}
-	us.resolver = r
+	server.resolver = r
 	node1 := handler.nodes["node1.moop.gfy."]
-	usSecret := node1.Secret
-	t.Logf("us: %v", usSecret)
+	serverSecret := node1.Secret
+	t.Logf("server: %v", serverSecret)
 
-	them, err := NewTransport(CurveX25519, "yes")
+	client, err := NewTransport(CurveX25519, "yes")
 	if err != nil {
 		t.Fatal(err)
 	}
-	them.resolver = r
+	client.resolver = r
 	node2 := handler.nodes["node2.moop.gfy."]
-	themSecret := node2.Secret
-	t.Logf("them: %v", themSecret)
+	clientSecret := node2.Secret
+	t.Logf("client: %v", clientSecret)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -676,25 +676,25 @@ func TestDNSTransportHandshake(t *testing.T) {
 		msgCh = make(chan string)
 		errCh = make(chan error)
 	)
-	exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) error {
+	exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) (*Identity, error) {
 		defer wg.Done()
 		if err := tr.KeyExchange(ctx, conn); err != nil {
-			return err
+			return nil, err
 		}
 		recovered, err := tr.Handshake(ctx, us)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if recovered.String() != them.String() {
-			return fmt.Errorf("recovered not equal got %v, want %v",
+			return nil, fmt.Errorf("recovered not equal got %v, want %v",
 				recovered, them)
 		}
-		return nil
+		return recovered, nil
 	}
 
 	wg.Add(2) // Wait for both key exchanges to complete
 
-	// them
+	// client
 	go func() {
 		// note that we connect to node1.
 		addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(node2.IP.String(), "0"))
@@ -711,19 +711,20 @@ func TestDNSTransportHandshake(t *testing.T) {
 			panic(err)
 		}
 		defer func() {
-			if err := them.Close(); err != nil {
+			if err := client.Close(); err != nil {
 				return
 			}
 		}()
-		err = exchangeFunc(conn, them, themSecret, usSecret)
+		r, err := exchangeFunc(conn, client, clientSecret, serverSecret)
 		if err != nil {
-			t.Logf("them error: %v", err)
+			t.Logf("client error: %v", err)
 			select {
 			case <-ctx.Done():
 				return
 			case errCh <- err:
 			}
 		}
+		t.Logf("client recovered: %v", r)
 		select {
 		case <-ctx.Done():
 			return
@@ -731,26 +732,27 @@ func TestDNSTransportHandshake(t *testing.T) {
 		}
 	}()
 
-	// us
+	// server
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
 			panic(err)
 		}
 		defer func() {
-			if err := us.Close(); err != nil {
+			if err := server.Close(); err != nil {
 				return
 			}
 		}()
-		err = exchangeFunc(conn, us, usSecret, themSecret)
+		r, err := exchangeFunc(conn, server, serverSecret, clientSecret)
 		if err != nil {
-			t.Logf("us error: %v", err)
+			t.Logf("server error: %v", err)
 			select {
 			case <-ctx.Done():
 				return
 			case errCh <- err:
 			}
 		}
+		t.Logf("server recovered: %v", r)
 		select {
 		case <-ctx.Done():
 			return
@@ -759,8 +761,8 @@ func TestDNSTransportHandshake(t *testing.T) {
 	}()
 
 	wg.Wait()
-	if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
-		t.Fatal(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+	if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+		t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(client.encryptionKey))
 	}
 
 	var done int
