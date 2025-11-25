@@ -575,7 +575,7 @@ func (t *Transport) write(blob []byte) error {
 	}
 	if n != len(size)+len(request) {
 		return fmt.Errorf("write error length: %v != %v",
-			n, len(blob))
+			n, len(blob)+len(size))
 	}
 
 	return nil
