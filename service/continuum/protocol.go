@@ -590,7 +590,6 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		if err != nil {
 			return nil, err
 		}
-		log.Infof("read %v, %v", i, len(cmd))
 
 		// XXX move this into read
 		nr := bytes.NewReader(cmd)
@@ -606,34 +605,33 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		// actual hash
 		switch header.PayloadType {
 		case PHelloRequest:
-			var hr HelloRequest
-			if err := jd.Decode(&hr); err != nil {
+			var req HelloRequest
+			if err := jd.Decode(&req); err != nil {
 				return nil, err
 			}
-			log.Infof("write hello response")
+
 			// Sign challenge and reply
 			err = t.Write(secret.Identity, HelloResponse{
-				Signature: secret.Sign(hr.Challenge),
+				Signature: secret.Sign(req.Challenge),
 			})
 			if err != nil {
 				return nil, err
 			}
 
 			// Mark valid
-			helloRequest = &hr
+			helloRequest = &req
 
 		case PHelloResponse:
-			var hr HelloResponse
-			if err := jd.Decode(&hr); err != nil {
+			var resp HelloResponse
+			if err := jd.Decode(&resp); err != nil {
 				return nil, err
 			}
-			helloResponse = &hr
-			log.Infof("read helloe response")
+			helloResponse = &resp
+
 		default:
 			return nil, fmt.Errorf("invalid command: %v", header.PayloadType)
 		}
 	}
-	log.Infof("exit loop")
 
 	// See if we completed the handshake
 	if helloRequest == nil || helloResponse == nil {
@@ -692,7 +690,6 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		return nil, fmt.Errorf("short read size: %v != 3", n)
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
-	log.Infof("read blob size: %v", sizeR)
 
 	blob := make([]byte, sizeR)
 	var at int
@@ -713,10 +710,8 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Note that we have to clip the 3 bytes for length here
-		if n < len(blob)-3 {
-			log.Infof("short read n %v %v", n, len(blob))
-			at += n
+		at += n
+		if at < len(blob) {
 			continue
 		}
 		return blob, nil
@@ -736,7 +731,6 @@ func (t *Transport) Read() (any, error) {
 }
 
 func (t *Transport) write(blob []byte) error {
-	log.Infof("write len pre enc %v", len(blob))
 	request, err := t.encrypt(blob)
 	if err != nil {
 		return err
@@ -746,7 +740,6 @@ func (t *Transport) write(blob []byte) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
-	log.Infof("write len post enc %v", len(request))
 	n, err := t.conn.Write(request)
 	if err != nil {
 		return err
