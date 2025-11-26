@@ -639,6 +639,164 @@ func TestTransportHandshake(t *testing.T) {
 	}
 }
 
+func TestMany(t *testing.T) {
+	// XXX remove once debugged
+	nodes := byte(2)
+	dnsAddress := "127.0.1.1:5353"
+	domain := "moop.gfy"
+	handler := createDNSNodes(domain, nodes)
+	go func() { newDNSServer(dnsAddress, handler) }()
+	waitForDNSServer(dnsAddress, t)
+	r := newResolver(dnsAddress, t)
+
+	for i := 0; i < 1111; i++ {
+		DNSTransportHandshake(r, handler, t)
+	}
+}
+
+func DNSTransportHandshake(r *net.Resolver, handler *dnsHandler, t *testing.T) {
+	// XXX remove once debugged
+	server, err := NewTransport(CurveX25519, "yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.resolver = r
+	node1 := handler.nodes["node1.moop.gfy."]
+	serverSecret := node1.Secret
+	t.Logf("server: %v", serverSecret)
+
+	client, err := NewTransport(CurveX25519, "yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.resolver = r
+	node2 := handler.nodes["node2.moop.gfy."]
+	clientSecret := node2.Secret
+	t.Logf("client: %v", clientSecret)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	l := net.ListenConfig{}
+	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+	log.Infof("Listening: %v", node1.IP)
+
+	var (
+		wg    sync.WaitGroup
+		msgCh = make(chan string)
+		errCh = make(chan error)
+	)
+	exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) (*Identity, error) {
+		defer wg.Done()
+		if err := tr.KeyExchange(ctx, conn); err != nil {
+			return nil, err
+		}
+		recovered, err := tr.Handshake(ctx, us)
+		if err != nil {
+			return nil, err
+		}
+		if recovered.String() != them.String() {
+			return nil, fmt.Errorf("recovered not equal got %v, want %v",
+				recovered, them)
+		}
+		return recovered, nil
+	}
+
+	wg.Add(2) // Wait for both key exchanges to complete
+
+	// client
+	go func() {
+		// note that we connect to node1.
+		addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(node2.IP.String(), "0"))
+		if err != nil {
+			panic(err)
+		}
+
+		d := &net.Dialer{
+			LocalAddr: addr,
+		}
+		conn, err := d.DialContext(ctx, "tcp",
+			net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := client.Close(); err != nil {
+				return
+			}
+		}()
+		r, err := exchangeFunc(conn, client, clientSecret, serverSecret)
+		if err != nil {
+			t.Logf("client error: %v", err)
+			select {
+			case <-ctx.Done():
+				return
+			case errCh <- err:
+			}
+		}
+		t.Logf("client recovered: %v", r)
+		select {
+		case <-ctx.Done():
+			return
+		case msgCh <- "done":
+		}
+	}()
+
+	// server
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := server.Close(); err != nil {
+				return
+			}
+		}()
+		r, err := exchangeFunc(conn, server, serverSecret, clientSecret)
+		if err != nil {
+			t.Logf("server error: %v", err)
+			select {
+			case <-ctx.Done():
+				return
+			case errCh <- err:
+			}
+		}
+		t.Logf("server recovered: %v", r)
+		select {
+		case <-ctx.Done():
+			return
+		case msgCh <- "done":
+		}
+	}()
+
+	wg.Wait()
+	if server.encryptionKey != nil || client.encryptionKey != nil {
+		if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+			t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
+		}
+	}
+
+	var done int
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case err := <-errCh:
+			t.Fatal(err)
+		case <-msgCh:
+			done++
+		}
+		if done == 2 {
+			return
+		}
+	}
+}
+
 func TestDNSTransportHandshake(t *testing.T) {
 	nodes := byte(2)
 	dnsAddress := "127.0.1.1:5353"
