@@ -588,7 +588,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	)
 	for i := 0; i < 2; i++ {
 		// log.Infof("%v: %p %p", secret.Identity, helloRequest, helloResponse)
-		cmd, err := t.read(2 * time.Second) // XXX figure out a good read timeout
+		cmd, err := t.read(4 * time.Second) // XXX figure out a good read timeout
 		if err != nil {
 			return nil, err
 		}
@@ -799,7 +799,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		return err
 	}
 
-	return t.write(1*time.Second, append(header, payload...)) // XXX timeout
+	return t.write(4*time.Second, append(header, payload...)) // XXX timeout
 }
 
 func NewResolver(resolverAddress string) *net.Resolver {
