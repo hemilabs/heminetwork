@@ -426,7 +426,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	var greatSuccess bool
 	defer func() {
 		if !greatSuccess {
-			if err := conn.Close(); err != nil {
+			if err := t.Close(); err != nil {
 				log.Errorf("connection: %v", conn.Close())
 			}
 		}
