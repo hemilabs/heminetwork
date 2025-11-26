@@ -578,8 +578,6 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 
-	log.Infof("enc %x", *t.encryptionKey)
-
 	// Read response.
 	// This can be either HelloRequest or HelloResponse depnding on
 	// mystical timing solar flares. Handle them regardless of order but
@@ -589,7 +587,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		helloResponse *HelloResponse
 	)
 	for i := 0; i < 2; i++ {
-		log.Infof("%p %p", helloRequest, helloResponse)
+		log.Infof("%v: %p %p", secret.Identity, helloRequest, helloResponse)
 		cmd, err := t.read(2 * time.Second) // XXX figure out a good read timeout
 		if err != nil {
 			return nil, err
@@ -697,8 +695,7 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
 	if sizeR > 1000 {
-		log.Infof("enc in panic %x", *t.encryptionKey)
-		log.Infof("%v", spew.Sdump(sizeRE))
+		log.Infof("readBlob %v", spew.Sdump(sizeRE))
 		panic("")
 	}
 
@@ -797,7 +794,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		Destination: nil,
 		TTL:         1, // expires at the receiver
 	})
-	log.Infof("write %v", spew.Sdump(header))
+	log.Infof("origin %v write %v", origin, spew.Sdump(header))
 	if err != nil {
 		return err
 	}
