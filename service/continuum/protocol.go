@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package continuum
 
 import (
@@ -62,7 +66,7 @@ type PayloadType string
 
 const (
 	PHelloRequest  PayloadType = "hello"
-	PHelloResponse             = "hello-response" // XXX does the linter allow this?
+	PHelloResponse PayloadType = "hello-response" // XXX does the linter allow this?
 )
 
 var (
@@ -122,11 +126,11 @@ func NewPayloadFromCommand(cmd any) (*PayloadHash, []byte, error) {
 }
 
 type Header struct {
-	PayloadType PayloadType `json:"payloadtype"`            // Hint to decode payload
-	PayloadHash PayloadHash `json:"payloadhash"`            // Message identifier
-	Origin      Identity    `json:"origin"`                 // Origin identity
-	Destination *Identity   `json:"destination,omitempty "` // Intended receiver
-	TTL         uint8       `json:"ttl"`                    // Time To Live
+	PayloadType PayloadType `json:"payloadtype"`           // Hint to decode payload
+	PayloadHash PayloadHash `json:"payloadhash"`           // Message identifier
+	Origin      Identity    `json:"origin"`                // Origin identity
+	Destination *Identity   `json:"destination,omitempty"` // Intended receiver
+	TTL         uint8       `json:"ttl"`                   // Time To Live
 	// Path        []Identity      // Record path when routing XXX ?
 }
 
@@ -138,14 +142,6 @@ type HelloRequest struct {
 
 type HelloResponse struct {
 	Signature []byte `json:"signature"` // Signature of Challenge and identity is derived
-}
-
-func newCommand(cmd any) (Header, any, error) {
-	panic("x")
-}
-
-func NewCommand(cmd any) ([]byte, error) {
-	panic("c")
 }
 
 const (
@@ -581,7 +577,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 
-	// Read reponse.
+	// Read response.
 	// This can be either HelloRequest or HelloResponse depnding on
 	// mystical timing solar flares. Handle them regardless of order but
 	// require both to always complete.
@@ -700,9 +696,19 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 
 	blob := make([]byte, sizeR)
 	var at int
-	to := time.Now().Add(timeout)
+	to := func() error {
+		return nil
+	}
+	if timeout != 0 {
+		to = func() error {
+			return t.conn.SetReadDeadline(time.Now().Add(timeout))
+		}
+	}
 	for {
-		t.conn.SetReadDeadline(to)
+		err := to()
+		if err != nil {
+			return nil, err
+		}
 		n, err = t.conn.Read(blob[at:])
 		if err != nil {
 			return nil, err

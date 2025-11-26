@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package continuum
 
 import (
@@ -72,7 +76,7 @@ type node struct {
 	Secret            *Secret
 	// PrivateKey        *secp256k1.PrivateKey
 	// PublicKey         *secp256k1.PublicKey
-	// Identity          Identity
+	// Identity
 }
 
 func createNode(name, domain string, ip net.IP, port uint16) (*node, error) {
@@ -115,7 +119,7 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 					Class: dns.ClassINET,
 				},
 				Txt: []string{"v=" + dnsAppName + " identity=" +
-					n.Secret.Identity.String() + port},
+					n.Secret.String() + port},
 			},
 		},
 		[]dns.RR{
