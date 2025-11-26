@@ -478,7 +478,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 }
 
 func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
-	ts := len(cmd) + secretbox.Overhead + TransportNonceSize
+	ts := TransportNonceSize + len(cmd) + secretbox.Overhead
 	if ts > TransportMaxSize {
 		return nil, fmt.Errorf("overflow")
 	}
