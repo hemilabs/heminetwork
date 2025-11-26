@@ -586,6 +586,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		helloResponse *HelloResponse
 	)
 	for i := 0; i < 2; i++ {
+		log.Infof("%p %p", helloRequest, helloResponse)
 		cmd, err := t.read(2 * time.Second) // XXX figure out a good read timeout
 		if err != nil {
 			return nil, err
@@ -672,6 +673,8 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	return &themID, nil
 }
 
+func noTimeout() error { return nil }
+
 // readBlob locks the connection and reads a size and the associated blob into
 // a slice and returns that.
 func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
@@ -690,17 +693,17 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		return nil, fmt.Errorf("short read size: %v != 3", n)
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
-
 	blob := make([]byte, sizeR)
-	var at int
-	to := func() error {
-		return nil
-	}
+
+	// Timeout
+	to := noTimeout
 	if timeout != 0 {
 		to = func() error {
 			return t.conn.SetReadDeadline(time.Now().Add(timeout))
 		}
 	}
+
+	var at int
 	for {
 		err := to()
 		if err != nil {
@@ -712,6 +715,9 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		}
 		at += n
 		if at < len(blob) {
+			log.Infof("at %v want %v", at, len(blob))
+			// XXX for now panic because we seem to get weird sizes
+			panic("wtf")
 			continue
 		}
 		return blob, nil
