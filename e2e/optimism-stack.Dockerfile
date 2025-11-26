@@ -5,7 +5,7 @@
 ARG OP_GETH_COMMIT=faf53b75ee93d24c93885364dbeb62bb7fc876f3
 ARG OPTIMISM_COMMIT=12dba15e5e3fdc48620a81872b381b2e79fcb62b
 
-FROM golang:1.25.4-trixie@sha256:27e1c927a07ed2c7295d39941d6d881424739dbde9ae3055d0d3013699ed35e8 AS build_1
+FROM golang:1.25.4-trixie@sha256:a02d35efc036053fdf0da8c15919276bf777a80cbfda6a35c5e9f087e652adfc AS build_1
 
 WORKDIR /git
 
@@ -15,7 +15,7 @@ RUN git checkout $OP_GETH_COMMIT
 
 RUN go run build/ci.go install -static ./cmd/geth
 
-FROM golang:1.25.4-trixie@sha256:27e1c927a07ed2c7295d39941d6d881424739dbde9ae3055d0d3013699ed35e8 AS build_2
+FROM golang:1.25.4-trixie@sha256:a02d35efc036053fdf0da8c15919276bf777a80cbfda6a35c5e9f087e652adfc AS build_2
 
 # store the latest geth here, build with go 1.23
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
