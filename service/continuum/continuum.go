@@ -265,6 +265,11 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
 
+	if !s.testAndSetRunning(true) {
+		return errors.New("continuum already running")
+	}
+	defer s.testAndSetRunning(false)
+
 	var err error
 	s.cfg.Home, err = homedir.Expand(s.cfg.Home)
 	if err != nil {
