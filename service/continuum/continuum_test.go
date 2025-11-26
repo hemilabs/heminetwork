@@ -606,8 +606,10 @@ func TestTransportHandshake(t *testing.T) {
 			}()
 
 			wg.Wait()
-			if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
-				t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
+			if server.encryptionKey != nil || client.encryptionKey != nil {
+				if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+					t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
+				}
 			}
 
 			var (

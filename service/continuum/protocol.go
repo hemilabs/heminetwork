@@ -478,7 +478,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 }
 
 func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
-	ts := len(cmd) + secretbox.Overhead + TransportNonceSize + 3
+	ts := len(cmd) + secretbox.Overhead + TransportNonceSize
 	if ts > TransportMaxSize {
 		return nil, fmt.Errorf("overflow")
 	}
@@ -491,7 +491,7 @@ func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
 		t.encryptionKey)
 
 	// diagnostic
-	if ts != len(blob) {
+	if ts != len(blob)-3 {
 		panic(fmt.Sprintf("encryption diagnostic: wanted %v got %v",
 			ts, len(blob)))
 	}
