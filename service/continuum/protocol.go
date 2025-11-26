@@ -583,7 +583,6 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	for i := 0; i < 2; i++ {
 		cmd, err := t.read(2 * time.Second) // XXX figure out a good read timeout
 		if err != nil {
-			panic(err)
 			return nil, err
 		}
 
@@ -674,8 +673,10 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
+	// XXX should we be using 3 as a constant here or not?
+
 	var sizeRE [4]byte
-	n, err := t.conn.Read(sizeRE[1:4])
+	n, err := t.conn.Read(sizeRE[1:4]) // read 3 bytes for the nonce+ciphertext
 	if err != nil {
 		return nil, err
 	}
@@ -683,7 +684,6 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		return nil, fmt.Errorf("short read size: %v != 3", n)
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
-	log.Infof("sizeR %v sizeRE %x", sizeR, sizeRE)
 
 	blob := make([]byte, sizeR)
 	var at int
@@ -694,11 +694,10 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if n < len(blob) {
-			log.Infof("at %v n %v total %v", at, n, sizeR)
+		// Note that we have to clip the 3 bytes for length here
+		if n < len(blob)-3 {
 			at += n
 			continue
-			// return nil, fmt.Errorf("short read: %v != %v", n, sizeR)
 		}
 		return blob, nil
 	}
