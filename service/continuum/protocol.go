@@ -335,7 +335,7 @@ type Transport struct {
 	nonce     *Nonce
 
 	them          *ecdh.PublicKey // Their public key
-	encryptionKey [32]byte        // Shared ephemeral encryption key
+	encryptionKey *[32]byte       // Shared ephemeral encryption key
 
 	// DNS lookup and verification
 	dns      string        // Validate identity using DNS
@@ -403,6 +403,24 @@ func (t *Transport) Close() error {
 	return err
 }
 
+func (t *Transport) kx() error {
+	// Shared secret seed.
+	shared, err := t.us.ECDH(t.them)
+	if err != nil {
+		return err
+	}
+
+	// Derive shared ephemeral encryption key.
+	var encryptionKey [32]byte
+	er := hkdf.New(sha256.New, shared, nil, nil)
+	if _, err := io.ReadFull(er, encryptionKey[:]); err != nil {
+		return err
+	}
+	t.encryptionKey = &encryptionKey // Assign encryption key
+
+	return nil
+}
+
 func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	var (
 		tr  TransportRequest
@@ -443,20 +461,14 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	if len(tr.PublicKey) == 0 {
 		return ErrInvalidPublicKey
 	}
+
 	t.them, err = t.curve.NewPublicKey(tr.PublicKey)
 	if err != nil {
 		return err
 	}
 
-	// Shared secret seed.
-	shared, err := t.us.ECDH(t.them)
+	err = t.kx()
 	if err != nil {
-		return err
-	}
-
-	// Derive shared ephemeral encryption key.
-	er := hkdf.New(sha256.New, shared, nil, nil)
-	if _, err := io.ReadFull(er, t.encryptionKey[:]); err != nil {
 		return err
 	}
 
@@ -465,24 +477,36 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	return nil
 }
 
-func (t *Transport) encrypt(cmd []byte) ([]byte, []byte, error) {
-	ts := len(cmd) + secretbox.Overhead + TransportNonceSize
+func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
+	ts := len(cmd) + secretbox.Overhead + TransportNonceSize + 3
 	if ts > TransportMaxSize {
-		return nil, nil, fmt.Errorf("overflow")
+		return nil, fmt.Errorf("overflow")
 	}
 
-	// Should we prefix nonce with size? or better yet, nonce+size and read
-	// 27 bytes instead of 3 to obtain size and noce.
+	// Encode size to prefix nonce
+	var size [4]byte
+	binary.BigEndian.PutUint32(size[:], uint32(ts))
 	nonce := t.nonce.Next()
-	blob := secretbox.Seal(nonce[:], cmd, nonce, &t.encryptionKey)
+	blob := secretbox.Seal(append(size[1:4], nonce[:]...), cmd, nonce,
+		t.encryptionKey)
+
 	// diagnostic
 	if ts != len(blob) {
 		panic(fmt.Sprintf("encryption diagnostic: wanted %v got %v",
 			ts, len(blob)))
 	}
-	var size [4]byte
-	binary.BigEndian.PutUint32(size[:], uint32(len(blob)))
-	return size[1:4], blob, nil
+	return blob, nil
+}
+
+func (t *Transport) decrypt(blob []byte) ([]byte, error) {
+	var nonce [TransportNonceSize]byte
+	copy(nonce[:], blob[:TransportNonceSize])
+	cleartext, ok := secretbox.Open(nil, blob[TransportNonceSize:], &nonce,
+		t.encryptionKey)
+	if !ok {
+		return nil, ErrDecrypt
+	}
+	return cleartext, nil
 }
 
 func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, error) {
@@ -685,15 +709,7 @@ func (t *Transport) read(timeout time.Duration) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var nonce [TransportNonceSize]byte
-	copy(nonce[:], blob[:TransportNonceSize])
-	cmd, ok := secretbox.Open(nil, blob[TransportNonceSize:], &nonce, &t.encryptionKey)
-	if !ok {
-		return nil, ErrDecrypt
-	}
-
-	return cmd, nil
+	return t.decrypt(blob)
 }
 
 func (t *Transport) Read() (any, error) {
@@ -701,7 +717,7 @@ func (t *Transport) Read() (any, error) {
 }
 
 func (t *Transport) write(blob []byte) error {
-	size, request, err := t.encrypt(blob)
+	request, err := t.encrypt(blob)
 	if err != nil {
 		return err
 	}
@@ -710,14 +726,14 @@ func (t *Transport) write(blob []byte) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
-	n, err := t.conn.Write(append(size, request...))
+	n, err := t.conn.Write(request)
 	if err != nil {
 		return err
 	}
-	if n != len(size)+len(request) {
+	if n != len(request) {
 		panic("diag")
 		return fmt.Errorf("write error length: %v != %v",
-			n, len(blob)+len(size))
+			n, len(blob))
 	}
 
 	return nil
