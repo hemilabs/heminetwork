@@ -742,7 +742,7 @@ func (t *Transport) Read() (any, error) {
 	return nil, fmt.Errorf("nope")
 }
 
-func (t *Transport) write(blob []byte) error {
+func (t *Transport) write(timeout time.Duration, blob []byte) error {
 	request, err := t.encrypt(blob)
 	if err != nil {
 		return err
@@ -752,8 +752,20 @@ func (t *Transport) write(blob []byte) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
+	// Timeout
+	to := noTimeout
+	if timeout != 0 {
+		to = func() error {
+			return t.conn.SetWriteDeadline(time.Now().Add(timeout))
+		}
+	}
+
 	var at int
 	for {
+		err := to()
+		if err != nil {
+			return err
+		}
 		n, err := t.conn.Write(request[at:])
 		if err != nil {
 			return err
@@ -790,7 +802,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		return err
 	}
 
-	return t.write(append(header, payload...))
+	return t.write(1*time.Second, append(header, payload...)) // XXX timeout
 }
 
 func NewResolver(resolverAddress string) *net.Resolver {
