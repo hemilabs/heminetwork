@@ -587,7 +587,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		helloResponse *HelloResponse
 	)
 	for i := 0; i < 2; i++ {
-		log.Infof("%v: %p %p", secret.Identity, helloRequest, helloResponse)
+		// log.Infof("%v: %p %p", secret.Identity, helloRequest, helloResponse)
 		cmd, err := t.read(2 * time.Second) // XXX figure out a good read timeout
 		if err != nil {
 			return nil, err
@@ -794,7 +794,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		Destination: nil,
 		TTL:         1, // expires at the receiver
 	})
-	log.Infof("origin %v write %v", origin, spew.Sdump(header))
+	// log.Infof("origin %v write %v", origin, spew.Sdump(header))
 	if err != nil {
 		return err
 	}
