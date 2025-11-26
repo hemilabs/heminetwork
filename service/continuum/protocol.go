@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -577,6 +578,8 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 
+	log.Infof("enc %x", *t.encryptionKey)
+
 	// Read response.
 	// This can be either HelloRequest or HelloResponse depnding on
 	// mystical timing solar flares. Handle them regardless of order but
@@ -693,6 +696,12 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		return nil, fmt.Errorf("short read size: %v != 3", n)
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
+	if sizeR > 1000 {
+		log.Infof("enc in panic %x", *t.encryptionKey)
+		log.Infof("%v", spew.Sdump(sizeRE))
+		panic("")
+	}
+
 	blob := make([]byte, sizeR)
 
 	// Timeout
@@ -715,9 +724,6 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		}
 		at += n
 		if at < len(blob) {
-			log.Infof("at %v want %v", at, len(blob))
-			// XXX for now panic because we seem to get weird sizes
-			panic("wtf")
 			continue
 		}
 		return blob, nil
@@ -746,16 +752,18 @@ func (t *Transport) write(blob []byte) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
-	n, err := t.conn.Write(request)
-	if err != nil {
-		return err
+	var at int
+	for {
+		n, err := t.conn.Write(request[at:])
+		if err != nil {
+			return err
+		}
+		at += n
+		if at < len(request) {
+			continue
+		}
+		return nil
 	}
-	if n != len(request) {
-		return fmt.Errorf("write error length: %v != %v",
-			n, len(blob))
-	}
-
-	return nil
 }
 
 // Write creats a new payload and header and sends that to the peer.
@@ -777,6 +785,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		Destination: nil,
 		TTL:         1, // expires at the receiver
 	})
+	log.Infof("write %v", spew.Sdump(header))
 	if err != nil {
 		return err
 	}
