@@ -14,9 +14,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -56,6 +58,78 @@ import (
 //
 // XXX describe the types a bit here and add a drawing if needed to tie it all together.
 
+type PayloadType string
+
+const (
+	PHelloRequest  PayloadType = "hello"
+	PHelloResponse             = "hello-response" // XXX does the linter allow this?
+)
+
+var (
+	pt2str = map[reflect.Type]PayloadType{
+		reflect.TypeOf(HelloRequest{}):  PHelloRequest,
+		reflect.TypeOf(HelloResponse{}): PHelloResponse,
+	}
+
+	str2pt map[PayloadType]reflect.Type
+)
+
+func init() {
+	// reverse pt2str map
+	str2pt = make(map[PayloadType]reflect.Type, len(pt2str))
+	for k, v := range pt2str {
+		str2pt[v] = k
+	}
+}
+
+type PayloadHash [32]byte
+
+func (p PayloadHash) MarshalJSON() ([]byte, error) {
+	return json.Marshal(hex.EncodeToString(p[:]))
+}
+
+func (p *PayloadHash) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	d, err := hex.DecodeString(s)
+	if err != nil {
+		return err
+	}
+	if len(d) != len(p) {
+		return fmt.Errorf("invalid length: %v", len(d))
+	}
+	copy(p[:], d)
+	return nil
+}
+
+func (p PayloadHash) String() string {
+	return hex.EncodeToString(p[:])
+}
+
+func NewPayloadHash(x []byte) *PayloadHash {
+	p := PayloadHash(sha256.Sum256(x))
+	return &p
+}
+
+func NewPayloadFromCommand(cmd any) (*PayloadHash, []byte, error) {
+	jc, err := json.Marshal(cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	return NewPayloadHash(jc), jc, nil
+}
+
+type Header struct {
+	PayloadType PayloadType `json:"payloadtype"`            // Hint to decode payload
+	PayloadHash PayloadHash `json:"payloadhash"`            // Message identifier
+	Origin      Identity    `json:"origin"`                 // Origin identity
+	Destination *Identity   `json:"destination,omitempty "` // Intended receiver
+	TTL         uint8       `json:"ttl"`                    // Time To Live
+	// Path        []Identity      // Record path when routing XXX ?
+}
+
 type HelloRequest struct {
 	Version   uint32            `json:"version"`           // Version number
 	Options   map[string]string `json:"options,omitempty"` // x=y
@@ -64,6 +138,14 @@ type HelloRequest struct {
 
 type HelloResponse struct {
 	Signature []byte `json:"signature"` // Signature of Challenge and identity is derived
+}
+
+func newCommand(cmd any) (Header, any, error) {
+	panic("x")
+}
+
+func NewCommand(cmd any) ([]byte, error) {
+	panic("c")
 }
 
 const (
@@ -137,11 +219,21 @@ func (i Identity) Bytes() []byte {
 }
 
 func (i *Identity) UnmarshalJSON(data []byte) error {
-	if len(data) != len(i) {
-		return errors.New("invalid length")
+	var d string
+	err := json.Unmarshal(data, &d)
+	if err != nil {
+		return err
 	}
-	copy(i[:], data)
+	ni, err := NewIdentityFromString(d)
+	if err != nil {
+		return err
+	}
+	copy(i[:], ni[:])
 	return nil
+}
+
+func (i Identity) MarshalJSON() ([]byte, error) {
+	return json.Marshal(hex.EncodeToString(i[:]))
 }
 
 func NewIdentityFromPub(pub *secp256k1.PublicKey) Identity {
@@ -226,6 +318,7 @@ var (
 	ErrCurveDoesnotMatch  = errors.New("curve does not match")
 	ErrDecrypt            = errors.New("could not decrypt")
 	ErrInvalidChallenge   = errors.New("invalid challenge")
+	ErrInvalidHandshake   = errors.New("invalid handshake")
 	ErrInvalidPublicKey   = errors.New("invalid public key")
 	ErrInvalidTXTRecord   = errors.New("invalid TXT record")
 	ErrNotCompact         = errors.New("not a compact public key")
@@ -373,7 +466,8 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 }
 
 func (t *Transport) encrypt(cmd []byte) ([]byte, []byte, error) {
-	if len(cmd)+secretbox.Overhead+TransportNonceSize > TransportMaxSize {
+	ts := len(cmd) + secretbox.Overhead + TransportNonceSize
+	if ts > TransportMaxSize {
 		return nil, nil, fmt.Errorf("overflow")
 	}
 
@@ -381,6 +475,11 @@ func (t *Transport) encrypt(cmd []byte) ([]byte, []byte, error) {
 	// 27 bytes instead of 3 to obtain size and noce.
 	nonce := t.nonce.Next()
 	blob := secretbox.Seal(nonce[:], cmd, nonce, &t.encryptionKey)
+	// diagnostic
+	if ts != len(blob) {
+		panic(fmt.Sprintf("encryption diagnostic: wanted %v got %v",
+			ts, len(blob)))
+	}
 	var size [4]byte
 	binary.BigEndian.PutUint32(size[:], uint32(len(blob)))
 	return size[1:4], blob, nil
@@ -394,6 +493,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 
+	// XXX this needs to be a function of sorts
 	var remoteDNSID *Identity
 	if t.dns != "" {
 		// XXX should we not panic on conn == nil?
@@ -436,7 +536,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	}
 
 	// Write HelloRequest
-	err = t.Write(HelloRequest{
+	err = t.Write(secret.Identity, HelloRequest{
 		Version:   ProtocolVersion,
 		Challenge: ourChallenge[:],
 		Options: map[string]string{
@@ -448,20 +548,69 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 
-	// Read HelloRequest
-	jsonHelloRequest, err := t.read()
-	if err != nil {
-		return nil, err
+	// Read reponse.
+	// This can be either HelloRequest or HelloResponse depnding on
+	// mystical timing solar flares. Handle them regardless of order but
+	// require both to always complete.
+	var (
+		helloRequest  *HelloRequest
+		helloResponse *HelloResponse
+	)
+	for i := 0; i < 2; i++ {
+		cmd, err := t.read(2 * time.Second) // XXX figure out a good read timeout
+		if err != nil {
+			panic(err)
+			return nil, err
+		}
+
+		// XXX move this into read
+		nr := bytes.NewReader(cmd)
+		jd := json.NewDecoder(nr)
+		var header Header
+		err = jd.Decode(&header)
+		if err != nil {
+			return nil, err
+		}
+		// XXX i was too clever to make the payload hash in the write
+		// but we can't really get to it here. It is a valid unique
+		// hash but it would be cute if we could verify the payload
+		// actual hash
+		switch header.PayloadType {
+		case PHelloRequest:
+			var hr HelloRequest
+			if err := jd.Decode(&hr); err != nil {
+				return nil, err
+			}
+
+			// Sign challenge and reply
+			err = t.Write(secret.Identity, HelloResponse{
+				Signature: secret.Sign(hr.Challenge),
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			// Mark valid
+			helloRequest = &hr
+
+		case PHelloResponse:
+			var hr HelloResponse
+			if err := jd.Decode(&hr); err != nil {
+				return nil, err
+			}
+			helloResponse = &hr
+		default:
+			return nil, fmt.Errorf("invalid command: %v", header.PayloadType)
+		}
 	}
-	var helloRequest HelloRequest
-	err = json.Unmarshal(jsonHelloRequest, &helloRequest)
-	if err != nil {
-		return nil, err
+
+	// See if we completed the handshake
+	if helloRequest == nil || helloResponse == nil {
+		return nil, ErrInvalidHandshake
 	}
+
+	// Validate HelloRequest
 	if helloRequest.Version != ProtocolVersion {
-		// XXX I have seen some tests go through here and I don't know
-		// why. Just leaving a nugget as a reminder to debug that.
-		// Basically, helloRequest is not unmarshaled.
 		return nil, ErrUnsupportedVersion
 	}
 	if len(helloRequest.Challenge) != ChallengeSize {
@@ -473,30 +622,14 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 
 	// XXX do something with options
 
-	// Write HelloResponse
-	err = t.Write(HelloResponse{
-		Signature: secret.Sign(helloRequest.Challenge),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// Read HelloResponse
-	jsonHelloResponse, err := t.read()
-	if err != nil {
-		return nil, err
-	}
-	var helloResponse HelloResponse
-	err = json.Unmarshal(jsonHelloResponse, &helloResponse)
-	if err != nil {
-		return nil, err
-	}
+	// Verify response
 	themPub, err := Verify(ourChallenge[:], helloResponse.Signature)
 	if err != nil {
 		return nil, err
 	}
 	themID := NewIdentityFromPub(themPub)
 
+	// XXX move this into a function
 	if t.dns != "" {
 		if remoteDNSID == nil {
 			return nil, errors.New("remote dns id not set")
@@ -512,7 +645,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 
 // readBlob locks the connection and reads a size and the associated blob into
 // a slice and returns that.
-func (t *Transport) readBlob() ([]byte, error) {
+func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	// Don't interleave blobs and sizes
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
@@ -526,21 +659,29 @@ func (t *Transport) readBlob() ([]byte, error) {
 		return nil, fmt.Errorf("short read size: %v != 3", n)
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
+	log.Infof("sizeR %v sizeRE %x", sizeR, sizeRE)
 
 	blob := make([]byte, sizeR)
-	n, err = t.conn.Read(blob)
-	if err != nil {
-		return nil, err
+	var at int
+	to := time.Now().Add(timeout)
+	for {
+		t.conn.SetReadDeadline(to)
+		n, err = t.conn.Read(blob[at:])
+		if err != nil {
+			return nil, err
+		}
+		if n < len(blob) {
+			log.Infof("at %v n %v total %v", at, n, sizeR)
+			at += n
+			continue
+			// return nil, fmt.Errorf("short read: %v != %v", n, sizeR)
+		}
+		return blob, nil
 	}
-	if n != len(blob) {
-		return nil, fmt.Errorf("short read: %v != %v", n, sizeR)
-	}
-
-	return blob, nil
 }
 
-func (t *Transport) read() ([]byte, error) {
-	blob, err := t.readBlob()
+func (t *Transport) read(timeout time.Duration) ([]byte, error) {
+	blob, err := t.readBlob(timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -574,6 +715,7 @@ func (t *Transport) write(blob []byte) error {
 		return err
 	}
 	if n != len(size)+len(request) {
+		panic("diag")
 		return fmt.Errorf("write error length: %v != %v",
 			n, len(blob)+len(size))
 	}
@@ -581,13 +723,30 @@ func (t *Transport) write(blob []byte) error {
 	return nil
 }
 
-func (t *Transport) Write(cmd any) error {
-	// XXX encoder interface here
-	blob, err := json.Marshal(cmd)
+// Write creats a new payload and header and sends that to the peer.
+// XXX think about header construction and if we need like a WriteTo which adds
+// an explicit origin that may need routing.
+func (t *Transport) Write(origin Identity, cmd any) error {
+	pt, ok := pt2str[reflect.TypeOf(cmd)]
+	if !ok {
+		return fmt.Errorf("invalid command type: %T", cmd)
+	}
+	hash, payload, err := NewPayloadFromCommand(cmd)
 	if err != nil {
 		return err
 	}
-	return t.write(blob)
+	header, err := json.Marshal(Header{
+		PayloadType: pt,
+		PayloadHash: *hash,
+		Origin:      origin,
+		Destination: nil,
+		TTL:         1, // expires at the receiver
+	})
+	if err != nil {
+		return err
+	}
+
+	return t.write(append(header, payload...))
 }
 
 func NewResolver(resolverAddress string) *net.Resolver {
