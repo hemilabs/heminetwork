@@ -9,7 +9,7 @@ version: "3"
 services:
   bitcoind:
     # yamllint disable-line rule:line-length
-    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
+    image: "kylemanna/bitcoind@sha256:8396d4f819a8b1c4bbb97f3d9700ff658365d0e89d4413c50762a18ce23b84ab"
     command:
       - "bitcoind"
       - "-regtest=1"
@@ -30,7 +30,7 @@ services:
 
   bitcoind-initialblocks:
     # yamllint disable-line rule:line-length
-    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
+    image: "kylemanna/bitcoind@sha256:8396d4f819a8b1c4bbb97f3d9700ff658365d0e89d4413c50762a18ce23b84ab"
     depends_on:
       - "bitcoind"
     command:
@@ -50,7 +50,7 @@ services:
 
   bitcoind-moreblocks:
     # yamllint disable-line rule:line-length
-    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
+    image: "kylemanna/bitcoind@sha256:8396d4f819a8b1c4bbb97f3d9700ff658365d0e89d4413c50762a18ce23b84ab"
     deploy:
       restart_policy:
         condition: "any"
