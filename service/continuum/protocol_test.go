@@ -14,50 +14,52 @@ import (
 )
 
 func TestEncryptDecrypt(t *testing.T) {
-	server, err := NewTransport(CurveX25519, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	client, err := NewTransport(CurveX25519, "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	for i := 0; i < 33; i++ {
+		server, err := NewTransport(CurveX25519, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, err := NewTransport(CurveX25519, "")
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// Set keys to simulate incomming key exchange message
-	server.them, err = server.curve.NewPublicKey(client.us.PublicKey().Bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
-	client.them, err = client.curve.NewPublicKey(server.us.PublicKey().Bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
+		// Set keys to simulate incomming key exchange message
+		server.them, err = server.curve.NewPublicKey(client.us.PublicKey().Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.them, err = client.curve.NewPublicKey(server.us.PublicKey().Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// Perform actual key exchange
-	err = server.kx()
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = client.kx()
-	if err != nil {
-		t.Fatal(err)
-	}
+		// Perform actual key exchange
+		err = server.kx()
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = client.kx()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
-		t.Fatal("shared key not equal")
-	}
+		if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+			t.Fatal("shared key not equal")
+		}
 
-	message := []byte("this is a super secret message y'all!")
-	em, err := server.encrypt(message)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cleartext, err := client.decrypt(em[3:]) // clip size that is done by read normally
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(message, cleartext) {
-		t.Fatal("message not equal")
+		message := []byte("this is a super secret message y'all!")
+		em, err := server.encrypt(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleartext, err := client.decrypt(em[3:]) // clip size that is done by read normally
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(message, cleartext) {
+			t.Fatal("message not equal")
+		}
 	}
 }
 
