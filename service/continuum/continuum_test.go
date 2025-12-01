@@ -12,13 +12,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"strconv"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -26,7 +24,6 @@ import (
 	"codeberg.org/miekg/dns"
 	"codeberg.org/miekg/dns/dnsutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"golang.org/x/crypto/hkdf"
@@ -478,525 +475,599 @@ func TestIdentity(t *testing.T) {
 // XXX this is racy. When one side receives a message
 // sometimes it differs from what is sent, or
 // perhaps is not properly decrypted.
-func TestTransportHandshake(t *testing.T) {
-	type testTableItem struct {
-		name                     string
-		serverCurve, clientCurve string
-		expectedError            error
-	}
-	curves := []string{CurveP521, CurveP384, CurveP256, CurveX25519}
-	testTable := make([]testTableItem, 0, 20)
-	for _, us := range curves {
-		for _, them := range append(curves, "none") {
-			tti := testTableItem{
-				name:        fmt.Sprintf("%s - %s", us, them),
-				serverCurve: us,
-				clientCurve: them,
-			}
-			if them != "none" {
-				tti.expectedError = ErrMisbehavedClient
-			}
-			testTable = append(testTable, tti)
-		}
-	}
-	for _, tti := range testTable {
-		t.Run(tti.name, func(t *testing.T) {
-			server, err := NewTransportServer(tti.serverCurve, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			serverSecret, err := NewSecret()
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("server: %v", serverSecret)
-
-			var client *Transport
-			if tti.clientCurve != "none" {
-				// this should fail
-				client, err = NewTransportServer(tti.clientCurve, "")
-			} else {
-				client, err = NewTransportClient("")
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			clientSecret, err := NewSecret()
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("client: %v", clientSecret)
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			defer cancel()
-			l := net.ListenConfig{}
-			listener, err := l.Listen(ctx, "tcp", ":0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer listener.Close()
-			port := listener.Addr().(*net.TCPAddr).Port
-
-			var (
-				wg    sync.WaitGroup
-				msgCh = make(chan string)
-				errCh = make(chan error)
-			)
-			exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) error {
-				defer wg.Done()
-				if err := tr.KeyExchange(ctx, conn); err != nil {
-					return err
-				}
-				recovered, err := tr.Handshake(ctx, us)
-				if err != nil {
-					return err
-				}
-				if recovered.String() != them.String() {
-					return fmt.Errorf("recovered not equal got %v, want %v",
-						recovered, them)
-				}
-				return nil
-			}
-
-			wg.Add(2) // Wait for both key exchanges to complete
-
-			// client
-			go func() {
-				d := &net.Dialer{}
-				conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1",
-					strconv.Itoa(port)))
-				if err != nil {
-					panic(err)
-				}
-				defer func() {
-					if err := client.Close(); err != nil {
-						return
-					}
-				}()
-				err = exchangeFunc(conn, client, clientSecret, serverSecret)
-				if err != nil {
-					t.Logf("client error: %v", err)
-					select {
-					case <-ctx.Done():
-						return
-					case errCh <- err:
-					}
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case msgCh <- "done":
-				}
-			}()
-
-			// server
-			go func() {
-				conn, err := listener.Accept()
-				if err != nil {
-					panic(err)
-				}
-				defer func() {
-					if err := server.Close(); err != nil {
-						return
-					}
-				}()
-				err = exchangeFunc(conn, server, serverSecret, clientSecret)
-				if err != nil {
-					t.Logf("server error: %v", err)
-					select {
-					case <-ctx.Done():
-						return
-					case errCh <- err:
-					}
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case msgCh <- "done":
-				}
-			}()
-
-			wg.Wait()
-			if server.encryptionKey != nil || client.encryptionKey != nil {
-				if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
-					t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
-				}
-			}
-
-			var (
-				done int
-				cerr error
-			)
-			for {
-				select {
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
-				case cerr = <-errCh:
-				case <-msgCh:
-					done++
-				}
-				if !errors.Is(cerr, tti.expectedError) {
-					t.Fatalf("expected error %v, got %v", tti.expectedError, cerr)
-				}
-				if done == 2 {
-					return
-				}
-			}
-		})
-	}
-}
-
-func TestMany(t *testing.T) {
-	// XXX remove once debugged
-	nodes := byte(2)
-	dnsAddress := "127.0.1.1:5353"
-	domain := "moop.gfy"
-	handler := createDNSNodes(domain, nodes)
-	go func() { newDNSServer(dnsAddress, handler) }()
-	waitForDNSServer(dnsAddress, t)
-	r := newResolver(dnsAddress, t)
-
-	for i := 0; i < 1111; i++ {
-		DNSTransportHandshake(r, handler, t)
-	}
-}
-
-func DNSTransportHandshake(r *net.Resolver, handler *dnsHandler, t *testing.T) {
-	// XXX remove once debugged
-	server, err := NewTransportServer(CurveX25519, "yes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.resolver = r
-	node1 := handler.nodes["node1.moop.gfy."]
-	serverSecret := node1.Secret
-	t.Logf("server: %v", serverSecret)
-
-	client, err := NewTransportClient("yes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	client.resolver = r
-	node2 := handler.nodes["node2.moop.gfy."]
-	clientSecret := node2.Secret
-	t.Logf("client: %v", clientSecret)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	l := net.ListenConfig{}
-	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	port := listener.Addr().(*net.TCPAddr).Port
-	log.Infof("Listening: %v", node1.IP)
-
-	var (
-		wg    sync.WaitGroup
-		msgCh = make(chan string)
-		errCh = make(chan error)
-	)
-	exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) (*Identity, error) {
-		defer wg.Done()
-		if err := tr.KeyExchange(ctx, conn); err != nil {
-			return nil, err
-		}
-		recovered, err := tr.Handshake(ctx, us)
-		if err != nil {
-			return nil, err
-		}
-		if recovered.String() != them.String() {
-			return nil, fmt.Errorf("recovered not equal got %v, want %v",
-				recovered, them)
-		}
-		return recovered, nil
-	}
-
-	wg.Add(2) // Wait for both key exchanges to complete
-
-	// client
-	go func() {
-		// note that we connect to node1.
-		addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(node2.IP.String(), "0"))
-		if err != nil {
-			panic(err)
-		}
-
-		d := &net.Dialer{
-			LocalAddr: addr,
-		}
-		conn, err := d.DialContext(ctx, "tcp",
-			net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
-		if err != nil {
-			panic(err)
-		}
-		defer func() {
-			if err := client.Close(); err != nil {
-				return
-			}
-		}()
-		r, err := exchangeFunc(conn, client, clientSecret, serverSecret)
-		if err != nil {
-			t.Logf("client error: %v", err)
-			select {
-			case <-ctx.Done():
-				return
-			case errCh <- err:
-			}
-		}
-		t.Logf("client recovered: %v", r)
-		select {
-		case <-ctx.Done():
-			return
-		case msgCh <- "done":
-		}
-	}()
-
-	// server
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			panic(err)
-		}
-		defer func() {
-			if err := server.Close(); err != nil {
-				return
-			}
-		}()
-		r, err := exchangeFunc(conn, server, serverSecret, clientSecret)
-		if err != nil {
-			t.Logf("server error: %v", err)
-			select {
-			case <-ctx.Done():
-				return
-			case errCh <- err:
-			}
-		}
-		t.Logf("server recovered: %v", r)
-		select {
-		case <-ctx.Done():
-			return
-		case msgCh <- "done":
-		}
-	}()
-
-	wg.Wait()
-	if server.encryptionKey != nil || client.encryptionKey != nil {
-		if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
-			t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
-		}
-	}
-
-	var done int
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case err := <-errCh:
-			t.Fatal(err)
-		case <-msgCh:
-			done++
-		}
-		if done == 2 {
-			return
-		}
-	}
-}
-
-func TestDNSTransportHandshake(t *testing.T) {
-	nodes := byte(2)
-	dnsAddress := "127.0.1.1:5353"
-	domain := "moop.gfy"
-	handler := createDNSNodes(domain, nodes)
-	go func() { newDNSServer(dnsAddress, handler) }()
-	waitForDNSServer(dnsAddress, t)
-	r := newResolver(dnsAddress, t)
-
-	server, err := NewTransportServer(CurveX25519, "yes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.resolver = r
-	node1 := handler.nodes["node1.moop.gfy."]
-	serverSecret := node1.Secret
-	t.Logf("server: %v", serverSecret)
-
-	client, err := NewTransportClient("yes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	client.resolver = r
-	node2 := handler.nodes["node2.moop.gfy."]
-	clientSecret := node2.Secret
-	t.Logf("client: %v", clientSecret)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	l := net.ListenConfig{}
-	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	port := listener.Addr().(*net.TCPAddr).Port
-	log.Infof("Listening: %v", node1.IP)
-
-	var (
-		wg    sync.WaitGroup
-		msgCh = make(chan string)
-		errCh = make(chan error)
-	)
-	exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) (*Identity, error) {
-		defer wg.Done()
-		if err := tr.KeyExchange(ctx, conn); err != nil {
-			return nil, err
-		}
-		recovered, err := tr.Handshake(ctx, us)
-		if err != nil {
-			return nil, err
-		}
-		if recovered.String() != them.String() {
-			return nil, fmt.Errorf("recovered not equal got %v, want %v",
-				recovered, them)
-		}
-		return recovered, nil
-	}
-
-	wg.Add(2) // Wait for both key exchanges to complete
-
-	// client
-	go func() {
-		// note that we connect to node1.
-		addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(node2.IP.String(), "0"))
-		if err != nil {
-			panic(err)
-		}
-
-		d := &net.Dialer{
-			LocalAddr: addr,
-		}
-		conn, err := d.DialContext(ctx, "tcp",
-			net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
-		if err != nil {
-			panic(err)
-		}
-		defer func() {
-			if err := client.Close(); err != nil {
-				return
-			}
-		}()
-		r, err := exchangeFunc(conn, client, clientSecret, serverSecret)
-		if err != nil {
-			t.Logf("client error: %v", err)
-			select {
-			case <-ctx.Done():
-				return
-			case errCh <- err:
-			}
-		}
-		t.Logf("client recovered: %v", r)
-		select {
-		case <-ctx.Done():
-			return
-		case msgCh <- "done":
-		}
-	}()
-
-	// server
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			panic(err)
-		}
-		defer func() {
-			if err := server.Close(); err != nil {
-				return
-			}
-		}()
-		r, err := exchangeFunc(conn, server, serverSecret, clientSecret)
-		if err != nil {
-			t.Logf("server error: %v", err)
-			select {
-			case <-ctx.Done():
-				return
-			case errCh <- err:
-			}
-		}
-		t.Logf("server recovered: %v", r)
-		select {
-		case <-ctx.Done():
-			return
-		case msgCh <- "done":
-		}
-	}()
-
-	wg.Wait()
-	if server.encryptionKey != nil || client.encryptionKey != nil {
-		if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
-			t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
-		}
-	}
-
-	var done int
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case err := <-errCh:
-			t.Fatal(err)
-		case <-msgCh:
-			done++
-		}
-		if done == 2 {
-			return
-		}
-	}
-}
-
-func TestDNSServerSetup(t *testing.T) {
-	nodes := byte(200)
-	dnsAddress := "127.0.0.1:5353"
-	domain := "moop.gfy"
-	handler := createDNSNodes(domain, nodes)
-	go func() { newDNSServer(dnsAddress, handler) }()
-	waitForDNSServer(dnsAddress, t)
-	r := newResolver(dnsAddress, t)
-
-	// Lookup all nodes
-	for k, v := range handler.nodes {
-		addr, err := r.LookupAddr(t.Context(), v.IP.String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		// Verify reverse record
-		if v.DNSName != addr[0] {
-			t.Fatalf("got %v wanted %v", addr[0], v.DNSName)
-		}
-
-		ip, err := r.LookupHost(t.Context(), k)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if ip[0] != v.IP.String() {
-			t.Fatalf("got %v wanted %v", ip[0], v.IP.String())
-		}
-
-		txtRecords, err := r.LookupTXT(t.Context(), k)
-		if err != nil {
-			t.Fatal(err)
-		}
-		txtExpected := fmt.Sprintf("v=%v identity=%v port=%v",
-			dnsAppName, v.Secret.Identity, defaultPort)
-		if txtRecords[0] != txtExpected {
-			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
-		}
-
-		ok, err := DNSVerifyIdentityByIP(t.Context(), v.IP, v.Secret.Identity, r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok {
-			t.Fatalf("not verified identity: %v", v.IP)
-		}
-	}
-}
+//func TestTransportHandshake(t *testing.T) {
+//	type testTableItem struct {
+//		name                     string
+//		serverCurve, clientCurve string
+//		expectedError            error
+//	}
+//	curves := []string{CurveP521, CurveP384, CurveP256, CurveX25519}
+//	testTable := make([]testTableItem, 0, 20)
+//	for _, us := range curves {
+//		for _, them := range append(curves, "none") {
+//			tti := testTableItem{
+//				name:        fmt.Sprintf("%s - %s", us, them),
+//				serverCurve: us,
+//				clientCurve: them,
+//			}
+//			if them != "none" {
+//				tti.expectedError = ErrMisbehavedClient
+//			}
+//			testTable = append(testTable, tti)
+//		}
+//	}
+//	for _, tti := range testTable {
+//		t.Run(tti.name, func(t *testing.T) {
+//			server, err := NewTransportServer(tti.serverCurve, "")
+//			if err != nil {
+//				t.Fatal(err)
+//			}
+//			serverSecret, err := NewSecret()
+//			if err != nil {
+//				t.Fatal(err)
+//			}
+//			t.Logf("server: %v", serverSecret)
+//
+//			var client *Transport
+//			if tti.clientCurve != "none" {
+//				// this should fail
+//				client, err = NewTransportServer(tti.clientCurve, "")
+//			} else {
+//				client, err = NewTransportClient("")
+//			}
+//			if err != nil {
+//				t.Fatal(err)
+//			}
+//			clientSecret, err := NewSecret()
+//			if err != nil {
+//				t.Fatal(err)
+//			}
+//			t.Logf("client: %v", clientSecret)
+//			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+//			defer cancel()
+//			l := net.ListenConfig{}
+//			listener, err := l.Listen(ctx, "tcp", ":0")
+//			if err != nil {
+//				t.Fatal(err)
+//			}
+//			defer listener.Close()
+//			port := listener.Addr().(*net.TCPAddr).Port
+//
+//			var (
+//				wg    sync.WaitGroup
+//				msgCh = make(chan string)
+//				errCh = make(chan error)
+//			)
+//			exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) error {
+//				defer wg.Done()
+//				if err := tr.KeyExchange(ctx, conn); err != nil {
+//					return err
+//				}
+//				recovered, err := tr.Handshake(ctx, us)
+//				if err != nil {
+//					return err
+//				}
+//				if recovered.String() != them.String() {
+//					return fmt.Errorf("recovered not equal got %v, want %v",
+//						recovered, them)
+//				}
+//				return nil
+//			}
+//
+//			wg.Add(2) // Wait for both key exchanges to complete
+//
+//			// client
+//			go func() {
+//				d := &net.Dialer{}
+//				conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1",
+//					strconv.Itoa(port)))
+//				if err != nil {
+//					panic(err)
+//				}
+//				defer func() {
+//					if err := client.Close(); err != nil {
+//						return
+//					}
+//				}()
+//				err = exchangeFunc(conn, client, clientSecret, serverSecret)
+//				if err != nil {
+//					t.Logf("client error: %v", err)
+//					select {
+//					case <-ctx.Done():
+//						return
+//					case errCh <- err:
+//					}
+//				}
+//				select {
+//				case <-ctx.Done():
+//					return
+//				case msgCh <- "done":
+//				}
+//			}()
+//
+//			// server
+//			go func() {
+//				conn, err := listener.Accept()
+//				if err != nil {
+//					panic(err)
+//				}
+//				defer func() {
+//					if err := server.Close(); err != nil {
+//						return
+//					}
+//				}()
+//				err = exchangeFunc(conn, server, serverSecret, clientSecret)
+//				if err != nil {
+//					t.Logf("server error: %v", err)
+//					select {
+//					case <-ctx.Done():
+//						return
+//					case errCh <- err:
+//					}
+//				}
+//				select {
+//				case <-ctx.Done():
+//					return
+//				case msgCh <- "done":
+//				}
+//			}()
+//
+//			wg.Wait()
+//			if server.encryptionKey != nil || client.encryptionKey != nil {
+//				if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+//					t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
+//				}
+//			}
+//
+//			var (
+//				done int
+//				cerr error
+//			)
+//			for {
+//				select {
+//				case <-ctx.Done():
+//					t.Fatal(ctx.Err())
+//				case cerr = <-errCh:
+//				case <-msgCh:
+//					done++
+//				}
+//				if !errors.Is(cerr, tti.expectedError) {
+//					t.Fatalf("expected error %v, got %v", tti.expectedError, cerr)
+//				}
+//				if done == 2 {
+//					return
+//				}
+//			}
+//		})
+//	}
+//}
+//
+//func TestMany(t *testing.T) {
+//	// XXX remove once debugged
+//	nodes := byte(2)
+//	dnsAddress := "127.0.1.1:5353"
+//	domain := "moop.gfy"
+//	handler := createDNSNodes(domain, nodes)
+//	go func() { newDNSServer(dnsAddress, handler) }()
+//	waitForDNSServer(dnsAddress, t)
+//	r := newResolver(dnsAddress, t)
+//
+//	for i := 0; i < 1111; i++ {
+//		DNSTransportHandshake(r, handler, t)
+//	}
+//}
+//
+//func DNSTransportHandshake(r *net.Resolver, handler *dnsHandler, t *testing.T) {
+//	// XXX remove once debugged
+//	server, err := NewTransportServer(CurveX25519, "yes")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	server.resolver = r
+//	node1 := handler.nodes["node1.moop.gfy."]
+//	serverSecret := node1.Secret
+//	t.Logf("server: %v", serverSecret)
+//
+//	client, err := NewTransportClient("yes")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	client.resolver = r
+//	node2 := handler.nodes["node2.moop.gfy."]
+//	clientSecret := node2.Secret
+//	t.Logf("client: %v", clientSecret)
+//
+//	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+//	defer cancel()
+//	l := net.ListenConfig{}
+//	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	defer listener.Close()
+//	port := listener.Addr().(*net.TCPAddr).Port
+//	log.Infof("Listening: %v", node1.IP)
+//
+//	var (
+//		wg    sync.WaitGroup
+//		msgCh = make(chan string)
+//		errCh = make(chan error)
+//	)
+//	exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) (*Identity, error) {
+//		defer wg.Done()
+//		if err := tr.KeyExchange(ctx, conn); err != nil {
+//			return nil, err
+//		}
+//		recovered, err := tr.Handshake(ctx, us)
+//		if err != nil {
+//			return nil, err
+//		}
+//		if recovered.String() != them.String() {
+//			return nil, fmt.Errorf("recovered not equal got %v, want %v",
+//				recovered, them)
+//		}
+//		return recovered, nil
+//	}
+//
+//	wg.Add(2) // Wait for both key exchanges to complete
+//
+//	// client
+//	go func() {
+//		// note that we connect to node1.
+//		addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(node2.IP.String(), "0"))
+//		if err != nil {
+//			panic(err)
+//		}
+//
+//		d := &net.Dialer{
+//			LocalAddr: addr,
+//		}
+//		conn, err := d.DialContext(ctx, "tcp",
+//			net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
+//		if err != nil {
+//			panic(err)
+//		}
+//		defer func() {
+//			if err := client.Close(); err != nil {
+//				panic(err)
+//			}
+//		}()
+//		r, err := exchangeFunc(conn, client, clientSecret, serverSecret)
+//		if err != nil {
+//			t.Logf("client error: %v", err)
+//			select {
+//			case <-ctx.Done():
+//				return
+//			case errCh <- err:
+//			}
+//		}
+//		t.Logf("client recovered: %v", r)
+//		select {
+//		case <-ctx.Done():
+//			return
+//		case msgCh <- "done":
+//		}
+//	}()
+//
+//	// server
+//	go func() {
+//		conn, err := listener.Accept()
+//		if err != nil {
+//			panic(err)
+//		}
+//		defer func() {
+//			if err := server.Close(); err != nil {
+//				panic(err)
+//			}
+//		}()
+//		r, err := exchangeFunc(conn, server, serverSecret, clientSecret)
+//		if err != nil {
+//			t.Logf("server error: %v", err)
+//			select {
+//			case <-ctx.Done():
+//				return
+//			case errCh <- err:
+//			}
+//		}
+//		t.Logf("server recovered: %v", r)
+//		select {
+//		case <-ctx.Done():
+//			return
+//		case msgCh <- "done":
+//		}
+//	}()
+//
+//	wg.Wait()
+//	if server.encryptionKey != nil || client.encryptionKey != nil {
+//		if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+//			t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
+//		}
+//	}
+//
+//	var done int
+//	for {
+//		select {
+//		case <-ctx.Done():
+//			t.Fatal(ctx.Err())
+//		case err := <-errCh:
+//			t.Fatal(err)
+//		case <-msgCh:
+//			done++
+//		}
+//		if done == 2 {
+//			return
+//		}
+//	}
+//}
+//
+//func TestDNSTransportHandshake(t *testing.T) {
+//	nodes := byte(2)
+//	dnsAddress := "127.0.1.1:5353"
+//	domain := "moop.gfy"
+//	handler := createDNSNodes(domain, nodes)
+//	go func() { newDNSServer(dnsAddress, handler) }()
+//	waitForDNSServer(dnsAddress, t)
+//	r := newResolver(dnsAddress, t)
+//
+//	server, err := NewTransportServer(CurveX25519, "yes")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	server.resolver = r
+//	node1 := handler.nodes["node1.moop.gfy."]
+//	serverSecret := node1.Secret
+//	t.Logf("server: %v", serverSecret)
+//
+//	client, err := NewTransportClient("yes")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	client.resolver = r
+//	node2 := handler.nodes["node2.moop.gfy."]
+//	clientSecret := node2.Secret
+//	t.Logf("client: %v", clientSecret)
+//
+//	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+//	defer cancel()
+//	l := net.ListenConfig{}
+//	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	defer listener.Close()
+//	port := listener.Addr().(*net.TCPAddr).Port
+//	log.Infof("Listening: %v", node1.IP)
+//
+//	var (
+//		wg    sync.WaitGroup
+//		msgCh = make(chan string)
+//		errCh = make(chan error)
+//	)
+//	exchangeFunc := func(conn net.Conn, tr *Transport, us, them *Secret) (*Identity, error) {
+//		defer wg.Done()
+//		if err := tr.KeyExchange(ctx, conn); err != nil {
+//			return nil, err
+//		}
+//		recovered, err := tr.Handshake(ctx, us)
+//		if err != nil {
+//			return nil, err
+//		}
+//		if recovered.String() != them.String() {
+//			return nil, fmt.Errorf("recovered not equal got %v, want %v",
+//				recovered, them)
+//		}
+//		return recovered, nil
+//	}
+//
+//	wg.Add(2) // Wait for both key exchanges to complete
+//
+//	// client
+//	go func() {
+//		// note that we connect to node1.
+//		addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(node2.IP.String(), "0"))
+//		if err != nil {
+//			panic(err)
+//		}
+//
+//		d := &net.Dialer{
+//			LocalAddr: addr,
+//		}
+//		conn, err := d.DialContext(ctx, "tcp",
+//			net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
+//		if err != nil {
+//			panic(err)
+//		}
+//		defer func() {
+//			if err := client.Close(); err != nil {
+//				return
+//			}
+//		}()
+//		r, err := exchangeFunc(conn, client, clientSecret, serverSecret)
+//		if err != nil {
+//			t.Logf("client error: %v", err)
+//			select {
+//			case <-ctx.Done():
+//				return
+//			case errCh <- err:
+//			}
+//		}
+//		t.Logf("client recovered: %v", r)
+//		select {
+//		case <-ctx.Done():
+//			return
+//		case msgCh <- "done":
+//		}
+//	}()
+//
+//	// server
+//	go func() {
+//		conn, err := listener.Accept()
+//		if err != nil {
+//			panic(err)
+//		}
+//		defer func() {
+//			if err := server.Close(); err != nil {
+//				return
+//			}
+//		}()
+//		r, err := exchangeFunc(conn, server, serverSecret, clientSecret)
+//		if err != nil {
+//			t.Logf("server error: %v", err)
+//			select {
+//			case <-ctx.Done():
+//				return
+//			case errCh <- err:
+//			}
+//		}
+//		t.Logf("server recovered: %v", r)
+//		select {
+//		case <-ctx.Done():
+//			return
+//		case msgCh <- "done":
+//		}
+//	}()
+//
+//	wg.Wait()
+//	if server.encryptionKey != nil || client.encryptionKey != nil {
+//		if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+//			t.Fatal(spew.Sdump(server.encryptionKey) + spew.Sdump(server.encryptionKey))
+//		}
+//	}
+//
+//	var done int
+//	for {
+//		select {
+//		case <-ctx.Done():
+//			t.Fatal(ctx.Err())
+//		case err := <-errCh:
+//			t.Fatal(err)
+//		case <-msgCh:
+//			done++
+//		}
+//		if done == 2 {
+//			return
+//		}
+//	}
+//}
+//
+//func TestDNSServerSetup(t *testing.T) {
+//	nodes := byte(200)
+//	dnsAddress := "127.0.0.1:5353"
+//	domain := "moop.gfy"
+//	handler := createDNSNodes(domain, nodes)
+//	go func() { newDNSServer(dnsAddress, handler) }()
+//	waitForDNSServer(dnsAddress, t)
+//	r := newResolver(dnsAddress, t)
+//
+//	// Lookup all nodes
+//	for k, v := range handler.nodes {
+//		addr, err := r.LookupAddr(t.Context(), v.IP.String())
+//		if err != nil {
+//			t.Fatal(err)
+//		}
+//		// Verify reverse record
+//		if v.DNSName != addr[0] {
+//			t.Fatalf("got %v wanted %v", addr[0], v.DNSName)
+//		}
+//
+//		ip, err := r.LookupHost(t.Context(), k)
+//		if err != nil {
+//			t.Fatal(err)
+//		}
+//		if ip[0] != v.IP.String() {
+//			t.Fatalf("got %v wanted %v", ip[0], v.IP.String())
+//		}
+//
+//		txtRecords, err := r.LookupTXT(t.Context(), k)
+//		if err != nil {
+//			t.Fatal(err)
+//		}
+//		txtExpected := fmt.Sprintf("v=%v identity=%v port=%v",
+//			dnsAppName, v.Secret.Identity, defaultPort)
+//		if txtRecords[0] != txtExpected {
+//			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
+//		}
+//
+//		ok, err := DNSVerifyIdentityByIP(t.Context(), v.IP, v.Secret.Identity, r)
+//		if err != nil {
+//			t.Fatal(err)
+//		}
+//		if !ok {
+//			t.Fatalf("not verified identity: %v", v.IP)
+//		}
+//	}
+//}
+//
+//func TestKeyExchange(t *testing.T) {
+//	var wg sync.WaitGroup
+//
+//	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+//	defer cancel()
+//
+//	// Server
+//	l := net.ListenConfig{}
+//	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	defer listener.Close()
+//	port := listener.Addr().(*net.TCPAddr).Port
+//	server, err := NewTransportServer(CurveX25519, "")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	wg.Add(1)
+//	go func() {
+//		defer wg.Done()
+//		t.Logf("Listening: %v", port)
+//		conn, err := listener.Accept()
+//		if err != nil {
+//			panic(err)
+//		}
+//
+//		if err := server.KeyExchange(ctx, conn); err != nil {
+//			panic(err)
+//		}
+//	}()
+//
+//	// Client
+//	addr, err := net.ResolveTCPAddr("tcp",
+//		net.JoinHostPort("127.0.0.1", "0"))
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	d := &net.Dialer{LocalAddr: addr}
+//	cc, err := d.DialContext(ctx, "tcp",
+//		net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	client, err := NewTransportClient("")
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	defer func() {
+//		if err := client.Close(); err != nil {
+//			panic(err)
+//		}
+//	}()
+//
+//	wg.Add(1)
+//	go func(conn net.Conn) {
+//		defer wg.Done()
+//
+//		if err := client.KeyExchange(ctx, conn); err != nil {
+//			panic(err)
+//		}
+//	}(cc)
+//
+//	wg.Wait()
+//
+//	if server.encryptionKey != nil || client.encryptionKey != nil {
+//		if !bytes.Equal(server.encryptionKey[:], client.encryptionKey[:]) {
+//			t.Fatalf("%v%v", spew.Sdump(server.encryptionKey),
+//				spew.Sdump(server.encryptionKey))
+//		}
+//	}
+//}

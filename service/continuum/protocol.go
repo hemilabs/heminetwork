@@ -24,7 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -306,242 +305,327 @@ func NewSecret() (*Secret, error) {
 
 type TransportRequest struct {
 	Version   uint32 `json:"version"`
-	Curve     string `json:"curve"`
 	PublicKey []byte `json:"publickey"`
 }
 
 var (
-	ErrCurveDoesnotMatch  = errors.New("curve does not match")
-	ErrDecrypt            = errors.New("could not decrypt")
-	ErrInvalidChallenge   = errors.New("invalid challenge")
-	ErrInvalidHandshake   = errors.New("invalid handshake")
-	ErrInvalidPublicKey   = errors.New("invalid public key")
-	ErrInvalidTXTRecord   = errors.New("invalid TXT record")
-	ErrMisbehavedClient   = errors.New("client misbehaving")
-	ErrNotCompact         = errors.New("not a compact public key")
-	ErrUnsupportedCurve   = errors.New("unsupported curve")
+	// ErrCurveDoesnotMatch  = errors.New("curve does not match")
+	ErrDecrypt          = errors.New("could not decrypt")
+	ErrInvalidChallenge = errors.New("invalid challenge")
+	// ErrInvalidHandshake   = errors.New("invalid handshake")
+	ErrInvalidPublicKey = errors.New("invalid public key")
+	ErrInvalidTXTRecord = errors.New("invalid TXT record")
+	// ErrMisbehavedClient   = errors.New("client misbehaving")
+	ErrNotCompact = errors.New("not a compact public key")
+	// ErrUnsupportedCurve   = errors.New("unsupported curve")
 	ErrUnsupportedVersion = errors.New("unsupported version")
+
+	ErrNoSuitableCurve = errors.New("no suitable curve found")
+	ErrNoConn          = errors.New("no connection")
 )
 
 type Transport struct {
 	mtx sync.Mutex
 
-	curveName string
-	curve     ecdh.Curve
-	server    bool
-	us        *ecdh.PrivateKey
-	nonce     *Nonce
-
+	mode  string
+	curve ecdh.Curve
+	us    *ecdh.PrivateKey
+	nonce *Nonce
+	//
 	them          *ecdh.PublicKey // Their public key
 	encryptionKey *[32]byte       // Shared ephemeral encryption key
-
-	// DNS lookup and verification
-	dns      string        // Validate identity using DNS
-	resolver *net.Resolver // only set to non default for test
-
+	//
+	// // DNS lookup and verification
+	// dns      string        // Validate identity using DNS
+	// resolver *net.Resolver // only set to non default for test
+	//
 	conn net.Conn
 }
 
-func newTransport(server bool, curve, dns string) (*Transport, error) {
-	t := &Transport{
-		dns:      dns,
-		resolver: net.DefaultResolver,
-		server:   server, // client or server
-	}
-
-	if server {
-		if err := t.begin(curve); err != nil {
-			return nil, err
-		}
-	}
-
-	return t, nil
+func (t Transport) String() string {
+	return t.mode
 }
 
+//	func newTransport(server bool, curve, dns string) (*Transport, error) {
+//		t := &Transport{
+//			dns:      dns,
+//			resolver: net.DefaultResolver,
+//			server:   server, // client or server
+//		}
+//
+//		if server {
+//			var c ecdh.Curve
+//			switch curve {
+//			case CurveP521:
+//				c = ecdh.P521()
+//			case CurveP384:
+//				c = ecdh.P384()
+//			case CurveP256:
+//				c = ecdh.P256()
+//			case CurveX25519:
+//				c = ecdh.X25519()
+//			default:
+//				return nil, ErrUnsupportedCurve
+//			}
+//
+//			nonce, err := NewNonce()
+//			if err != nil {
+//				return nil, err
+//			}
+//			us, err := c.GenerateKey(rand.Reader)
+//			if err != nil {
+//				return nil, err
+//			}
+//
+//			// Set all bits at once
+//			t.curve = c
+//			t.us = us
+//			t.nonce = nonce
+//		}
+//
+//		return t, nil
+//	}
 func NewTransportServer(curve, dns string) (*Transport, error) {
-	return newTransport(true, curve, dns)
+	panic("server")
 }
 
 func NewTransportClient(dns string) (*Transport, error) {
-	return newTransport(false, "", dns)
+	panic("client")
 }
 
-func (t *Transport) begin(curve string) error {
-	var (
-		err error
-		c   ecdh.Curve
-	)
-	switch curve {
-	case CurveP521:
-		c = ecdh.P521()
-	case CurveP384:
-		c = ecdh.P384()
-	case CurveX25519:
-		c = ecdh.X25519()
-	case CurveP256:
-		c = ecdh.P256()
-	default:
-		return ErrUnsupportedCurve
-	}
+//	func (t *Transport) begin(publicKey []byte) error {
+//		// XXX make this a setting that both client and server can use
+//		curves := []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
+//		for _, curve := range curves {
+//			pub, err := curve.NewPublicKey(publicKey)
+//			if err != nil {
+//				continue
+//				panic(err)
+//				return fmt.Errorf("invalid pub, make checkable: %v", err)
+//			}
+//
+//			// We were handed a valid public key
+//			nonce, err := NewNonce()
+//			if err != nil {
+//				return err
+//			}
+//			us, err := curve.GenerateKey(rand.Reader)
+//			if err != nil {
+//				return err
+//			}
+//
+//			t.mtx.Lock()
+//			t.curve = curve
+//			t.us = us
+//			t.nonce = nonce
+//			t.them = pub
+//			t.mtx.Unlock()
+//			return nil
+//		}
+//
+//		return fmt.Errorf("make me a testable error")
+//	}
 
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
-
-	t.curveName = curve
-	t.curve = c
-
-	t.us, err = t.curve.GenerateKey(rand.Reader)
-	if err != nil {
-		return err
-	}
-
-	t.nonce, err = NewNonce()
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
+// Close closes the underlying connection but leaves the ephemeral encryption
+// key and connection set. This is deliberate to prevent reuse.
 func (t *Transport) Close() error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	if t.conn == nil {
-		// didn't finish exchanging keys
-		// or was previously closed
-		return nil
+		return ErrNoConn
 	}
-	err := t.conn.Close()
-	t.conn = nil // XXX should we do this?
-	return err
+	return t.conn.Close()
 }
 
-func (t *Transport) kx() error {
+func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
 	// Shared secret seed.
-	shared, err := t.us.ECDH(t.them)
+	shared, err := us.ECDH(them)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Derive shared ephemeral encryption key.
 	var encryptionKey [32]byte
 	er := hkdf.New(sha256.New, shared, nil, nil)
 	if _, err := io.ReadFull(er, encryptionKey[:]); err != nil {
-		return err
+		return nil, err
 	}
-	t.encryptionKey = &encryptionKey // Assign encryption key
 
-	return nil
+	return &encryptionKey, nil
 }
 
 func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
+	// XXX do we need to close the connection on the way out if it fails?
 	var (
-		tr  TransportRequest
-		err error
+		them *ecdh.PublicKey
+		tr   TransportRequest
+		mode string
 	)
-	var greatSuccess bool
-	defer func() {
-		if !greatSuccess {
-			if err := t.Close(); err != nil {
-				log.Errorf("connection: %v", conn.Close())
-			}
+	timeout := 5 * time.Second // XXX config?
+	if t.them == nil {
+		mode = "client"
+
+		// Read TransportRequest
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return err
 		}
-	}()
-	if t.server {
-		tr, err = t.keyExchangeServer(ctx, conn)
-		if err != nil {
-			return fmt.Errorf("server error: %w", err)
+		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+			return err
+		}
+		// log.Infof("client read %v", spew.Sdump(tr))
+
+		// Send TransportRequest
+		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+		if err := json.NewEncoder(conn).Encode(TransportRequest{
+			Version:   TransportVersion,
+			PublicKey: t.us.PublicKey().Bytes(),
+		}); err != nil {
+			return err
 		}
 	} else {
-		tr, err = t.keyExchangeClient(ctx, conn)
-		if err != nil {
-			return fmt.Errorf("client error: %w", err)
+		mode = "server"
+
+		// Send TransportRequest
+		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
 		}
+		if err := json.NewEncoder(conn).Encode(TransportRequest{
+			Version:   TransportVersion,
+			PublicKey: t.us.PublicKey().Bytes(),
+		}); err != nil {
+			return err
+		}
+
+		// Read TransportRequest
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+			return err
+		}
+		// log.Infof("server read %v", spew.Sdump(tr))
+
 	}
 
+	// Validate other side TransportRequest
 	if tr.Version != TransportVersion {
 		return ErrUnsupportedVersion
 	}
-	if len(tr.PublicKey) == 0 {
+	if len(tr.PublicKey) <= 0 {
 		return ErrInvalidPublicKey
 	}
 
+	them, err := t.curve.NewPublicKey(tr.PublicKey)
+	encryptionKey, err := KeyExchange(t.us, them)
+	if err != nil {
+		return err
+	}
+
+	nonce, err := NewNonce()
+	if err != nil {
+		return err
+	}
+
+	// Finish KX
 	t.mtx.Lock()
-	defer t.mtx.Unlock()
-
-	t.them, err = t.curve.NewPublicKey(tr.PublicKey)
-	if err != nil {
-		return err
-	}
-
-	err = t.kx()
-	if err != nil {
-		return err
-	}
-
-	greatSuccess = true
-	t.conn = conn // Now we are ready to talk through transport.
+	t.mode = mode
+	t.encryptionKey = encryptionKey
+	t.them = them
+	t.nonce = nonce
+	t.conn = conn
+	t.mtx.Unlock()
 
 	return nil
+	//		var (
+	//			tr  *TransportRequest
+	//			err error
+	//		)
+	//		var greatSuccess bool
+	//		defer func() {
+	//			if !greatSuccess {
+	//				if err := t.Close(); err != nil {
+	//					log.Errorf("connection: %v", conn.Close())
+	//					panic(err)
+	//				}
+	//			}
+	//		}()
+	//		if t.server {
+	//			tr, err = t.keyExchangeServer(ctx, conn)
+	//			if err != nil {
+	//				return fmt.Errorf("server error: %w", err)
+	//			}
+	//		} else {
+	//			tr, err = t.keyExchangeClient(ctx, conn)
+	//			if err != nil {
+	//				return fmt.Errorf("client error: %w", err)
+	//			}
+	//		}
+	//
+	//		if tr.Version != TransportVersion {
+	//			return ErrUnsupportedVersion
+	//		}
+	//		if len(tr.PublicKey) == 0 {
+	//			return ErrInvalidPublicKey
+	//		}
+	//
+	//		t.mtx.Lock()
+	//		defer t.mtx.Unlock()
+	//
+	//		them, err := t.curve.NewPublicKey(tr.PublicKey)
+	//		if err != nil {
+	//			return err
+	//		}
+	//
+	//		encryptionKey, err := kx(t.us, them)
+	//		if err != nil {
+	//			return err
+	//		}
+	//
+	//		greatSuccess = true
+	//		t.conn = conn // Now we are ready to talk through transport.
+	//		t.encryptionKey = encryptionKey
+	//		t.them = them
+	//
+	//		log.Infof("%v: hanshake done with %x", t, t.them)
+	//
+	//		return nil
 }
 
-func (t *Transport) keyExchangeClient(_ context.Context, conn net.Conn) (TransportRequest, error) {
-	var (
-		tr  TransportRequest
-		err error
-	)
-
-	if err = json.NewDecoder(conn).Decode(&tr); err != nil {
-		return tr, err
-	}
-
-	if err := t.begin(tr.Curve); err != nil {
-		return tr, err
-	}
-
-	// sanity check that begin worked
-	if tr.Curve != t.curveName {
-		return tr, ErrCurveDoesnotMatch
-	}
-
-	// don't send curve as client
-	err = json.NewEncoder(conn).Encode(TransportRequest{
-		Version:   TransportVersion,
-		PublicKey: t.us.PublicKey().Bytes(),
-	})
-	if err != nil {
-		return tr, err
-	}
-
-	return tr, nil
-}
-
-func (t *Transport) keyExchangeServer(_ context.Context, conn net.Conn) (TransportRequest, error) {
-	var (
-		tr  TransportRequest
-		err error
-	)
-
-	err = json.NewEncoder(conn).Encode(TransportRequest{
-		Version:   TransportVersion,
-		Curve:     t.curveName,
-		PublicKey: t.us.PublicKey().Bytes(),
-	})
-	if err != nil {
-		return tr, err
-	}
-
-	if err = json.NewDecoder(conn).Decode(&tr); err != nil {
-		return tr, err
-	}
-
-	// if client sent a curve, then exit
-	if tr.Curve != "" {
-		return tr, ErrMisbehavedClient
-	}
-
-	return tr, nil
-}
+//	func (t *Transport) keyExchangeClient(_ context.Context, conn net.Conn) (*TransportRequest, error) {
+//		var tr TransportRequest
+//		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+//			return nil, err
+//		}
+//		if err := t.begin(tr.PublicKey); err != nil {
+//			return nil, err
+//		}
+//		if err := json.NewEncoder(conn).Encode(TransportRequest{
+//			Version:   TransportVersion,
+//			PublicKey: t.us.PublicKey().Bytes(),
+//		}); err != nil {
+//			return nil, err
+//		}
+//
+//		return &tr, nil
+//	}
+//
+//	func (t *Transport) keyExchangeServer(_ context.Context, conn net.Conn) (*TransportRequest, error) {
+//		if err := json.NewEncoder(conn).Encode(TransportRequest{
+//			Version:   TransportVersion,
+//			PublicKey: t.us.PublicKey().Bytes(),
+//		}); err != nil {
+//			return nil, err
+//		}
+//
+//		var tr TransportRequest
+//		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+//			return nil, err
+//		}
+//
+//		return &tr, nil
+//	}
 
 func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
 	ts := TransportNonceSize + len(cmd) + secretbox.Overhead
@@ -552,6 +636,9 @@ func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
 	// Encode size to prefix nonce
 	var size [4]byte
 	binary.BigEndian.PutUint32(size[:], uint32(ts))
+	if t.nonce == nil {
+		panic("wtf")
+	}
 	nonce := t.nonce.Next()
 	blob := secretbox.Seal(append(size[1:4], nonce[:]...), cmd, nonce,
 		t.encryptionKey)
@@ -576,55 +663,11 @@ func (t *Transport) decrypt(blob []byte) ([]byte, error) {
 }
 
 func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, error) {
-	// XXX add timeout based on context
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
 	if err != nil {
 		return nil, err
 	}
-
-	// XXX this needs to be a function of sorts
-	var remoteDNSID *Identity
-	if t.dns != "" {
-		// XXX should we not panic on conn == nil?
-		t.mtx.Lock()
-		addr := t.conn.RemoteAddr()
-		t.mtx.Unlock()
-
-		// XXX this needs to be a function of sorts
-		h, _, err := net.SplitHostPort(addr.String())
-		if err != nil {
-			return nil, fmt.Errorf("dns split: %w", err)
-		}
-		rl, err := t.resolver.LookupAddr(ctx, h)
-		if err != nil {
-			return nil, fmt.Errorf("dns lookup: %w", err)
-		}
-		if len(rl) < 1 {
-			return nil, fmt.Errorf("dns lookup: no records for %v", addr)
-		}
-		txts, err := t.resolver.LookupTXT(ctx, rl[0])
-		if err != nil {
-			return nil, err
-		}
-		if len(txts) != 1 {
-			return nil, fmt.Errorf("dns no txt records: %v", len(txts))
-		}
-		m, err := kvFomTxt(txts[0])
-		if err != nil {
-			return nil, fmt.Errorf("dns txt record: %w", err)
-		}
-
-		if m["v"] != dnsAppName {
-			return nil, fmt.Errorf("dns invalid app name: '%v'", m["v"])
-		}
-		remoteDNSID, err = NewIdentityFromString(m["identity"])
-		if err != nil {
-			return nil, fmt.Errorf("dns invalid identity: %w", err)
-		}
-		// XXX are we going to use port?
-	}
-
 	// Write HelloRequest
 	err = t.Write(secret.Identity, HelloRequest{
 		Version:   ProtocolVersion,
@@ -638,68 +681,16 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 
-	// Read response.
-	// This can be either HelloRequest or HelloResponse depnding on
-	// mystical timing solar flares. Handle them regardless of order but
-	// require both to always complete.
-	var (
-		helloRequest  *HelloRequest
-		helloResponse *HelloResponse
-	)
-	for i := 0; i < 2; i++ {
-		// log.Infof("%v: %p %p", secret.Identity, helloRequest, helloResponse)
-		cmd, err := t.read(4 * time.Second) // XXX figure out a good read timeout
-		if err != nil {
-			return nil, err
-		}
-
-		// XXX move this into read
-		nr := bytes.NewReader(cmd)
-		jd := json.NewDecoder(nr)
-		var header Header
-		err = jd.Decode(&header)
-		if err != nil {
-			return nil, err
-		}
-		// XXX i was too clever to make the payload hash in the write
-		// but we can't really get to it here. It is a valid unique
-		// hash but it would be cute if we could verify the payload
-		// actual hash
-		switch header.PayloadType {
-		case PHelloRequest:
-			var req HelloRequest
-			if err := jd.Decode(&req); err != nil {
-				return nil, err
-			}
-
-			// Sign challenge and reply
-			err = t.Write(secret.Identity, HelloResponse{
-				Signature: secret.Sign(req.Challenge),
-			})
-			if err != nil {
-				return nil, err
-			}
-
-			// Mark valid
-			helloRequest = &req
-
-		case PHelloResponse:
-			var resp HelloResponse
-			if err := jd.Decode(&resp); err != nil {
-				return nil, err
-			}
-			helloResponse = &resp
-
-		default:
-			return nil, fmt.Errorf("invalid command: %v", header.PayloadType)
-		}
+	// Read Hello
+	header, cmd, err := t.readEncrypted(4 * time.Second) // XXX figure out a good read timeout
+	if err != nil {
+		return nil, err
 	}
-
-	// See if we completed the handshake
-	if helloRequest == nil || helloResponse == nil {
-		return nil, ErrInvalidHandshake
+	_ = header
+	helloRequest, ok := cmd.(*HelloRequest)
+	if !ok {
+		return nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
 	}
-
 	// Validate HelloRequest
 	if helloRequest.Version != ProtocolVersion {
 		return nil, ErrUnsupportedVersion
@@ -711,42 +702,228 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, ErrInvalidChallenge
 	}
 
-	// XXX do something with options
+	// Sign challenge and reply
+	if err := t.Write(secret.Identity, HelloResponse{
+		Signature: secret.Sign(helloRequest.Challenge),
+	}); err != nil {
+		return nil, err
+	}
+
+	// Read HelloResponse
+	header2, cmd2, err := t.readEncrypted(4 * time.Second) // XXX figure out a good read timeout
+	if err != nil {
+		return nil, err
+	}
+	_ = header2
+	helloResponse, ok := cmd2.(*HelloResponse)
+	if !ok {
+		return nil, fmt.Errorf("unexpected command: %T", cmd2)
+	}
 
 	// Verify response
 	themPub, err := Verify(ourChallenge[:], helloResponse.Signature)
 	if err != nil {
 		return nil, err
 	}
+
+	// XXX do something with options
+
 	themID := NewIdentityFromPub(themPub)
 
-	// XXX move this into a function
-	if t.dns != "" {
-		if remoteDNSID == nil {
-			return nil, errors.New("remote dns id not set")
-		}
-		if themID.String() != remoteDNSID.String() {
-			return nil, fmt.Errorf("dns identity does not match: got %v, want %v",
-				themID, remoteDNSID)
-		}
-	}
-
 	return &themID, nil
-}
 
-func noTimeout() error { return nil }
+	//		// XXX this needs to be a function of sorts
+	//		log.Infof("===================================== NEW HANDSHAKE")
+	//		var remoteDNSID *Identity
+	//		if t.dns != "" {
+	//			// XXX should we not panic on conn == nil?
+	//			t.mtx.Lock()
+	//			addr := t.conn.RemoteAddr()
+	//			t.mtx.Unlock()
+	//
+	//			// XXX this needs to be a function of sorts
+	//			h, _, err := net.SplitHostPort(addr.String())
+	//			if err != nil {
+	//				return nil, fmt.Errorf("dns split: %w", err)
+	//			}
+	//			rl, err := t.resolver.LookupAddr(ctx, h)
+	//			if err != nil {
+	//				return nil, fmt.Errorf("dns lookup: %w", err)
+	//			}
+	//			if len(rl) < 1 {
+	//				return nil, fmt.Errorf("dns lookup: no records for %v", addr)
+	//			}
+	//			txts, err := t.resolver.LookupTXT(ctx, rl[0])
+	//			if err != nil {
+	//				return nil, err
+	//			}
+	//			if len(txts) != 1 {
+	//				return nil, fmt.Errorf("dns no txt records: %v", len(txts))
+	//			}
+	//			m, err := kvFomTxt(txts[0])
+	//			if err != nil {
+	//				return nil, fmt.Errorf("dns txt record: %w", err)
+	//			}
+	//
+	//			if m["v"] != dnsAppName {
+	//				return nil, fmt.Errorf("dns invalid app name: '%v'", m["v"])
+	//			}
+	//			remoteDNSID, err = NewIdentityFromString(m["identity"])
+	//			if err != nil {
+	//				return nil, fmt.Errorf("dns invalid identity: %w", err)
+	//			}
+	//			// XXX are we going to use port?
+	//		}
+	//
+	//		// Write HelloRequest
+	//		var ourChallenge [32]byte
+	//		_, err := rand.Read(ourChallenge[:])
+	//		if err != nil {
+	//			panic(err)
+	//			return nil, err
+	//		}
+	//
+	//		log.Infof("%v: send HelloRequest", t)
+	//		err = t.Write(secret.Identity, HelloRequest{
+	//			Version:   ProtocolVersion,
+	//			Challenge: ourChallenge[:],
+	//			Options: map[string]string{
+	//				"encoding":    "json",
+	//				"compression": "none",
+	//			},
+	//		})
+	//		if err != nil {
+	//			return nil, err
+	//		}
+	//
+	//		// Read response.
+	//		// This can be either HelloRequest or HelloResponse depnding on
+	//		// mystical timing solar flares. Handle them regardless of order but
+	//		// require both to always complete.
+	//		var (
+	//			helloRequest  *HelloRequest
+	//			helloResponse *HelloResponse
+	//		)
+	//		for i := 0; i < 2; i++ {
+	//			// log.Infof("%v: %p %p", secret.Identity, helloRequest, helloResponse)
+	//			log.Infof("%v: read %p %p", t, helloRequest, helloResponse)
+	//			cmd, err := t.readEncrypted(4 * time.Second) // XXX figure out a good read timeout
+	//			if err != nil {
+	//				log.Infof("%v: readencrypte : %v", t, err)
+	//				return nil, err
+	//			}
+	//
+	//			// XXX move this into read
+	//			nr := bytes.NewReader(cmd)
+	//			jd := json.NewDecoder(nr)
+	//			var header Header
+	//			err = jd.Decode(&header)
+	//			if err != nil {
+	//				panic(err)
+	//				return nil, err
+	//			}
+	//			log.Infof("%v: read %v", t, header.PayloadType)
+	//			// XXX i was too clever to make the payload hash in the write
+	//			// but we can't really get to it here. It is a valid unique
+	//			// hash but it would be cute if we could verify the payload
+	//			// actual hash
+	//			switch header.PayloadType {
+	//			case PHelloRequest:
+	//				var req HelloRequest
+	//				if err := jd.Decode(&req); err != nil {
+	//					panic(err)
+	//					return nil, err
+	//				}
+	//
+	//				// Sign challenge and reply
+	//				if err := t.Write(secret.Identity, HelloResponse{
+	//					Signature: secret.Sign(req.Challenge),
+	//				}); err != nil {
+	//					panic(err)
+	//					return nil, err
+	//				}
+	//
+	//				// Mark valid
+	//				helloRequest = &req
+	//
+	//			case PHelloResponse:
+	//				var resp HelloResponse
+	//				if err := jd.Decode(&resp); err != nil {
+	//					panic(err)
+	//					return nil, err
+	//				}
+	//				helloResponse = &resp
+	//
+	//			default:
+	//				panic(err)
+	//				return nil, fmt.Errorf("invalid command: %v", header.PayloadType)
+	//			}
+	//			log.Infof("%v: handled %v %p %p", t, header.PayloadType, helloRequest, helloResponse)
+	//		}
+	//
+	//		log.Infof("HANDSHAKE DONE %v", t)
+	//
+	//		// See if we completed the handshake
+	//		if helloRequest == nil || helloResponse == nil {
+	//			return nil, ErrInvalidHandshake
+	//		}
+	//
+	//		// Validate HelloRequest
+	//		if helloRequest.Version != ProtocolVersion {
+	//			return nil, ErrUnsupportedVersion
+	//		}
+	//		if len(helloRequest.Challenge) != ChallengeSize {
+	//			return nil, ErrInvalidChallenge
+	//		}
+	//		if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
+	//			return nil, ErrInvalidChallenge
+	//		}
+	//
+	//		// XXX do something with options
+	//
+	//		// Verify response
+	//		themPub, err := Verify(ourChallenge[:], helloResponse.Signature)
+	//		if err != nil {
+	//			return nil, err
+	//		}
+	//		themID := NewIdentityFromPub(themPub)
+	//
+	//		// XXX move this into a function
+	//		if t.dns != "" {
+	//			if remoteDNSID == nil {
+	//				return nil, errors.New("remote dns id not set")
+	//			}
+	//			if themID.String() != remoteDNSID.String() {
+	//				return nil, fmt.Errorf("dns identity does not match: got %v, want %v",
+	//					themID, remoteDNSID)
+	//			}
+	//		}
+	//
+	//		return &themID, nil
+	//	}
+	//
+}
 
 // readBlob locks the connection and reads a size and the associated blob into
 // a slice and returns that.
 func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
-	// Don't interleave blobs and sizes
 	t.mtx.Lock()
-	defer t.mtx.Unlock()
+	conn := t.conn
+	t.mtx.Unlock()
+
+	if timeout != 0 {
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			return nil, err
+		}
+	}
 
 	// XXX should we be using 3 as a constant here or not?
-
 	var sizeRE [4]byte
-	n, err := t.conn.Read(sizeRE[1:4]) // read 3 bytes for the nonce+ciphertext
+	n, err := conn.Read(sizeRE[1:4]) // read 3 bytes for the nonce+ciphertext
 	if err != nil {
 		return nil, err
 	}
@@ -754,28 +931,11 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		return nil, fmt.Errorf("short read size: %v != 3", n)
 	}
 	sizeR := binary.BigEndian.Uint32(sizeRE[:])
-	if sizeR > 1000 {
-		log.Infof("readBlob %v", spew.Sdump(sizeRE))
-		panic("")
-	}
 
 	blob := make([]byte, sizeR)
-
-	// Timeout
-	to := noTimeout
-	if timeout != 0 {
-		to = func() error {
-			return t.conn.SetReadDeadline(time.Now().Add(timeout))
-		}
-	}
-
 	var at int
 	for {
-		err := to()
-		if err != nil {
-			return nil, err
-		}
-		n, err = t.conn.Read(blob[at:])
+		n, err = conn.Read(blob[at:])
 		if err != nil {
 			return nil, err
 		}
@@ -787,12 +947,43 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	}
 }
 
-func (t *Transport) read(timeout time.Duration) ([]byte, error) {
+func (t *Transport) readEncrypted(timeout time.Duration) (*Header, any, error) {
 	blob, err := t.readBlob(timeout)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return t.decrypt(blob)
+	cleartext, err := t.decrypt(blob)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// log.Infof("%v: read cleartext %v", t, spew.Sdump(cleartext))
+	jd := json.NewDecoder(bytes.NewReader(cleartext))
+	var header Header
+	if err := jd.Decode(&header); err != nil {
+		return nil, nil, err
+	}
+	// log.Infof("%v: read %v", t, header.PayloadType)
+	// XXX i was too clever to make the payload hash in the write
+	// but we can't really get to it here. It is a valid unique
+	// hash but it would be cute if we could verify the payload
+	// actual hash
+	switch header.PayloadType {
+	case PHelloRequest:
+		var helloRequest HelloRequest
+		if err := jd.Decode(&helloRequest); err != nil {
+			return nil, nil, err
+		}
+		return &header, &helloRequest, nil
+	case PHelloResponse:
+		var helloResponse HelloResponse
+		if err := jd.Decode(&helloResponse); err != nil {
+			return nil, nil, err
+		}
+		return &header, &helloResponse, nil
+	}
+
+	return nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
 }
 
 func (t *Transport) Read() (any, error) {
@@ -802,27 +993,27 @@ func (t *Transport) Read() (any, error) {
 func (t *Transport) write(timeout time.Duration, blob []byte) error {
 	request, err := t.encrypt(blob)
 	if err != nil {
+		panic(err)
 		return err
 	}
 
-	// Don't interleave blobs and sizes
+	// Don't interleave writes
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
 	// Timeout
-	to := noTimeout
 	if timeout != 0 {
-		to = func() error {
-			return t.conn.SetWriteDeadline(time.Now().Add(timeout))
+		if err := t.conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+	} else {
+		if err := t.conn.SetWriteDeadline(time.Time{}); err != nil {
+			return err
 		}
 	}
 
 	var at int
 	for {
-		err := to()
-		if err != nil {
-			return err
-		}
 		n, err := t.conn.Write(request[at:])
 		if err != nil {
 			return err
@@ -836,6 +1027,7 @@ func (t *Transport) write(timeout time.Duration, blob []byte) error {
 }
 
 // Write creats a new payload and header and sends that to the peer.
+//
 // XXX think about header construction and if we need like a WriteTo which adds
 // an explicit origin that may need routing.
 func (t *Transport) Write(origin Identity, cmd any) error {
@@ -854,11 +1046,9 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		Destination: nil,
 		TTL:         1, // expires at the receiver
 	})
-	// log.Infof("origin %v write %v", origin, spew.Sdump(header))
 	if err != nil {
 		return err
 	}
-
 	return t.write(4*time.Second, append(header, payload...)) // XXX timeout
 }
 
