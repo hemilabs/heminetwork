@@ -199,6 +199,9 @@ services:
       - "--datadir=/data"
       - "--accept-terms-of-use"
       - "--verbosity=trace"
+      - "--chain-config-file=/chain-config.yaml"
+    volumes:
+      - ./chain-config.yaml:/chain-config.yaml
     networks:
       e2e:
 
