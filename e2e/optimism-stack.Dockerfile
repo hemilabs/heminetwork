@@ -2,8 +2,8 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-ARG OP_GETH_COMMIT=cc281fa
-ARG OPTIMISM_COMMIT=38edddf
+ARG OP_GETH_COMMIT=9340ebeeecba295f89b5298811507e6c93c9d8cc
+ARG OPTIMISM_COMMIT=32f736b1d752731407ae3bc16cf47f277520a511
 
 FROM golang:1.25.4-trixie@sha256:27e1c927a07ed2c7295d39941d6d881424739dbde9ae3055d0d3013699ed35e8 AS build_1
 
