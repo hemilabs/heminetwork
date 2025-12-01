@@ -487,21 +487,21 @@ func TestTransportHandshake(t *testing.T) {
 	curves := []string{CurveP521, CurveP384, CurveP256, CurveX25519}
 	testTable := make([]testTableItem, 0, 20)
 	for _, us := range curves {
-		for _, them := range append(curves, CurveClient) {
+		for _, them := range append(curves, "none") {
 			tti := testTableItem{
 				name:        fmt.Sprintf("%s - %s", us, them),
 				serverCurve: us,
 				clientCurve: them,
 			}
-			if us != them && them != CurveClient {
-				tti.expectedError = ErrCurveDoesnotMatch
+			if them != "none" {
+				tti.expectedError = ErrMisbehavedClient
 			}
 			testTable = append(testTable, tti)
 		}
 	}
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			server, err := NewTransport(tti.serverCurve, "")
+			server, err := NewTransportServer(tti.serverCurve, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -511,7 +511,13 @@ func TestTransportHandshake(t *testing.T) {
 			}
 			t.Logf("server: %v", serverSecret)
 
-			client, err := NewTransport(tti.clientCurve, "")
+			var client *Transport
+			if tti.clientCurve != "none" {
+				// this should fail
+				client, err = NewTransportServer(tti.clientCurve, "")
+			} else {
+				client, err = NewTransportClient("")
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -656,7 +662,7 @@ func TestMany(t *testing.T) {
 
 func DNSTransportHandshake(r *net.Resolver, handler *dnsHandler, t *testing.T) {
 	// XXX remove once debugged
-	server, err := NewTransport(CurveX25519, "yes")
+	server, err := NewTransportServer(CurveX25519, "yes")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +671,7 @@ func DNSTransportHandshake(r *net.Resolver, handler *dnsHandler, t *testing.T) {
 	serverSecret := node1.Secret
 	t.Logf("server: %v", serverSecret)
 
-	client, err := NewTransport(CurveX25519, "yes")
+	client, err := NewTransportClient("yes")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -806,7 +812,7 @@ func TestDNSTransportHandshake(t *testing.T) {
 	waitForDNSServer(dnsAddress, t)
 	r := newResolver(dnsAddress, t)
 
-	server, err := NewTransport(CurveX25519, "yes")
+	server, err := NewTransportServer(CurveX25519, "yes")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -815,7 +821,7 @@ func TestDNSTransportHandshake(t *testing.T) {
 	serverSecret := node1.Secret
 	t.Logf("server: %v", serverSecret)
 
-	client, err := NewTransport(CurveX25519, "yes")
+	client, err := NewTransportClient("yes")
 	if err != nil {
 		t.Fatal(err)
 	}

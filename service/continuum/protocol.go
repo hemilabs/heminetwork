@@ -160,7 +160,6 @@ const (
 	CurveP384   = "P384"
 	CurveP521   = "P521"
 	CurveX25519 = "x25519"
-	CurveClient = "none"
 
 	dnsAppName = "transfunctioner"
 )
@@ -318,8 +317,9 @@ var (
 	ErrInvalidHandshake   = errors.New("invalid handshake")
 	ErrInvalidPublicKey   = errors.New("invalid public key")
 	ErrInvalidTXTRecord   = errors.New("invalid TXT record")
+	ErrMisbehavedClient   = errors.New("client misbehaving")
 	ErrNotCompact         = errors.New("not a compact public key")
-	ErrUnsupportedCurve   = errors.New("unsupported cruve")
+	ErrUnsupportedCurve   = errors.New("unsupported curve")
 	ErrUnsupportedVersion = errors.New("unsupported version")
 )
 
@@ -328,6 +328,7 @@ type Transport struct {
 
 	curveName string
 	curve     ecdh.Curve
+	server    bool
 	us        *ecdh.PrivateKey
 	nonce     *Nonce
 
@@ -341,38 +342,53 @@ type Transport struct {
 	conn net.Conn
 }
 
-func NewTransport(curve, dns string) (*Transport, error) {
+func newTransport(server bool, curve, dns string) (*Transport, error) {
 	t := &Transport{
 		dns:      dns,
 		resolver: net.DefaultResolver,
+		server:   server, // client or server
 	}
-	if err := t.begin(curve); err != nil {
-		return nil, err
+
+	if server {
+		if err := t.begin(curve); err != nil {
+			return nil, err
+		}
 	}
+
 	return t, nil
 }
 
+func NewTransportServer(curve, dns string) (*Transport, error) {
+	return newTransport(true, curve, dns)
+}
+
+func NewTransportClient(dns string) (*Transport, error) {
+	return newTransport(false, "", dns)
+}
+
 func (t *Transport) begin(curve string) error {
+	var (
+		err error
+		c   ecdh.Curve
+	)
+	switch curve {
+	case CurveP521:
+		c = ecdh.P521()
+	case CurveP384:
+		c = ecdh.P384()
+	case CurveX25519:
+		c = ecdh.X25519()
+	case CurveP256:
+		c = ecdh.P256()
+	default:
+		return ErrUnsupportedCurve
+	}
+
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
 	t.curveName = curve
-
-	var err error
-	switch curve {
-	case CurveClient:
-		return nil
-	case CurveP521:
-		t.curve = ecdh.P521()
-	case CurveP384:
-		t.curve = ecdh.P384()
-	case CurveX25519:
-		t.curve = ecdh.X25519()
-	case CurveP256:
-		t.curve = ecdh.P256()
-	default:
-		return ErrUnsupportedCurve
-	}
+	t.curve = c
 
 	t.us, err = t.curve.GenerateKey(rand.Reader)
 	if err != nil {
@@ -431,41 +447,27 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 			}
 		}
 	}()
-	sendRequest := func() error {
-		return json.NewEncoder(conn).Encode(TransportRequest{
-			Version:   TransportVersion,
-			Curve:     t.curveName,
-			PublicKey: t.us.PublicKey().Bytes(),
-		})
-	}
-	if t.curveName != CurveClient {
-		if err = sendRequest(); err != nil {
-			return err
-		}
-		if err = json.NewDecoder(conn).Decode(&tr); err != nil {
-			return err
+	if t.server {
+		tr, err = t.keyExchangeServer(ctx, conn)
+		if err != nil {
+			return fmt.Errorf("server error: %w", err)
 		}
 	} else {
-		if err = json.NewDecoder(conn).Decode(&tr); err != nil {
-			return err
-		}
-		if err := t.begin(tr.Curve); err != nil {
-			return err
-		}
-		if err := sendRequest(); err != nil {
-			return err
+		tr, err = t.keyExchangeClient(ctx, conn)
+		if err != nil {
+			return fmt.Errorf("client error: %w", err)
 		}
 	}
 
 	if tr.Version != TransportVersion {
 		return ErrUnsupportedVersion
 	}
-	if tr.Curve != t.curveName {
-		return ErrCurveDoesnotMatch
-	}
 	if len(tr.PublicKey) == 0 {
 		return ErrInvalidPublicKey
 	}
+
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
 
 	t.them, err = t.curve.NewPublicKey(tr.PublicKey)
 	if err != nil {
@@ -481,6 +483,64 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	t.conn = conn // Now we are ready to talk through transport.
 
 	return nil
+}
+
+func (t *Transport) keyExchangeClient(_ context.Context, conn net.Conn) (TransportRequest, error) {
+	var (
+		tr  TransportRequest
+		err error
+	)
+
+	if err = json.NewDecoder(conn).Decode(&tr); err != nil {
+		return tr, err
+	}
+
+	if err := t.begin(tr.Curve); err != nil {
+		return tr, err
+	}
+
+	// sanity check that begin worked
+	if tr.Curve != t.curveName {
+		return tr, ErrCurveDoesnotMatch
+	}
+
+	// don't send curve as client
+	err = json.NewEncoder(conn).Encode(TransportRequest{
+		Version:   TransportVersion,
+		PublicKey: t.us.PublicKey().Bytes(),
+	})
+	if err != nil {
+		return tr, err
+	}
+
+	return tr, nil
+}
+
+func (t *Transport) keyExchangeServer(_ context.Context, conn net.Conn) (TransportRequest, error) {
+	var (
+		tr  TransportRequest
+		err error
+	)
+
+	err = json.NewEncoder(conn).Encode(TransportRequest{
+		Version:   TransportVersion,
+		Curve:     t.curveName,
+		PublicKey: t.us.PublicKey().Bytes(),
+	})
+	if err != nil {
+		return tr, err
+	}
+
+	if err = json.NewDecoder(conn).Decode(&tr); err != nil {
+		return tr, err
+	}
+
+	// if client sent a curve, then exit
+	if tr.Curve != "" {
+		return tr, ErrMisbehavedClient
+	}
+
+	return tr, nil
 }
 
 func (t *Transport) encrypt(cmd []byte) ([]byte, error) {

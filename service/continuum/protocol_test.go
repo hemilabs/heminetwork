@@ -15,11 +15,11 @@ import (
 
 func TestEncryptDecrypt(t *testing.T) {
 	for i := 0; i < 33; i++ {
-		server, err := NewTransport(CurveX25519, "")
+		server, err := NewTransportServer(CurveX25519, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		client, err := NewTransport(CurveX25519, "")
+		client, err := NewTransportClient("")
 		if err != nil {
 			t.Fatal(err)
 		}
