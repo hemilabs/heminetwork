@@ -43,12 +43,13 @@ import (
 // payloads with a size (that is capped). If the message is too large the
 // receiver will drop the connection and potentially blacklist the caller.
 //
-// An envelope is constructed on the wire as: [size][payload]. Once an envelope
-// is decrypted there are two distinct pieces, a header and a message or
-// another envelope.  The header contains information akin to TCP and is used
-// to route the envelope.  Anologous to wire protocol it is encoded with size
-// prefixes followed by a payload, i.e. [[size][header] [size][envelope]]. A
-// message is for the reader and an envelope should be routed to a third party.
+// An envelope is constructed on the wire as: [size+nonce][header+payload].
+// Once an envelope is decrypted there are two distinct pieces, a header
+// and a message or another envelope. The header contains information akin
+// to TCP and is used to route the envelope. Anologous to wire protocol it
+// is encoded with a size prefix, which validates the amount of data to be
+// read, A message is for the reader and an envelope should be routed to a
+// third party.
 //
 // Size is encoded as a big endian 24 bit unsigned integer.
 
