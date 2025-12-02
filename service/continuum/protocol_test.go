@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -526,6 +527,54 @@ func TestConnHandshake(t *testing.T) {
 					derivedClient, clientSecret.Identity)
 			}
 		})
+	}
+}
+
+func TestDNSServerSetup(t *testing.T) {
+	nodes := byte(200)
+	dnsAddress := "127.0.0.1:5353"
+	domain := "moop.gfy"
+	handler := createDNSNodes(domain, nodes)
+	go func() { newDNSServer(dnsAddress, handler) }()
+	waitForDNSServer(dnsAddress, t)
+	r := newResolver(dnsAddress, t)
+
+	// Lookup all nodes
+	for k, v := range handler.nodes {
+		addr, err := r.LookupAddr(t.Context(), v.IP.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Verify reverse record
+		if v.DNSName != addr[0] {
+			t.Fatalf("got %v wanted %v", addr[0], v.DNSName)
+		}
+
+		ip, err := r.LookupHost(t.Context(), k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ip[0] != v.IP.String() {
+			t.Fatalf("got %v wanted %v", ip[0], v.IP.String())
+		}
+
+		txtRecords, err := r.LookupTXT(t.Context(), k)
+		if err != nil {
+			t.Fatal(err)
+		}
+		txtExpected := fmt.Sprintf("v=%v identity=%v port=%v",
+			dnsAppName, v.Secret.Identity, defaultPort)
+		if txtRecords[0] != txtExpected {
+			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
+		}
+		a, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(v.IP.String(), "0"))
+		ok, err := VerifyRemoteDNSIdentity(t.Context(), r, a, v.Secret.Identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Fatalf("not verified identity: %v", v.IP)
+		}
 	}
 }
 
