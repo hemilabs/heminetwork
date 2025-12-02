@@ -349,7 +349,7 @@ func (t Transport) String() string {
 	return "client"
 }
 
-// Cruve returns the curve name.
+// Curve returns the curve name.
 func (t Transport) Curve() string {
 	return fmt.Sprintf("%v", t.curve) // Can't directly call the stringer.
 }
@@ -379,6 +379,9 @@ func newTransportFromPublicKey(publicKey []byte) (*Transport, error) {
 	return t, err
 }
 
+// setTransportFromPublicKey is used during Handshake to fill out the client
+// side ephemeral key. The correct curve is picked based on the public key that
+// is passed in.
 func (t *Transport) setTransportFromPublicKey(publicKey []byte) error {
 	curves := []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
 	for _, curve := range curves {
@@ -791,6 +794,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 	return t.write(4*time.Second, append(header, payload...)) // XXX timeout
 }
 
+// NewResolver returns a custom resolver that suports context.
 func NewResolver(resolverAddress string) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
@@ -801,6 +805,8 @@ func NewResolver(resolverAddress string) *net.Resolver {
 	}
 }
 
+// kvFomTxt converts a TXT record to a key value map. The format is typical INI
+// file style. E.g. "v=transfunctioner identity=myidentity key=value".
 func kvFomTxt(txt string) (map[string]string, error) {
 	s := strings.Split(txt, " ")
 	m := make(map[string]string)
@@ -842,6 +848,9 @@ func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.
 	return kvFomTxt(txts[0])
 }
 
+// VerifyRemoteDNSIdentity verifies that passed in identity matches it's
+// associated TXT record identity. This can be used to determine if a server or
+// client are indeed who they claim they are.
 func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr, id Identity) (bool, error) {
 	m, err := TXTRecordFromAddress(ctx, r, addr)
 	if err != nil {
