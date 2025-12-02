@@ -309,19 +309,14 @@ type TransportRequest struct {
 }
 
 var (
-	// ErrCurveDoesnotMatch  = errors.New("curve does not match")
-	ErrDecrypt          = errors.New("could not decrypt")
-	ErrInvalidChallenge = errors.New("invalid challenge")
-	// ErrInvalidHandshake   = errors.New("invalid handshake")
-	ErrInvalidPublicKey = errors.New("invalid public key")
-	ErrInvalidTXTRecord = errors.New("invalid TXT record")
-	// ErrMisbehavedClient   = errors.New("client misbehaving")
-	ErrNotCompact = errors.New("not a compact public key")
-	// ErrUnsupportedCurve   = errors.New("unsupported curve")
+	ErrDecrypt            = errors.New("could not decrypt")
+	ErrInvalidChallenge   = errors.New("invalid challenge")
+	ErrInvalidPublicKey   = errors.New("invalid public key")
+	ErrInvalidTXTRecord   = errors.New("invalid TXT record")
+	ErrNoConn             = errors.New("no connection")
+	ErrNotCompact         = errors.New("not a compact public key")
+	ErrNoSuitableCurve    = errors.New("no suitable curve found")
 	ErrUnsupportedVersion = errors.New("unsupported version")
-
-	ErrNoSuitableCurve = errors.New("no suitable curve found")
-	ErrNoConn          = errors.New("no connection")
 )
 
 type Transport struct {
@@ -342,10 +337,13 @@ type Transport struct {
 	conn net.Conn
 }
 
+// String returns what mode this transport is in.
 func (t Transport) String() string {
 	return t.mode
 }
 
+// NewTransportFromCurve creates a server transport for the provided curve.
+// This is the listening side.
 func NewTransportFromCurve(curve ecdh.Curve) (*Transport, error) {
 	privateKey, err := curve.GenerateKey(rand.Reader)
 	if err != nil {
@@ -358,6 +356,8 @@ func NewTransportFromCurve(curve ecdh.Curve) (*Transport, error) {
 	}, nil
 }
 
+// NewTransportFromPublicKey creates a client transport based on the server
+// public key. This is the connecting side.
 func NewTransportFromPublicKey(publicKey []byte) (*Transport, error) {
 	curves := []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
 	for _, curve := range curves {
@@ -391,6 +391,9 @@ func (t *Transport) Close() error {
 	return t.conn.Close()
 }
 
+// KeyExchange returns a shared encryption key for the provided private and
+// public keys. The returned encryption key is derived from the shared ECDH
+// secret using HKDF and has 256 bits of entropy.
 func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
 	// Shared secret seed.
 	shared, err := us.ECDH(them)
@@ -408,6 +411,9 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
 	return &encryptionKey, nil
 }
 
+// KeyExchange performs a series of reads and writes to establish a transport
+// encryption key between the server and the client. Note that the server
+// dictates the curve.
 func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	// XXX do we need to close the connection on the way out if it fails?
 	var (
@@ -415,6 +421,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		tr   TransportRequest
 		mode string
 	)
+	// XXX the conn timeout could and maybe should be set by the caller.
 	timeout := 5 * time.Second // XXX config?
 	if t.them == nil {
 		mode = "client"
@@ -492,97 +499,13 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	t.mtx.Unlock()
 
 	return nil
-	//		var (
-	//			tr  *TransportRequest
-	//			err error
-	//		)
-	//		var greatSuccess bool
-	//		defer func() {
-	//			if !greatSuccess {
-	//				if err := t.Close(); err != nil {
-	//					log.Errorf("connection: %v", conn.Close())
-	//					panic(err)
-	//				}
-	//			}
-	//		}()
-	//		if t.server {
-	//			tr, err = t.keyExchangeServer(ctx, conn)
-	//			if err != nil {
-	//				return fmt.Errorf("server error: %w", err)
-	//			}
-	//		} else {
-	//			tr, err = t.keyExchangeClient(ctx, conn)
-	//			if err != nil {
-	//				return fmt.Errorf("client error: %w", err)
-	//			}
-	//		}
-	//
-	//		if tr.Version != TransportVersion {
-	//			return ErrUnsupportedVersion
-	//		}
-	//		if len(tr.PublicKey) == 0 {
-	//			return ErrInvalidPublicKey
-	//		}
-	//
-	//		t.mtx.Lock()
-	//		defer t.mtx.Unlock()
-	//
-	//		them, err := t.curve.NewPublicKey(tr.PublicKey)
-	//		if err != nil {
-	//			return err
-	//		}
-	//
-	//		encryptionKey, err := kx(t.us, them)
-	//		if err != nil {
-	//			return err
-	//		}
-	//
-	//		greatSuccess = true
-	//		t.conn = conn // Now we are ready to talk through transport.
-	//		t.encryptionKey = encryptionKey
-	//		t.them = them
-	//
-	//		log.Infof("%v: hanshake done with %x", t, t.them)
-	//
-	//		return nil
 }
 
-//	func (t *Transport) keyExchangeClient(_ context.Context, conn net.Conn) (*TransportRequest, error) {
-//		var tr TransportRequest
-//		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
-//			return nil, err
-//		}
-//		if err := t.begin(tr.PublicKey); err != nil {
-//			return nil, err
-//		}
-//		if err := json.NewEncoder(conn).Encode(TransportRequest{
-//			Version:   TransportVersion,
-//			PublicKey: t.us.PublicKey().Bytes(),
-//		}); err != nil {
-//			return nil, err
-//		}
-//
-//		return &tr, nil
-//	}
-//
-//	func (t *Transport) keyExchangeServer(_ context.Context, conn net.Conn) (*TransportRequest, error) {
-//		if err := json.NewEncoder(conn).Encode(TransportRequest{
-//			Version:   TransportVersion,
-//			PublicKey: t.us.PublicKey().Bytes(),
-//		}); err != nil {
-//			return nil, err
-//		}
-//
-//		var tr TransportRequest
-//		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
-//			return nil, err
-//		}
-//
-//		return &tr, nil
-//	}
-
-func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
-	ts := TransportNonceSize + len(cmd) + secretbox.Overhead
+// encrypt encrypts the passed in slice. The returned encrypted data is
+// prepended with a length and a nonce. This is to facilitate writes directly
+// on the wire.
+func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
+	ts := TransportNonceSize + len(cleartext) + secretbox.Overhead
 	if ts > TransportMaxSize {
 		return nil, fmt.Errorf("overflow")
 	}
@@ -595,7 +518,7 @@ func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
 	var size [4]byte
 	binary.BigEndian.PutUint32(size[:], uint32(ts))
 	nonce := t.nonce.Next()
-	blob := secretbox.Seal(append(size[1:4], nonce[:]...), cmd, nonce,
+	blob := secretbox.Seal(append(size[1:4], nonce[:]...), cleartext, nonce,
 		t.encryptionKey)
 
 	// diagnostic
@@ -606,10 +529,12 @@ func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
 	return blob, nil
 }
 
-func (t *Transport) decrypt(blob []byte) ([]byte, error) {
+// decrypt decrypts the passed in ciphertext. The ciphertext must be prefixed
+// with the nonce. Note that the three byte length must have been clipped off.
+func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
 	var nonce [TransportNonceSize]byte
-	copy(nonce[:], blob[:TransportNonceSize])
-	cleartext, ok := secretbox.Open(nil, blob[TransportNonceSize:], &nonce,
+	copy(nonce[:], ciphertext[:TransportNonceSize])
+	cleartext, ok := secretbox.Open(nil, ciphertext[TransportNonceSize:], &nonce,
 		t.encryptionKey)
 	if !ok {
 		return nil, ErrDecrypt
@@ -617,6 +542,9 @@ func (t *Transport) decrypt(blob []byte) ([]byte, error) {
 	return cleartext, nil
 }
 
+// Handshake advertises to the other side what version and options this
+// transport wishes to use. It is also used to verify that the derived Identity
+// identity did indeed sign the challenge.
 func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
@@ -860,7 +788,8 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 }
 
 // readBlob locks the connection and reads a size and the associated blob into
-// a slice and returns that.
+// a slice and returns that. It is locked for the duration to prevent
+// interleaved reads.
 func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	t.mtx.Lock()
 	conn := t.conn
@@ -902,12 +831,13 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	}
 }
 
+// readEncrypted reads the next encrypted blob from the connection stream.
 func (t *Transport) readEncrypted(timeout time.Duration) (*Header, any, error) {
-	blob, err := t.readBlob(timeout)
+	ciphertext, err := t.readBlob(timeout)
 	if err != nil {
 		return nil, nil, err
 	}
-	cleartext, err := t.decrypt(blob)
+	cleartext, err := t.decrypt(ciphertext)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -923,6 +853,8 @@ func (t *Transport) readEncrypted(timeout time.Duration) (*Header, any, error) {
 	// but we can't really get to it here. It is a valid unique
 	// hash but it would be cute if we could verify the payload
 	// actual hash
+	//
+	// XXX can we make this generic using the PayloadType map and reflection?
 	switch header.PayloadType {
 	case PHelloRequest:
 		var helloRequest HelloRequest
@@ -941,12 +873,16 @@ func (t *Transport) readEncrypted(timeout time.Duration) (*Header, any, error) {
 	return nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
 }
 
-func (t *Transport) Read() (any, error) {
+// Read reads and decrypts the next command from the connection stream. It
+// returns the header and command.
+func (t *Transport) Read() (any, any, error) {
 	return nil, fmt.Errorf("nope")
 }
 
-func (t *Transport) write(timeout time.Duration, blob []byte) error {
-	request, err := t.encrypt(blob)
+// write encrypts the passed in cleartext and writes it to the connection
+// stream. This function takes the lock to prevent interleaving writes.
+func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
+	request, err := t.encrypt(cleartext)
 	if err != nil {
 		panic(err)
 		return err
