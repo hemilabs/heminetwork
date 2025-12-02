@@ -568,6 +568,9 @@ func TestDNSServerSetup(t *testing.T) {
 			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
 		}
 		a, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(v.IP.String(), "0"))
+		if err != nil {
+			t.Fatal(err)
+		}
 		ok, err := VerifyRemoteDNSIdentity(t.Context(), r, a, v.Secret.Identity)
 		if err != nil {
 			t.Fatal(err)
