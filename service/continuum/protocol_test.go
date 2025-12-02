@@ -270,118 +270,145 @@ func TestConnKeyExchange(t *testing.T) {
 //}
 
 func TestConnHandshake(t *testing.T) {
-	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
-	if err != nil {
-		t.Fatal(err)
-	}
-	serverSecret, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create transport from server public key
-	clientTransport := new(Transport)
-	clientSecret, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
-	defer cancel()
-	var wg sync.WaitGroup
-
-	// Server
-	l := net.ListenConfig{}
-	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	port := listener.Addr().(*net.TCPAddr).Port
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		t.Logf("Listening: %v", port)
-		conn, err := listener.Accept()
-		if err != nil {
-			panic(err)
-		}
-
-		if err := serverTransport.KeyExchange(ctx, conn); err != nil {
-			panic(err)
-		}
-	}()
-
-	// Client
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		addr, err := net.ResolveTCPAddr("tcp",
-			net.JoinHostPort("127.0.0.1", "0"))
-		if err != nil {
-			panic(err)
-		}
-		d := &net.Dialer{LocalAddr: addr}
-		conn, err := d.DialContext(ctx, "tcp",
-			net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-		if err != nil {
-			panic(err)
-		}
-
-		if err := clientTransport.KeyExchange(ctx, conn); err != nil {
-			panic(err)
-		}
-	}()
-
-	wg.Wait()
-
-	if !bytes.Equal(serverTransport.encryptionKey[:],
-		clientTransport.encryptionKey[:]) {
-		t.Fatal("derived shared key not equal")
-	}
-
-	// Handshake
-	var derivedClient, derivedServer *Identity
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		dc, err := serverTransport.Handshake(ctx, serverSecret)
-		if err != nil {
-			panic(err)
-		}
-		derivedClient = dc // XXX if we directly assign derivedClient we have a data race, investigate
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		defer func() {
-			if err := clientTransport.Close(); err != nil {
-				panic(err)
+	curves := []string{CurveP256, CurveP384, CurveP521, CurveX25519}
+	for _, curve := range curves {
+		t.Run(curve, func(t *testing.T) {
+			cr, err := str2Curve(curve)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}()
+			serverTransport, err := NewTransportFromCurve(cr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			serverSecret, err := NewSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		ds, err := clientTransport.Handshake(ctx, clientSecret)
-		if err != nil {
-			panic(err)
-		}
-		derivedServer = ds
-	}()
+			// Create transport from server public key
+			clientTransport := new(Transport)
+			clientSecret, err := NewSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	wg.Wait()
+			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			defer cancel()
+			var wg sync.WaitGroup
 
-	if derivedServer.String() != serverSecret.Identity.String() {
-		t.Fatalf("derived server got %v, want %v",
-			derivedServer, serverSecret.Identity)
+			// Server
+			l := net.ListenConfig{}
+			listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			port := listener.Addr().(*net.TCPAddr).Port
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				t.Logf("Listening: %v", port)
+				conn, err := listener.Accept()
+				if err != nil {
+					panic(err)
+				}
+
+				if err := serverTransport.KeyExchange(ctx, conn); err != nil {
+					panic(err)
+				}
+			}()
+
+			// Client
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				addr, err := net.ResolveTCPAddr("tcp",
+					net.JoinHostPort("127.0.0.1", "0"))
+				if err != nil {
+					panic(err)
+				}
+				d := &net.Dialer{LocalAddr: addr}
+				conn, err := d.DialContext(ctx, "tcp",
+					net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+				if err != nil {
+					panic(err)
+				}
+
+				if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+					panic(err)
+				}
+			}()
+
+			wg.Wait()
+
+			if !bytes.Equal(serverTransport.encryptionKey[:],
+				clientTransport.encryptionKey[:]) {
+				t.Fatal("derived shared key not equal")
+			}
+
+			// Handshake
+			var derivedClient, derivedServer *Identity
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				var err error
+
+				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
+				if err != nil {
+					panic(err)
+				}
+
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				var err error
+
+				defer func() {
+					if err := clientTransport.Close(); err != nil {
+						panic(err)
+					}
+				}()
+
+				derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
+				if err != nil {
+					panic(err)
+				}
+			}()
+
+			wg.Wait()
+
+			if derivedServer.String() != serverSecret.Identity.String() {
+				t.Fatalf("derived server got %v, want %v",
+					derivedServer, serverSecret.Identity)
+			}
+			if derivedClient.String() != clientSecret.Identity.String() {
+				t.Fatalf("derived client got %v, want %v",
+					derivedClient, clientSecret.Identity)
+			}
+		})
 	}
-	if derivedClient.String() != clientSecret.Identity.String() {
-		t.Fatalf("derived client got %v, want %v",
-			derivedClient, clientSecret.Identity)
+}
+
+func str2Curve(name string) (ecdh.Curve, error) {
+	switch name {
+	case CurveP256:
+		return ecdh.P256(), nil
+	case CurveP384:
+		return ecdh.P384(), nil
+	case CurveP521:
+		return ecdh.P521(), nil
+	case CurveX25519:
+		return ecdh.X25519(), nil
+	default:
 	}
+	return nil, ErrNoSuitableCurve
 }
