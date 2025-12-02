@@ -327,7 +327,7 @@ type Transport struct {
 	mtx sync.Mutex
 
 	// Transport encryption bits
-	mode          string           // server or client
+	isServer      bool             // server or client
 	curve         ecdh.Curve       // transport encryption curve
 	us            *ecdh.PrivateKey // our transport ephemeral private key
 	them          *ecdh.PublicKey  // their ephemeral public key
@@ -343,7 +343,10 @@ type Transport struct {
 
 // String returns what mode this transport is in.
 func (t Transport) String() string {
-	return t.mode
+	if t.isServer {
+		return "server"
+	}
+	return "client"
 }
 
 // Cruve returns the curve name.
@@ -360,14 +363,23 @@ func NewTransportFromCurve(curve ecdh.Curve) (*Transport, error) {
 	}
 
 	return &Transport{
-		curve: curve,
-		us:    privateKey,
+		curve:    curve,
+		us:       privateKey,
+		isServer: true,
 	}, nil
 }
 
-// NewTransportFromPublicKey creates a client transport based on the server
+// newTransportFromPublicKey creates a client transport based on the server
 // public key. This is the connecting side.
-func NewTransportFromPublicKey(publicKey []byte) (*Transport, error) {
+//
+// This utility function is probably only useful in tests.
+func newTransportFromPublicKey(publicKey []byte) (*Transport, error) {
+	t := new(Transport)
+	err := t.setTransportFromPublicKey(publicKey)
+	return t, err
+}
+
+func (t *Transport) setTransportFromPublicKey(publicKey []byte) error {
 	curves := []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
 	for _, curve := range curves {
 		theirPublicKey, err := curve.NewPublicKey(publicKey)
@@ -377,16 +389,17 @@ func NewTransportFromPublicKey(publicKey []byte) (*Transport, error) {
 
 		privateKey, err := curve.GenerateKey(rand.Reader)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return &Transport{
-			curve: curve,
-			us:    privateKey,
-			them:  theirPublicKey,
-		}, nil
+		t.mtx.Lock()
+		t.curve = curve
+		t.us = privateKey
+		t.them = theirPublicKey
+		t.mtx.Unlock()
+		return nil
 	}
 
-	return nil, ErrNoSuitableCurve
+	return ErrNoSuitableCurve
 }
 
 // Close closes the underlying connection but leaves the ephemeral encryption
@@ -428,35 +441,10 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	var (
 		them *ecdh.PublicKey
 		tr   TransportRequest
-		mode string
 	)
 	// XXX the conn timeout could and maybe should be set by the caller.
 	timeout := 5 * time.Second // XXX config?
-	if t.them == nil {
-		mode = "client"
-
-		// Read TransportRequest
-		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-			return err
-		}
-		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
-			return err
-		}
-		// log.Infof("client read %v", spew.Sdump(tr))
-
-		// Send TransportRequest
-		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-			return err
-		}
-		if err := json.NewEncoder(conn).Encode(TransportRequest{
-			Version:   TransportVersion,
-			PublicKey: t.us.PublicKey().Bytes(),
-		}); err != nil {
-			return err
-		}
-	} else {
-		mode = "server"
-
+	if t.isServer {
 		// Send TransportRequest
 		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
 			return err
@@ -476,7 +464,30 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 			return err
 		}
 		// log.Infof("server read %v", spew.Sdump(tr))
+	} else {
+		// Read TransportRequest
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+			return err
+		}
+		// log.Infof("client read %v", spew.Sdump(tr))
 
+		if err := t.setTransportFromPublicKey(tr.PublicKey); err != nil {
+			return err
+		}
+
+		// Send TransportRequest
+		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
+		if err := json.NewEncoder(conn).Encode(TransportRequest{
+			Version:   TransportVersion,
+			PublicKey: t.us.PublicKey().Bytes(),
+		}); err != nil {
+			return err
+		}
 	}
 
 	// Validate other side TransportRequest
@@ -500,7 +511,6 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 
 	// Finish KX
 	t.mtx.Lock()
-	t.mode = mode
 	t.encryptionKey = encryptionKey
 	t.them = them
 	t.nonce = nonce
@@ -975,47 +985,82 @@ func kvFomTxt(txt string) (map[string]string, error) {
 	return m, nil
 }
 
-// XXX this seems broken because the identity parameter is not necessarily known
-func DNSVerifyIdentityByAddress(ctx context.Context, address string, identity Identity, resolver *net.Resolver) (bool, error) {
+func txtRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.Addr) (map[string]string, error) {
 	if resolver == nil {
 		resolver = &net.Resolver{}
 	}
 
-	if !strings.HasSuffix(address, ".") {
-		address = address + "."
-	}
-
-	txts, err := resolver.LookupTXT(ctx, address)
+	h, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
-		return false, fmt.Errorf("lookup txt: %w", err)
+		return nil, fmt.Errorf("dns split: %w", err)
+	}
+	rl, err := resolver.LookupAddr(ctx, h)
+	if err != nil {
+		return nil, fmt.Errorf("dns lookup: %w", err)
+	}
+	if len(rl) < 1 {
+		return nil, fmt.Errorf("dns lookup: no records for %v", addr)
+	}
+	txts, err := resolver.LookupTXT(ctx, rl[0])
+	if err != nil {
+		return nil, err
 	}
 	if len(txts) != 1 {
-		return false, errors.New("lookup txt: invalid response")
+		return nil, fmt.Errorf("dns no txt records: %v", len(txts))
 	}
+	return kvFomTxt(txts[0])
 
-	m, err := kvFomTxt(txts[0])
-	if err != nil {
-		return false, err
-	}
-
-	if m["v"] != dnsAppName {
-		return false, fmt.Errorf("invalid dns app name: '%v'", m["v"])
-	}
-	if m["identity"] == identity.String() {
-		return true, nil
-	}
-
-	return false, nil
+	//if m["v"] != dnsAppName {
+	//	return nil, fmt.Errorf("dns invalid app name: '%v'", m["v"])
+	//}
+	//remoteDNSID, err = NewIdentityFromString(m["identity"])
+	//if err != nil {
+	//	return nil, fmt.Errorf("dns invalid identity: %w", err)
+	//}
+	// XXX are we going to use port?
 }
 
-func DNSVerifyIdentityByIP(ctx context.Context, ip net.IP, identity Identity, resolver *net.Resolver) (bool, error) {
-	addr, err := resolver.LookupAddr(ctx, ip.String())
-	if err != nil {
-		return false, fmt.Errorf("reverse lookup: %w", err)
-	}
-	if len(addr) != 1 {
-		return false, errors.New("reverse lookup: invalid response")
-	}
-
-	return DNSVerifyIdentityByAddress(ctx, addr[0], identity, resolver)
-}
+// XXX this seems broken because the identity parameter is not necessarily known
+//func DNSVerifyIdentityByAddress(ctx context.Context, address string, identity Identity, resolver *net.Resolver) (bool, error) {
+//	if resolver == nil {
+//		resolver = &net.Resolver{}
+//	}
+//
+//	if !strings.HasSuffix(address, ".") {
+//		address = address + "."
+//	}
+//
+//	txts, err := resolver.LookupTXT(ctx, address)
+//	if err != nil {
+//		return false, fmt.Errorf("lookup txt: %w", err)
+//	}
+//	if len(txts) != 1 {
+//		return false, errors.New("lookup txt: invalid response")
+//	}
+//
+//	m, err := kvFomTxt(txts[0])
+//	if err != nil {
+//		return false, err
+//	}
+//
+//	if m["v"] != dnsAppName {
+//		return false, fmt.Errorf("invalid dns app name: '%v'", m["v"])
+//	}
+//	if m["identity"] == identity.String() {
+//		return true, nil
+//	}
+//
+//	return false, nil
+//}
+//
+//func DNSVerifyIdentityByIP(ctx context.Context, ip net.IP, identity Identity, resolver *net.Resolver) (bool, error) {
+//	addr, err := resolver.LookupAddr(ctx, ip.String())
+//	if err != nil {
+//		return false, fmt.Errorf("reverse lookup: %w", err)
+//	}
+//	if len(addr) != 1 {
+//		return false, errors.New("reverse lookup: invalid response")
+//	}
+//
+//	return DNSVerifyIdentityByAddress(ctx, addr[0], identity, resolver)
+//}

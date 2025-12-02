@@ -26,7 +26,7 @@ func TestEncryptDecrypt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		client, err := NewTransportFromPublicKey(server.us.PublicKey().Bytes())
+		client, err := newTransportFromPublicKey(server.us.PublicKey().Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestKeyExchange(t *testing.T) {
 	serverPublicKey := serverTransport.us.PublicKey().Bytes()
 
 	// Create transport from server public key
-	clientTransport, err := NewTransportFromPublicKey(serverPublicKey)
+	clientTransport, err := newTransportFromPublicKey(serverPublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,14 +179,8 @@ func TestConnKeyExchange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Send public key to client
-	serverPublicKey := serverTransport.us.PublicKey().Bytes()
-
-	// Create transport from server public key
-	clientTransport, err := NewTransportFromPublicKey(serverPublicKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Create blank transport
+	clientTransport := new(Transport)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
 	defer cancel()
@@ -253,6 +247,28 @@ func TestConnKeyExchange(t *testing.T) {
 	}
 }
 
+//func TestTestConnHandshakeDNS(t *testing.T) {
+//	nodes := byte(2)
+//	dnsAddress := "127.0.1.1:5353" // XXX make this :0 somehow
+//	domain := "moop.gfy"
+//	handler := createDNSNodes(domain, nodes)
+//	go func() { newDNSServer(dnsAddress, handler) }()
+//	waitForDNSServer(dnsAddress, t)
+//	r := newResolver(dnsAddress, t)
+//
+//	node1 := handler.nodes["node1.moop.gfy."]
+//	serverSecret := node1.Secret
+//	node2 := handler.nodes["node2.moop.gfy."]
+//	clientSecret := node1.Secret
+//
+//	// Mostly the same as TestConnHandshake, this should be rolled up into
+//	// one bigger test.
+//	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//}
+
 func TestConnHandshake(t *testing.T) {
 	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
 	if err != nil {
@@ -263,14 +279,8 @@ func TestConnHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Send public key to client
-	serverPublicKey := serverTransport.us.PublicKey().Bytes()
-
 	// Create transport from server public key
-	clientTransport, err := NewTransportFromPublicKey(serverPublicKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	clientTransport := new(Transport)
 	clientSecret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -334,18 +344,19 @@ func TestConnHandshake(t *testing.T) {
 	}
 
 	// Handshake
-	var derivedClient *Identity
+	var derivedClient, derivedServer *Identity
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
-		derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
+		dc, err := serverTransport.Handshake(ctx, serverSecret)
 		if err != nil {
 			panic(err)
 		}
+		derivedClient = dc // XXX if we directly assign derivedClient we have a data race, investigate
 	}()
 
-	var derivedServer *Identity
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -356,10 +367,11 @@ func TestConnHandshake(t *testing.T) {
 			}
 		}()
 
-		derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
+		ds, err := clientTransport.Handshake(ctx, clientSecret)
 		if err != nil {
 			panic(err)
 		}
+		derivedServer = ds
 	}()
 
 	wg.Wait()
