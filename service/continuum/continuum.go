@@ -183,12 +183,12 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 
 	log.Infof("read")
 	for {
-		cmd, err := transport.Read()
+		header, payload, err := transport.Read()
 		if err != nil {
 			panic(err) // XXX
 		}
-
-		switch cmd.(type) {
+		_ = header
+		switch payload.(type) {
 		}
 	}
 }

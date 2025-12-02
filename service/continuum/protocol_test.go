@@ -173,6 +173,7 @@ func TestKeyExchange(t *testing.T) {
 }
 
 func TestConnKeyExchange(t *testing.T) {
+	// XXX do all curves
 	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
 	if err != nil {
 		t.Fatal(err)
@@ -240,6 +241,8 @@ func TestConnKeyExchange(t *testing.T) {
 		if err := clientTransport.KeyExchange(ctx, conn); err != nil {
 			panic(err)
 		}
+
+		t.Logf("client connected using: %v", clientTransport.Curve())
 	}()
 
 	wg.Wait()

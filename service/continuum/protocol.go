@@ -319,27 +319,36 @@ var (
 	ErrUnsupportedVersion = errors.New("unsupported version")
 )
 
+// Transport is an opaque type that provides encrypted transport for
+// arbitrarily sized cleartext.
+//
+// XXX toni please add an example here on how to use it.
 type Transport struct {
 	mtx sync.Mutex
 
-	mode  string
-	curve ecdh.Curve
-	us    *ecdh.PrivateKey
-	nonce *Nonce
-	//
-	them          *ecdh.PublicKey // Their public key
-	encryptionKey *[32]byte       // Shared ephemeral encryption key
-	//
-	// // DNS lookup and verification
-	// dns      string        // Validate identity using DNS
-	// resolver *net.Resolver // only set to non default for test
-	//
+	// Transport encryption bits
+	mode          string           // server or client
+	curve         ecdh.Curve       // transport encryption curve
+	us            *ecdh.PrivateKey // our transport ephemeral private key
+	them          *ecdh.PublicKey  // their ephemeral public key
+	encryptionKey *[32]byte        // shared symmetric ephemeral encryption key
+	nonce         *Nonce           // transport nonce
+
+	// DNS lookup for identity verification
+	dns      string        // Validate identity using DNS
+	resolver *net.Resolver // only set to non default for test
+
 	conn net.Conn
 }
 
 // String returns what mode this transport is in.
 func (t Transport) String() string {
 	return t.mode
+}
+
+// Cruve returns the curve name.
+func (t Transport) Curve() string {
+	return fmt.Sprintf("%v", t.curve) // Can't directly call the stringer.
 }
 
 // NewTransportFromCurve creates a server transport for the provided curve.
@@ -876,7 +885,7 @@ func (t *Transport) readEncrypted(timeout time.Duration) (*Header, any, error) {
 // Read reads and decrypts the next command from the connection stream. It
 // returns the header and command.
 func (t *Transport) Read() (any, any, error) {
-	return nil, fmt.Errorf("nope")
+	return nil, nil, fmt.Errorf("nope")
 }
 
 // write encrypts the passed in cleartext and writes it to the connection
