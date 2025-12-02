@@ -16,56 +16,58 @@ import (
 	"time"
 )
 
-//func TestEncryptDecrypt(t *testing.T) {
-//	for i := 0; i < 33; i++ {
-//		server, err := NewTransportServer(CurveX25519, "")
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		client, err := NewTransportClient("")
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//
-//		// Set keys to simulate incomming key exchange message
-//		//server.them, err = server.curve.NewPublicKey(client.us.PublicKey().Bytes())
-//		//if err != nil {
-//		//	t.Fatal(err)
-//		//}
-//		//client.them, err = client.curve.NewPublicKey(server.us.PublicKey().Bytes())
-//		//if err != nil {
-//		//	t.Fatal(err)
-//		//}
-//
-//		// Perform actual key exchange
-//		encryptionKeyServer, err := kx(server.us, client.us.PublicKey())
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		encryptionKeyClient, err := kx(client.us, server.us.PublicKey())
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//
-//		if !bytes.Equal(encryptionKeyServer[:], encryptionKeyClient[:]) {
-//			t.Fatal("shared key not equal")
-//		}
-//
-//		message := []byte("this is a super secret message y'all!")
-//		em, err := server.encrypt(message)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		cleartext, err := client.decrypt(em[3:]) // clip size that is done by read normally
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		if !bytes.Equal(message, cleartext) {
-//			t.Fatal("message not equal")
-//		}
-//	}
-//}
-//
+func TestEncryptDecrypt(t *testing.T) {
+	for i := 0; i < 33; i++ {
+		server, err := NewTransportFromCurve(ecdh.X25519())
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.nonce, err = NewNonce()
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, err := NewTransportFromPublicKey(server.us.PublicKey().Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.nonce, err = NewNonce()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Perform actual key exchange
+		encryptionKeyServer, err := KeyExchange(server.us, client.us.PublicKey())
+		if err != nil {
+			t.Fatal(err)
+		}
+		encryptionKeyClient, err := KeyExchange(client.us, server.us.PublicKey())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(encryptionKeyServer[:], encryptionKeyClient[:]) {
+			t.Fatal("shared key not equal")
+		}
+
+		// Set keys to simulate incomming key exchange message
+		server.encryptionKey = encryptionKeyServer
+		client.encryptionKey = encryptionKeyClient
+
+		// Encrypt a message
+		message := []byte("this is a super secret message y'all!")
+		em, err := server.encrypt(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleartext, err := client.decrypt(em[3:]) // clip size that is done by read normally
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(message, cleartext) {
+			t.Fatal("message not equal")
+		}
+	}
+}
+
 //func TestNewCommand(t *testing.T) {
 //	helloChallenge := make([]byte, 32)
 //	helloRequest := &HelloRequest{
@@ -128,40 +130,6 @@ func TestECDHKeyExchange(t *testing.T) {
 		t.Fatalf("failure got %v, wanted %v", failure,
 			(len(curves)-1)*len(curves))
 	}
-}
-
-func NewTransportFromCurve(curve ecdh.Curve) (*Transport, error) {
-	privateKey, err := curve.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Transport{
-		curve: curve,
-		us:    privateKey,
-	}, nil
-}
-
-func NewTransportFromPublicKey(publicKey []byte) (*Transport, error) {
-	curves := []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
-	for _, curve := range curves {
-		theirPublicKey, err := curve.NewPublicKey(publicKey)
-		if err != nil {
-			continue
-		}
-
-		privateKey, err := curve.GenerateKey(rand.Reader)
-		if err != nil {
-			return nil, err
-		}
-		return &Transport{
-			curve: curve,
-			us:    privateKey,
-			them:  theirPublicKey,
-		}, nil
-	}
-
-	return nil, ErrNoSuitableCurve
 }
 
 func TestKeyExchange(t *testing.T) {

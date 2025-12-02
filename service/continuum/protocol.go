@@ -346,85 +346,39 @@ func (t Transport) String() string {
 	return t.mode
 }
 
-//	func newTransport(server bool, curve, dns string) (*Transport, error) {
-//		t := &Transport{
-//			dns:      dns,
-//			resolver: net.DefaultResolver,
-//			server:   server, // client or server
-//		}
-//
-//		if server {
-//			var c ecdh.Curve
-//			switch curve {
-//			case CurveP521:
-//				c = ecdh.P521()
-//			case CurveP384:
-//				c = ecdh.P384()
-//			case CurveP256:
-//				c = ecdh.P256()
-//			case CurveX25519:
-//				c = ecdh.X25519()
-//			default:
-//				return nil, ErrUnsupportedCurve
-//			}
-//
-//			nonce, err := NewNonce()
-//			if err != nil {
-//				return nil, err
-//			}
-//			us, err := c.GenerateKey(rand.Reader)
-//			if err != nil {
-//				return nil, err
-//			}
-//
-//			// Set all bits at once
-//			t.curve = c
-//			t.us = us
-//			t.nonce = nonce
-//		}
-//
-//		return t, nil
-//	}
-//func NewTransportServer(curve, dns string) (*Transport, error) {
-//	panic("server")
-//}
+func NewTransportFromCurve(curve ecdh.Curve) (*Transport, error) {
+	privateKey, err := curve.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
 
-//func NewTransportClient(dns string) (*Transport, error) {
-//	panic("client")
-//}
+	return &Transport{
+		curve: curve,
+		us:    privateKey,
+	}, nil
+}
 
-//	func (t *Transport) begin(publicKey []byte) error {
-//		// XXX make this a setting that both client and server can use
-//		curves := []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
-//		for _, curve := range curves {
-//			pub, err := curve.NewPublicKey(publicKey)
-//			if err != nil {
-//				continue
-//				panic(err)
-//				return fmt.Errorf("invalid pub, make checkable: %v", err)
-//			}
-//
-//			// We were handed a valid public key
-//			nonce, err := NewNonce()
-//			if err != nil {
-//				return err
-//			}
-//			us, err := curve.GenerateKey(rand.Reader)
-//			if err != nil {
-//				return err
-//			}
-//
-//			t.mtx.Lock()
-//			t.curve = curve
-//			t.us = us
-//			t.nonce = nonce
-//			t.them = pub
-//			t.mtx.Unlock()
-//			return nil
-//		}
-//
-//		return fmt.Errorf("make me a testable error")
-//	}
+func NewTransportFromPublicKey(publicKey []byte) (*Transport, error) {
+	curves := []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
+	for _, curve := range curves {
+		theirPublicKey, err := curve.NewPublicKey(publicKey)
+		if err != nil {
+			continue
+		}
+
+		privateKey, err := curve.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		return &Transport{
+			curve: curve,
+			us:    privateKey,
+			them:  theirPublicKey,
+		}, nil
+	}
+
+	return nil, ErrNoSuitableCurve
+}
 
 // Close closes the underlying connection but leaves the ephemeral encryption
 // key and connection set. This is deliberate to prevent reuse.
@@ -633,12 +587,13 @@ func (t *Transport) encrypt(cmd []byte) ([]byte, error) {
 		return nil, fmt.Errorf("overflow")
 	}
 
+	if t.encryptionKey == nil {
+		panic("wtf")
+	}
+
 	// Encode size to prefix nonce
 	var size [4]byte
 	binary.BigEndian.PutUint32(size[:], uint32(ts))
-	if t.nonce == nil {
-		panic("wtf")
-	}
 	nonce := t.nonce.Next()
 	blob := secretbox.Seal(append(size[1:4], nonce[:]...), cmd, nonce,
 		t.encryptionKey)
