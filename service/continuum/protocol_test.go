@@ -342,16 +342,16 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		dc, err := serverTransport.Handshake(ctx, serverSecret)
+		var err error // prevent data race
+		derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
 		if err != nil {
 			panic(err)
 		}
-		derivedClient = dc // XXX if we directly assign derivedClient we have a data race, investigate
-
-		// log.Infof("derived client: %v", dc)
+		// log.Infof("derived client: %v", derivedClient)
 
 		// Perform DNS test
-		ok, err := VerifyRemoteDNSIdentity(ctx, r, clientAddress, *dc)
+		ok, err := VerifyRemoteDNSIdentity(ctx, r, clientAddress,
+			*derivedClient)
 		if err != nil {
 			panic(err)
 		}
@@ -370,16 +370,17 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 			}
 		}()
 
-		ds, err := clientTransport.Handshake(ctx, clientSecret)
+		var err error // prevent data race
+		derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
 		if err != nil {
 			panic(err)
 		}
-		derivedServer = ds
 
-		// log.Infof("derived server: %v", ds)
+		// log.Infof("derived server: %v", derivedServer)
 
 		// Perform DNS test
-		ok, err := VerifyRemoteDNSIdentity(ctx, r, listener.Addr(), *ds)
+		ok, err := VerifyRemoteDNSIdentity(ctx, r, listener.Addr(),
+			*derivedServer)
 		if err != nil {
 			panic(err)
 		}
@@ -494,7 +495,6 @@ func TestConnHandshake(t *testing.T) {
 				if err != nil {
 					panic(err)
 				}
-
 			}()
 
 			wg.Add(1)
