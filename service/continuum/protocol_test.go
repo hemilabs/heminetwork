@@ -9,6 +9,8 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -251,6 +253,166 @@ func TestConnKeyExchange(t *testing.T) {
 				clientTransport.encryptionKey[:]) {
 				t.Fatal("derived shared key not equal")
 			}
+		})
+	}
+}
+
+func TestHandshakeErrors(t *testing.T) {
+	type testTableItem struct {
+		name          string
+		curve         ecdh.Curve
+		isServer      bool
+		keyExchange   func(context.Context, net.Conn) error
+		expectedError error
+	}
+	ErrNoType := errors.New("any error")
+	tests := []testTableItem{
+		{
+			name:          "unsupported version - server",
+			curve:         ecdh.P256(),
+			isServer:      true,
+			expectedError: ErrUnsupportedVersion,
+			keyExchange: func(ctx context.Context, c net.Conn) error {
+				pk, err := ecdh.P256().GenerateKey(rand.Reader)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(c).Encode(TransportRequest{
+					Version:   0,
+					PublicKey: pk.PublicKey().Bytes(),
+				})
+			},
+		},
+		{
+			name:          "unsupported version - client",
+			isServer:      false,
+			expectedError: ErrUnsupportedVersion,
+			keyExchange: func(ctx context.Context, c net.Conn) error {
+				pk, err := ecdh.P256().GenerateKey(rand.Reader)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(c).Encode(TransportRequest{
+					Version:   0,
+					PublicKey: pk.PublicKey().Bytes(),
+				})
+			},
+		},
+		{
+			name:          "empty pub key",
+			curve:         ecdh.P256(),
+			isServer:      true,
+			expectedError: ErrInvalidPublicKey,
+			keyExchange: func(ctx context.Context, c net.Conn) error {
+				return json.NewEncoder(c).Encode(TransportRequest{
+					Version: TransportVersion,
+				})
+			},
+		},
+		{
+			name:          "invalid pub key",
+			curve:         ecdh.P256(),
+			isServer:      true,
+			expectedError: ErrNoType,
+			keyExchange: func(ctx context.Context, c net.Conn) error {
+				pk, err := ecdh.P521().GenerateKey(rand.Reader)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(c).Encode(TransportRequest{
+					Version:   TransportVersion,
+					PublicKey: pk.PublicKey().Bytes(),
+				})
+			},
+		},
+		{
+			name:          "invalid curve",
+			isServer:      false,
+			expectedError: ErrNoType,
+			keyExchange: func(ctx context.Context, c net.Conn) error {
+				return json.NewEncoder(c).Encode(TransportRequest{
+					Version:   TransportVersion,
+					PublicKey: []byte("invalid"),
+				})
+			},
+		},
+	}
+	for _, tti := range tests {
+		t.Run(tti.name, func(t *testing.T) {
+			var (
+				transport              *Transport
+				serverConn, clientConn net.Conn
+				wg                     sync.WaitGroup
+				err                    error
+			)
+			if tti.isServer {
+				transport, err = NewTransportFromCurve(tti.curve)
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				transport = new(Transport)
+			}
+
+			secret, err := NewSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_ = secret
+
+			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			defer cancel()
+
+			// Server
+			l := net.ListenConfig{}
+			listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			port := listener.Addr().(*net.TCPAddr).Port
+
+			// Server conn
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var cerr error
+				serverConn, cerr = listener.Accept()
+				if cerr != nil {
+					panic(err)
+				}
+			}()
+
+			// Client conn
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var cerr error
+				d := &net.Dialer{}
+				clientConn, cerr = d.DialContext(ctx, "tcp",
+					net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+				if cerr != nil {
+					panic(err)
+				}
+			}()
+
+			wg.Wait()
+
+			go func() {
+				if err := tti.keyExchange(ctx, clientConn); err != nil {
+					panic(err)
+				}
+			}()
+
+			err = transport.KeyExchange(ctx, serverConn)
+			if err != nil {
+				if errors.Is(err, tti.expectedError) ||
+					errors.Is(tti.expectedError, ErrNoType) {
+					return
+				}
+			}
+			t.Fatalf("expected error %v, got %v", tti.expectedError, err)
 		})
 	}
 }
