@@ -117,6 +117,8 @@ func NewPayloadHash(x []byte) *PayloadHash {
 	return &p
 }
 
+// NewPayloadFromCommand returns the json encoding of a given command,
+// along with its hash.
 func NewPayloadFromCommand(cmd any) (*PayloadHash, []byte, error) {
 	jc, err := json.Marshal(cmd)
 	if err != nil {
@@ -125,6 +127,9 @@ func NewPayloadFromCommand(cmd any) (*PayloadHash, []byte, error) {
 	return NewPayloadHash(jc), jc, nil
 }
 
+// Header is a part of every message sent by transport, and contains
+// information about identity of the sender and intended receiver, as
+// well as the payload.
 type Header struct {
 	PayloadType PayloadType `json:"payloadtype"`           // Hint to decode payload
 	PayloadHash PayloadHash `json:"payloadhash"`           // Message identifier
@@ -165,6 +170,9 @@ const (
 
 var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is invalid
 
+// Nonce is used by transport for message encryption / decryption.
+// It is first generated during key exchange, and is atomically
+// incremented by every message sent, producing a new value.
 type Nonce struct {
 	counter atomic.Uint64
 	key     [TransportNonceSize]byte
@@ -322,7 +330,24 @@ var (
 // Transport is an opaque type that provides encrypted transport for
 // arbitrarily sized cleartext.
 //
-// XXX toni please add an example here on how to use it.
+// Server Example:
+//
+//	server, _ := NewTransportFromCurve(ecdh.P256())
+//	serverSecret, _ := NewSecret()
+//	l := net.ListenConfig{}
+//	listener, _ := l.Listen(ctx, "tcp", <ADDRESS:PORT>)
+//	conn, _ := listener.Accept()
+//	server.KeyExchange(ctx, conn)
+//	derivedClient, _ := server.Handshake(ctx, serverSecret)
+//
+// Client Example:
+//
+//	client := new(Transport)
+//	clientSecret, _ := NewSecret()
+//	d := &net.Dialer{}
+//	conn, _ := d.DialContext(ctx, "tcp", <ADDRESS:PORT>)
+//	client.KeyExchange(ctx, conn)
+//	derivedServer, _ := client.Handshake(ctx, clientSecret)
 type Transport struct {
 	mtx sync.Mutex
 
@@ -565,7 +590,7 @@ func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
 
 // Handshake advertises to the other side what version and options this
 // transport wishes to use. It is also used to verify that the derived Identity
-// identity did indeed sign the challenge.
+// did indeed sign the challenge.
 func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
