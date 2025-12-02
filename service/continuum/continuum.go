@@ -6,6 +6,7 @@ package continuum
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -153,7 +154,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		}
 	}()
 
-	transport, err := NewTransportServer(defaultTransportCurve, "") // XXX config option
+	transport, err := NewTransportFromCurve(ecdh.X25519()) // XXX config option
 	if err != nil {
 		log.Errorf("create new transport: %v", err)
 		return

@@ -385,13 +385,13 @@ func (t Transport) String() string {
 //
 //		return t, nil
 //	}
-func NewTransportServer(curve, dns string) (*Transport, error) {
-	panic("server")
-}
+//func NewTransportServer(curve, dns string) (*Transport, error) {
+//	panic("server")
+//}
 
-func NewTransportClient(dns string) (*Transport, error) {
-	panic("client")
-}
+//func NewTransportClient(dns string) (*Transport, error) {
+//	panic("client")
+//}
 
 //	func (t *Transport) begin(publicKey []byte) error {
 //		// XXX make this a setting that both client and server can use

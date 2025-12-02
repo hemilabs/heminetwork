@@ -288,6 +288,9 @@ func TestConnHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 	serverSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Send public key to client
 	serverPublicKey := serverTransport.us.PublicKey().Bytes()
@@ -298,6 +301,9 @@ func TestConnHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 	clientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
 	defer cancel()
@@ -357,17 +363,18 @@ func TestConnHandshake(t *testing.T) {
 	}
 
 	// Handshake
+	var derivedClient *Identity
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
-		// XXX store id and verify after handshake
-		log.Infof("server handshake complete")
-		if _, err := serverTransport.Handshake(ctx, serverSecret); err != nil {
+		derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
+		if err != nil {
 			panic(err)
 		}
 	}()
 
+	var derivedServer *Identity
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -378,12 +385,20 @@ func TestConnHandshake(t *testing.T) {
 			}
 		}()
 
-		// XXX store id and verify after handshake
-		if _, err := clientTransport.Handshake(ctx, clientSecret); err != nil {
+		derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
+		if err != nil {
 			panic(err)
 		}
 	}()
 
 	wg.Wait()
-	t.Logf("handshake complete")
+
+	if derivedServer.String() != serverSecret.Identity.String() {
+		t.Fatalf("derived server got %v, want %v",
+			derivedServer, serverSecret.Identity)
+	}
+	if derivedClient.String() != clientSecret.Identity.String() {
+		t.Fatalf("derived client got %v, want %v",
+			derivedClient, clientSecret.Identity)
+	}
 }
