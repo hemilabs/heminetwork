@@ -730,23 +730,15 @@ func (t *Transport) readEncrypted(timeout time.Duration) (*Header, any, error) {
 	// hash but it would be cute if we could verify the payload
 	// actual hash
 	//
-	// XXX can we make this generic using the PayloadType map and reflection?
-	switch header.PayloadType {
-	case PHelloRequest:
-		var helloRequest HelloRequest
-		if err := jd.Decode(&helloRequest); err != nil {
-			return nil, nil, err
-		}
-		return &header, &helloRequest, nil
-	case PHelloResponse:
-		var helloResponse HelloResponse
-		if err := jd.Decode(&helloResponse); err != nil {
-			return nil, nil, err
-		}
-		return &header, &helloResponse, nil
+	ct, ok := str2pt[header.PayloadType]
+	if !ok {
+		return nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
 	}
-
-	return nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
+	cmd := reflect.New(ct)
+	if err := jd.Decode(cmd.Interface()); err != nil {
+		return nil, nil, err
+	}
+	return &header, cmd.Interface(), nil
 }
 
 // Read reads and decrypts the next command from the connection stream. It

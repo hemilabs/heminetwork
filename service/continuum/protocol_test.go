@@ -254,24 +254,23 @@ func TestConnKeyExchange(t *testing.T) {
 }
 
 func TestTestConnHandshakeDNS(t *testing.T) {
+	nodes := byte(2)
+	dnsAddress := "127.0.1.1:5353" // XXX make this :0 somehow
+	domain := "moop.gfy"
+	handler := createDNSNodes(domain, nodes)
+	go func() { newDNSServer(dnsAddress, handler) }()
+	waitForDNSServer(dnsAddress, t)
+	r := newResolver(dnsAddress, t)
+
+	node1 := handler.nodes["node1.moop.gfy."]
+	serverSecret := node1.Secret
+	node2 := handler.nodes["node2.moop.gfy."]
+	clientSecret := node2.Secret
+
 	curves := []ecdh.Curve{ecdh.P256(), ecdh.P384(), ecdh.P521(), ecdh.X25519()}
 	for _, curve := range curves {
 		testName := fmt.Sprintf("%v", curve)
 		t.Run(testName, func(t *testing.T) {
-
-			nodes := byte(2)
-			dnsAddress := "127.0.1.1:5353" // XXX make this :0 somehow
-			domain := "moop.gfy"
-			handler := createDNSNodes(domain, nodes)
-			go func() { newDNSServer(dnsAddress, handler) }()
-			waitForDNSServer(dnsAddress, t)
-			r := newResolver(dnsAddress, t)
-
-			node1 := handler.nodes["node1.moop.gfy."]
-			serverSecret := node1.Secret
-			node2 := handler.nodes["node2.moop.gfy."]
-			clientSecret := node2.Secret
-
 			// log.Infof("server identity: %v", serverSecret)
 			// log.Infof("client identity: %v", clientSecret)
 
