@@ -334,15 +334,11 @@ type Transport struct {
 	encryptionKey *[32]byte        // shared symmetric ephemeral encryption key
 	nonce         *Nonce           // transport nonce
 
-	// DNS lookup for identity verification
-	dns      string        // Validate identity using DNS
-	resolver *net.Resolver // only set to non default for test
-
 	conn net.Conn
 }
 
 // String returns what mode this transport is in.
-func (t Transport) String() string {
+func (t *Transport) String() string {
 	if t.isServer {
 		return "server"
 	}
@@ -350,7 +346,7 @@ func (t Transport) String() string {
 }
 
 // Curve returns the curve name.
-func (t Transport) Curve() string {
+func (t *Transport) Curve() string {
 	return fmt.Sprintf("%v", t.curve) // Can't directly call the stringer.
 }
 
@@ -502,6 +498,9 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	}
 
 	them, err := t.curve.NewPublicKey(tr.PublicKey)
+	if err != nil {
+		return err
+	}
 	encryptionKey, err := KeyExchange(t.us, them)
 	if err != nil {
 		return err
@@ -736,7 +735,6 @@ func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 	request, err := t.encrypt(cleartext)
 	if err != nil {
 		panic(err)
-		return err
 	}
 
 	// Don't interleave writes

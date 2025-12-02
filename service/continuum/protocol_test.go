@@ -391,11 +391,11 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 
 	wg.Wait()
 
-	if derivedServer.String() != serverSecret.Identity.String() {
+	if derivedServer.String() != serverSecret.String() {
 		t.Fatalf("derived server got %v, want %v",
 			derivedServer, serverSecret.Identity)
 	}
-	if derivedClient.String() != clientSecret.Identity.String() {
+	if derivedClient.String() != clientSecret.String() {
 		t.Fatalf("derived client got %v, want %v",
 			derivedClient, clientSecret.Identity)
 	}
@@ -517,11 +517,11 @@ func TestConnHandshake(t *testing.T) {
 
 			wg.Wait()
 
-			if derivedServer.String() != serverSecret.Identity.String() {
+			if derivedServer.String() != serverSecret.String() {
 				t.Fatalf("derived server got %v, want %v",
 					derivedServer, serverSecret.Identity)
 			}
-			if derivedClient.String() != clientSecret.Identity.String() {
+			if derivedClient.String() != clientSecret.String() {
 				t.Fatalf("derived client got %v, want %v",
 					derivedClient, clientSecret.Identity)
 			}
