@@ -174,243 +174,249 @@ func TestKeyExchange(t *testing.T) {
 }
 
 func TestConnKeyExchange(t *testing.T) {
-	// XXX do all curves
-	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create blank transport
-	clientTransport := new(Transport)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
-	defer cancel()
-	var wg sync.WaitGroup
-
-	// Server
-	l := net.ListenConfig{}
-	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	port := listener.Addr().(*net.TCPAddr).Port
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		t.Logf("Listening: %v", port)
-		conn, err := listener.Accept()
-		if err != nil {
-			panic(err)
-		}
-
-		if err := serverTransport.KeyExchange(ctx, conn); err != nil {
-			panic(err)
-		}
-	}()
-
-	// Client
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		addr, err := net.ResolveTCPAddr("tcp",
-			net.JoinHostPort("127.0.0.1", "0"))
-		if err != nil {
-			panic(err)
-		}
-		d := &net.Dialer{LocalAddr: addr}
-		conn, err := d.DialContext(ctx, "tcp",
-			net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-		if err != nil {
-			panic(err)
-		}
-		defer func() {
-			if err := clientTransport.Close(); err != nil {
-				panic(err)
+	curves := []ecdh.Curve{ecdh.P256(), ecdh.P384(), ecdh.P521(), ecdh.X25519()}
+	for _, curve := range curves {
+		testName := fmt.Sprintf("%v", curve)
+		t.Run(testName, func(t *testing.T) {
+			serverTransport, err := NewTransportFromCurve(curve)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}()
 
-		if err := clientTransport.KeyExchange(ctx, conn); err != nil {
-			panic(err)
-		}
+			// Create blank transport
+			clientTransport := new(Transport)
 
-		t.Logf("client connected using: %v", clientTransport.Curve())
-	}()
+			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			defer cancel()
+			var wg sync.WaitGroup
 
-	wg.Wait()
+			// Server
+			l := net.ListenConfig{}
+			listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			port := listener.Addr().(*net.TCPAddr).Port
 
-	if !bytes.Equal(serverTransport.encryptionKey[:],
-		clientTransport.encryptionKey[:]) {
-		t.Fatal("derived shared key not equal")
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				t.Logf("Listening: %v", port)
+				conn, err := listener.Accept()
+				if err != nil {
+					panic(err)
+				}
+
+				if err := serverTransport.KeyExchange(ctx, conn); err != nil {
+					panic(err)
+				}
+			}()
+
+			// Client
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				addr, err := net.ResolveTCPAddr("tcp",
+					net.JoinHostPort("127.0.0.1", "0"))
+				if err != nil {
+					panic(err)
+				}
+				d := &net.Dialer{LocalAddr: addr}
+				conn, err := d.DialContext(ctx, "tcp",
+					net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+				if err != nil {
+					panic(err)
+				}
+				defer func() {
+					if err := clientTransport.Close(); err != nil {
+						panic(err)
+					}
+				}()
+
+				if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+					panic(err)
+				}
+
+				t.Logf("client connected using: %v", clientTransport.Curve())
+			}()
+
+			wg.Wait()
+
+			if !bytes.Equal(serverTransport.encryptionKey[:],
+				clientTransport.encryptionKey[:]) {
+				t.Fatal("derived shared key not equal")
+			}
+		})
 	}
 }
 
 func TestTestConnHandshakeDNS(t *testing.T) {
-	// Mostly the same as TestConnHandshake, this should be rolled up into
-	// one bigger test.
+	curves := []ecdh.Curve{ecdh.P256(), ecdh.P384(), ecdh.P521(), ecdh.X25519()}
+	for _, curve := range curves {
+		testName := fmt.Sprintf("%v", curve)
+		t.Run(testName, func(t *testing.T) {
 
-	nodes := byte(2)
-	dnsAddress := "127.0.1.1:5353" // XXX make this :0 somehow
-	domain := "moop.gfy"
-	handler := createDNSNodes(domain, nodes)
-	go func() { newDNSServer(dnsAddress, handler) }()
-	waitForDNSServer(dnsAddress, t)
-	r := newResolver(dnsAddress, t)
+			nodes := byte(2)
+			dnsAddress := "127.0.1.1:5353" // XXX make this :0 somehow
+			domain := "moop.gfy"
+			handler := createDNSNodes(domain, nodes)
+			go func() { newDNSServer(dnsAddress, handler) }()
+			waitForDNSServer(dnsAddress, t)
+			r := newResolver(dnsAddress, t)
 
-	node1 := handler.nodes["node1.moop.gfy."]
-	serverSecret := node1.Secret
-	node2 := handler.nodes["node2.moop.gfy."]
-	clientSecret := node2.Secret
+			node1 := handler.nodes["node1.moop.gfy."]
+			serverSecret := node1.Secret
+			node2 := handler.nodes["node2.moop.gfy."]
+			clientSecret := node2.Secret
 
-	// log.Infof("server identity: %v", serverSecret)
-	// log.Infof("client identity: %v", clientSecret)
+			// log.Infof("server identity: %v", serverSecret)
+			// log.Infof("client identity: %v", clientSecret)
 
-	// Server
-	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create blank transport
-	clientTransport := new(Transport)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
-	defer cancel()
-	var wg sync.WaitGroup
-
-	// Server
-	l := net.ListenConfig{}
-	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	port := listener.Addr().(*net.TCPAddr).Port
-
-	var clientAddress net.Addr // We obtain client IP when we accept a connection.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		t.Logf("Listening: %v:%v", node1.IP, port)
-		conn, err := listener.Accept()
-		if err != nil {
-			panic(err)
-		}
-		clientAddress = conn.RemoteAddr()
-
-		if err := serverTransport.KeyExchange(ctx, conn); err != nil {
-			panic(err)
-		}
-	}()
-
-	// Client
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		addr, err := net.ResolveTCPAddr("tcp",
-			net.JoinHostPort(node2.IP.String(), "0"))
-		if err != nil {
-			panic(err)
-		}
-		d := &net.Dialer{LocalAddr: addr}
-		conn, err := d.DialContext(ctx, "tcp",
-			net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
-		if err != nil {
-			panic(err)
-		}
-
-		if err := clientTransport.KeyExchange(ctx, conn); err != nil {
-			panic(err)
-		}
-	}()
-
-	wg.Wait()
-
-	if !bytes.Equal(serverTransport.encryptionKey[:],
-		clientTransport.encryptionKey[:]) {
-		t.Fatal("derived shared key not equal")
-	}
-
-	// Handshake
-	var derivedClient, derivedServer *Identity
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		var err error // prevent data race
-		derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
-		if err != nil {
-			panic(err)
-		}
-		// log.Infof("derived client: %v", derivedClient)
-
-		// Perform DNS test
-		ok, err := VerifyRemoteDNSIdentity(ctx, r, clientAddress,
-			*derivedClient)
-		if err != nil {
-			panic(err)
-		}
-		if !ok {
-			panic("client dns")
-		}
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		defer func() {
-			if err := clientTransport.Close(); err != nil {
-				panic(err)
+			// Server
+			serverTransport, err := NewTransportFromCurve(curve)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}()
 
-		var err error // prevent data race
-		derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
-		if err != nil {
-			panic(err)
-		}
+			// Create blank transport
+			clientTransport := new(Transport)
 
-		// log.Infof("derived server: %v", derivedServer)
+			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			defer cancel()
+			var wg sync.WaitGroup
 
-		// Perform DNS test
-		ok, err := VerifyRemoteDNSIdentity(ctx, r, listener.Addr(),
-			*derivedServer)
-		if err != nil {
-			panic(err)
-		}
-		if !ok {
-			panic("server dns")
-		}
-	}()
+			// Server
+			l := net.ListenConfig{}
+			listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			port := listener.Addr().(*net.TCPAddr).Port
 
-	wg.Wait()
+			var clientAddress net.Addr // We obtain client IP when we accept a connection.
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 
-	if derivedServer.String() != serverSecret.String() {
-		t.Fatalf("derived server got %v, want %v",
-			derivedServer, serverSecret.Identity)
-	}
-	if derivedClient.String() != clientSecret.String() {
-		t.Fatalf("derived client got %v, want %v",
-			derivedClient, clientSecret.Identity)
+				t.Logf("Listening: %v:%v", node1.IP, port)
+				conn, err := listener.Accept()
+				if err != nil {
+					panic(err)
+				}
+				clientAddress = conn.RemoteAddr()
+
+				if err := serverTransport.KeyExchange(ctx, conn); err != nil {
+					panic(err)
+				}
+			}()
+
+			// Client
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				addr, err := net.ResolveTCPAddr("tcp",
+					net.JoinHostPort(node2.IP.String(), "0"))
+				if err != nil {
+					panic(err)
+				}
+				d := &net.Dialer{LocalAddr: addr}
+				conn, err := d.DialContext(ctx, "tcp",
+					net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
+				if err != nil {
+					panic(err)
+				}
+
+				if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+					panic(err)
+				}
+			}()
+
+			wg.Wait()
+
+			if !bytes.Equal(serverTransport.encryptionKey[:],
+				clientTransport.encryptionKey[:]) {
+				t.Fatal("derived shared key not equal")
+			}
+
+			// Handshake
+			var derivedClient, derivedServer *Identity
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				var err error // prevent data race
+				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
+				if err != nil {
+					panic(err)
+				}
+				// log.Infof("derived client: %v", derivedClient)
+
+				// Perform DNS test
+				ok, err := VerifyRemoteDNSIdentity(ctx, r, clientAddress,
+					*derivedClient)
+				if err != nil {
+					panic(err)
+				}
+				if !ok {
+					panic("client dns")
+				}
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				defer func() {
+					if err := clientTransport.Close(); err != nil {
+						panic(err)
+					}
+				}()
+
+				var err error // prevent data race
+				derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
+				if err != nil {
+					panic(err)
+				}
+
+				// log.Infof("derived server: %v", derivedServer)
+
+				// Perform DNS test
+				ok, err := VerifyRemoteDNSIdentity(ctx, r, listener.Addr(),
+					*derivedServer)
+				if err != nil {
+					panic(err)
+				}
+				if !ok {
+					panic("server dns")
+				}
+			}()
+
+			wg.Wait()
+
+			if derivedServer.String() != serverSecret.String() {
+				t.Fatalf("derived server got %v, want %v",
+					derivedServer, serverSecret.Identity)
+			}
+			if derivedClient.String() != clientSecret.String() {
+				t.Fatalf("derived client got %v, want %v",
+					derivedClient, clientSecret.Identity)
+			}
+		})
 	}
 }
 
 func TestConnHandshake(t *testing.T) {
-	curves := []string{CurveP256, CurveP384, CurveP521, CurveX25519}
+	curves := []ecdh.Curve{ecdh.P256(), ecdh.P384(), ecdh.P521(), ecdh.X25519()}
 	for _, curve := range curves {
-		t.Run(curve, func(t *testing.T) {
-			cr, err := str2Curve(curve)
-			if err != nil {
-				t.Fatal(err)
-			}
-			serverTransport, err := NewTransportFromCurve(cr)
+		testName := fmt.Sprintf("%v", curve)
+		t.Run(testName, func(t *testing.T) {
+			serverTransport, err := NewTransportFromCurve(curve)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -579,19 +585,4 @@ func TestDNSServerSetup(t *testing.T) {
 			t.Fatalf("not verified identity: %v", v.IP)
 		}
 	}
-}
-
-func str2Curve(name string) (ecdh.Curve, error) {
-	switch name {
-	case CurveP256:
-		return ecdh.P256(), nil
-	case CurveP384:
-		return ecdh.P384(), nil
-	case CurveP521:
-		return ecdh.P521(), nil
-	case CurveX25519:
-		return ecdh.X25519(), nil
-	default:
-	}
-	return nil, ErrNoSuitableCurve
 }
