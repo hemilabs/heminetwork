@@ -247,27 +247,158 @@ func TestConnKeyExchange(t *testing.T) {
 	}
 }
 
-//func TestTestConnHandshakeDNS(t *testing.T) {
-//	nodes := byte(2)
-//	dnsAddress := "127.0.1.1:5353" // XXX make this :0 somehow
-//	domain := "moop.gfy"
-//	handler := createDNSNodes(domain, nodes)
-//	go func() { newDNSServer(dnsAddress, handler) }()
-//	waitForDNSServer(dnsAddress, t)
-//	r := newResolver(dnsAddress, t)
-//
-//	node1 := handler.nodes["node1.moop.gfy."]
-//	serverSecret := node1.Secret
-//	node2 := handler.nodes["node2.moop.gfy."]
-//	clientSecret := node1.Secret
-//
-//	// Mostly the same as TestConnHandshake, this should be rolled up into
-//	// one bigger test.
-//	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//}
+func TestTestConnHandshakeDNS(t *testing.T) {
+	// Mostly the same as TestConnHandshake, this should be rolled up into
+	// one bigger test.
+
+	nodes := byte(2)
+	dnsAddress := "127.0.1.1:5353" // XXX make this :0 somehow
+	domain := "moop.gfy"
+	handler := createDNSNodes(domain, nodes)
+	go func() { newDNSServer(dnsAddress, handler) }()
+	waitForDNSServer(dnsAddress, t)
+	r := newResolver(dnsAddress, t)
+
+	node1 := handler.nodes["node1.moop.gfy."]
+	serverSecret := node1.Secret
+	node2 := handler.nodes["node2.moop.gfy."]
+	clientSecret := node2.Secret
+
+	// log.Infof("server identity: %v", serverSecret)
+	// log.Infof("client identity: %v", clientSecret)
+
+	// Server
+	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create blank transport
+	clientTransport := new(Transport)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+
+	// Server
+	l := net.ListenConfig{}
+	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort(node1.IP.String(), "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	var clientAddress net.Addr // We obtain client IP when we accept a connection.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		t.Logf("Listening: %v:%v", node1.IP, port)
+		conn, err := listener.Accept()
+		if err != nil {
+			panic(err)
+		}
+		clientAddress = conn.RemoteAddr()
+
+		if err := serverTransport.KeyExchange(ctx, conn); err != nil {
+			panic(err)
+		}
+	}()
+
+	// Client
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		addr, err := net.ResolveTCPAddr("tcp",
+			net.JoinHostPort(node2.IP.String(), "0"))
+		if err != nil {
+			panic(err)
+		}
+		d := &net.Dialer{LocalAddr: addr}
+		conn, err := d.DialContext(ctx, "tcp",
+			net.JoinHostPort(node1.IP.String(), strconv.Itoa(port)))
+		if err != nil {
+			panic(err)
+		}
+
+		if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+			panic(err)
+		}
+	}()
+
+	wg.Wait()
+
+	if !bytes.Equal(serverTransport.encryptionKey[:],
+		clientTransport.encryptionKey[:]) {
+		t.Fatal("derived shared key not equal")
+	}
+
+	// Handshake
+	var derivedClient, derivedServer *Identity
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		dc, err := serverTransport.Handshake(ctx, serverSecret)
+		if err != nil {
+			panic(err)
+		}
+		derivedClient = dc // XXX if we directly assign derivedClient we have a data race, investigate
+
+		// log.Infof("derived client: %v", dc)
+
+		// Perform DNS test
+		ok, err := VerifyRemoteDNSIdentity(ctx, r, clientAddress, *dc)
+		if err != nil {
+			panic(err)
+		}
+		if !ok {
+			panic("client dns")
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		defer func() {
+			if err := clientTransport.Close(); err != nil {
+				panic(err)
+			}
+		}()
+
+		ds, err := clientTransport.Handshake(ctx, clientSecret)
+		if err != nil {
+			panic(err)
+		}
+		derivedServer = ds
+
+		// log.Infof("derived server: %v", ds)
+
+		// Perform DNS test
+		ok, err := VerifyRemoteDNSIdentity(ctx, r, listener.Addr(), *ds)
+		if err != nil {
+			panic(err)
+		}
+		if !ok {
+			panic("server dns")
+		}
+	}()
+
+	wg.Wait()
+
+	if derivedServer.String() != serverSecret.Identity.String() {
+		t.Fatalf("derived server got %v, want %v",
+			derivedServer, serverSecret.Identity)
+	}
+	if derivedClient.String() != clientSecret.Identity.String() {
+		t.Fatalf("derived client got %v, want %v",
+			derivedClient, clientSecret.Identity)
+	}
+}
 
 func TestConnHandshake(t *testing.T) {
 	curves := []string{CurveP256, CurveP384, CurveP521, CurveX25519}

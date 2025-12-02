@@ -633,177 +633,6 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	themID := NewIdentityFromPub(themPub)
 
 	return &themID, nil
-
-	//		// XXX this needs to be a function of sorts
-	//		log.Infof("===================================== NEW HANDSHAKE")
-	//		var remoteDNSID *Identity
-	//		if t.dns != "" {
-	//			// XXX should we not panic on conn == nil?
-	//			t.mtx.Lock()
-	//			addr := t.conn.RemoteAddr()
-	//			t.mtx.Unlock()
-	//
-	//			// XXX this needs to be a function of sorts
-	//			h, _, err := net.SplitHostPort(addr.String())
-	//			if err != nil {
-	//				return nil, fmt.Errorf("dns split: %w", err)
-	//			}
-	//			rl, err := t.resolver.LookupAddr(ctx, h)
-	//			if err != nil {
-	//				return nil, fmt.Errorf("dns lookup: %w", err)
-	//			}
-	//			if len(rl) < 1 {
-	//				return nil, fmt.Errorf("dns lookup: no records for %v", addr)
-	//			}
-	//			txts, err := t.resolver.LookupTXT(ctx, rl[0])
-	//			if err != nil {
-	//				return nil, err
-	//			}
-	//			if len(txts) != 1 {
-	//				return nil, fmt.Errorf("dns no txt records: %v", len(txts))
-	//			}
-	//			m, err := kvFomTxt(txts[0])
-	//			if err != nil {
-	//				return nil, fmt.Errorf("dns txt record: %w", err)
-	//			}
-	//
-	//			if m["v"] != dnsAppName {
-	//				return nil, fmt.Errorf("dns invalid app name: '%v'", m["v"])
-	//			}
-	//			remoteDNSID, err = NewIdentityFromString(m["identity"])
-	//			if err != nil {
-	//				return nil, fmt.Errorf("dns invalid identity: %w", err)
-	//			}
-	//			// XXX are we going to use port?
-	//		}
-	//
-	//		// Write HelloRequest
-	//		var ourChallenge [32]byte
-	//		_, err := rand.Read(ourChallenge[:])
-	//		if err != nil {
-	//			panic(err)
-	//			return nil, err
-	//		}
-	//
-	//		log.Infof("%v: send HelloRequest", t)
-	//		err = t.Write(secret.Identity, HelloRequest{
-	//			Version:   ProtocolVersion,
-	//			Challenge: ourChallenge[:],
-	//			Options: map[string]string{
-	//				"encoding":    "json",
-	//				"compression": "none",
-	//			},
-	//		})
-	//		if err != nil {
-	//			return nil, err
-	//		}
-	//
-	//		// Read response.
-	//		// This can be either HelloRequest or HelloResponse depnding on
-	//		// mystical timing solar flares. Handle them regardless of order but
-	//		// require both to always complete.
-	//		var (
-	//			helloRequest  *HelloRequest
-	//			helloResponse *HelloResponse
-	//		)
-	//		for i := 0; i < 2; i++ {
-	//			// log.Infof("%v: %p %p", secret.Identity, helloRequest, helloResponse)
-	//			log.Infof("%v: read %p %p", t, helloRequest, helloResponse)
-	//			cmd, err := t.readEncrypted(4 * time.Second) // XXX figure out a good read timeout
-	//			if err != nil {
-	//				log.Infof("%v: readencrypte : %v", t, err)
-	//				return nil, err
-	//			}
-	//
-	//			// XXX move this into read
-	//			nr := bytes.NewReader(cmd)
-	//			jd := json.NewDecoder(nr)
-	//			var header Header
-	//			err = jd.Decode(&header)
-	//			if err != nil {
-	//				panic(err)
-	//				return nil, err
-	//			}
-	//			log.Infof("%v: read %v", t, header.PayloadType)
-	//			// XXX i was too clever to make the payload hash in the write
-	//			// but we can't really get to it here. It is a valid unique
-	//			// hash but it would be cute if we could verify the payload
-	//			// actual hash
-	//			switch header.PayloadType {
-	//			case PHelloRequest:
-	//				var req HelloRequest
-	//				if err := jd.Decode(&req); err != nil {
-	//					panic(err)
-	//					return nil, err
-	//				}
-	//
-	//				// Sign challenge and reply
-	//				if err := t.Write(secret.Identity, HelloResponse{
-	//					Signature: secret.Sign(req.Challenge),
-	//				}); err != nil {
-	//					panic(err)
-	//					return nil, err
-	//				}
-	//
-	//				// Mark valid
-	//				helloRequest = &req
-	//
-	//			case PHelloResponse:
-	//				var resp HelloResponse
-	//				if err := jd.Decode(&resp); err != nil {
-	//					panic(err)
-	//					return nil, err
-	//				}
-	//				helloResponse = &resp
-	//
-	//			default:
-	//				panic(err)
-	//				return nil, fmt.Errorf("invalid command: %v", header.PayloadType)
-	//			}
-	//			log.Infof("%v: handled %v %p %p", t, header.PayloadType, helloRequest, helloResponse)
-	//		}
-	//
-	//		log.Infof("HANDSHAKE DONE %v", t)
-	//
-	//		// See if we completed the handshake
-	//		if helloRequest == nil || helloResponse == nil {
-	//			return nil, ErrInvalidHandshake
-	//		}
-	//
-	//		// Validate HelloRequest
-	//		if helloRequest.Version != ProtocolVersion {
-	//			return nil, ErrUnsupportedVersion
-	//		}
-	//		if len(helloRequest.Challenge) != ChallengeSize {
-	//			return nil, ErrInvalidChallenge
-	//		}
-	//		if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
-	//			return nil, ErrInvalidChallenge
-	//		}
-	//
-	//		// XXX do something with options
-	//
-	//		// Verify response
-	//		themPub, err := Verify(ourChallenge[:], helloResponse.Signature)
-	//		if err != nil {
-	//			return nil, err
-	//		}
-	//		themID := NewIdentityFromPub(themPub)
-	//
-	//		// XXX move this into a function
-	//		if t.dns != "" {
-	//			if remoteDNSID == nil {
-	//				return nil, errors.New("remote dns id not set")
-	//			}
-	//			if themID.String() != remoteDNSID.String() {
-	//				return nil, fmt.Errorf("dns identity does not match: got %v, want %v",
-	//					themID, remoteDNSID)
-	//			}
-	//		}
-	//
-	//		return &themID, nil
-	//	}
-	//
 }
 
 // readBlob locks the connection and reads a size and the associated blob into
@@ -985,7 +814,9 @@ func kvFomTxt(txt string) (map[string]string, error) {
 	return m, nil
 }
 
-func txtRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.Addr) (map[string]string, error) {
+// TXTRecordFromAddress returns one and only one TXT record that is associated
+// with an address.
+func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.Addr) (map[string]string, error) {
 	if resolver == nil {
 		resolver = &net.Resolver{}
 	}
@@ -1009,58 +840,23 @@ func txtRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.
 		return nil, fmt.Errorf("dns no txt records: %v", len(txts))
 	}
 	return kvFomTxt(txts[0])
-
-	//if m["v"] != dnsAppName {
-	//	return nil, fmt.Errorf("dns invalid app name: '%v'", m["v"])
-	//}
-	//remoteDNSID, err = NewIdentityFromString(m["identity"])
-	//if err != nil {
-	//	return nil, fmt.Errorf("dns invalid identity: %w", err)
-	//}
-	// XXX are we going to use port?
 }
 
-// XXX this seems broken because the identity parameter is not necessarily known
-//func DNSVerifyIdentityByAddress(ctx context.Context, address string, identity Identity, resolver *net.Resolver) (bool, error) {
-//	if resolver == nil {
-//		resolver = &net.Resolver{}
-//	}
-//
-//	if !strings.HasSuffix(address, ".") {
-//		address = address + "."
-//	}
-//
-//	txts, err := resolver.LookupTXT(ctx, address)
-//	if err != nil {
-//		return false, fmt.Errorf("lookup txt: %w", err)
-//	}
-//	if len(txts) != 1 {
-//		return false, errors.New("lookup txt: invalid response")
-//	}
-//
-//	m, err := kvFomTxt(txts[0])
-//	if err != nil {
-//		return false, err
-//	}
-//
-//	if m["v"] != dnsAppName {
-//		return false, fmt.Errorf("invalid dns app name: '%v'", m["v"])
-//	}
-//	if m["identity"] == identity.String() {
-//		return true, nil
-//	}
-//
-//	return false, nil
-//}
-//
-//func DNSVerifyIdentityByIP(ctx context.Context, ip net.IP, identity Identity, resolver *net.Resolver) (bool, error) {
-//	addr, err := resolver.LookupAddr(ctx, ip.String())
-//	if err != nil {
-//		return false, fmt.Errorf("reverse lookup: %w", err)
-//	}
-//	if len(addr) != 1 {
-//		return false, errors.New("reverse lookup: invalid response")
-//	}
-//
-//	return DNSVerifyIdentityByAddress(ctx, addr[0], identity, resolver)
-//}
+func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr, id Identity) (bool, error) {
+	m, err := TXTRecordFromAddress(ctx, r, addr)
+	if err != nil {
+		return false, err
+	}
+	// XXX are we going to use port?
+
+	if m["v"] != dnsAppName {
+		return false, fmt.Errorf("dns invalid app name: '%v'", m["v"])
+	}
+	remoteDNSID, err := NewIdentityFromString(m["identity"])
+	if err != nil {
+		return false, fmt.Errorf("dns invalid identity: %w", err)
+	}
+	return bytes.Equal(id[:], remoteDNSID[:]), nil
+}
+
+// XXX add VerifyRemoteDNSIdentity by hostname and call VerifyRemoteDNSIdentity
