@@ -10,6 +10,7 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
 
@@ -288,7 +291,7 @@ func TestConnKeyExchange(t *testing.T) {
 	}
 }
 
-func TestHandshakeErrors(t *testing.T) {
+func TestKeyExchangeErrors(t *testing.T) {
 	type testTableItem struct {
 		name          string
 		curve         ecdh.Curve
@@ -385,13 +388,6 @@ func TestHandshakeErrors(t *testing.T) {
 				transport = new(Transport)
 			}
 
-			secret, err := NewSecret()
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			_ = secret
-
 			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
 			defer cancel()
 
@@ -437,6 +433,245 @@ func TestHandshakeErrors(t *testing.T) {
 			}()
 
 			err = transport.KeyExchange(ctx, serverConn)
+			if err != nil {
+				if errors.Is(err, tti.expectedError) ||
+					errors.Is(tti.expectedError, ErrNoType) {
+					return
+				}
+			}
+			t.Fatalf("expected error %v, got %v", tti.expectedError, err)
+		})
+	}
+}
+
+func TestHandshakeErrors(t *testing.T) {
+	type testTableItem struct {
+		name          string
+		curve         ecdh.Curve
+		handshake     func(context.Context, *Transport, *Secret) error
+		expectedError error
+	}
+	ErrNoType := errors.New("any error")
+	tests := []testTableItem{
+		{
+			name:          "unsupported version",
+			curve:         ecdh.P256(),
+			expectedError: ErrUnsupportedVersion,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				return tr.Write(s.Identity, HelloRequest{
+					Version:   0,
+					Challenge: ourChallenge[:],
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				})
+			},
+		},
+		{
+			name:          "invalid challenge",
+			curve:         ecdh.P256(),
+			expectedError: ErrInvalidChallenge,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				return tr.Write(s.Identity, HelloRequest{
+					Version: ProtocolVersion,
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				})
+			},
+		},
+		{
+			name:          "zero challenge",
+			curve:         ecdh.P256(),
+			expectedError: ErrInvalidChallenge,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				return tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ZeroChallenge[:],
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				})
+			},
+		},
+		{
+			name:          "malformed signature",
+			curve:         ecdh.P256(),
+			expectedError: ErrNoType,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				if err := tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ourChallenge[:],
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				}); err != nil {
+					return err
+				}
+				return tr.Write(s.Identity, HelloResponse{
+					Signature: []byte("invalid"),
+				})
+			},
+		},
+		{
+			name:          "uncompact signature",
+			curve:         ecdh.P256(),
+			expectedError: ErrNotCompact,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				if err := tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ourChallenge[:],
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				}); err != nil {
+					return err
+				}
+				sig := ecdsa.SignCompact(s.privateKey, []byte("test"), false)
+				return tr.Write(s.Identity, HelloResponse{
+					Signature: sig,
+				})
+			},
+		},
+		{
+			name:          "invalid encryption",
+			curve:         ecdh.P256(),
+			expectedError: ErrDecrypt,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				nonce := tr.nonce.Next()
+				msg := []byte("test")
+				var size [4]byte
+				binary.BigEndian.PutUint32(size[:], uint32(len(msg)+len(nonce)))
+				header := append(size[1:4], nonce[0:24]...)
+				spew.Dump(append(header, msg...))
+				_, err := tr.conn.Write(append(header, msg...))
+				return err
+			},
+		},
+		{
+			name:          "unexpected cmd",
+			curve:         ecdh.P256(),
+			expectedError: ErrNoType,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				return tr.Write(s.Identity, HelloResponse{
+					Signature: []byte("invalid"),
+				})
+			},
+		},
+	}
+	for _, tti := range tests {
+		t.Run(tti.name, func(t *testing.T) {
+			var (
+				serverConn, clientConn net.Conn
+				wg                     sync.WaitGroup
+				err                    error
+			)
+
+			serverTransport, err := NewTransportFromCurve(tti.curve)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			serverSecret, err := NewSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			clientTransport := new(Transport)
+
+			clientSecret, err := NewSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			defer cancel()
+
+			// Server
+			l := net.ListenConfig{}
+			listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			port := listener.Addr().(*net.TCPAddr).Port
+
+			// Server conn
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var cerr error
+				serverConn, cerr = listener.Accept()
+				if cerr != nil {
+					panic(err)
+				}
+			}()
+
+			// Client conn
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var cerr error
+				d := &net.Dialer{}
+				clientConn, cerr = d.DialContext(ctx, "tcp",
+					net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+				if cerr != nil {
+					panic(err)
+				}
+			}()
+
+			wg.Wait()
+
+			// Server conn
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := serverTransport.KeyExchange(ctx, serverConn)
+				if err != nil {
+					panic(err)
+				}
+			}()
+
+			// Client conn
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := clientTransport.KeyExchange(ctx, clientConn)
+				if err != nil {
+					panic(err)
+				}
+			}()
+
+			wg.Wait()
+
+			go func() {
+				err := tti.handshake(ctx, clientTransport, clientSecret)
+				if err != nil {
+					panic(err)
+				}
+			}()
+
+			_, err = serverTransport.Handshake(ctx, serverSecret)
 			if err != nil {
 				if errors.Is(err, tti.expectedError) ||
 					errors.Is(tti.expectedError, ErrNoType) {
