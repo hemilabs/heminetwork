@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
@@ -599,7 +599,6 @@ func TestHandshakeErrors(t *testing.T) {
 				var size [4]byte
 				binary.BigEndian.PutUint32(size[:], uint32(len(msg)+len(nonce)))
 				header := append(size[1:4], nonce[0:24]...)
-				spew.Dump(append(header, msg...))
 				_, err := tr.conn.Write(append(header, msg...))
 				return err
 			},
@@ -677,6 +676,9 @@ func TestHandshakeErrors(t *testing.T) {
 			}()
 
 			wg.Wait()
+
+			t.Logf("%s: %s", serverTransport, serverConn.LocalAddr())
+			t.Logf("%s: %s", clientTransport, clientConn.LocalAddr())
 
 			// Server conn
 			wg.Add(1)
@@ -1050,5 +1052,143 @@ func TestDNSServerSetup(t *testing.T) {
 		if !ok {
 			t.Fatalf("not verified identity: %v", v.IP)
 		}
+	}
+}
+
+func TestSecret(t *testing.T) {
+	pk, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// New Secret
+	_, err = NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Secret from string
+	_, err = NewSecretFromString(pk.Key.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewSecretFromString("l337")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	fakePkS := hex.EncodeToString([]byte("fake"))
+	_, err = NewSecretFromString(fakePkS)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	// Secret from private
+	s := NewSecretFromPrivate(pk)
+	if !s.PublicKey().IsEqual(pk.PubKey()) {
+		t.Fatalf("pubKey mismatch: %v != %v", s.PublicKey(), pk.PubKey())
+	}
+
+	// Test sign and recovering
+	hash := []byte("testhash")
+	sig := s.Sign(hash)
+	recPub, err := Verify(hash, sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recPub.IsEqual(pk.PubKey()) {
+		t.Fatalf("pubKey mismatch: %v != %v", recPub, pk.PubKey())
+	}
+}
+
+func TestIdentity(t *testing.T) {
+	pk, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Identity from public key
+	id := NewIdentityFromPub(pk.PubKey())
+
+	// Identity from string
+	ids, err := NewIdentityFromString(id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(ids.Bytes(), id.Bytes()) {
+		t.Fatalf("identities mismatch: %v != %v", ids, id)
+	}
+	_, err = NewIdentityFromString("fail")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	fakeID := hex.EncodeToString([]byte("fake"))
+	_, err = NewIdentityFromString(fakeID)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	// Unmarshal Identity
+	idm := Identity{}
+	marshaledID, err := id.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idm.UnmarshalJSON([]byte("fake")); err == nil {
+		t.Fatal("expected error")
+	}
+	if err := idm.UnmarshalJSON(marshaledID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Recover Identity
+	s1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var c1 [32]byte
+	_, err = rand.Read(c1[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var c2 [32]byte
+	_, err = rand.Read(c2[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sig1 := s1.Sign(c2[:])
+	sig2 := s2.Sign(c1[:])
+
+	rec1, err := Verify(c1[:], sig2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec2, err := Verify(c2[:], sig1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("id1: %v", s1)
+	t.Logf("id2: %v", s2)
+	t.Logf("rec1: %v", NewIdentityFromPub(rec1))
+	t.Logf("rec2: %v", NewIdentityFromPub(rec2))
+
+	if s1.String() != NewIdentityFromPub(rec2).String() {
+		t.Fatal("recovery failed in 1")
+	}
+	if s2.String() != NewIdentityFromPub(rec1).String() {
+		t.Fatal("recovery failed in 2")
+	}
+	if !bytes.Equal(NewIdentityFromPub(rec2).Bytes(), s1.Bytes()) {
+		t.Fatal("recovery failed in 1")
+	}
+	if !bytes.Equal(NewIdentityFromPub(rec1).Bytes(), s2.Bytes()) {
+		t.Fatal("recovery failed in 2")
 	}
 }
