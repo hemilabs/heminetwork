@@ -460,7 +460,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 			handler := createDNSNodes(domain, nodes)
 			go func() { newDNSServer(dnsAddress, handler) }()
 			waitForDNSServer(dnsAddress, t)
-			r := newResolver(dnsAddress, t)
+			r := newResolver(dnsAddress)
 
 			node1 := handler.nodes["node1.moop.gfy."]
 			serverSecret := node1.Secret
@@ -738,7 +738,7 @@ func TestDNSServerSetup(t *testing.T) {
 	handler := createDNSNodes(domain, nodes)
 	go func() { newDNSServer(dnsAddress, handler) }()
 	waitForDNSServer(dnsAddress, t)
-	r := newResolver(dnsAddress, t)
+	r := newResolver(dnsAddress)
 
 	// Lookup all nodes
 	for k, v := range handler.nodes {

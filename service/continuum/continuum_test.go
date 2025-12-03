@@ -129,14 +129,14 @@ func (h *dnsHandler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.
 	}
 }
 
-func newResolver(resolverAddress string, t *testing.T) *net.Resolver {
+func newResolver(resolverAddress string) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			d := &net.Dialer{
 				Timeout: 10000 * time.Millisecond,
 			}
-			return d.DialContext(t.Context(), "tcp", resolverAddress)
+			return d.DialContext(ctx, "tcp", resolverAddress)
 		},
 	}
 }

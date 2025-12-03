@@ -852,17 +852,6 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 	return t.write(writeTimeout, append(header, payload...))
 }
 
-// NewResolver returns a custom resolver that suports context.
-func NewResolver(resolverAddress string) *net.Resolver {
-	return &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := &net.Dialer{}
-			return d.DialContext(ctx, network, resolverAddress)
-		},
-	}
-}
-
 // kvFomTxt converts a TXT record to a key value map. The format is typical INI
 // file style. E.g. "v=transfunctioner identity=myidentity key=value".
 func kvFomTxt(txt string) (map[string]string, error) {
