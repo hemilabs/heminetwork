@@ -67,13 +67,17 @@ type PayloadType string
 
 const (
 	PHelloRequest  PayloadType = "hello"
-	PHelloResponse PayloadType = "hello-response" // XXX does the linter allow this?
+	PHelloResponse PayloadType = "hello-response"
+	PPingRequest   PayloadType = "ping"
+	PPingResponse  PayloadType = "ping-response"
 )
 
 var (
 	pt2str = map[reflect.Type]PayloadType{
 		reflect.TypeOf(HelloRequest{}):  PHelloRequest,
 		reflect.TypeOf(HelloResponse{}): PHelloResponse,
+		reflect.TypeOf(PingRequest{}):   PPingRequest,
+		reflect.TypeOf(PingResponse{}):  PPingResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -148,6 +152,15 @@ type HelloRequest struct {
 
 type HelloResponse struct {
 	Signature []byte `json:"signature"` // Signature of Challenge and identity is derived
+}
+
+type PingRequest struct {
+	OriginTimestamp int64 `json:"origintimestamp"` // Sender timestamp
+}
+
+type PingResponse struct {
+	OriginTimestamp int64 `json:"origintimestamp"` // Copy the value back
+	PeerTimestamp   int64 `json:"peertimestamp"`   // Remote timestamp
 }
 
 const (
