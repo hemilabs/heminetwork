@@ -228,22 +228,29 @@ func NewNonce() (*Nonce, error) {
 	return n, nil
 }
 
+// Hash160 is a utility function that returns the ripemd160 hash for the
+// provided data.
 func Hash160(data []byte) []byte {
 	ripemd := ripemd160.New()
 	ripemd.Write(data[:])
 	return ripemd.Sum(nil)
 }
 
+// Identity is how a node is identified. It simply is the ripemd160 of the
+// public key.
 type Identity [ripemd160.Size]byte // ripemd160 of compressed pubkey
 
+// String returns the hex endoded string of the identity.
 func (i Identity) String() string {
 	return hex.EncodeToString(i[:])
 }
 
+// Bytes returns a copy of identity as a byte slice.
 func (i Identity) Bytes() []byte {
 	return append([]byte{}, i[:]...) // Fucking linter rejects append(i[:])
 }
 
+// UnmarshalJSON satisfies the JSON Decode interface.
 func (i *Identity) UnmarshalJSON(data []byte) error {
 	var d string
 	err := json.Unmarshal(data, &d)
@@ -258,10 +265,12 @@ func (i *Identity) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON satisfies the JSON Encode interface.
 func (i Identity) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hex.EncodeToString(i[:]))
 }
 
+// NewIdentityFromPub returns a new identity for the provided public key.
 func NewIdentityFromPub(pub *secp256k1.PublicKey) Identity {
 	id := Hash160(pub.SerializeCompressed())
 	var i Identity
@@ -269,6 +278,8 @@ func NewIdentityFromPub(pub *secp256k1.PublicKey) Identity {
 	return i
 }
 
+// NewIdentityFromString returns a new identity for the provided string encoded
+// public key.
 func NewIdentityFromString(identity string) (*Identity, error) {
 	id, err := hex.DecodeString(identity)
 	if err != nil {
@@ -282,20 +293,27 @@ func NewIdentityFromString(identity string) (*Identity, error) {
 	return &i, nil
 }
 
+// Secret is the ephemeral private key that a node uses for signing challenges.
+// It also provides the publicly known derived Identity.
 type Secret struct {
 	privateKey *secp256k1.PrivateKey
 
 	Identity // Provides stringer
 }
 
+// PublicKey returns the public key of the secret.
 func (s Secret) PublicKey() *secp256k1.PublicKey {
 	return s.privateKey.PubKey()
 }
 
+// Sign signs a hash and returns the signature. Don't be a smartass and send
+// anything but a hash into this function.
 func (s Secret) Sign(hash []byte) []byte {
 	return ecdsa.SignCompact(s.privateKey, hash[:], true)
 }
 
+// Verify verifies that hash was signed by the provided siganture. It returns
+// the derived compact public key.
 func Verify(hash []byte, sig []byte) (*secp256k1.PublicKey, error) {
 	publicKey, compact, err := ecdsa.RecoverCompact(sig, hash[:])
 	if err != nil {
@@ -307,6 +325,7 @@ func Verify(hash []byte, sig []byte) (*secp256k1.PublicKey, error) {
 	return publicKey, nil
 }
 
+// NewSecretFromPrivate returns a secret type for the provided private key.
 func NewSecretFromPrivate(privateKey *secp256k1.PrivateKey) *Secret {
 	return &Secret{
 		privateKey: privateKey,
@@ -314,18 +333,21 @@ func NewSecretFromPrivate(privateKey *secp256k1.PrivateKey) *Secret {
 	}
 }
 
+// NewSecretFromPrivate returns a secret type for the provided string encoded
+// private key.
 func NewSecretFromString(secret string) (*Secret, error) {
 	s, err := hex.DecodeString(secret)
 	if err != nil {
 		return nil, err
 	}
-	// XXX this may not always be the case and may need to be a range
+	// This may not always be the case and may need to be a range.
 	if len(s) != 32 {
 		return nil, fmt.Errorf("invalid key")
 	}
 	return NewSecretFromPrivate(secp256k1.PrivKeyFromBytes(s)), nil
 }
 
+// NewSecret returns a secret type with a randomly generated private key.
 func NewSecret() (*Secret, error) {
 	s, err := secp256k1.GeneratePrivateKey()
 	if err != nil {

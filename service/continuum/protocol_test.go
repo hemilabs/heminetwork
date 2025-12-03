@@ -24,6 +24,7 @@ import (
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
 
@@ -204,6 +205,69 @@ func TestNonce(t *testing.T) {
 	wg.Wait()
 	if len(m) != maxNonces {
 		t.Fatalf("got %v want %v", len(m), maxNonces)
+	}
+}
+
+func TestSecret(t *testing.T) {
+	// This test implicitely tests Identity
+	k1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	k2, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if bytes.Equal(k1.privateKey.Serialize(), k2.privateKey.Serialize()) {
+		t.Fatal("same key")
+	}
+
+	secretData1 := sha256.Sum256([]byte("so secret 1"))
+	secretData2 := sha256.Sum256([]byte("SO SECRET 2"))
+
+	// Sign data with respective keys
+	sig1 := k1.Sign(secretData1[:])
+	sig2 := k2.Sign(secretData2[:])
+
+	// Postive path
+	pubk1, err := Verify(secretData1[:], sig1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pubk1.IsEqual(k1.PublicKey()) {
+		t.Fatal("derived key 1 not equal")
+	}
+	pubk2, err := Verify(secretData2[:], sig2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pubk2.IsEqual(k2.PublicKey()) {
+		t.Fatal("derived key 2 not equal")
+	}
+
+	// Negative path
+	signature := ecdsa.SignCompact(k1.privateKey, secretData1[:], false)
+	// verified := signature.Verify(secretData1[:], k1.PublicKey())
+	rk, _, err := ecdsa.RecoverCompact(signature, secretData1[:])
+	spew.Dump(err)
+	spew.Dump(rk)
+	//_ = verified
+
+	spew.Dump(secretData1)
+	spew.Dump(secretData2)
+	spew.Dump(sig1)
+	spew.Dump(sig2)
+	x, err := Verify(secretData1[:], sig2)
+	if err == nil {
+		spew.Dump(k1.PublicKey())
+		spew.Dump(k2.PublicKey())
+		spew.Dump(x)
+		t.Fatal("should not verify")
+	}
+	_, err = Verify(secretData2[:], sig1)
+	if err == nil {
+		t.Fatal("should not verify")
 	}
 }
 
