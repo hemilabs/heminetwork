@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"codeberg.org/miekg/dns"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 
@@ -1323,5 +1324,83 @@ func TestIdentity(t *testing.T) {
 	}
 	if !bytes.Equal(NewIdentityFromPub(rec1).Bytes(), s2.Bytes()) {
 		t.Fatal("recovery failed in 2")
+	}
+}
+
+func TestDNSTXTRecord(t *testing.T) {
+	nodes := byte(1)
+	dnsAddress := "127.0.0.1:25353"
+	domain := "moop.gfy"
+	handler := createDNSNodes(domain, nodes)
+	go func() { newDNSServer(dnsAddress, handler) }()
+	waitForDNSServer(dnsAddress, t)
+	r := newResolver(dnsAddress)
+
+	node1 := handler.nodes["node1.moop.gfy."]
+	addr, err := net.ResolveTCPAddr("tcp",
+		net.JoinHostPort(node1.IP.String(), "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := TXTRecordFromAddress(t.Context(), r, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := m["v"]; !ok || v != "transfunctioner" {
+		t.Fatal("invalid v")
+	}
+
+	// Corrupt record
+	handler.lookup["node1.moop.gfy."] = []dns.RR{
+		&dns.A{
+			Hdr: dns.Header{
+				Name:  node1.DNSName,
+				Class: dns.ClassINET,
+			},
+			A: node1.IP,
+		},
+		&dns.TXT{
+			Hdr: dns.Header{
+				Name:  node1.DNSName,
+				Class: dns.ClassINET,
+			},
+			Txt: []string{"k=ppp"},
+		},
+	}
+	m, err = TXTRecordFromAddress(t.Context(), r, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["v"]; ok {
+		t.Fatal("invalid v")
+	}
+
+	// Complete break record
+	handler.lookup["node1.moop.gfy."] = []dns.RR{
+		&dns.A{
+			Hdr: dns.Header{
+				Name:  node1.DNSName,
+				Class: dns.ClassINET,
+			},
+			A: node1.IP,
+		},
+		&dns.TXT{
+			Hdr: dns.Header{
+				Name:  node1.DNSName,
+				Class: dns.ClassINET,
+			},
+			Txt: []string{"x"},
+		},
+	}
+	m, err = TXTRecordFromAddress(t.Context(), r, addr)
+	if err == nil {
+		t.Fatal("expectred invalid txt record")
+	}
+
+	// Delete record
+	delete(handler.lookup, "node1.moop.gfy.")
+	_, err = TXTRecordFromAddress(t.Context(), r, addr)
+	if err == nil {
+		t.Fatal("expected lame referral")
 	}
 }
