@@ -625,10 +625,6 @@ func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("overflow")
 	}
 
-	if t.encryptionKey == nil {
-		panic("wtf")
-	}
-
 	// Encode size to prefix nonce
 	var size [4]byte
 	binary.BigEndian.PutUint32(size[:], uint32(ts))
