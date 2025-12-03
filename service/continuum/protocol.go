@@ -382,6 +382,11 @@ type Transport struct {
 	conn net.Conn
 }
 
+// allowedCurves are the curves that the server and client are allowed to use.
+// Note that the server side dictates which curve the client must use. If the
+// client does not approve it should hang up.
+var allowedCurves = []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
+
 // String returns what mode this transport is in.
 func (t *Transport) String() string {
 	if t.isServer {
@@ -424,8 +429,7 @@ func newTransportFromPublicKey(publicKey []byte) (*Transport, error) {
 // side ephemeral key. The correct curve is picked based on the public key that
 // is passed in.
 func (t *Transport) setTransportFromPublicKey(publicKey []byte) error {
-	curves := []ecdh.Curve{ecdh.X25519(), ecdh.P521(), ecdh.P384(), ecdh.P256()}
-	for _, curve := range curves {
+	for _, curve := range allowedCurves {
 		theirPublicKey, err := curve.NewPublicKey(publicKey)
 		if err != nil {
 			continue
@@ -481,18 +485,28 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
 // encryption key between the server and the client. Note that the server
 // dictates the curve.
 func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
-	// XXX do we need to close the connection on the way out if it fails?
 	var (
-		them *ecdh.PublicKey
-		tr   TransportRequest
+		them         *ecdh.PublicKey
+		tr           TransportRequest
+		greatSuccess bool
 	)
-	// XXX the conn timeout could and maybe should be set by the caller.
-	timeout := 5 * time.Second // XXX config?
+
+	// If KeyExchange is aborted the connection is killed.
+	defer func() {
+		if !greatSuccess {
+			if err := conn.Close(); err != nil {
+				log.Errorf("KeyExchange: %v", err)
+			}
+		}
+	}()
+
+	// The key exchange should finish in less than 5 seconds.
+	timeout := 5 * time.Second
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
 	if t.isServer {
 		// Send TransportRequest
-		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-			return err
-		}
 		if err := json.NewEncoder(conn).Encode(TransportRequest{
 			Version:   TransportVersion,
 			PublicKey: t.us.PublicKey().Bytes(),
@@ -501,18 +515,12 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		}
 
 		// Read TransportRequest
-		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-			return err
-		}
 		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
 			return err
 		}
 		// log.Infof("server read %v", spew.Sdump(tr))
 	} else {
 		// Read TransportRequest
-		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-			return err
-		}
 		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
 			return err
 		}
@@ -523,9 +531,6 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		}
 
 		// Send TransportRequest
-		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-			return err
-		}
 		if err := json.NewEncoder(conn).Encode(TransportRequest{
 			Version:   TransportVersion,
 			PublicKey: t.us.PublicKey().Bytes(),
@@ -556,6 +561,11 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		return err
 	}
 
+	// Reset deadline for connection
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return err
+	}
+
 	// Finish KX
 	t.mtx.Lock()
 	t.encryptionKey = encryptionKey
@@ -563,6 +573,8 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	t.nonce = nonce
 	t.conn = conn
 	t.mtx.Unlock()
+
+	greatSuccess = true // High five!
 
 	return nil
 }
