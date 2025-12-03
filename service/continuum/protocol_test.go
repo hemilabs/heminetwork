@@ -671,6 +671,73 @@ func TestHandshakeErrors(t *testing.T) {
 				})
 			},
 		},
+		{
+			name:          "fake signature",
+			curve:         ecdh.P256(),
+			expectedError: ErrIdentityMismatch,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				if err := tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ourChallenge[:],
+					Identity:  s.Identity,
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				}); err != nil {
+					return err
+				}
+				sig := ecdsa.SignCompact(s.privateKey, []byte("fake"), true)
+				return tr.Write(s.Identity, HelloResponse{
+					Signature: sig,
+				})
+			},
+		},
+		{
+			name:          "fake identity",
+			curve:         ecdh.P256(),
+			expectedError: ErrIdentityMismatch,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				fakeSecret, err := NewSecret()
+				if err != nil {
+					return err
+				}
+				if err := tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ourChallenge[:],
+					Identity:  fakeSecret.Identity,
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				}); err != nil {
+					return err
+				}
+				// Read Hello
+				_, cmd, err := tr.read(readTimeout)
+				if err != nil {
+					return err
+				}
+				helloRequest, ok := cmd.(*HelloRequest)
+				if !ok {
+					return fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
+				}
+				sig := ecdsa.SignCompact(s.privateKey, []byte(helloRequest.Challenge), true)
+				return tr.Write(s.Identity, HelloResponse{
+					Signature: sig,
+				})
+			},
+		},
 	}
 	for _, tti := range tests {
 		t.Run(tti.name, func(t *testing.T) {
