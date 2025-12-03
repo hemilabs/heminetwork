@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -190,7 +191,12 @@ func waitForDNSServer(address string, t *testing.T) {
 			break
 		}
 
-		if err.(*net.OpError).Err.(*os.SyscallError).Err == syscall.ECONNREFUSED {
+		if errors.Is(func() *os.SyscallError {
+			target := &os.SyscallError{}
+			_ = errors.As(err.(*net.OpError).Err, &target)
+			return target
+		}().Err,
+			syscall.ECONNREFUSED) {
 			continue
 		}
 	}
