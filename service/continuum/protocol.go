@@ -345,6 +345,10 @@ var (
 	ErrNotCompact         = errors.New("not a compact public key")
 	ErrNoSuitableCurve    = errors.New("no suitable curve found")
 	ErrUnsupportedVersion = errors.New("unsupported version")
+
+	// placeholders until we decide on timeout handling
+	readTimeout  time.Duration = 4 * time.Second
+	writeTimeout time.Duration = 4 * time.Second
 )
 
 // Transport is an opaque type that provides encrypted transport for
@@ -643,11 +647,10 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	}
 
 	// Read Hello
-	header, cmd, err := t.readEncrypted(4 * time.Second) // XXX figure out a good read timeout
+	_, cmd, err := t.read(readTimeout)
 	if err != nil {
 		return nil, err
 	}
-	_ = header
 	helloRequest, ok := cmd.(*HelloRequest)
 	if !ok {
 		return nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
@@ -671,7 +674,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	}
 
 	// Read HelloResponse
-	header2, cmd2, err := t.readEncrypted(4 * time.Second) // XXX figure out a good read timeout
+	header2, cmd2, err := t.read(readTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -746,8 +749,8 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	}
 }
 
-// readEncrypted reads the next encrypted blob from the connection stream.
-func (t *Transport) readEncrypted(timeout time.Duration) (*Header, any, error) {
+// read reads the next encrypted blob from the connection stream.
+func (t *Transport) read(timeout time.Duration) (*Header, any, error) {
 	ciphertext, err := t.readBlob(timeout)
 	if err != nil {
 		return nil, nil, err
@@ -846,7 +849,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 	if err != nil {
 		return err
 	}
-	return t.write(4*time.Second, append(header, payload...)) // XXX timeout
+	return t.write(writeTimeout, append(header, payload...))
 }
 
 // NewResolver returns a custom resolver that suports context.
