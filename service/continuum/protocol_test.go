@@ -9,10 +9,13 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -103,6 +106,57 @@ func TestECDHKeyExchange(t *testing.T) {
 	if failure != (len(curves)-1)*len(curves) {
 		t.Fatalf("failure got %v, wanted %v", failure,
 			(len(curves)-1)*len(curves))
+	}
+}
+
+func TestPayloadHash(t *testing.T) {
+	hello := HelloRequest{
+		Version:   0xdeadbeef,
+		Options:   map[string]string{"moo": "MOO"},
+		Challenge: []byte("this is a challenge"),
+	}
+	hash, payload, err := NewPayloadFromCommand(hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := sha256.Sum256(payload)
+	if !bytes.Equal(expected[:], hash[:]) {
+		t.Fatal("not equal")
+	}
+	if hex.EncodeToString(expected[:]) != hash.String() {
+		t.Fatal("string not equal")
+	}
+
+	// Encode payload
+	m := map[string]PayloadHash{"iamhash": *hash}
+	em, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mm map[string]PayloadHash
+	err = json.Unmarshal(em, &mm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(m, mm) {
+		t.Fatal("map not equal")
+	}
+
+	// Encode individual line
+	el, err := hash.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(el) != `"`+hash.String()+`"` {
+		t.Fatal("unexpected json")
+	}
+	var ph PayloadHash
+	err = ph.UnmarshalJSON(el)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(ph[:], hash[:]) {
+		t.Fatal("json line not equal to hash")
 	}
 }
 

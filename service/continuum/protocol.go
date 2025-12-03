@@ -91,12 +91,16 @@ func init() {
 	}
 }
 
+// PayloadHash is a wrapper around sha256 to enable human readable encoding.
+// It is used as a unique identifier for the command.
 type PayloadHash [32]byte
 
+// MarshalJSON satisfies the JSON Encode interface.
 func (p PayloadHash) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hex.EncodeToString(p[:]))
 }
 
+// UnmarshalJSON satisfies the JSON Decode interface.
 func (p *PayloadHash) UnmarshalJSON(data []byte) error {
 	var s string
 	if err := json.Unmarshal(data, &s); err != nil {
@@ -113,17 +117,19 @@ func (p *PayloadHash) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// String returns the payloadhash as a hexadecimal encoded string.
 func (p PayloadHash) String() string {
 	return hex.EncodeToString(p[:])
 }
 
+// NewPayloadHash returns a PayloadHash type that hashes x.
 func NewPayloadHash(x []byte) *PayloadHash {
 	p := PayloadHash(sha256.Sum256(x))
 	return &p
 }
 
-// NewPayloadFromCommand returns the json encoding of a given command,
-// along with its hash.
+// NewPayloadFromCommand returns the json encoding of a given command, along
+// with its hash.
 func NewPayloadFromCommand(cmd any) (*PayloadHash, []byte, error) {
 	jc, err := json.Marshal(cmd)
 	if err != nil {
