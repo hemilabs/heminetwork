@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
@@ -28,9 +29,8 @@ const (
 	logLevel = "INFO"
 	appName  = "cnt"
 
-	defaultListenAddress  = "localhost:49152"
-	defaultTransportCurve = CurveP521
-	defaultMaxConnections = 1000 // XXX
+	defaultListenAddress  = "localhost:45067"
+	defaultMaxConnections = 8
 )
 
 var log = loggo.GetLogger(appName)
@@ -179,17 +179,15 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		log.Errorf("handshake: %v", err)
 		return
 	}
-	_ = hr
 
-	log.Infof("read")
+	log.Infof("connected %v: %v", conn.RemoteAddr(), hr)
 	for {
 		header, payload, err := transport.Read()
 		if err != nil {
 			panic(err) // XXX
 		}
-		_ = header
-		switch payload.(type) {
-		}
+		log.Infof("%v", spew.Sdump(header))
+		log.Infof("%v", spew.Sdump(payload))
 	}
 }
 

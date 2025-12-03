@@ -23,7 +23,8 @@ const (
 	daemonName      = "trfd"
 	defaultLogLevel = daemonName + "=INFO"
 	// defaultNetwork  = "mainnet"
-	defaultHome = "~/." + daemonName
+	defaultHome           = "~/." + daemonName
+	defaultMaxConnections = 8
 )
 
 var (
@@ -69,8 +70,8 @@ var (
 			Print:        config.PrintAll,
 		},
 		"TRF_MAX_CONNECTIONS": config.Config{
-			Value:        &cfg.PprofListenAddress,
-			DefaultValue: 1000, // XXX
+			Value:        &cfg.MaxConnections,
+			DefaultValue: defaultMaxConnections,
 			Help:         "maximum allowed connections to transfuctionerd at a time",
 			Print:        config.PrintAll,
 		},

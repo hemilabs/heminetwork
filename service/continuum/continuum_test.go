@@ -34,7 +34,7 @@ import (
 // internal testutils.
 
 var (
-	defaultPort = uint16(49152)
+	defaultPort = uint16(45067)
 	// seed1       = "seed.bark.gfy." // XXX implement this
 
 	// wellKnownSeeds = []string{seed1}

@@ -73,37 +73,6 @@ func TestEncryptDecrypt(t *testing.T) {
 	}
 }
 
-//func TestNewCommand(t *testing.T) {
-//	helloChallenge := make([]byte, 32)
-//	helloRequest := &HelloRequest{
-//		Version:   TransportVersion,
-//		Options:   nil,
-//		Challenge: helloChallenge,
-//	}
-//	m := make(map[reflect.Type]PayloadType)
-//	m[reflect.TypeOf(helloRequest)] = PHelloRequest
-//	t.Logf("%v", m[reflect.TypeOf(helloRequest)])
-//
-//	hash, payload, err := NewPayloadFromCommand(helloRequest)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	t.Logf("%v", spew.Sdump(hash))
-//	t.Logf("%v", spew.Sdump(payload))
-//
-//	var x any = helloRequest
-//	header := Header{
-//		PayloadType: m[reflect.TypeOf(x)],
-//		PayloadHash: *hash,
-//	}
-//	t.Logf("header: %v", spew.Sdump(header))
-//	jh, err := json.Marshal(header)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	t.Logf("%v", spew.Sdump(append(jh, payload...)))
-//}
-
 func TestECDHKeyExchange(t *testing.T) {
 	// This test illustrated that the server can dictate the curve and the
 	// client can figure it out either by brute force as shown or by
