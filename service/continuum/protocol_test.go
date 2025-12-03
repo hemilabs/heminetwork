@@ -209,7 +209,7 @@ func TestNonce(t *testing.T) {
 	}
 }
 
-func TestSecret(t *testing.T) {
+func TestSecretSignature(t *testing.T) {
 	// This test implicitely tests Identity
 	k1, err := NewSecret()
 	if err != nil {
@@ -1148,17 +1148,25 @@ func TestSecret(t *testing.T) {
 	}
 
 	// Secret from private
-	s := NewSecretFromPrivate(pk)
-	if !s.PublicKey().IsEqual(pk.PubKey()) {
-		t.Fatalf("pubKey mismatch: %v != %v", s.PublicKey(), pk.PubKey())
+	sec := NewSecretFromPrivate(pk)
+	if !sec.PublicKey().IsEqual(pk.PubKey()) {
+		t.Fatalf("pubKey mismatch: %v != %v", sec.PublicKey(), pk.PubKey())
 	}
 
 	// Test sign and recovering
 	hash := []byte("testhash")
-	sig := s.Sign(hash)
+	sig := sec.Sign(hash)
+
+	var r, s secp256k1.ModNScalar
+	r.SetByteSlice(sig[1:33])
+	s.SetByteSlice(sig[33:])
+	fullSig := ecdsa.NewSignature(&r, &s)
 	recPub, err := Verify(hash, sig)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !fullSig.Verify(hash, recPub) {
+		t.Fatal("recovered pubkey invalid for signature and hash")
 	}
 	if !recPub.IsEqual(pk.PubKey()) {
 		t.Fatalf("pubKey mismatch: %v != %v", recPub, pk.PubKey())
