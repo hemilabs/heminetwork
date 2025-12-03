@@ -191,12 +191,16 @@ func waitForDNSServer(address string, t *testing.T) {
 			break
 		}
 
+		fts := syscall.ECONNREFUSED
 		if errors.Is(func() *os.SyscallError {
 			target := &os.SyscallError{}
-			_ = errors.As(err.(*net.OpError).Err, &target)
+			_ = errors.As(func() *net.OpError {
+				target := &net.OpError{}
+				_ = errors.As(err, &target)
+				return target
+			}().Err, &target)
 			return target
-		}().Err,
-			syscall.ECONNREFUSED) {
+		}().Err, &fts) {
 			continue
 		}
 	}
