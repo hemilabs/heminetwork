@@ -209,7 +209,7 @@ func TestNonce(t *testing.T) {
 }
 
 func TestSecretSignature(t *testing.T) {
-	// This test implicitely tests Identity
+	// This test implicitly tests Identity
 	k1, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)

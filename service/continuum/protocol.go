@@ -361,6 +361,8 @@ func NewSecret() (*Secret, error) {
 	return NewSecretFromPrivate(s), nil
 }
 
+// TransportRequest advertises the ephemeral public key. It is the only command
+// that travels in the clear.
 type TransportRequest struct {
 	Version   uint32 `json:"version"`
 	PublicKey []byte `json:"publickey"`
