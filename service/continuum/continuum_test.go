@@ -324,7 +324,6 @@ func TestECDHSecretBox(t *testing.T) {
 	}
 }
 
-// Below this line should be all retained
 func TestIdentity(t *testing.T) {
 	s1, err := NewSecret()
 	if err != nil {

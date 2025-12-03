@@ -694,21 +694,29 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		}
 	}
 
-	// XXX should we be using 3 as a constant here or not?
-	var sizeRE [4]byte
-	n, err := conn.Read(sizeRE[1:4]) // read 3 bytes for the nonce+ciphertext
-	if err != nil {
-		return nil, err
+	// Blob size is 24 bits or 3 bytes encoded in big endian
+	var (
+		sizeRE [4]byte
+		at     int
+		sizeR  uint32
+	)
+	for {
+		n, err := conn.Read(sizeRE[1:4]) // read 3 bytes for the nonce+ciphertext
+		if err != nil {
+			return nil, err
+		}
+		at += n
+		if at < 3 {
+			continue
+		}
+		sizeR = binary.BigEndian.Uint32(sizeRE[:])
+		break
 	}
-	if n != 3 {
-		return nil, fmt.Errorf("short read size: %v != 3", n)
-	}
-	sizeR := binary.BigEndian.Uint32(sizeRE[:])
 
 	blob := make([]byte, sizeR)
-	var at int
+	at = 0
 	for {
-		n, err = conn.Read(blob[at:])
+		n, err := conn.Read(blob[at:])
 		if err != nil {
 			return nil, err
 		}
