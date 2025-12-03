@@ -49,7 +49,6 @@ mainnet)
 	TBCNET="mainnet"
 	OVERRIDES="--override.ecotone=1725868497 \\
 	--override.canyon=1725868497 \\
-	--override.cancun=1725868497 \\
 	--override.hvm0=1739286001 \\
 	--override.isthmus=1751554801 \\
 	--override.holocene=1751554801 \\
