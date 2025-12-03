@@ -158,6 +158,14 @@ func TestPayloadHash(t *testing.T) {
 	if !bytes.Equal(ph[:], hash[:]) {
 		t.Fatal("json line not equal to hash")
 	}
+
+	// Negative
+	crap := []byte("this is brocken")
+	var mmm map[string]PayloadHash
+	err = json.Unmarshal(crap, &mmm)
+	if err == nil {
+		t.Fatal("brocken")
+	}
 }
 
 func TestKeyExchange(t *testing.T) {
