@@ -171,6 +171,42 @@ func TestPayloadHash(t *testing.T) {
 	}
 }
 
+func TestNonce(t *testing.T) {
+	n, err := NewNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var (
+		wg  sync.WaitGroup
+		mtx sync.Mutex
+	)
+	maxNonces := int(1e6)
+	m := make(map[[TransportNonceSize]byte]int, maxNonces)
+	for i := 0; i < maxNonces; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			nonce := n.Next() // race nonce
+
+			// But be nice to map inserts
+			mtx.Lock()
+			defer mtx.Unlock()
+			if _, ok := m[*nonce]; ok {
+				panic(fmt.Sprintf("duplicate nonce: key %x i %v",
+					n.key, i))
+			}
+			m[*nonce] = i + 1
+		}()
+	}
+
+	wg.Wait()
+	if len(m) != maxNonces {
+		t.Fatalf("got %v want %v", len(m), maxNonces)
+	}
+}
+
 func TestKeyExchange(t *testing.T) {
 	// Setup server
 	serverTransport, err := NewTransportFromCurve(ecdh.X25519())

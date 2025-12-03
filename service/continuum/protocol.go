@@ -139,8 +139,8 @@ func NewPayloadFromCommand(cmd any) (*PayloadHash, []byte, error) {
 }
 
 // Header is a part of every message sent by transport, and contains
-// information about identity of the sender and intended receiver, as
-// well as the payload.
+// information about identity of the sender and intended receiver, as well as
+// the payload.
 type Header struct {
 	PayloadType PayloadType `json:"payloadtype"`           // Hint to decode payload
 	PayloadHash PayloadHash `json:"payloadhash"`           // Message identifier
@@ -150,42 +150,43 @@ type Header struct {
 	// Path        []Identity      // Record path when routing XXX ?
 }
 
+// HelloRequest is the first command that is sent to the other side after the
+// key exchange pahse. It advertises the version the node is running and some
+// desired options. The challenge must be signed by the remote node.
 type HelloRequest struct {
 	Version   uint32            `json:"version"`           // Version number
 	Options   map[string]string `json:"options,omitempty"` // x=y
 	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
 }
 
+// HelloResponse returns the signed challenge. The remote identity is dervied
+// from the signature.
 type HelloResponse struct {
-	Signature []byte `json:"signature"` // Signature of Challenge and identity is derived
+	Signature []byte `json:"signature"` // Signature of Challenge
 }
 
+// PingRequest is a ping to the other side.
 type PingRequest struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Sender timestamp
 }
 
+// PingResponse is the response to a pin request.
 type PingResponse struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Copy the value back
 	PeerTimestamp   int64 `json:"peertimestamp"`   // Remote timestamp
 }
 
 const (
-	TransportVersion = 1
+	TransportVersion = 1 // Transport protocol version
 
-	ProtocolVersion = 1
+	ProtocolVersion = 1 // Node version
 
 	TransportNonceSize = 24         // 24 bytes, per secretbox
 	TransportMaxSize   = 0x00ffffff // 24 bit, 3 bytes
 
 	ChallengeSize = 32 // 32 bytes random data
 
-	// Transport curves
-	CurveP256   = "P256"
-	CurveP384   = "P384"
-	CurveP521   = "P521"
-	CurveX25519 = "x25519"
-
-	dnsAppName = "transfunctioner"
+	dnsAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
 )
 
 var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is an invalid challenge
@@ -216,6 +217,8 @@ func (n *Nonce) Next() *[TransportNonceSize]byte {
 	return &nonce
 }
 
+// NewNonce returns a new Nonce type. This is used to guarantee a unique nonce
+// that can be used with secretbox.
 func NewNonce() (*Nonce, error) {
 	n := &Nonce{}
 	_, err := rand.Read(n.key[:])
