@@ -733,7 +733,8 @@ func TestHandshakeErrors(t *testing.T) {
 				if !ok {
 					return fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
 				}
-				sig := ecdsa.SignCompact(s.privateKey, []byte(helloRequest.Challenge), true)
+				sig := ecdsa.SignCompact(s.privateKey,
+					helloRequest.Challenge, true)
 				return tr.Write(s.Identity, HelloResponse{
 					Signature: sig,
 				})
@@ -1392,7 +1393,7 @@ func TestDNSTXTRecord(t *testing.T) {
 			Txt: []string{"x"},
 		},
 	}
-	m, err = TXTRecordFromAddress(t.Context(), r, addr)
+	_, err = TXTRecordFromAddress(t.Context(), r, addr)
 	if err == nil {
 		t.Fatal("expectred invalid txt record")
 	}
