@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 
@@ -231,15 +230,15 @@ func TestSecretSignature(t *testing.T) {
 	sig1 := k1.Sign(secretData1[:])
 	sig2 := k2.Sign(secretData2[:])
 
-	// Postive path
-	pubk1, err := Verify(secretData1[:], sig1)
+	// Positive path
+	pubk1, err := Verify(secretData1[:], k1.Identity, sig1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !pubk1.IsEqual(k1.PublicKey()) {
 		t.Fatal("derived key 1 not equal")
 	}
-	pubk2, err := Verify(secretData2[:], sig2)
+	pubk2, err := Verify(secretData2[:], k2.Identity, sig2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,25 +247,19 @@ func TestSecretSignature(t *testing.T) {
 	}
 
 	// Negative path
-	signature := ecdsa.SignCompact(k1.privateKey, secretData1[:], false)
-	// verified := signature.Verify(secretData1[:], k1.PublicKey())
-	rk, _, err := ecdsa.RecoverCompact(signature, secretData1[:])
-	spew.Dump(err)
-	spew.Dump(rk)
-	//_ = verified
-
-	spew.Dump(secretData1)
-	spew.Dump(secretData2)
-	spew.Dump(sig1)
-	spew.Dump(sig2)
-	x, err := Verify(secretData1[:], sig2)
+	_, err = Verify(secretData1[:], k1.Identity, sig2)
 	if err == nil {
-		spew.Dump(k1.PublicKey())
-		spew.Dump(k2.PublicKey())
-		spew.Dump(x)
 		t.Fatal("should not verify")
 	}
-	_, err = Verify(secretData2[:], sig1)
+	_, err = Verify(secretData1[:], k2.Identity, sig2)
+	if err == nil {
+		t.Fatal("should not verify")
+	}
+	_, err = Verify(secretData2[:], k2.Identity, sig1)
+	if err == nil {
+		t.Fatal("should not verify")
+	}
+	_, err = Verify(secretData2[:], k1.Identity, sig1)
 	if err == nil {
 		t.Fatal("should not verify")
 	}
@@ -1161,7 +1154,7 @@ func TestSecret(t *testing.T) {
 	r.SetByteSlice(sig[1:33])
 	s.SetByteSlice(sig[33:])
 	fullSig := ecdsa.NewSignature(&r, &s)
-	recPub, err := Verify(hash, sig)
+	recPub, err := Verify(hash, sec.Identity, sig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1238,11 +1231,11 @@ func TestIdentity(t *testing.T) {
 	sig1 := s1.Sign(c2[:])
 	sig2 := s2.Sign(c1[:])
 
-	rec1, err := Verify(c1[:], sig2)
+	rec1, err := Verify(c1[:], s2.Identity, sig2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec2, err := Verify(c2[:], sig1)
+	rec2, err := Verify(c2[:], s1.Identity, sig1)
 	if err != nil {
 		t.Fatal(err)
 	}

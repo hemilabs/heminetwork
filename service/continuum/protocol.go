@@ -156,6 +156,7 @@ type Header struct {
 type HelloRequest struct {
 	Version   uint32            `json:"version"`           // Version number
 	Options   map[string]string `json:"options,omitempty"` // x=y
+	Identity  Identity          `json:"identity"`          // Advertise our identity
 	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
 }
 
@@ -312,15 +313,19 @@ func (s Secret) Sign(hash []byte) []byte {
 	return ecdsa.SignCompact(s.privateKey, hash[:], true)
 }
 
-// Verify verifies that hash was signed by the provided siganture. It returns
+// Verify verifies that hash was signed by the provided identity. It returns
 // the derived compact public key.
-func Verify(hash []byte, sig []byte) (*secp256k1.PublicKey, error) {
+func Verify(hash []byte, remote Identity, sig []byte) (*secp256k1.PublicKey, error) {
 	publicKey, compact, err := ecdsa.RecoverCompact(sig, hash[:])
 	if err != nil {
 		return nil, err
 	}
 	if !compact {
 		return nil, ErrNotCompact
+	}
+	recoveredID := NewIdentityFromPub(publicKey)
+	if !bytes.Equal(recoveredID[:], remote[:]) {
+		return nil, ErrIdentityMismatch
 	}
 	return publicKey, nil
 }
@@ -363,6 +368,7 @@ type TransportRequest struct {
 
 var (
 	ErrDecrypt            = errors.New("could not decrypt")
+	ErrIdentityMismatch   = errors.New("identity mismatch")
 	ErrInvalidChallenge   = errors.New("invalid challenge")
 	ErrInvalidPublicKey   = errors.New("invalid public key")
 	ErrInvalidTXTRecord   = errors.New("invalid TXT record")
@@ -661,6 +667,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	// Write HelloRequest
 	err = t.Write(secret.Identity, HelloRequest{
 		Version:   ProtocolVersion,
+		Identity:  secret.Identity,
 		Challenge: ourChallenge[:],
 		Options: map[string]string{
 			"encoding":    "json",
@@ -710,7 +717,8 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	}
 
 	// Verify response
-	themPub, err := Verify(ourChallenge[:], helloResponse.Signature)
+	themPub, err := Verify(ourChallenge[:], helloRequest.Identity,
+		helloResponse.Signature)
 	if err != nil {
 		return nil, err
 	}
