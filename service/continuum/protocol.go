@@ -188,7 +188,7 @@ const (
 	dnsAppName = "transfunctioner"
 )
 
-var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is invalid
+var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is an invalid challenge
 
 // Nonce is used by transport for message encryption / decryption.
 // It is first generated during key exchange, and is atomically
