@@ -900,6 +900,11 @@ func kvFomTxt(txt string) (map[string]string, error) {
 
 // TXTRecordFromAddress returns one and only one TXT record that is associated
 // with an address.
+//
+// XXX I slept some more on this and we should use provide a hint during
+// handshake (already encrypted) as to where we are initiating the connection
+// from. DNS has been sufficiently broken by you know who and reverse lookups
+// are essentially undoable these days.
 func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.Addr) (map[string]string, error) {
 	if resolver == nil {
 		resolver = &net.Resolver{}
