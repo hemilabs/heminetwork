@@ -2,10 +2,17 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-ARG OP_GETH_COMMIT=faf53b75ee93d24c93885364dbeb62bb7fc876f3
-ARG OPTIMISM_COMMIT=12dba15e5e3fdc48620a81872b381b2e79fcb62b
+ARG OP_GETH_COMMIT=12a93e2f9538378a3cdf0cd3976409246e1c0af1
+ARG OPTIMISM_COMMIT=984ab34d8f3b69ed86bdcd8d053855daf4c71bd3
+
+# commit near tip on "master" (main) branch.  the most recent release is
+# broken
+ARG FOUNDRY_COMMIT=97fba0a51e335a174442b19d92b64df9d2ab72ab
 
 FROM golang:1.25.5-trixie@sha256:4f9d98ebaa759f776496d850e0439c48948d587b191fc3949b5f5e4667abef90 AS build_1
+ARG OP_GETH_COMMIT
+ARG OPTIMISM_COMMIT
+ARG FOUNDRY_COMMIT
 
 WORKDIR /git
 
@@ -16,6 +23,9 @@ RUN git checkout $OP_GETH_COMMIT
 RUN go run build/ci.go install -static ./cmd/geth
 
 FROM golang:1.25.5-trixie@sha256:4f9d98ebaa759f776496d850e0439c48948d587b191fc3949b5f5e4667abef90 AS build_2
+ARG OP_GETH_COMMIT
+ARG OPTIMISM_COMMIT
+ARG FOUNDRY_COMMIT
 
 # store the latest geth here, build with go 1.23
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
@@ -35,6 +45,16 @@ WORKDIR /git/just
 RUN cargo install just
 
 WORKDIR /git
+
+RUN git clone https://github.com/foundry-rs/foundry.git
+
+WORKDIR /git/foundry
+RUN git checkout $FOUNDRY_COMMIT
+RUN cargo build --release
+RUN cp /git/foundry/target/release/forge /usr/bin/forge
+
+WORKDIR /git
+
 
 RUN curl -L https://foundry.paradigm.xyz | bash
 
@@ -79,8 +99,5 @@ RUN just op-proposer
 
 WORKDIR /git/optimism/op-conductor
 RUN just op-conductor
-
-WORKDIR /git/optimism/op-deployer
-RUN just build
 
 WORKDIR /git/optimism
