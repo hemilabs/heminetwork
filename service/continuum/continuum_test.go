@@ -76,7 +76,8 @@ func createNode(name, domain string, ip net.IP, port uint16) (*node, error) {
 func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 	var port string
 	if n.Port != 0 {
-		port = " port=" + strconv.Itoa(int(n.Port))
+		// Note extra spaces here are to test kvFomTxt parser.
+		port = ";   port=" + strconv.Itoa(int(n.Port)) + ";"
 	}
 	return []dns.RR{
 			&dns.A{
@@ -91,7 +92,7 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 					Name:  n.DNSName,
 					Class: dns.ClassINET,
 				},
-				Txt: []string{"v=" + dnsAppName + " identity=" +
+				Txt: []string{"v=" + dnsAppName + "; identity=" +
 					n.Secret.String() + port},
 			},
 		},

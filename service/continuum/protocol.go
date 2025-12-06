@@ -634,7 +634,7 @@ func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
 
 	// diagnostic
 	if ts != len(blob)-3 {
-		panic(fmt.Sprintf("encryption diagnostic: wanted %v got %v",
+		panic(fmt.Errorf("encryption diagnostic: wanted %v got %v",
 			ts, len(blob)))
 	}
 	return blob, nil
@@ -886,14 +886,17 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 // kvFomTxt converts a TXT record to a key value map. The format is typical INI
 // file style. E.g. "v=transfunctioner identity=myidentity key=value".
 func kvFomTxt(txt string) (map[string]string, error) {
-	s := strings.Split(txt, " ")
+	s := strings.Split(txt, "; ")
 	m := make(map[string]string)
 	for _, v := range s {
+		log.Infof("v %v", v)
 		kv := strings.Split(v, "=")
 		if len(kv) != 2 {
+			log.Infof("txt %v", txt)
+			log.Infof("kv %v", kv)
 			return nil, ErrInvalidTXTRecord
 		}
-		m[kv[0]] = kv[1]
+		m[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
 	}
 	return m, nil
 }

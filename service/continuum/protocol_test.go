@@ -1163,7 +1163,8 @@ func TestDNSServerSetup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		txtExpected := fmt.Sprintf("v=%v identity=%v port=%v",
+		// Note that the extra spaces match the TXT record that is generated.
+		txtExpected := fmt.Sprintf("v=%v; identity=%v;   port=%v;",
 			dnsAppName, v.Secret.Identity, defaultPort)
 		if txtRecords[0] != txtExpected {
 			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
@@ -1395,7 +1396,7 @@ func TestDNSTXTRecord(t *testing.T) {
 	}
 	_, err = TXTRecordFromAddress(t.Context(), r, addr)
 	if err == nil {
-		t.Fatal("expectred invalid txt record")
+		t.Fatal("expected invalid txt record")
 	}
 
 	// Delete record
