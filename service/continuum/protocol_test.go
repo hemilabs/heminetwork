@@ -78,6 +78,12 @@ func TestEncryptDecrypt(t *testing.T) {
 		if !bytes.Equal(message, cleartext) {
 			t.Fatal("message not equal")
 		}
+
+		// Clip blob to test length test
+		_, err = client.decrypt(em[3:8]) // clip nonce
+		if !errors.Is(ErrInvalidSecretboxLength, err) {
+			t.Fatalf("expected length error: %v", err)
+		}
 	}
 }
 
@@ -651,7 +657,7 @@ func TestHandshakeErrors(t *testing.T) {
 		{
 			name:          "invalid encryption",
 			curve:         ecdh.P256(),
-			expectedError: ErrDecrypt,
+			expectedError: ErrInvalidSecretboxLength,
 			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
 				nonce := tr.nonce.Next()
 				msg := []byte("test")

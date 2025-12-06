@@ -369,15 +369,16 @@ type TransportRequest struct {
 }
 
 var (
-	ErrDecrypt            = errors.New("could not decrypt")
-	ErrIdentityMismatch   = errors.New("identity mismatch")
-	ErrInvalidChallenge   = errors.New("invalid challenge")
-	ErrInvalidPublicKey   = errors.New("invalid public key")
-	ErrInvalidTXTRecord   = errors.New("invalid TXT record")
-	ErrNoConn             = errors.New("no connection")
-	ErrNotCompact         = errors.New("not a compact public key")
-	ErrNoSuitableCurve    = errors.New("no suitable curve found")
-	ErrUnsupportedVersion = errors.New("unsupported version")
+	ErrDecrypt                = errors.New("could not decrypt")
+	ErrIdentityMismatch       = errors.New("identity mismatch")
+	ErrInvalidChallenge       = errors.New("invalid challenge")
+	ErrInvalidPublicKey       = errors.New("invalid public key")
+	ErrInvalidSecretboxLength = errors.New("invalid secretbox length")
+	ErrInvalidTXTRecord       = errors.New("invalid TXT record")
+	ErrNoConn                 = errors.New("no connection")
+	ErrNotCompact             = errors.New("not a compact public key")
+	ErrNoSuitableCurve        = errors.New("no suitable curve found")
+	ErrUnsupportedVersion     = errors.New("unsupported version")
 
 	// placeholders until we decide on timeout handling
 	readTimeout  time.Duration = 4 * time.Second
@@ -643,6 +644,11 @@ func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
 // decrypt decrypts the passed in ciphertext. The ciphertext must be prefixed
 // with the nonce. Note that the three byte length must have been clipped off.
 func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
+	// Make sure we have received enough bytes to decrypt.
+	if len(ciphertext) < TransportNonceSize+1+secretbox.Overhead {
+		return nil, ErrInvalidSecretboxLength
+	}
+
 	var nonce [TransportNonceSize]byte
 	copy(nonce[:], ciphertext[:TransportNonceSize])
 	cleartext, ok := secretbox.Open(nil, ciphertext[TransportNonceSize:], &nonce,
@@ -889,11 +895,8 @@ func kvFomTxt(txt string) (map[string]string, error) {
 	s := strings.Split(txt, "; ")
 	m := make(map[string]string)
 	for _, v := range s {
-		log.Infof("v %v", v)
 		kv := strings.Split(v, "=")
 		if len(kv) != 2 {
-			log.Infof("txt %v", txt)
-			log.Infof("kv %v", kv)
 			return nil, ErrInvalidTXTRecord
 		}
 		m[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
