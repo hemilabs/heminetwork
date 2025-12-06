@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	daemonName      = "trfd"
+	daemonName      = "transfunctionerd"
 	defaultLogLevel = daemonName + "=INFO"
 	// defaultNetwork  = "mainnet"
 	defaultHome           = "~/." + daemonName
