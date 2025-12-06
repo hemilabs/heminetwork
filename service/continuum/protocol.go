@@ -511,7 +511,7 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
 
 	// Derive shared ephemeral encryption key.
 	var encryptionKey [32]byte
-	er := hkdf.New(sha256.New, shared, nil, nil)
+	er := hkdf.New(sha256.New, shared, nil, []byte("continuum-transport-v1"))
 	if _, err := io.ReadFull(er, encryptionKey[:]); err != nil {
 		return nil, err
 	}
