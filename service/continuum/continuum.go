@@ -2,6 +2,8 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
+// Package continuum implements the service that runs the p2p network for
+// MinerFI Multi-Party Threshold Signature Scheme.
 package continuum
 
 import (
@@ -27,7 +29,7 @@ import (
 
 const (
 	logLevel = "INFO"
-	appName  = "cnt"
+	appName  = "continuum"
 
 	defaultListenAddress  = "localhost:45067"
 	defaultMaxConnections = 8
@@ -51,6 +53,7 @@ type Config struct {
 	ListenAddress           string
 	MaxConnections          int
 }
+
 type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
@@ -109,6 +112,8 @@ func (s *Server) newSession(t *Transport) string {
 		id := genID()
 		s.mtx.Lock()
 		if _, ok := s.sessions[id]; ok {
+			s.mtx.Unlock()
+
 			// ID is already used, retry.
 			continue
 		}
