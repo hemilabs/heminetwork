@@ -14,7 +14,7 @@ export GOPKG=$(PROJECTPATH)/pkg
 GO_LDFLAGS=
 
 # renovate: datasource=github-releases depName=golangci/golangci-lint versioning=semver
-GOLANGCI_LINT_VERSION="v2.6.2"
+GOLANGCI_LINT_VERSION="v2.7.1"
 # renovate: datasource=github-releases depName=joshuasing/golicenser versioning=semver
 GOLICENSER_VERSION="v0.3.1"
 # renovate: datasource=github-releases depName=mvdan/gofumpt versioning=semver
