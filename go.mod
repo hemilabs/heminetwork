@@ -1,6 +1,6 @@
 module github.com/hemilabs/heminetwork/v2
 
-go 1.25
+go 1.25.5
 
 toolchain go1.25.4
 

@@ -1,6 +1,6 @@
 module github.com/hemilabs/heminetwork/e2e/monitor
 
-go 1.25
+go 1.25.5
 
 toolchain go1.25.4
 
