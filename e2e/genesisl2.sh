@@ -7,6 +7,15 @@ set -ex
 
 MY_ADDRESS="0x78697c88847dfbbb40523e42c1f2e28a13a170be"
 
+# need an older version of op-deployer here, need to update the repo
+# to use the new one but this will do for our purposes now
+# this should only affect the op-geth-l2-setup container (no others)
+cd /git/optimism
+git checkout 12dba15e5e3fdc48620a81872b381b2e79fcb62b
+git submodule update --init --recursive
+cd /git/optimism/op-deployer
+just build
+
 cd /git/optimism/packages/contracts-bedrock
 
 forge build --deny never --skip test --out .artifacts
