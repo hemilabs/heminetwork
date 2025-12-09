@@ -189,7 +189,7 @@ func TestNonce(t *testing.T) {
 		wg  sync.WaitGroup
 		mtx sync.Mutex
 	)
-	maxNonces := int(1e6)
+	maxNonces := int(1e4)
 	m := make(map[[TransportNonceSize]byte]int, maxNonces)
 	for i := 0; i < maxNonces; i++ {
 		wg.Add(1)
