@@ -31,8 +31,6 @@ import (
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
-// XXX this needs to be rewritten to match new reality
-//
 // The continuum protocol is a simple gossipy P2P system.
 //
 // The continuum transfunctioner is a very mysterious and powerful device and
@@ -43,16 +41,21 @@ import (
 // payloads with a size (that is capped). If the message is too large the
 // receiver will drop the connection and potentially blacklist the caller.
 //
-// An envelope is constructed on the wire as: [size+nonce][header+payload].
-// Once an envelope is decrypted there are two distinct pieces, a header
-// and a message or another envelope. The header contains information akin
-// to TCP and is used to route the envelope. Anologous to wire protocol it
-// is encoded with a size prefix, which validates the amount of data to be
-// read, A message is for the reader and an envelope should be routed to a
-// third party.
+// Communication should occur between a transport "client" and a "server",
+// where the server determines the type of Curve and encryption key shared
+// by both. Communication between these two parties is initiated by performing
+// a key exchange, followed by a handshake where the other party's identity
+// is verified. After this, envelopes can be shared freely between both sides.
 //
-// Size is encoded as a big endian 24 bit unsigned integer.
-
+// An envelope is constructed on the wire as: [size+nonce][header+payload].
+// The size and nonce are unencrypted, the former being used to validate the
+// amount of data to be read, and the latter for decrypting the message.
+//
+// Once an envelope is decrypted there are two distinct pieces, a header
+// and a message + payload. The header contains information akin to TCP
+// and is used to route the envelope and specify the payload command type.
+// A message is for the reader and an envelope should be routed to a third party.
+//
 // Version
 //	1:
 //		Defaults to JSON encoding
@@ -60,8 +63,6 @@ import (
 // Options (default):
 //	encoding=json
 //	compression=no
-//
-// XXX describe the types a bit here and add a drawing if needed to tie it all together.
 
 type PayloadType string
 
@@ -379,6 +380,7 @@ var (
 	ErrNotCompact             = errors.New("not a compact public key")
 	ErrNoSuitableCurve        = errors.New("no suitable curve found")
 	ErrUnsupportedVersion     = errors.New("unsupported version")
+	ErrMessageTooLarge        = errors.New("message too large")
 
 	// placeholders until we decide on timeout handling
 	readTimeout  time.Duration = 4 * time.Second
@@ -623,7 +625,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
 	ts := TransportNonceSize + len(cleartext) + secretbox.Overhead
 	if ts > TransportMaxSize {
-		return nil, fmt.Errorf("overflow")
+		return nil, ErrMessageTooLarge
 	}
 
 	// Encode size to prefix nonce
@@ -769,6 +771,10 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		}
 		sizeR = binary.BigEndian.Uint32(sizeRE[:])
 		break
+	}
+
+	if sizeR > TransportMaxSize {
+		return nil, ErrMessageTooLarge
 	}
 
 	blob := make([]byte, sizeR)
