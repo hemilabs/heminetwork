@@ -238,6 +238,21 @@ func Hash160(data []byte) []byte {
 	return ripemd.Sum(nil)
 }
 
+func Hash256(data []byte, extraData ...[]byte) []byte {
+	hash := sha256.New()
+	_, err := hash.Write(data[:])
+	if err != nil {
+		panic(err)
+	}
+	for _, v := range extraData {
+		_, err := hash.Write(v)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return hash.Sum(nil)
+}
+
 // Identity is how a node is identified. It simply is the ripemd160 of the
 // public key.
 type Identity [ripemd160.Size]byte // ripemd160 of compressed pubkey
@@ -704,9 +719,11 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, ErrInvalidChallenge
 	}
 
-	// Sign challenge and reply
+	// Sign combined challenge that is represented by the sha256 hash of
+	// their challenge plus ephemeral transport public key and reply.
+	combinedChallenge := Hash256(helloRequest.Challenge, t.them.Bytes())
 	if err := t.Write(secret.Identity, HelloResponse{
-		Signature: secret.Sign(helloRequest.Challenge),
+		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
 		return nil, err
 	}
@@ -722,8 +739,9 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
-	// Verify response
-	themPub, err := Verify(ourChallenge[:], helloRequest.Identity,
+	// Verify signature over sha256(our challenge + our tranport public key)
+	linkedChallenge := Hash256(ourChallenge[:], t.us.PublicKey().Bytes())
+	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
 		return nil, err
