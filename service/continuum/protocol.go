@@ -238,6 +238,8 @@ func Hash160(data []byte) []byte {
 	return ripemd.Sum(nil)
 }
 
+// Hash160 is a utility function that returns the sha256 of multiple byte
+// slices.
 func Hash256(data []byte, extraData ...[]byte) []byte {
 	hash := sha256.New()
 	_, err := hash.Write(data[:])
