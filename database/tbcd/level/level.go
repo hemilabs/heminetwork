@@ -649,7 +649,7 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 	binary.BigEndian.PutUint64(ebhr[0:8], height)
 	copy(ebhr[8:88], header[:])
 	difficulty.FillBytes(ebhr[88:blockheaderSize])
-	return
+	return ebhr
 }
 
 // decodeBlockHeader reverse the process of encodeBlockHeader.
@@ -1954,7 +1954,7 @@ func encodeKeystone(ks tbcd.Keystone) (eks [keystoneSize]byte) {
 	copy(eks[0:4], h[:])
 	copy(eks[4:4+32], ks.BlockHash[:])
 	copy(eks[36:], ks.AbbreviatedKeystone[:])
-	return
+	return eks
 }
 
 func encodeKeystoneToSlice(ks tbcd.Keystone) []byte {
@@ -1981,7 +1981,7 @@ func encodeKeystoneHeightHash(height uint32, hash chainhash.Hash) (e [keystoneHe
 	e[0] = 'h'
 	copy(e[1:1+4], h[:])
 	copy(e[5:5+32], hash[:])
-	return
+	return e
 }
 
 func encodeKeystoneHeightHashSlice(height uint32, hash chainhash.Hash) []byte {

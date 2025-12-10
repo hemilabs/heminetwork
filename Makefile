@@ -21,12 +21,13 @@ GOLICENSER_VERSION="v0.3.1"
 GOFUMPT_VERSION="v0.9.2"
 
 cmds = \
-	bfgd	\
-	hemictl	\
-	hproxyd	\
-	keygen	\
-	popmd	\
-	tbcd
+	bfgd			\
+	hemictl			\
+	hproxyd			\
+	keygen			\
+	popmd			\
+	tbcd			\
+	transfunctionerd	\
 
 .PHONY: all clean deps go-deps $(cmds) build install lint lint-deps tidy race test vulncheck \
 	vulncheck-deps
