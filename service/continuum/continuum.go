@@ -49,7 +49,7 @@ type Config struct {
 	PprofListenAddress      string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
-	Secret                  string
+	PrivateKey              string
 	ListenAddress           string
 	MaxConnections          int
 }
@@ -83,7 +83,7 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		LogLevel:            logLevel,
 		PrometheusNamespace: appName,
-		Secret:              "",
+		PrivateKey:          "",
 		ListenAddress:       defaultListenAddress,
 		MaxConnections:      defaultMaxConnections,
 	}
@@ -279,11 +279,11 @@ func (s *Server) Run(pctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("expand: %w", err)
 	}
-	s.secret, err = NewSecretFromString(s.cfg.Secret)
+	s.secret, err = NewSecretFromString(s.cfg.PrivateKey)
 	if err != nil {
 		return fmt.Errorf("secret: %w", err)
 	}
-	s.cfg.Secret = "" // hopefully Secret is reaped later.
+	s.cfg.PrivateKey = "" // hopefully PrivateKey is reaped later.
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()

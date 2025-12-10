@@ -39,8 +39,8 @@ var (
 			Help:         "data directory",
 			Print:        config.PrintAll,
 		},
-		"TRF_SECRET": config.Config{
-			Value:        &cfg.Secret,
+		"TRF_PRIVATE_KEY": config.Config{
+			Value:        &cfg.PrivateKey,
 			DefaultValue: "",
 			Help:         "secp256k1 private key",
 			Print:        config.PrintSecret,

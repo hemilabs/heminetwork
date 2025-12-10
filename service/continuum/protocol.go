@@ -121,7 +121,7 @@ import (
 // In the continuum protocol every host has a long lived identity. This
 // identity is the RIPEMD160 digest of a public secp256k1 compressed key. This
 // means that every host has a long lived secp256k1 private key that is used to
-// sign various things over its life-cycle and uniquely identify itself withing
+// sign various things over its life-cycle and uniquely identify itself within
 // the protocol.
 //
 // An envelope is defined as an encrypted blob that contains a header and a
@@ -1038,6 +1038,10 @@ func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.
 // VerifyRemoteDNSIdentity verifies that passed in identity matches it's
 // associated TXT record identity. This can be used to determine if a server or
 // client are indeed who they claim they are.
+//
+// XXX the likes of amazon and cloudflare have completely destroyed the meaning
+// of reverse DNS records. We thus must flip this around and associate it with
+// regular lookups.
 func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr, id Identity) (bool, error) {
 	m, err := TXTRecordFromAddress(ctx, r, addr)
 	if err != nil {
