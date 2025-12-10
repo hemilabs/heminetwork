@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
 
