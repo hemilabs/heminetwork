@@ -63,6 +63,78 @@ import (
 // Options (default):
 //	encoding=json
 //	compression=no
+//
+// Transport encryption is done in two phases:
+//	1. Key Exchange
+//	2. Handshake
+//
+// Phase one is an ordered set of commands. It uses a server-first approach
+// where the client either agrees to what is being dictated or drops the
+// connection if it doesn't.
+//	1. Server generates an ephemeral transport private key (ETK) based on a
+//	pre-determined curve, e.g. X25519. It sends the corresponding public
+//	key (ETP) to the client in cleartext using a TransportRequest JSON
+//	blob.
+//
+//	2. Client reads and decodes the JSON TransportRequest and extracts the
+//	suggested curve from the server ETP. If the curve is agreeable it
+//	replies with a freshly generated  ETP using the same mechanism as the
+//	server. If the curve is not agreeable it should hang up.
+//
+//	3. Both sides verify the transport protocol version in TransportRequest.
+//	4. Both sides calculate the shared transport secret using Elliptic
+//	Curve Diffie-Hellman (ECDH). Next they derive a shared transport
+//	encryption key (STK) using an HMAC-based key derivation function (HKDF).
+//	The hash used is SHA256, salt remains unused at this time and the info
+//	is "continuum-transport-v1".
+//
+// At this point, both sides have an identical STK which they use to encrypt
+// all packets going forward using NaCl's secretbox. Protocol requires one
+// packet per secretbox and the wire format is 24 bits of cleartext that
+// designates encrypted blob length. The encrypted blob comprises of a 24 byte
+// nonce plus ciphertext. Decrypting is done by calling secretbox open using
+// STK and nonce.
+//
+// Note on nonces: When using secretbox it is imperative to not use duplicate
+// nonces. In order to prevent reuse both sides generate a random 256 bit key
+// and every time a new packet is sent a counter is incremented and then fed
+// into an HMAC to generate a guaranteed unique nonce.
+//
+// Phase two, the handshake, is an unordered set of commands that both sides
+// perform to establish and verify the identity of the counterparty. Do note
+// that at this point every command is sent through the encrypted tunnel using
+// an envelope (see below).
+//	1. Both sides send a HelloRequest that contains a version, their
+//	identity, a challenge, options etc.
+//	2. Both sides read the HelloRequest and validate it's contents prior to
+//	replying with a HelloResponse. By protocol, either side can hang up at
+//	any time if they feel their counterparty is misbehaving. It is
+//	important to note that the challenge that must be signed is the SHA256
+//	of the counterparty challenge and ETP.
+//	3. Both sides read the HelloResponse and derive the remote's ETP from
+//	the signature. The derived ETP must match the provided identity to
+//	prove ownership of the accompanying private key. Additionally, the
+//	identity may be stores in a DNS TXT record that is associated with the
+//	remote host.
+//	TODO: define DNS mechanism in more detail.
+//
+// In the continuum protocol every host has a long lived identity. This
+// identity is the RIPEMD160 digest of a public secp256k1 compressed key. This
+// means that every host has a long lived secp256k1 private key that is used to
+// sign various things over its life-cycle and uniquely identify itself withing
+// the protocol.
+//
+// An envelope is defined as an encrypted blob that contains a header and a
+// command. A headers is akin to a TCP header that contains routing
+// information, TTL and hints for the remote side to aid in command decoding.
+//
+// TODO:
+//	* routing
+//	* TTL
+//	* gossip rules
+//	* uniqueness of commands
+//	* envelope wrapped in envelope (encrypted routing)
+//	* commands
 
 type PayloadType string
 
