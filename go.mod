@@ -20,7 +20,6 @@ require (
 	github.com/ethereum/go-ethereum v1.16.7
 	github.com/go-test/deep v1.1.1
 	github.com/hemilabs/x/tss-lib/v2 v2.0.0-20251204143115-5f2203dde989
-	github.com/juju/loggo v1.0.0
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
