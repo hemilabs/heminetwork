@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/x/tss-lib/v2/common"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/resharing"
@@ -122,7 +123,7 @@ func sign(t *testing.T, curve elliptic.Curve, threshold int, pids tss.SortedPart
 	return nil
 }
 
-func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int, oldPids, newPids tss.SortedPartyIDs, oldKeys []*keygen.LocalPartySaveData) error {
+func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int, oldPids, newPids tss.SortedPartyIDs, oldKeys []*keygen.LocalPartySaveData) ([]*keygen.LocalPartySaveData, error) {
 	t.Logf("Resharing data %v/%v -> %v/%v", oldThreshold, len(oldPids),
 		newThreshold, len(newPids))
 
@@ -139,7 +140,7 @@ func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int,
 	oldParties := make([]*resharing.LocalParty, 0, len(oldPids))
 	for i := 0; i < len(oldPids); i++ {
 		params := tss.NewReSharingParameters(curve, oldCtx, newCtx, oldPids[i],
-			len(oldPids), oldThreshold, len(newPids), newThreshold)
+			len(newPids), oldThreshold, len(newPids), newThreshold)
 		p := resharing.NewLocalParty(params, *oldKeys[i], outCh, endCh).(*resharing.LocalParty)
 		oldParties = append(oldParties, p)
 	}
@@ -160,62 +161,70 @@ func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int,
 		newParties = append(newParties, p)
 	}
 
-	_ = errCh
+	// start the new parties; they will wait for messages
+	for _, P := range newParties {
+		go func(P *resharing.LocalParty) {
+			if err := P.Start(); err != nil {
+				errCh <- err
+			}
+		}(P)
+	}
+	// start the old parties; they will send messages
+	for _, P := range oldParties {
+		go func(P *resharing.LocalParty) {
+			if err := P.Start(); err != nil {
+				errCh <- err
+			}
+		}(P)
+	}
 
-	//signData := make([]*common.SignatureData, 0, len(pids))
-	//// we use len(pids) to test all sigs but it works with threshold as
-	//// well. I tested that.
-	//for done := 0; done != len(pids); {
-	//	select {
-	//	case err := <-errCh:
-	//		return err
-	//	case end := <-endCh:
-	//		signData = append(signData, end)
-	//		done++
-	//		t.Logf("end: threshold %v %v/%v", threshold, done, len(pids))
-	//		break
-	//	case msg := <-outCh:
-	//		dest := msg.GetTo()
-	//		switch dest {
-	//		case nil:
-	//			// broadcast
-	//			t.Logf("broadcast from: %v", msg.GetFrom())
-	//			for _, p := range parties {
-	//				if p.PartyID().Index == msg.GetFrom().Index {
-	//					// skip self
-	//					continue
-	//				}
-	//				go partyUpdate(p, msg, errCh)
-	//			}
-	//		default:
-	//			// send p2p
-	//			if dest[0].Index == msg.GetFrom().Index {
-	//				return fmt.Errorf("party %d send a message self (%d)",
-	//					dest[0].Index, msg.GetFrom().Index)
-	//			}
-	//			t.Logf("p2p: %v -> %v", msg.GetFrom(), dest)
-	//			go partyUpdate(parties[dest[0].Index], msg, errCh)
-	//		}
-	//	}
-	//}
+	newKeys := make([]*keygen.LocalPartySaveData, len(newParties))
+	for done := 0; done != len(newPids); {
+		select {
+		case err := <-errCh:
+			t.Errorf("Error: %s", err)
+			return nil, err
+		case msg := <-outCh:
+			dest := msg.GetTo()
+			if dest == nil {
+				return nil, errors.New("did not expect a msg to have a nil destination during resharing")
+			}
+			if msg.IsToOldAndNewCommittees() {
+				t.Logf("broadcast from: %v", msg.GetFrom())
+				spew.Dump(dest)
+				for _, destP := range dest[:len(oldParties)] {
+					go partyUpdate(oldParties[destP.Index], msg, errCh)
+				}
+				for _, destP := range dest[len(oldParties):] {
+					go partyUpdate(newParties[destP.Index], msg, errCh)
+				}
+				continue
+			}
 
-	//// Verify sigs
-	//for i := 0; i < len(keys); i++ {
-	//	pkX, pkY := keys[i].ECDSAPub.X(), keys[i].ECDSAPub.Y()
-	//	pk := ecdsa.PublicKey{
-	//		Curve: curve,
-	//		X:     pkX,
-	//		Y:     pkY,
-	//	}
-	//	for j := 0; j < len(signData); j++ {
-	//		if !ecdsa.Verify(&pk, data, new(big.Int).SetBytes(signData[j].R),
-	//			new(big.Int).SetBytes(signData[j].S)) {
-	//			// i and j are mixed but all should succeed
-	//			return fmt.Errorf("signer failed: %v %v", i, j)
-	//		}
-	//	}
-	//}
-	return nil
+			t.Logf("p2p: %v -> %v", msg.GetFrom(), dest)
+
+			if msg.IsToOldCommittee() {
+				for _, destP := range dest[:len(oldParties)] {
+					go partyUpdate(oldParties[destP.Index], msg, errCh)
+				}
+			} else {
+				for _, destP := range dest {
+					go partyUpdate(newParties[destP.Index], msg, errCh)
+				}
+			}
+		case save := <-endCh:
+			// old committee members that aren't receiving a share have their Xi zeroed
+			if save.Xi != nil {
+				index, err := save.OriginalIndex()
+				if err != nil {
+					return nil, err
+				}
+				newKeys[index] = save
+				done++
+			}
+		}
+	}
+	return newKeys, nil
 }
 
 func TestTSS(t *testing.T) {
@@ -370,7 +379,14 @@ func TestTSS(t *testing.T) {
 	newPids := tss.SortPartyIDs(tss.UnSortedPartyIDs{dan, erin})
 	newThreshold := len(newPids) - 1
 	// XXX return something here since we are "losing" keys?
-	if err := reshare(t, curve, threshold, newThreshold, pids, newPids, keys); err != nil {
+	newKeys, err := reshare(t, curve, threshold, newThreshold, pids, newPids, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Let's sign something
+	data = []byte("Bye, world!")
+	if err := sign(t, curve, newThreshold, newPids, newKeys, data); err != nil {
 		t.Fatal(err)
 	}
 }
