@@ -16,8 +16,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/x/tss-lib/v2/common"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
+	"github.com/hemilabs/x/tss-lib/v2/ecdsa/resharing"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/signing"
 	"github.com/hemilabs/x/tss-lib/v2/tss"
 )
@@ -121,6 +123,103 @@ func sign(t *testing.T, curve elliptic.Curve, threshold int, pids tss.SortedPart
 	return nil
 }
 
+func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int, oldPids, newPids tss.SortedPartyIDs, oldKeys []*keygen.LocalPartySaveData) error {
+	t.Logf("Resharing data %v/%v -> %v/%v", oldThreshold, len(oldPids),
+		newThreshold, len(newPids))
+
+	totalPids := len(oldPids) + len(newPids)
+	errCh := make(chan *tss.Error, totalPids)
+	outCh := make(chan tss.Message, totalPids)
+	endCh := make(chan *keygen.LocalPartySaveData, totalPids)
+
+	// init both party contexts
+	oldCtx := tss.NewPeerContext(oldPids)
+	newCtx := tss.NewPeerContext(newPids)
+
+	// init old parties
+	oldParties := make([]*resharing.LocalParty, 0, len(oldPids))
+	for i := 0; i < len(oldPids); i++ {
+		params := tss.NewReSharingParameters(curve, oldCtx, newCtx, oldPids[i],
+			len(oldPids), oldThreshold, len(newPids), newThreshold)
+		p := resharing.NewLocalParty(params, *oldKeys[i], outCh, endCh).(*resharing.LocalParty)
+		oldParties = append(oldParties, p)
+	}
+
+	// init new parties
+	newParties := make([]*resharing.LocalParty, 0, len(newPids))
+	for i := 0; i < len(newPids); i++ {
+		params := tss.NewReSharingParameters(curve, oldCtx, newCtx, oldPids[i],
+			len(oldPids), oldThreshold, len(newPids), newThreshold)
+
+		// XXX DO NOT USE IN UNTRUSTED SETTING
+		params.SetNoProofMod()
+		params.SetNoProofFac()
+		// XXX DO NOT USE IN UNTRUSTED SETTING
+
+		newKeys := keygen.NewLocalPartySaveData(len(newPids))
+		panic(spew.Sdump(newPids))
+		p := resharing.NewLocalParty(params, newKeys, outCh, endCh).(*resharing.LocalParty)
+		newParties = append(newParties, p)
+	}
+
+	_ = errCh
+
+	//signData := make([]*common.SignatureData, 0, len(pids))
+	//// we use len(pids) to test all sigs but it works with threshold as
+	//// well. I tested that.
+	//for done := 0; done != len(pids); {
+	//	select {
+	//	case err := <-errCh:
+	//		return err
+	//	case end := <-endCh:
+	//		signData = append(signData, end)
+	//		done++
+	//		t.Logf("end: threshold %v %v/%v", threshold, done, len(pids))
+	//		break
+	//	case msg := <-outCh:
+	//		dest := msg.GetTo()
+	//		switch dest {
+	//		case nil:
+	//			// broadcast
+	//			t.Logf("broadcast from: %v", msg.GetFrom())
+	//			for _, p := range parties {
+	//				if p.PartyID().Index == msg.GetFrom().Index {
+	//					// skip self
+	//					continue
+	//				}
+	//				go partyUpdate(p, msg, errCh)
+	//			}
+	//		default:
+	//			// send p2p
+	//			if dest[0].Index == msg.GetFrom().Index {
+	//				return fmt.Errorf("party %d send a message self (%d)",
+	//					dest[0].Index, msg.GetFrom().Index)
+	//			}
+	//			t.Logf("p2p: %v -> %v", msg.GetFrom(), dest)
+	//			go partyUpdate(parties[dest[0].Index], msg, errCh)
+	//		}
+	//	}
+	//}
+
+	//// Verify sigs
+	//for i := 0; i < len(keys); i++ {
+	//	pkX, pkY := keys[i].ECDSAPub.X(), keys[i].ECDSAPub.Y()
+	//	pk := ecdsa.PublicKey{
+	//		Curve: curve,
+	//		X:     pkX,
+	//		Y:     pkY,
+	//	}
+	//	for j := 0; j < len(signData); j++ {
+	//		if !ecdsa.Verify(&pk, data, new(big.Int).SetBytes(signData[j].R),
+	//			new(big.Int).SetBytes(signData[j].S)) {
+	//			// i and j are mixed but all should succeed
+	//			return fmt.Errorf("signer failed: %v %v", i, j)
+	//		}
+	//	}
+	//}
+	return nil
+}
+
 func TestTSS(t *testing.T) {
 	var preParams *keygen.LocalPreParams
 
@@ -220,7 +319,7 @@ func TestTSS(t *testing.T) {
 	}
 
 	// Keygen phase
-	saveData := make([]*keygen.LocalPartySaveData, len(pids))
+	keys := make([]*keygen.LocalPartySaveData, len(pids))
 	for done := 0; done != len(pids); {
 		select {
 		case err := <-errCh:
@@ -230,7 +329,7 @@ func TestTSS(t *testing.T) {
 			if err != nil {
 				t.Fatalf("keygen save data index: %v", err)
 			}
-			saveData[index] = end
+			keys[index] = end
 			done++
 			t.Logf("end: index %v %v/%v", index, done, len(pids))
 			break
@@ -261,11 +360,19 @@ func TestTSS(t *testing.T) {
 
 	// Let's sign something
 	data := []byte("Hello, world!")
-	if err := sign(t, curve, threshold, pids, saveData, data); err != nil {
+	if err := sign(t, curve, threshold, pids, keys, data); err != nil {
 		t.Fatal(err)
 	}
 
-	// Alice is trash! Replace with Dan.
-	// var params *tss.ReSharingParameter
-	// party := resharing.NewLocalParty(params, ourKeyData, outCh, endCh)
+	// Alice is trash! Replace with Dan and add Erin.
+	keyDan := common.MustGetRandomInt(rand.Reader, 256)
+	dan := tss.NewPartyID("dan", "dan monicker", keyDan)
+	keyErin := common.MustGetRandomInt(rand.Reader, 256)
+	erin := tss.NewPartyID("erin", "erin monicker", keyErin)
+	newPids := tss.SortPartyIDs(tss.UnSortedPartyIDs{bob, charlie, dan, erin})
+	newThreshold := len(newPids) - 1
+	// XXX return something here since we are "losing" keys?
+	if err := reshare(t, curve, threshold, newThreshold, pids, newPids, keys); err != nil {
+		t.Fatal(err)
+	}
 }
