@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/x/tss-lib/v2/common"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/resharing"
@@ -148,8 +147,8 @@ func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int,
 	// init new parties
 	newParties := make([]*resharing.LocalParty, 0, len(newPids))
 	for i := 0; i < len(newPids); i++ {
-		params := tss.NewReSharingParameters(curve, oldCtx, newCtx, oldPids[i],
-			len(oldPids), oldThreshold, len(newPids), newThreshold)
+		params := tss.NewReSharingParameters(curve, oldCtx, newCtx, newPids[i],
+			len(newPids), oldThreshold, len(newPids), newThreshold)
 
 		// XXX DO NOT USE IN UNTRUSTED SETTING
 		params.SetNoProofMod()
@@ -157,7 +156,6 @@ func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int,
 		// XXX DO NOT USE IN UNTRUSTED SETTING
 
 		newKeys := keygen.NewLocalPartySaveData(len(newPids))
-		panic(spew.Sdump(newPids))
 		p := resharing.NewLocalParty(params, newKeys, outCh, endCh).(*resharing.LocalParty)
 		newParties = append(newParties, p)
 	}
@@ -369,7 +367,7 @@ func TestTSS(t *testing.T) {
 	dan := tss.NewPartyID("dan", "dan monicker", keyDan)
 	keyErin := common.MustGetRandomInt(rand.Reader, 256)
 	erin := tss.NewPartyID("erin", "erin monicker", keyErin)
-	newPids := tss.SortPartyIDs(tss.UnSortedPartyIDs{bob, charlie, dan, erin})
+	newPids := tss.SortPartyIDs(tss.UnSortedPartyIDs{dan, erin})
 	newThreshold := len(newPids) - 1
 	// XXX return something here since we are "losing" keys?
 	if err := reshare(t, curve, threshold, newThreshold, pids, newPids, keys); err != nil {
