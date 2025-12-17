@@ -2,8 +2,8 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-ARG OP_GETH_COMMIT=12a93e2f9538378a3cdf0cd3976409246e1c0af1
-ARG OPTIMISM_COMMIT=984ab34d8f3b69ed86bdcd8d053855daf4c71bd3
+ARG OP_GETH_COMMIT=73dbd17c8d105ce2a3cc9dd1684b2ab261028408
+ARG OPTIMISM_COMMIT=2ebe8b74ccafd854c7fed719d7ff812bae765bd7
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken
