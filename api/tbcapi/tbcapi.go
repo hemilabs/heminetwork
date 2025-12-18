@@ -377,15 +377,15 @@ type BlockInsertRawResponse struct {
 	Error     *protocol.Error `json:"error,omitempty"`
 }
 
-// BlockDownloadAsyncResponse returns a block if it exists or attempts to
-// download the block from p2p asynchronously.
+// BlockDownloadAsyncRequest requests a block to be downloaded from p2p
+// asynchronously.
 type BlockDownloadAsyncRequest struct {
 	Hash  chainhash.Hash `json:"hash"`
 	Peers uint           `json:"peers"`
 }
 
 // BlockDownloadAsyncResponse replies with a block, an error or nothing. When
-// bot Error and Block are nil it measn the block download request was issued
+// both Error and Block are nil it means the block download request was issued
 // to p2p.
 type BlockDownloadAsyncResponse struct {
 	Block *wire.MsgBlock  `json:"block,omitempty"`
