@@ -5,6 +5,8 @@
 package continuum
 
 import (
+	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -14,6 +16,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -152,25 +155,30 @@ func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int,
 			len(newPids), oldThreshold, len(newPids), newThreshold)
 
 		// XXX DO NOT USE IN UNTRUSTED SETTING
-		params.SetNoProofMod()
-		params.SetNoProofFac()
+		// params.SetNoProofMod()
+		// params.SetNoProofFac()
 		// XXX DO NOT USE IN UNTRUSTED SETTING
 
+		// XXX the local pre params are missing from params
 		newKeys := keygen.NewLocalPartySaveData(len(newPids))
+		fmt.Printf("reshare %v\n", newPids[i])
+		// subset = keygen.BuildLocalSaveDataSubset(key, params.OldParties().IDs())
+		// keygen.keysToIndices() = x
 		p := resharing.NewLocalParty(params, newKeys, outCh, endCh).(*resharing.LocalParty)
 		newParties = append(newParties, p)
 	}
 
-	// start the new parties; they will wait for messages
-	for _, P := range newParties {
+	// start the old parties; they will send messages
+	for _, P := range oldParties {
 		go func(P *resharing.LocalParty) {
 			if err := P.Start(); err != nil {
 				errCh <- err
 			}
 		}(P)
 	}
-	// start the old parties; they will send messages
-	for _, P := range oldParties {
+
+	// start the new parties; they will wait for messages
+	for _, P := range newParties {
 		go func(P *resharing.LocalParty) {
 			if err := P.Start(); err != nil {
 				errCh <- err
@@ -228,7 +236,7 @@ func reshare(t *testing.T, curve elliptic.Curve, oldThreshold, newThreshold int,
 }
 
 func TestTSS(t *testing.T) {
-	var preParams *keygen.LocalPreParams
+	var preParams keygen.LocalPreParams
 
 	// Generate testdata if it does not exist.
 	testDataDir := "testdata"
@@ -244,7 +252,7 @@ func TestTSS(t *testing.T) {
 		// because this can take some time.  This code will generate
 		// those parameters using a concurrency limit equal to the
 		// number of available CPU cores.
-		preParams, err = keygen.GeneratePreParamsWithContextAndRandom(t.Context(),
+		pp, err := keygen.GeneratePreParamsWithContextAndRandom(t.Context(),
 			rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -257,11 +265,11 @@ func TestTSS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		preParams = *pp
 	} else if err != nil {
 		t.Fatal(err)
 	} else {
-		var pp keygen.LocalPreParams
-		if err := json.NewDecoder(ppf).Decode(&pp); err != nil {
+		if err := json.NewDecoder(ppf).Decode(&preParams); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -315,6 +323,7 @@ func TestTSS(t *testing.T) {
 	for i := 0; i < len(pids); i++ {
 		var p *keygen.LocalParty
 		params := tss.NewParameters(curve, pc, pids[i], len(pids), threshold)
+		// p = keygen.NewLocalParty(params, outCh, endCh, preParams).(*keygen.LocalParty)
 		p = keygen.NewLocalParty(params, outCh, endCh).(*keygen.LocalParty)
 		parties = append(parties, p)
 		go func(party *keygen.LocalParty) {
@@ -376,7 +385,10 @@ func TestTSS(t *testing.T) {
 	dan := tss.NewPartyID("dan", "dan monicker", keyDan)
 	keyErin := common.MustGetRandomInt(rand.Reader, 256)
 	erin := tss.NewPartyID("erin", "erin monicker", keyErin)
-	newPids := tss.SortPartyIDs(tss.UnSortedPartyIDs{dan, erin})
+	newPids := tss.SortPartyIDs(tss.UnSortedPartyIDs{alice, bob, charlie})
+	_ = dan
+	_ = erin
+	//	newPids := tss.SortPartyIDs(tss.UnSortedPartyIDs{dan, erin})
 	newThreshold := len(newPids) - 1
 	// XXX return something here since we are "losing" keys?
 	newKeys, err := reshare(t, curve, threshold, newThreshold, pids, newPids, keys)
@@ -389,4 +401,236 @@ func TestTSS(t *testing.T) {
 	if err := sign(t, curve, newThreshold, newPids, newKeys, data); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type TSSParty struct {
+	LocalPreParams *keygen.LocalPreParams
+	PartyID        *tss.PartyID
+}
+
+// XXX unexport
+type TSSCeremony struct {
+	Curve              elliptic.Curve
+	Threshold          int
+	SortedPartyIDs     tss.SortedPartyIDs
+	PeerContext        *tss.PeerContext
+	SelfIndex          int
+	Party              tss.Party
+	LocalPartySaveData *keygen.LocalPartySaveData
+}
+
+func TSSNewParty(ctx context.Context, name string) (*TSSParty, error) {
+	lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	key := common.MustGetRandomInt(rand.Reader, 256) // XXX this is shit
+	return &TSSParty{
+		LocalPreParams: lpp,
+		PartyID:        tss.NewPartyID(name, name+" monicker", key),
+	}, nil
+}
+
+func NewTSSCeremony(curve elliptic.Curve, threshold int, parties []*TSSParty) (*TSSCeremony, error) {
+	if len(parties) == 0 || threshold > len(parties) {
+		return nil, fmt.Errorf("invalid threshold %v/%v", threshold, len(parties))
+	}
+
+	upids := make(tss.UnSortedPartyIDs, 0, len(parties))
+	for _, v := range parties {
+		upids = append(upids, v.PartyID)
+	}
+	spids := tss.SortPartyIDs(upids)
+	return &TSSCeremony{
+		Curve:          curve,
+		Threshold:      threshold,
+		SortedPartyIDs: spids,
+		PeerContext:    tss.NewPeerContext(spids),
+		SelfIndex:      -1,
+	}, nil
+}
+
+func (c *TSSCeremony) Start(ctx context.Context, self *TSSParty, outCh chan tss.Message) error {
+	// Make sure self is indeed a ceremony memeber
+	key := self.PartyID.GetKey()
+	for k, v := range c.SortedPartyIDs {
+		if bytes.Equal(v.GetKey(), key) {
+			c.SelfIndex = k
+		}
+	}
+	if c.SelfIndex < 0 {
+		return fmt.Errorf("not a participant: %x", key)
+	}
+
+	params := tss.NewParameters(c.Curve, c.PeerContext, self.PartyID,
+		len(c.SortedPartyIDs), c.Threshold)
+	errCh := make(chan *tss.Error)
+	endCh := make(chan *keygen.LocalPartySaveData)
+	c.Party = keygen.NewLocalParty(params, outCh, endCh).(*keygen.LocalParty)
+	go func() {
+		if err := c.Party.Start(); err != nil {
+			errCh <- err
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+
+		case err := <-errCh:
+			return err
+
+		case end := <-endCh:
+			c.LocalPartySaveData = end
+			return nil
+		}
+	}
+
+	return nil
+}
+
+func send(msg tss.Message, index int, p tss.Party) error {
+	b, _, err := msg.WireBytes()
+	if err != nil {
+		return err
+	}
+	ok, err := p.UpdateFromBytes(b, msg.GetFrom(), msg.IsBroadcast())
+	if !ok {
+		return fmt.Errorf("update failed %v: %v", index, p)
+	}
+	return nil
+}
+
+func broadcast(t *testing.T, msg tss.Message, ceremonies []*TSSCeremony) error {
+	for _, c := range ceremonies {
+		if c.SelfIndex == msg.GetFrom().Index {
+			// skip self
+			continue
+		}
+		t.Logf("broadcast from: %v updating %v",
+			msg.GetFrom(), c.SelfIndex)
+		err := send(msg, c.SelfIndex, c.Party)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func p2p(t *testing.T, msg tss.Message, ceremonies []*TSSCeremony) error {
+	// Find correct ceremony
+	for _, to := range msg.GetTo() {
+		var c *TSSCeremony
+		for _, cm := range ceremonies {
+			if cm.SelfIndex == to.Index {
+				c = cm
+				break
+			}
+		}
+		if c == nil {
+			return fmt.Errorf("ceremony not found: %v", to.Index)
+		}
+
+		t.Logf("%v -> %v", msg.GetFrom(), to)
+		err := send(msg, c.SelfIndex, c.Party)
+		if err != nil {
+			return err
+		}
+
+	}
+	return nil
+}
+
+func handle(t *testing.T, msg tss.Message, ceremonies []*TSSCeremony) error {
+	if msg.IsBroadcast() {
+		return broadcast(t, msg, ceremonies)
+	}
+	return p2p(t, msg, ceremonies)
+}
+
+func router(t *testing.T, outCh chan tss.Message, ceremonies []*TSSCeremony) error {
+	for {
+		select {
+		case <-t.Context().Done():
+			return t.Context().Err()
+
+		case msg := <-outCh:
+			if err := handle(t, msg, ceremonies); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func TestTSSExhaustive(t *testing.T) {
+	parties := []string{"alice", "bob", "charlie"}
+	unsortedTSSParties := make([]*TSSParty, 0, len(parties))
+	for _, v := range parties {
+		party, err := TSSNewParty(t.Context(), v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unsortedTSSParties = append(unsortedTSSParties, party)
+
+		t.Logf("%v: %x", party.PartyID.GetId(), party.PartyID.GetKey())
+	}
+
+	// Setup ceremony for all parties, this would come in over continuum to
+	// all clients.
+	threshold := len(unsortedTSSParties) - 1
+
+	// Select elliptic curve
+	var curve elliptic.Curve
+	usesecp256k1 := true
+	if usesecp256k1 {
+		curve = tss.S256() // secp256k1
+	} else {
+		curve = tss.Edwards() // ed25519
+	}
+
+	// Create a ceremony for each participant. Yes, they are identical but
+	// this is to simulate individual client machine.
+	ceremonies := make([]*TSSCeremony, 0, len(unsortedTSSParties))
+	for range unsortedTSSParties {
+		ceremony, err := NewTSSCeremony(curve, threshold, unsortedTSSParties)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ceremonies = append(ceremonies, ceremony)
+	}
+
+	// Launch ceremony for all parties.
+	if len(unsortedTSSParties) != len(ceremonies) {
+		t.Fatalf("you done fucked up %v != %v", len(unsortedTSSParties),
+			len(ceremonies))
+	}
+	var wg sync.WaitGroup
+	outCh := make(chan tss.Message, 10) // coordinator
+	for k := range unsortedTSSParties {
+		// This is a bit hard to read since we have to call Start with
+		// a party to identify ourself.  The the gist is, all
+		// ceremonies are identical so we can just iterate over the
+		// unsorted array and use the index party as self.
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+
+			c := ceremonies[i]
+			self := unsortedTSSParties[i]
+
+			t.Logf("Start: %v", self.PartyID)
+			err := c.Start(t.Context(), self, outCh)
+			if err != nil {
+				panic(err)
+			}
+		}(k)
+	}
+
+	// This simulates network communication
+	go router(t, outCh, ceremonies)
+
+	t.Logf("waiting")
+	wg.Wait()
 }
