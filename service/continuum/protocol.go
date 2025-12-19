@@ -428,7 +428,7 @@ func NewSecretFromPrivate(privateKey *secp256k1.PrivateKey) *Secret {
 	}
 }
 
-// NewSecretFromPrivate returns a secret type for the provided string encoded
+// NewSecretFromString returns a secret type for the provided string encoded
 // private key.
 func NewSecretFromString(secret string) (*Secret, error) {
 	s, err := hex.DecodeString(secret)
