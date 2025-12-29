@@ -33,34 +33,16 @@ var (
 
 	cfg = continuum.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"TRF_CONNECT": config.Config{
+			Value:        &cfg.Connect,
+			DefaultValue: []string{},
+			Help:         "connect to provided hosts directly, this bypasses seeding",
+			Print:        config.PrintAll,
+		},
 		"TRF_HOME": config.Config{
 			Value:        &cfg.Home,
 			DefaultValue: defaultHome,
 			Help:         "data directory",
-			Print:        config.PrintAll,
-		},
-		"TRF_PRIVATE_KEY": config.Config{
-			Value:        &cfg.PrivateKey,
-			DefaultValue: "",
-			Help:         "secp256k1 private key",
-			Print:        config.PrintSecret,
-		},
-		"TRF_LOG_LEVEL": config.Config{
-			Value:        &cfg.LogLevel,
-			DefaultValue: defaultLogLevel,
-			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
-			Print:        config.PrintAll,
-		},
-		"TRF_PROMETHEUS_ADDRESS": config.Config{
-			Value:        &cfg.PrometheusListenAddress,
-			DefaultValue: "",
-			Help:         "address and port transfunctionerd prometheus listens on",
-			Print:        config.PrintAll,
-		},
-		"TRF_PPROF_ADDRESS": config.Config{
-			Value:        &cfg.PprofListenAddress,
-			DefaultValue: "",
-			Help:         "address and port transfunctionerd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
 		"TRF_LISTEN_ADDRESS": config.Config{
@@ -69,10 +51,34 @@ var (
 			Help:         "address and port transfunctionerd listens on for incoming tcp connections",
 			Print:        config.PrintAll,
 		},
+		"TRF_LOG_LEVEL": config.Config{
+			Value:        &cfg.LogLevel,
+			DefaultValue: defaultLogLevel,
+			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
+			Print:        config.PrintAll,
+		},
 		"TRF_MAX_CONNECTIONS": config.Config{
 			Value:        &cfg.MaxConnections,
 			DefaultValue: defaultMaxConnections,
 			Help:         "maximum allowed connections to transfuctionerd at a time",
+			Print:        config.PrintAll,
+		},
+		"TRF_PPROF_ADDRESS": config.Config{
+			Value:        &cfg.PprofListenAddress,
+			DefaultValue: "",
+			Help:         "address and port transfunctionerd pprof listens on (open <address>/debug/pprof to see available profiles)",
+			Print:        config.PrintAll,
+		},
+		"TRF_PRIVATE_KEY": config.Config{
+			Value:        &cfg.PrivateKey,
+			DefaultValue: "",
+			Help:         "secp256k1 private key",
+			Print:        config.PrintSecret,
+		},
+		"TRF_PROMETHEUS_ADDRESS": config.Config{
+			Value:        &cfg.PrometheusListenAddress,
+			DefaultValue: "",
+			Help:         "address and port transfunctionerd prometheus listens on",
 			Print:        config.PrintAll,
 		},
 		// XXX add DNS security toggle
