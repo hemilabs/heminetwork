@@ -408,17 +408,6 @@ type TSSParty struct {
 	PartyID        *tss.PartyID
 }
 
-// XXX unexport
-type TSSCeremony struct {
-	Curve              elliptic.Curve
-	Threshold          int
-	SortedPartyIDs     tss.SortedPartyIDs
-	PeerContext        *tss.PeerContext
-	SelfIndex          int
-	Party              tss.Party
-	LocalPartySaveData *keygen.LocalPartySaveData
-}
-
 func TSSNewParty(ctx context.Context, name string) (*TSSParty, error) {
 	lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
 	if err != nil {
@@ -432,7 +421,18 @@ func TSSNewParty(ctx context.Context, name string) (*TSSParty, error) {
 	}, nil
 }
 
-func NewTSSCeremony(curve elliptic.Curve, threshold int, parties []*TSSParty) (*TSSCeremony, error) {
+// XXX unexport
+type TSSCeremony struct {
+	Curve              elliptic.Curve
+	Threshold          int
+	SortedPartyIDs     tss.SortedPartyIDs
+	PeerContext        *tss.PeerContext
+	SelfIndex          int
+	Party              tss.Party
+	LocalPartySaveData *keygen.LocalPartySaveData
+}
+
+func NewTSSCeremony(curve elliptic.Curve, threshold int, self *TSSParty, parties []*TSSParty) (*TSSCeremony, error) {
 	if len(parties) == 0 || threshold > len(parties) {
 		return nil, fmt.Errorf("invalid threshold %v/%v", threshold, len(parties))
 	}
@@ -442,28 +442,35 @@ func NewTSSCeremony(curve elliptic.Curve, threshold int, parties []*TSSParty) (*
 		upids = append(upids, v.PartyID)
 	}
 	spids := tss.SortPartyIDs(upids)
+
+	// Make sure self is indeed a ceremony member
+	key := self.PartyID.GetKey()
+	selfIndex := -1
+	for k, v := range spids {
+		if bytes.Equal(v.GetKey(), key) {
+			if selfIndex != -1 {
+				return nil, fmt.Errorf("duplicate self: %v %v",
+					selfIndex, k)
+			}
+			selfIndex = k
+		}
+	}
+	if selfIndex < 0 {
+		return nil, fmt.Errorf("not a participant: %x", key)
+	}
+
 	return &TSSCeremony{
 		Curve:          curve,
 		Threshold:      threshold,
 		SortedPartyIDs: spids,
 		PeerContext:    tss.NewPeerContext(spids),
-		SelfIndex:      -1,
+		SelfIndex:      selfIndex,
 	}, nil
 }
 
-func (c *TSSCeremony) Start(ctx context.Context, self *TSSParty, outCh chan tss.Message) error {
-	// Make sure self is indeed a ceremony memeber
-	key := self.PartyID.GetKey()
-	for k, v := range c.SortedPartyIDs {
-		if bytes.Equal(v.GetKey(), key) {
-			c.SelfIndex = k
-		}
-	}
-	if c.SelfIndex < 0 {
-		return fmt.Errorf("not a participant: %x", key)
-	}
-
-	params := tss.NewParameters(c.Curve, c.PeerContext, self.PartyID,
+func (c *TSSCeremony) Start(ctx context.Context, outCh chan tss.Message) error {
+	self := c.SortedPartyIDs[c.SelfIndex]
+	params := tss.NewParameters(c.Curve, c.PeerContext, self,
 		len(c.SortedPartyIDs), c.Threshold)
 	errCh := make(chan *tss.Error)
 	endCh := make(chan *keygen.LocalPartySaveData)
@@ -487,8 +494,6 @@ func (c *TSSCeremony) Start(ctx context.Context, self *TSSParty, outCh chan tss.
 			return nil
 		}
 	}
-
-	return nil
 }
 
 func send(msg tss.Message, index int, p tss.Party) error {
@@ -538,7 +543,6 @@ func p2p(t *testing.T, msg tss.Message, ceremonies []*TSSCeremony) error {
 		if err != nil {
 			return err
 		}
-
 	}
 	return nil
 }
@@ -593,8 +597,9 @@ func TestTSSExhaustive(t *testing.T) {
 	// Create a ceremony for each participant. Yes, they are identical but
 	// this is to simulate individual client machine.
 	ceremonies := make([]*TSSCeremony, 0, len(unsortedTSSParties))
-	for range unsortedTSSParties {
-		ceremony, err := NewTSSCeremony(curve, threshold, unsortedTSSParties)
+	for k := range unsortedTSSParties {
+		ceremony, err := NewTSSCeremony(curve, threshold, unsortedTSSParties[k],
+			unsortedTSSParties)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -621,7 +626,7 @@ func TestTSSExhaustive(t *testing.T) {
 			self := unsortedTSSParties[i]
 
 			t.Logf("Start: %v", self.PartyID)
-			err := c.Start(t.Context(), self, outCh)
+			err := c.Start(t.Context(), outCh)
 			if err != nil {
 				panic(err)
 			}
@@ -631,6 +636,11 @@ func TestTSSExhaustive(t *testing.T) {
 	// This simulates network communication
 	go router(t, outCh, ceremonies)
 
-	t.Logf("waiting")
 	wg.Wait()
+
+	// Sign something.
+
+	// Reshare.
+
+	// Sign something else.
 }
