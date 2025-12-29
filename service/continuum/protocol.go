@@ -1,4 +1,4 @@
-// Copyright (c) 2025-2026 Hemi Labs, Inc.
+// Copyright (c) 2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -139,18 +139,22 @@ import (
 type PayloadType string
 
 const (
-	PHelloRequest  PayloadType = "hello"
-	PHelloResponse PayloadType = "hello-response"
-	PPingRequest   PayloadType = "ping"
-	PPingResponse  PayloadType = "ping-response"
+	PHelloRequest   PayloadType = "hello"
+	PHelloResponse  PayloadType = "hello-response"
+	PPingRequest    PayloadType = "ping"
+	PPingResponse   PayloadType = "ping-response"
+	PKeygenRequest  PayloadType = "keygen"
+	PKeygenResponse PayloadType = "keygen-response"
 )
 
 var (
 	pt2str = map[reflect.Type]PayloadType{
-		reflect.TypeFor[HelloRequest]():  PHelloRequest,
-		reflect.TypeFor[HelloResponse](): PHelloResponse,
-		reflect.TypeFor[PingRequest]():   PPingRequest,
-		reflect.TypeFor[PingResponse]():  PPingResponse,
+		reflect.TypeOf(HelloRequest{}):   PHelloRequest,
+		reflect.TypeOf(HelloResponse{}):  PHelloResponse,
+		reflect.TypeOf(PingRequest{}):    PPingRequest,
+		reflect.TypeOf(PingResponse{}):   PPingResponse,
+		reflect.TypeOf(KeygenRequest{}):  PKeygenRequest,
+		reflect.TypeOf(KeygenResponse{}): PKeygenResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -249,6 +253,12 @@ type PingResponse struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Copy the value back
 	PeerTimestamp   int64 `json:"peertimestamp"`   // Remote timestamp
 }
+
+type KeygenRequest struct {
+	Curve string `json:"curve"` // Curve for TSS
+}
+
+type KeygenResponse struct{}
 
 const (
 	TransportVersion = 1 // Transport protocol version
