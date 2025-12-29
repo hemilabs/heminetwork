@@ -44,14 +44,15 @@ func init() {
 }
 
 type Config struct {
+	Connect                 []string
 	Home                    string
+	ListenAddress           string
 	LogLevel                string
+	MaxConnections          int
 	PprofListenAddress      string
+	PrivateKey              string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
-	PrivateKey              string
-	ListenAddress           string
-	MaxConnections          int
 }
 
 type Server struct {
@@ -96,6 +97,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	return &Server{
 		cfg:          cfg,
 		listenConfig: &net.ListenConfig{},
+		sessions:     make(map[string]*Transport, cfg.MaxConnections),
 	}, nil
 }
 
@@ -131,6 +133,11 @@ func (s *Server) deleteSession(id string) {
 	if !ok {
 		log.Errorf("id not found in sessions %s", id)
 	}
+	// XXX this races with deleteAllSessions since it is called from a defer
+	if t == nil {
+		// Happens when server is ctrl-c and client is still connected
+		panic("fixme antonio")
+	}
 	if err := t.Close(); err != nil {
 		log.Errorf("close session %s: %v", id, err)
 	}
@@ -148,14 +155,16 @@ func (s *Server) deleteAllSessions() {
 }
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
-	log.Infof("handle: %v", conn.RemoteAddr())
-	defer log.Infof("handle exit: %v", conn.RemoteAddr())
+	log.Debugf("handle: %v", conn.RemoteAddr())
+	defer log.Debugf("handle exit: %v", conn.RemoteAddr())
 
 	defer s.wg.Done()
 	defer func() {
 		err := conn.Close()
 		if err != nil {
+			// XXX too loud?
 			log.Errorf("close %v: %v", conn.RemoteAddr(), err)
+			return
 		}
 	}()
 
@@ -172,7 +181,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		if errors.Is(err, io.EOF) {
 			return
 		}
-		log.Errorf("key exchange: %v", err)
+		log.Errorf("key exchange: %v", err) // XXX too loud?
 		return
 	}
 
@@ -181,7 +190,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		if errors.Is(err, io.EOF) {
 			return
 		}
-		log.Errorf("handshake: %v", err)
+		log.Errorf("handshake: %v", err) // XXX too loud?
 		return
 	}
 
@@ -189,10 +198,25 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	for {
 		header, payload, err := transport.Read()
 		if err != nil {
-			panic(err) // XXX
+			// XXX too loud?
+			log.Errorf("read %v: %v", hr, err)
+			return
 		}
 		log.Infof("%v", spew.Sdump(header))
 		log.Infof("%v", spew.Sdump(payload))
+
+		// XXX make this a map like str2pt with callbacks
+		switch payload.(type) {
+		case *PingRequest:
+			err := transport.Write(s.secret.Identity, PingResponse{
+				OriginTimestamp: payload.(*PingRequest).OriginTimestamp,
+				PeerTimestamp:   time.Now().Unix(),
+			})
+			if err != nil {
+				panic(err)
+			}
+		default:
+		}
 	}
 }
 
@@ -263,6 +287,129 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	defer log.Tracef("health exit")
 
 	return s.isHealthy(ctx), Info{Online: true}, nil
+}
+
+func (s *Server) client(ctx context.Context, them *Identity, t *Transport) error {
+	log.Infof("client: %v", them)
+	defer log.Infof("client: %v exit", them)
+
+	// Always ping
+	// XXX make this a call, not a write.
+	err := t.Write(s.secret.Identity, PingRequest{
+		OriginTimestamp: time.Now().Unix(),
+	})
+	if err != nil {
+		return fmt.Errorf("ping %v: %w", them, err)
+	}
+
+	for {
+		header, cmd, err := t.Read()
+		if err != nil {
+			return fmt.Errorf("read %v: %w", them, err)
+		}
+		log.Infof("%v", spew.Sdump(header))
+		log.Infof("%v", spew.Sdump(cmd))
+	}
+
+	return nil
+}
+
+func (s *Server) connect(ctx context.Context, c string, errC chan error) {
+	defer s.wg.Done()
+
+	// XXX timeout
+
+	log.Infof("connect: %v", c)
+	defer log.Infof("connect: %v exit", c)
+
+	d := &net.Dialer{}
+	conn, err := d.DialContext(ctx, "tcp", c)
+	if err != nil {
+		errC <- err
+		return
+	}
+	clientTransport := new(Transport)
+	defer func() {
+		if err := clientTransport.Close(); err != nil {
+			log.Errorf("client close: %v", err)
+			return
+		}
+	}()
+
+	if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+		errC <- err
+		return
+	}
+	them, err := clientTransport.Handshake(ctx, s.secret)
+	if err != nil {
+		errC <- err
+		return
+	}
+
+	// This should no longer be terminal since we made it through key
+	// exchange.
+	if err := s.client(ctx, them, clientTransport); err != nil {
+		log.Errorf("client: %v", err)
+		return
+	}
+}
+
+func (s *Server) connectAll(ctx context.Context, errC chan error) {
+	defer s.wg.Done()
+
+	log.Tracef("connectAll")
+	defer log.Tracef("connectAll")
+
+	// XXX should we exit when we can't connect?
+	for k := range s.cfg.Connect {
+		s.wg.Add(1)
+		go s.connect(ctx, s.cfg.Connect[k], errC)
+	}
+}
+
+func (s *Server) listen(ctx context.Context, errC chan error) {
+	defer s.wg.Done()
+
+	listener, err := s.listenConfig.Listen(ctx, "tcp", s.cfg.ListenAddress)
+	if err != nil {
+		errC <- err
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		if err := listener.Close(); err != nil {
+			log.Errorf("listner close: %v", err)
+		}
+		s.deleteAllSessions()
+	}()
+
+	for {
+		conn, err := listener.Accept()
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return
+		}
+		if err != nil {
+			log.Errorf("accept: %v", err)
+			continue
+		}
+
+		s.mtx.RLock()
+		conNum := len(s.sessions)
+		s.mtx.RUnlock()
+		if conNum >= s.cfg.MaxConnections {
+			// XXX send a "busy" message?
+			log.Debugf("server full, connection rejected: %s",
+				conn.RemoteAddr())
+			if err := conn.Close(); err != nil {
+				log.Errorf("close connection %s:  %v", err)
+			}
+			continue
+		}
+
+		// handle connection
+		s.wg.Add(1)
+		go s.handle(ctx, conn)
+	}
 }
 
 func (s *Server) Run(pctx context.Context) error {
@@ -338,50 +485,15 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 
 	errC := make(chan error)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		listener, err := s.listenConfig.Listen(ctx, "tcp", s.cfg.ListenAddress)
-		if err != nil {
-			errC <- err
-			return
-		}
-		go func() {
-			<-ctx.Done()
-			if err := listener.Close(); err != nil {
-				log.Errorf("listner close: %v", err)
-			}
-			s.deleteAllSessions()
-		}()
+	if s.cfg.ListenAddress != "" {
+		s.wg.Add(1)
+		go s.listen(ctx, errC)
+	}
 
-		for {
-			conn, err := listener.Accept()
-			if errors.Is(ctx.Err(), context.Canceled) {
-				return
-			}
-			if err != nil {
-				log.Errorf("accept: %v", err)
-				continue
-			}
-
-			s.mtx.RLock()
-			conNum := len(s.sessions)
-			s.mtx.RUnlock()
-			if conNum >= s.cfg.MaxConnections {
-				// XXX send a "busy" message?
-				log.Debugf("server full, connection rejected: %s",
-					conn.RemoteAddr())
-				if err := conn.Close(); err != nil {
-					log.Errorf("close connection %s:  %v", err)
-				}
-				continue
-			}
-
-			// handle connection
-			s.wg.Add(1)
-			go s.handle(ctx, conn)
-		}
-	}()
+	if len(s.cfg.Connect) != 0 {
+		s.wg.Add(1)
+		go s.connectAll(ctx, errC)
+	}
 
 	log.Infof("Identity: %v", s.secret)
 
