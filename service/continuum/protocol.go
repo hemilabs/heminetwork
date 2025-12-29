@@ -920,8 +920,8 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, error) {
 
 // Read reads and decrypts the next command from the connection stream. It
 // returns the header and command.
-func (t *Transport) Read() (any, any, error) {
-	return nil, nil, fmt.Errorf("nope")
+func (t *Transport) Read() (*Header, any, error) {
+	return t.read(0 * time.Second) // XXX timeout
 }
 
 // write encrypts the passed in cleartext and writes it to the connection
