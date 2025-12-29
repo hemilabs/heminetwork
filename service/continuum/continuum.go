@@ -11,10 +11,13 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -22,6 +25,8 @@ import (
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
 
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
@@ -59,13 +64,17 @@ type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
-	cfg *Config
+	cfg  *Config
+	data string // Data directory home+identity
 
 	// Sessions
 	sessions map[string]*Transport
 
 	// Secrets
 	secret *Secret
+
+	// TSS
+	preParams keygen.LocalPreParams
 
 	// Listener
 	listenConfig *net.ListenConfig
@@ -412,6 +421,42 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 	}
 }
 
+func (s *Server) initPartyID(pctx context.Context) error {
+	log.Tracef("initPartyID")
+	defer log.Tracef("initPartyID exit")
+
+	ctx, cancel := context.WithTimeout(pctx, 1*time.Minute)
+	defer cancel()
+
+	preparamsFilename := filepath.Join(s.data, "preparams.json")
+	ppf, err := os.Open(preparamsFilename)
+	if errors.Is(err, os.ErrNotExist) {
+		log.Infof("Generating TSS Paillier primes")
+		lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
+		if err != nil {
+			return err
+		}
+		jpp, err := json.MarshalIndent(lpp, "  ", "  ")
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(preparamsFilename, jpp, 0o400)
+		if err != nil {
+			return err
+		}
+		s.preParams = *lpp
+		log.Infof("Generating TSS Paillier primes complete")
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	if err := json.NewDecoder(ppf).Decode(&s.preParams); err != nil {
+		return err
+	}
+	return ppf.Close()
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -421,19 +466,33 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.testAndSetRunning(false)
 
+	// Make sure we have a valid secret
 	var err error
-	s.cfg.Home, err = homedir.Expand(s.cfg.Home)
-	if err != nil {
-		return fmt.Errorf("expand: %w", err)
-	}
 	s.secret, err = NewSecretFromString(s.cfg.PrivateKey)
 	if err != nil {
 		return fmt.Errorf("secret: %w", err)
 	}
 	s.cfg.PrivateKey = "" // hopefully PrivateKey is reaped later.
 
+	// Setup home
+	s.cfg.Home, err = homedir.Expand(s.cfg.Home)
+	if err != nil {
+		return fmt.Errorf("expand: %w", err)
+	}
+	s.data = filepath.Join(s.cfg.Home, s.secret.Identity.String())
+	err = os.MkdirAll(s.data, 0o700)
+	if err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
+
+	// Read or generate party
+	err = s.initPartyID(ctx)
+	if err != nil {
+		return fmt.Errorf("party: %w", err)
+	}
 
 	// pprof
 	if s.cfg.PprofListenAddress != "" {

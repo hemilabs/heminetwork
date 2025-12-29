@@ -139,18 +139,22 @@ import (
 type PayloadType string
 
 const (
-	PHelloRequest  PayloadType = "hello"
-	PHelloResponse PayloadType = "hello-response"
-	PPingRequest   PayloadType = "ping"
-	PPingResponse  PayloadType = "ping-response"
+	PHelloRequest   PayloadType = "hello"
+	PHelloResponse  PayloadType = "hello-response"
+	PPingRequest    PayloadType = "ping"
+	PPingResponse   PayloadType = "ping-response"
+	PKeygenRequest  PayloadType = "keygen"
+	PKeygenResponse PayloadType = "keygen-response"
 )
 
 var (
 	pt2str = map[reflect.Type]PayloadType{
-		reflect.TypeOf(HelloRequest{}):  PHelloRequest,
-		reflect.TypeOf(HelloResponse{}): PHelloResponse,
-		reflect.TypeOf(PingRequest{}):   PPingRequest,
-		reflect.TypeOf(PingResponse{}):  PPingResponse,
+		reflect.TypeOf(HelloRequest{}):   PHelloRequest,
+		reflect.TypeOf(HelloResponse{}):  PHelloResponse,
+		reflect.TypeOf(PingRequest{}):    PPingRequest,
+		reflect.TypeOf(PingResponse{}):   PPingResponse,
+		reflect.TypeOf(KeygenRequest{}):  PKeygenRequest,
+		reflect.TypeOf(KeygenResponse{}): PKeygenResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -249,6 +253,12 @@ type PingResponse struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Copy the value back
 	PeerTimestamp   int64 `json:"peertimestamp"`   // Remote timestamp
 }
+
+type KeygenRequest struct {
+	Curve string `json:"curve"` // Curve for TSS
+}
+
+type KeygenResponse struct{}
 
 const (
 	TransportVersion = 1 // Transport protocol version
