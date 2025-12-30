@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -68,7 +67,7 @@ type Server struct {
 	data string // Data directory home+identity
 
 	// Sessions
-	sessions map[string]*Transport
+	sessions map[Identity]*Transport
 
 	// Secrets
 	secret *Secret
@@ -106,10 +105,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	return &Server{
 		cfg:          cfg,
 		listenConfig: &net.ListenConfig{},
-		sessions:     make(map[string]*Transport, cfg.MaxConnections),
+		sessions:     make(map[Identity]*Transport, cfg.MaxConnections),
 	}, nil
 }
 
+// genID is used in testing only.
 func genID() string {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
@@ -118,38 +118,28 @@ func genID() string {
 	return hex.EncodeToString(buf)
 }
 
-func (s *Server) newSession(t *Transport) string {
-	for {
-		id := genID()
-		s.mtx.Lock()
-		if _, ok := s.sessions[id]; ok {
-			s.mtx.Unlock()
+func (s *Server) newSession(id *Identity, t *Transport) error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 
-			// ID is already used, retry.
-			continue
-		}
-		s.sessions[id] = t
-		s.mtx.Unlock()
-		return id
+	if _, ok := s.sessions[*id]; ok {
+		return errors.New("duplicate identity")
 	}
+	s.sessions[*id] = t
+
+	return nil
 }
 
-func (s *Server) deleteSession(id string) {
+func (s *Server) deleteSession(id *Identity) error {
 	s.mtx.Lock()
-	t, ok := s.sessions[id]
-	delete(s.sessions, id)
-	s.mtx.Unlock()
-	if !ok {
-		log.Errorf("id not found in sessions %s", id)
-	}
-	// XXX this races with deleteAllSessions since it is called from a defer
+	defer s.mtx.Unlock()
+
+	t := s.sessions[*id]
 	if t == nil {
-		// Happens when server is ctrl-c and client is still connected
-		panic("fixme antonio")
+		return fmt.Errorf("no session: %v", id)
 	}
-	if err := t.Close(); err != nil {
-		log.Errorf("close session %s: %v", id, err)
-	}
+	delete(s.sessions, *id)
+	return t.Close()
 }
 
 func (s *Server) deleteAllSessions() {
@@ -163,52 +153,37 @@ func (s *Server) deleteAllSessions() {
 	s.sessions = nil
 }
 
-func (s *Server) handle(ctx context.Context, conn net.Conn) {
-	log.Debugf("handle: %v", conn.RemoteAddr())
-	defer log.Debugf("handle exit: %v", conn.RemoteAddr())
-
-	defer s.wg.Done()
-	defer func() {
-		err := conn.Close()
-		if err != nil {
-			// XXX too loud?
-			log.Errorf("close %v: %v", conn.RemoteAddr(), err)
-			return
-		}
-	}()
-
+func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, error) {
 	transport, err := NewTransportFromCurve(ecdh.X25519()) // XXX config option
 	if err != nil {
-		log.Errorf("create new transport: %v", err)
-		return
+		return nil, nil, fmt.Errorf("new transport: %w", err)
 	}
-	id := s.newSession(transport)
-	defer s.deleteSession(id)
 
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return
-		}
-		log.Errorf("key exchange: %v", err) // XXX too loud?
-		return
+		return nil, nil, fmt.Errorf("key exchange: %w", err) // XXX too loud?
 	}
 
-	hr, err := transport.Handshake(ctx, s.secret)
+	id, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return
-		}
-		log.Errorf("handshake: %v", err) // XXX too loud?
-		return
+		return nil, nil, fmt.Errorf("handshake: %w", err) // XXX too loud?
 	}
 
-	log.Infof("connected %v: %v", conn.RemoteAddr(), hr)
+	return id, transport, nil
+}
+
+func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
+	defer s.deleteSession(id)
+	defer s.wg.Done()
+
+	log.Debugf("handle: %v", id)
+	defer log.Debugf("handle exit: %v", id)
+
 	for {
-		header, payload, err := transport.Read()
+		header, payload, err := t.Read()
 		if err != nil {
 			// XXX too loud?
-			log.Errorf("read %v: %v", hr, err)
+			log.Errorf("read %v: %v", id, err)
 			return
 		}
 		log.Infof("%v", spew.Sdump(header))
@@ -217,13 +192,24 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		// XXX make this a map like str2pt with callbacks
 		switch payload.(type) {
 		case *PingRequest:
-			err := transport.Write(s.secret.Identity, PingResponse{
+			err := t.Write(s.secret.Identity, PingResponse{
 				OriginTimestamp: payload.(*PingRequest).OriginTimestamp,
 				PeerTimestamp:   time.Now().Unix(),
 			})
 			if err != nil {
 				panic(err)
 			}
+
+			// XXX use ping request for now to kick off keygen
+			err = t.Write(s.secret.Identity, KeygenRequest{
+				Curve: "secp256k1",
+				// Committee: committee,
+				// Threashold, len(committee) - 1,
+			})
+			if err != nil {
+				panic(err)
+			}
+
 		default:
 		}
 	}
@@ -415,15 +401,31 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 			continue
 		}
 
+		// XXX this can cause rate limitting since it isn't in a go
+		// routine. This is obviously a DDOS and needs fixing.
+		id, transport, err := s.newTransport(ctx, conn)
+		if err != nil {
+			log.Errorf("transport: %v", err)
+			continue
+		}
+
+		// Insert into sessions
+		if err := s.newSession(id, transport); err != nil {
+			log.Errorf("session: %v", err)
+			continue
+		}
+
+		log.Infof("connected %v: %v", conn.RemoteAddr(), id)
+
 		// handle connection
 		s.wg.Add(1)
-		go s.handle(ctx, conn)
+		go s.handle(ctx, id, transport)
 	}
 }
 
-func (s *Server) initPartyID(pctx context.Context) error {
-	log.Tracef("initPartyID")
-	defer log.Tracef("initPartyID exit")
+func (s *Server) initPaillierPrimes(pctx context.Context) error {
+	log.Tracef("initPaillierPrimes")
+	defer log.Tracef("initPaillierPrimes exit")
 
 	ctx, cancel := context.WithTimeout(pctx, 1*time.Minute)
 	defer cancel()
@@ -488,8 +490,8 @@ func (s *Server) Run(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	// Read or generate party
-	err = s.initPartyID(ctx)
+	// Read or generate Paillier primes.
+	err = s.initPaillierPrimes(ctx)
 	if err != nil {
 		return fmt.Errorf("party: %w", err)
 	}
