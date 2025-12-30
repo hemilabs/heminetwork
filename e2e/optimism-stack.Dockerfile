@@ -3,7 +3,7 @@
 # which can be found in the LICENSE file.
 
 ARG OP_GETH_COMMIT=73dbd17c8d105ce2a3cc9dd1684b2ab261028408
-ARG OPTIMISM_COMMIT=2ebe8b74ccafd854c7fed719d7ff812bae765bd7
+ARG OPTIMISM_COMMIT=b1f96f2dbfad6a076fa3a1eb3d4854e0d68f18d8
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken
