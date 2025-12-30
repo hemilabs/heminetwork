@@ -139,18 +139,22 @@ import (
 type PayloadType string
 
 const (
-	PHelloRequest  PayloadType = "hello"
-	PHelloResponse PayloadType = "hello-response"
-	PPingRequest   PayloadType = "ping"
-	PPingResponse  PayloadType = "ping-response"
+	PHelloRequest   PayloadType = "hello"
+	PHelloResponse  PayloadType = "hello-response"
+	PPingRequest    PayloadType = "ping"
+	PPingResponse   PayloadType = "ping-response"
+	PKeygenRequest  PayloadType = "keygen"
+	PKeygenResponse PayloadType = "keygen-response"
 )
 
 var (
 	pt2str = map[reflect.Type]PayloadType{
-		reflect.TypeOf(HelloRequest{}):  PHelloRequest,
-		reflect.TypeOf(HelloResponse{}): PHelloResponse,
-		reflect.TypeOf(PingRequest{}):   PPingRequest,
-		reflect.TypeOf(PingResponse{}):  PPingResponse,
+		reflect.TypeOf(HelloRequest{}):   PHelloRequest,
+		reflect.TypeOf(HelloResponse{}):  PHelloResponse,
+		reflect.TypeOf(PingRequest{}):    PPingRequest,
+		reflect.TypeOf(PingResponse{}):   PPingResponse,
+		reflect.TypeOf(KeygenRequest{}):  PKeygenRequest,
+		reflect.TypeOf(KeygenResponse{}): PKeygenResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -249,6 +253,12 @@ type PingResponse struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Copy the value back
 	PeerTimestamp   int64 `json:"peertimestamp"`   // Remote timestamp
 }
+
+type KeygenRequest struct {
+	Curve string `json:"curve"` // Curve for TSS
+}
+
+type KeygenResponse struct{}
 
 const (
 	TransportVersion = 1 // Transport protocol version
@@ -630,6 +640,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	}()
 
 	// The key exchange should finish in less than 5 seconds.
+	// XXX we should get rid of context here or use it instead of the deadline
 	timeout := 5 * time.Second
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return err
@@ -920,8 +931,8 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, error) {
 
 // Read reads and decrypts the next command from the connection stream. It
 // returns the header and command.
-func (t *Transport) Read() (any, any, error) {
-	return nil, nil, fmt.Errorf("nope")
+func (t *Transport) Read() (*Header, any, error) {
+	return t.read(0 * time.Second) // XXX timeout
 }
 
 // write encrypts the passed in cleartext and writes it to the connection

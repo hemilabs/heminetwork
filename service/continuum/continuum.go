@@ -11,10 +11,12 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -22,6 +24,8 @@ import (
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
 
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
@@ -44,27 +48,32 @@ func init() {
 }
 
 type Config struct {
+	Connect                 []string
 	Home                    string
+	ListenAddress           string
 	LogLevel                string
+	MaxConnections          int
 	PprofListenAddress      string
+	PrivateKey              string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
-	PrivateKey              string
-	ListenAddress           string
-	MaxConnections          int
 }
 
 type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
-	cfg *Config
+	cfg  *Config
+	data string // Data directory home+identity
 
 	// Sessions
-	sessions map[string]*Transport
+	sessions map[Identity]*Transport
 
 	// Secrets
 	secret *Secret
+
+	// TSS
+	preParams keygen.LocalPreParams
 
 	// Listener
 	listenConfig *net.ListenConfig
@@ -96,9 +105,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	return &Server{
 		cfg:          cfg,
 		listenConfig: &net.ListenConfig{},
+		sessions:     make(map[Identity]*Transport, cfg.MaxConnections),
 	}, nil
 }
 
+// genID is used in testing only.
 func genID() string {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
@@ -107,33 +118,28 @@ func genID() string {
 	return hex.EncodeToString(buf)
 }
 
-func (s *Server) newSession(t *Transport) string {
-	for {
-		id := genID()
-		s.mtx.Lock()
-		if _, ok := s.sessions[id]; ok {
-			s.mtx.Unlock()
+func (s *Server) newSession(id *Identity, t *Transport) error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 
-			// ID is already used, retry.
-			continue
-		}
-		s.sessions[id] = t
-		s.mtx.Unlock()
-		return id
+	if _, ok := s.sessions[*id]; ok {
+		return errors.New("duplicate identity")
 	}
+	s.sessions[*id] = t
+
+	return nil
 }
 
-func (s *Server) deleteSession(id string) {
+func (s *Server) deleteSession(id *Identity) error {
 	s.mtx.Lock()
-	t, ok := s.sessions[id]
-	delete(s.sessions, id)
-	s.mtx.Unlock()
-	if !ok {
-		log.Errorf("id not found in sessions %s", id)
+	defer s.mtx.Unlock()
+
+	t := s.sessions[*id]
+	if t == nil {
+		return fmt.Errorf("no session: %v", id)
 	}
-	if err := t.Close(); err != nil {
-		log.Errorf("close session %s: %v", id, err)
-	}
+	delete(s.sessions, *id)
+	return t.Close()
 }
 
 func (s *Server) deleteAllSessions() {
@@ -147,52 +153,65 @@ func (s *Server) deleteAllSessions() {
 	s.sessions = nil
 }
 
-func (s *Server) handle(ctx context.Context, conn net.Conn) {
-	log.Infof("handle: %v", conn.RemoteAddr())
-	defer log.Infof("handle exit: %v", conn.RemoteAddr())
-
-	defer s.wg.Done()
-	defer func() {
-		err := conn.Close()
-		if err != nil {
-			log.Errorf("close %v: %v", conn.RemoteAddr(), err)
-		}
-	}()
-
+func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, error) {
 	transport, err := NewTransportFromCurve(ecdh.X25519()) // XXX config option
 	if err != nil {
-		log.Errorf("create new transport: %v", err)
-		return
+		return nil, nil, fmt.Errorf("new transport: %w", err)
 	}
-	id := s.newSession(transport)
-	defer s.deleteSession(id)
 
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return
-		}
-		log.Errorf("key exchange: %v", err)
-		return
+		return nil, nil, fmt.Errorf("key exchange: %w", err) // XXX too loud?
 	}
 
-	hr, err := transport.Handshake(ctx, s.secret)
+	id, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return
-		}
-		log.Errorf("handshake: %v", err)
-		return
+		return nil, nil, fmt.Errorf("handshake: %w", err) // XXX too loud?
 	}
 
-	log.Infof("connected %v: %v", conn.RemoteAddr(), hr)
+	return id, transport, nil
+}
+
+func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
+	defer s.deleteSession(id)
+	defer s.wg.Done()
+
+	log.Debugf("handle: %v", id)
+	defer log.Debugf("handle exit: %v", id)
+
 	for {
-		header, payload, err := transport.Read()
+		header, payload, err := t.Read()
 		if err != nil {
-			panic(err) // XXX
+			// XXX too loud?
+			log.Errorf("read %v: %v", id, err)
+			return
 		}
 		log.Infof("%v", spew.Sdump(header))
 		log.Infof("%v", spew.Sdump(payload))
+
+		// XXX make this a map like str2pt with callbacks
+		switch payload.(type) {
+		case *PingRequest:
+			err := t.Write(s.secret.Identity, PingResponse{
+				OriginTimestamp: payload.(*PingRequest).OriginTimestamp,
+				PeerTimestamp:   time.Now().Unix(),
+			})
+			if err != nil {
+				panic(err)
+			}
+
+			// XXX use ping request for now to kick off keygen
+			err = t.Write(s.secret.Identity, KeygenRequest{
+				Curve: "secp256k1",
+				// Committee: committee,
+				// Threashold, len(committee) - 1,
+			})
+			if err != nil {
+				panic(err)
+			}
+
+		default:
+		}
 	}
 }
 
@@ -265,6 +284,181 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	return s.isHealthy(ctx), Info{Online: true}, nil
 }
 
+func (s *Server) client(ctx context.Context, them *Identity, t *Transport) error {
+	log.Infof("client: %v", them)
+	defer log.Infof("client: %v exit", them)
+
+	// Always ping
+	// XXX make this a call, not a write.
+	err := t.Write(s.secret.Identity, PingRequest{
+		OriginTimestamp: time.Now().Unix(),
+	})
+	if err != nil {
+		return fmt.Errorf("ping %v: %w", them, err)
+	}
+
+	for {
+		header, cmd, err := t.Read()
+		if err != nil {
+			return fmt.Errorf("read %v: %w", them, err)
+		}
+		log.Infof("%v", spew.Sdump(header))
+		log.Infof("%v", spew.Sdump(cmd))
+	}
+
+	return nil
+}
+
+func (s *Server) connect(ctx context.Context, c string, errC chan error) {
+	defer s.wg.Done()
+
+	// XXX timeout
+
+	log.Infof("connect: %v", c)
+	defer log.Infof("connect: %v exit", c)
+
+	d := &net.Dialer{}
+	conn, err := d.DialContext(ctx, "tcp", c)
+	if err != nil {
+		errC <- err
+		return
+	}
+	clientTransport := new(Transport)
+	defer func() {
+		if err := clientTransport.Close(); err != nil {
+			log.Errorf("client close: %v", err)
+			return
+		}
+	}()
+
+	if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+		errC <- err
+		return
+	}
+	them, err := clientTransport.Handshake(ctx, s.secret)
+	if err != nil {
+		errC <- err
+		return
+	}
+
+	// This should no longer be terminal since we made it through key
+	// exchange.
+	if err := s.client(ctx, them, clientTransport); err != nil {
+		log.Errorf("client: %v", err)
+		return
+	}
+}
+
+func (s *Server) connectAll(ctx context.Context, errC chan error) {
+	defer s.wg.Done()
+
+	log.Tracef("connectAll")
+	defer log.Tracef("connectAll")
+
+	// XXX should we exit when we can't connect?
+	for k := range s.cfg.Connect {
+		s.wg.Add(1)
+		go s.connect(ctx, s.cfg.Connect[k], errC)
+	}
+}
+
+func (s *Server) listen(ctx context.Context, errC chan error) {
+	defer s.wg.Done()
+
+	listener, err := s.listenConfig.Listen(ctx, "tcp", s.cfg.ListenAddress)
+	if err != nil {
+		errC <- err
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		if err := listener.Close(); err != nil {
+			log.Errorf("listner close: %v", err)
+		}
+		s.deleteAllSessions()
+	}()
+
+	for {
+		conn, err := listener.Accept()
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return
+		}
+		if err != nil {
+			log.Errorf("accept: %v", err)
+			continue
+		}
+
+		s.mtx.RLock()
+		conNum := len(s.sessions)
+		s.mtx.RUnlock()
+		if conNum >= s.cfg.MaxConnections {
+			// XXX send a "busy" message?
+			log.Debugf("server full, connection rejected: %s",
+				conn.RemoteAddr())
+			if err := conn.Close(); err != nil {
+				log.Errorf("close connection %s:  %v", err)
+			}
+			continue
+		}
+
+		// XXX this can cause rate limitting since it isn't in a go
+		// routine. This is obviously a DDOS and needs fixing.
+		id, transport, err := s.newTransport(ctx, conn)
+		if err != nil {
+			log.Errorf("transport: %v", err)
+			continue
+		}
+
+		// Insert into sessions
+		if err := s.newSession(id, transport); err != nil {
+			log.Errorf("session: %v", err)
+			continue
+		}
+
+		log.Infof("connected %v: %v", conn.RemoteAddr(), id)
+
+		// handle connection
+		s.wg.Add(1)
+		go s.handle(ctx, id, transport)
+	}
+}
+
+func (s *Server) initPaillierPrimes(pctx context.Context) error {
+	log.Tracef("initPaillierPrimes")
+	defer log.Tracef("initPaillierPrimes exit")
+
+	ctx, cancel := context.WithTimeout(pctx, 1*time.Minute)
+	defer cancel()
+
+	preparamsFilename := filepath.Join(s.data, "preparams.json")
+	ppf, err := os.Open(preparamsFilename)
+	if errors.Is(err, os.ErrNotExist) {
+		log.Infof("Generating TSS Paillier primes")
+		lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
+		if err != nil {
+			return err
+		}
+		jpp, err := json.MarshalIndent(lpp, "  ", "  ")
+		if err != nil {
+			return err
+		}
+		err = os.WriteFile(preparamsFilename, jpp, 0o400)
+		if err != nil {
+			return err
+		}
+		s.preParams = *lpp
+		log.Infof("Generating TSS Paillier primes complete")
+		return nil
+	} else if err != nil {
+		return err
+	}
+
+	if err := json.NewDecoder(ppf).Decode(&s.preParams); err != nil {
+		return err
+	}
+	return ppf.Close()
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -274,19 +468,33 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.testAndSetRunning(false)
 
+	// Make sure we have a valid secret
 	var err error
-	s.cfg.Home, err = homedir.Expand(s.cfg.Home)
-	if err != nil {
-		return fmt.Errorf("expand: %w", err)
-	}
 	s.secret, err = NewSecretFromString(s.cfg.PrivateKey)
 	if err != nil {
 		return fmt.Errorf("secret: %w", err)
 	}
 	s.cfg.PrivateKey = "" // hopefully PrivateKey is reaped later.
 
+	// Setup home
+	s.cfg.Home, err = homedir.Expand(s.cfg.Home)
+	if err != nil {
+		return fmt.Errorf("expand: %w", err)
+	}
+	s.data = filepath.Join(s.cfg.Home, s.secret.Identity.String())
+	err = os.MkdirAll(s.data, 0o700)
+	if err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
+
+	// Read or generate Paillier primes.
+	err = s.initPaillierPrimes(ctx)
+	if err != nil {
+		return fmt.Errorf("party: %w", err)
+	}
 
 	// pprof
 	if s.cfg.PprofListenAddress != "" {
@@ -338,50 +546,15 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 
 	errC := make(chan error)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		listener, err := s.listenConfig.Listen(ctx, "tcp", s.cfg.ListenAddress)
-		if err != nil {
-			errC <- err
-			return
-		}
-		go func() {
-			<-ctx.Done()
-			if err := listener.Close(); err != nil {
-				log.Errorf("listner close: %v", err)
-			}
-			s.deleteAllSessions()
-		}()
+	if s.cfg.ListenAddress != "" {
+		s.wg.Add(1)
+		go s.listen(ctx, errC)
+	}
 
-		for {
-			conn, err := listener.Accept()
-			if errors.Is(ctx.Err(), context.Canceled) {
-				return
-			}
-			if err != nil {
-				log.Errorf("accept: %v", err)
-				continue
-			}
-
-			s.mtx.RLock()
-			conNum := len(s.sessions)
-			s.mtx.RUnlock()
-			if conNum >= s.cfg.MaxConnections {
-				// XXX send a "busy" message?
-				log.Debugf("server full, connection rejected: %s",
-					conn.RemoteAddr())
-				if err := conn.Close(); err != nil {
-					log.Errorf("close connection %s:  %v", err)
-				}
-				continue
-			}
-
-			// handle connection
-			s.wg.Add(1)
-			go s.handle(ctx, conn)
-		}
-	}()
+	if len(s.cfg.Connect) != 0 {
+		s.wg.Add(1)
+		go s.connectAll(ctx, errC)
+	}
 
 	log.Infof("Identity: %v", s.secret)
 
