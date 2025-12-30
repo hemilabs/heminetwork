@@ -640,6 +640,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	}()
 
 	// The key exchange should finish in less than 5 seconds.
+	// XXX we should get rid of context here or use it instead of the deadline
 	timeout := 5 * time.Second
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return err
