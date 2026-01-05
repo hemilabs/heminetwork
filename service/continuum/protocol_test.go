@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -855,13 +856,16 @@ func TestHandshakeErrors(t *testing.T) {
 }
 
 func TestTestConnHandshakeDNS(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
+	}
 	curves := []ecdh.Curve{ecdh.P256(), ecdh.P384(), ecdh.P521(), ecdh.X25519()}
 	for _, curve := range curves {
 		testName := fmt.Sprintf("%v", curve)
 		t.Run(testName, func(t *testing.T) {
 			nodes := byte(2)
 			dnsPort := testutil.FreePort()
-			dnsAddress := "127.0.1.1:" + dnsPort
+			dnsAddress := "127.0.0.1:" + dnsPort
 			domain := "moop.gfy"
 			handler := createDNSNodes(domain, nodes)
 			go func() { newDNSServer(dnsAddress, handler) }()
@@ -1138,8 +1142,12 @@ func TestConnHandshake(t *testing.T) {
 }
 
 func TestDNSServerSetup(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
+	}
 	nodes := byte(200)
-	dnsAddress := "127.0.0.1:5353"
+	dnsPort := testutil.FreePort()
+	dnsAddress := "127.0.0.1:" + dnsPort
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)
 	go func() { newDNSServer(dnsAddress, handler) }()
@@ -1336,8 +1344,12 @@ func TestIdentity(t *testing.T) {
 }
 
 func TestDNSTXTRecord(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
+	}
 	nodes := byte(1)
-	dnsAddress := "127.0.0.1:25353"
+	dnsPort := testutil.FreePort()
+	dnsAddress := "127.0.0.1:" + dnsPort
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)
 	go func() { newDNSServer(dnsAddress, handler) }()
