@@ -147,7 +147,9 @@ func RandomHash() *chainhash.Hash {
 	return h
 }
 
-// String2Hash converts a string into a hash.
+// String2Hash converts a string into a hash. If the provided string is
+// smaller than the expected size for a hash, the hash will be padded
+// with zeros.
 func String2Hash(s string) *chainhash.Hash {
 	h, err := chainhash.NewHashFromStr(s)
 	if err != nil {
