@@ -88,11 +88,15 @@ func newServer(x int, state func() (int, time.Time)) *httptest.Server {
 }
 
 func newHproxy(t *testing.T, servers []string, filter []string) (*Server, *Config) {
+	return newHproxyWithPollFrequency(t, servers, filter, time.Second)
+}
+
+func newHproxyWithPollFrequency(t *testing.T, servers []string, filter []string, pollFrequency time.Duration) (*Server, *Config) {
 	hpCfg := NewDefaultConfig()
 	hpCfg.HVMURLs = servers
 	hpCfg.LogLevel = "hproxy=TRACE" // XXX figure out why this isn't working
 	hpCfg.RequestTimeout = time.Second
-	hpCfg.PollFrequency = time.Second
+	hpCfg.PollFrequency = pollFrequency
 	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
 	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
 	hpCfg.MethodFilter = filter
@@ -648,8 +652,9 @@ func TestFailover(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), testDuration)
 	defer cancel()
 
-	// Setup hproxy
-	hp, hpCfg := newHproxy(t, servers, []string{"ping"})
+	// Setup hproxy with long poll frequency to prevent monitor from
+	// re-marking nodes as healthy after we force them unhealthy.
+	hp, hpCfg := newHproxyWithPollFrequency(t, servers, []string{"ping"}, time.Hour)
 	time.Sleep(500 * time.Millisecond) // Let proxies be marked healthy
 
 	// Do 10 command and fail node 0
