@@ -119,7 +119,7 @@ func FillBytesZero(prefix string, n int) []byte {
 // FreePort finds a port that is currently free.
 func FreePort(ctx context.Context) string {
 	lc := net.ListenConfig{}
-	l, err := lc.Listen(ctx, "tcp", ":0")
+	l, err := lc.Listen(ctx, "tcp", "localhost:0")
 	if err != nil {
 		panic(err)
 	}
