@@ -1146,7 +1146,7 @@ func TestDNSServerSetup(t *testing.T) {
 		t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
 	}
 	nodes := byte(200)
-	dnsPort := testutil.FreePort()
+	dnsPort := testutil.FreePort(t.Context())
 	dnsAddress := "127.0.0.1:" + dnsPort
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)
@@ -1348,7 +1348,7 @@ func TestDNSTXTRecord(t *testing.T) {
 		t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
 	}
 	nodes := byte(1)
-	dnsPort := testutil.FreePort()
+	dnsPort := testutil.FreePort(t.Context())
 	dnsAddress := "127.0.0.1:" + dnsPort
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)
