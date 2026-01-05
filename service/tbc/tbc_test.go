@@ -1245,7 +1245,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	if err := os.RemoveAll(home); err != nil {
 		t.Fatal(err)
 	}
-	tcbListenAddress := "localhost:" + testutil.FreePort(ctx)
+	tcbListenAddress := ":" + testutil.FreePort(ctx)
 
 	cfg := NewDefaultConfig()
 	cfg.LevelDBHome = home
