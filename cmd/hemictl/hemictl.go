@@ -826,7 +826,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 
 		fmt.Printf("count: %v\n", count)
 
-	// XXX this needs to be hidden behind a debug flug of sorts.
+	// XXX this needs to be hidden behind a debug flag of sorts.
 	// case "dbget":
 	//	dbname := args["dbname"]
 	//	if dbname == "" {
