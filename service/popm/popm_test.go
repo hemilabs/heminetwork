@@ -73,7 +73,7 @@ func TestPopMiner(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestTickingPopMiner(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestTickingPopMiner(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestPopmFilterUtxos(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestPopmFilterUtxos(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,30 +502,6 @@ func TestOpgethReconnect(t *testing.T) {
 				t.Fatal("reconnected too fast")
 			}
 			return
-		}
-	}
-}
-
-func messageListener(t *testing.T, expected map[string]int, errCh chan error, msgCh chan string) error {
-	for {
-		select {
-		case err := <-errCh:
-			return err
-		case n := <-msgCh:
-			t.Logf("received message %s", n)
-			expected[n]--
-		case <-t.Context().Done():
-			return t.Context().Err()
-		}
-		finished := true
-		for v, k := range expected {
-			if k > 0 {
-				t.Logf("missing %d messages of type %s", k, v)
-				finished = false
-			}
-		}
-		if finished {
-			return nil
 		}
 	}
 }

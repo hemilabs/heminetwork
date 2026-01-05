@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -27,7 +27,7 @@ func TestTBCGozerConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 
 	// Connect tbc service
 	tbcCfg := &tbc.Config{

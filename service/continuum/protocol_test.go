@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -864,7 +864,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 		testName := fmt.Sprintf("%v", curve)
 		t.Run(testName, func(t *testing.T) {
 			nodes := byte(2)
-			dnsPort := testutil.FreePort()
+			dnsPort := testutil.FreePort(t.Context())
 			dnsAddress := "127.0.0.1:" + dnsPort
 			domain := "moop.gfy"
 			handler := createDNSNodes(domain, nodes)

@@ -9,14 +9,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
 
 func TestErrors(t *testing.T) {
-	hash, err := chainhash.NewHashFromStr("000000000000098faa89ab34c3ec0e6e037698e3e54c8d1bbb9dcfe0054a8e7a")
-	if err != nil {
-		t.Fatal(err)
-	}
+	var err error
+	hash := testutil.String2Hash("000000000000098faa89ab34c3ec0e6e037698e3e54c8d1bbb9dcfe0054a8e7a")
 	err = BlockNotFoundError{*hash}
 	if !errors.Is(err, ErrBlockNotFound) {
 		t.Fatalf("expected block not found, got %T", err)

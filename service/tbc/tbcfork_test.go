@@ -7,7 +7,6 @@ package tbc
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -47,7 +46,7 @@ type block struct {
 	txs map[tbcd.TxKey]*tbcd.TxValue // Parsed Txs in cache format
 }
 
-func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
+func newBlock(_ *chaincfg.Params, name string, b *btcutil.Block) *block {
 	blk := &block{
 		name: name,
 		b:    b,
@@ -608,15 +607,6 @@ func (b *btcNode) Best() []*chainhash.Hash {
 	return chs
 }
 
-func random(count int) []byte {
-	b := make([]byte, count)
-	_, err := rand.Read(b)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
-
 // type addressToKey struct {
 // 	key        *btcec.PrivateKey
 // 	compressed bool
@@ -768,7 +758,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		return nil, errors.New("parent hash not found")
 	}
 	// extra nonce is needed to prevent block collisions
-	en := random(8)
+	en := testutil.RandomBytes(8)
 	extraNonce := binary.BigEndian.Uint64(en)
 	var mempool []*btcutil.Tx
 
@@ -828,7 +818,7 @@ func (b *btcNode) mineMultiple(name string, from *chainhash.Hash, payToAddress b
 		return nil, errors.New("parent hash not found")
 	}
 	// extra nonce is needed to prevent block collisions
-	en := random(8)
+	en := testutil.RandomBytes(8)
 	extraNonce := binary.BigEndian.Uint64(en)
 	var mempool []*btcutil.Tx
 
@@ -895,7 +885,7 @@ func (b *btcNode) mineKss(name string, from *chainhash.Hash, payToAddress btcuti
 		return nil, errors.New("parent hash not found")
 	}
 	// extra nonce is needed to prevent block collisions
-	en := random(8)
+	en := testutil.RandomBytes(8)
 	extraNonce := binary.BigEndian.Uint64(en)
 	var mempool []*btcutil.Tx
 
@@ -1375,20 +1365,6 @@ func mustNotHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 	return nil
 }
 
-func errorIsOneOf(err error, errs []error) bool {
-	if err == nil {
-		return false
-	}
-
-	for _, v := range errs {
-		if errors.Is(err, v) {
-			return true
-		}
-	}
-
-	return false
-}
-
 func (s *Server) hasAllBlocks(ctx context.Context, m map[int32][]*block) (bool, error) {
 	for _, k := range m {
 		for _, blk := range k {
@@ -1430,7 +1406,7 @@ func TestFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1444,7 +1420,7 @@ func TestFork(t *testing.T) {
 	}()
 
 	go func() {
-		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
 		}
 	}()
@@ -1693,7 +1669,7 @@ func TestIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1707,7 +1683,7 @@ func TestIndexNoFork(t *testing.T) {
 	}()
 
 	go func() {
-		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
 		}
 	}()
@@ -1890,7 +1866,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1916,7 +1892,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	kss2Hash := n.newKeystone("kss2")
 
 	go func() {
-		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
 		}
 	}()
@@ -2230,7 +2206,7 @@ func TestIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -2242,7 +2218,7 @@ func TestIndexFork(t *testing.T) {
 		}
 	}()
 	go func() {
-		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
 		}
 	}()
@@ -2559,7 +2535,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -2584,7 +2560,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	kss2Hash := n.newKeystone("kss2")
 
 	go func() {
-		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
 		}
 	}()
@@ -3161,7 +3137,7 @@ func TestForkCanonicity(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -3173,7 +3149,7 @@ func TestForkCanonicity(t *testing.T) {
 		}
 	}()
 	go func() {
-		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
 		}
 	}()
@@ -3344,7 +3320,7 @@ func TestCacheOverflow(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -3366,7 +3342,7 @@ func TestCacheOverflow(t *testing.T) {
 	t.Logf("  address    : %v", popAddress)
 
 	go func() {
-		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
 		}
 	}()
@@ -3517,7 +3493,7 @@ func TestZKIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort()
+	port := testutil.FreePort(ctx)
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -3530,7 +3506,7 @@ func TestZKIndexFork(t *testing.T) {
 	}()
 
 	go func() {
-		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
 		}
 	}()

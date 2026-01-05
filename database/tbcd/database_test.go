@@ -6,12 +6,12 @@ package tbcd_test
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"slices"
 	"testing"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
 
 func TestNewOutpoint(t *testing.T) {
@@ -76,16 +76,8 @@ func TestNewOutpoint(t *testing.T) {
 	}
 }
 
-func decodeHex(s string) []byte {
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
-
 func decodeTxId(s string) [32]byte {
-	b := decodeHex(s)
+	b := testutil.DecodeHex(s)
 	if len(b) != 32 {
 		panic(fmt.Errorf("invalid txid: %s", s))
 	}

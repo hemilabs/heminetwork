@@ -7,17 +7,14 @@ package tbc
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -31,7 +28,6 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/juju/loggo/v2"
-	"github.com/phayes/freeport"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -455,11 +451,7 @@ func TestDbUpgradeV4(t *testing.T) {
 	}
 
 	for _, kh := range keystoneHashes {
-		hash, err := chainhash.NewHashFromStr(kh)
-		if err != nil {
-			t.Fatal(err)
-		}
-
+		hash := testutil.String2Hash(kh)
 		ks, err := s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *hash)
 		if err != nil {
 			t.Fatal(err)
@@ -498,14 +490,8 @@ func TestKeystonesInBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rb1, err := hex.DecodeString(strings.TrimSpace(string(hb1)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rb2, err := hex.DecodeString(strings.TrimSpace(string(hb2)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	rb1 := testutil.DecodeHex(strings.TrimSpace(string(hb1)))
+	rb2 := testutil.DecodeHex(strings.TrimSpace(string(hb2)))
 	b1, err := btcutil.NewBlockFromBytes(rb1)
 	if err != nil {
 		t.Fatal(err)
@@ -1248,33 +1234,6 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 	return hash
 }
 
-func nextPort(ctx context.Context, t *testing.T) int {
-	var dialer net.Dialer
-	dialer.Timeout = 1 * time.Second
-
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		default:
-		}
-
-		port, err := freeport.GetFreePort()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port))); err != nil {
-			if errors.Is(err, syscall.ECONNREFUSED) {
-				// connection error, port is open
-				return port
-			}
-
-			t.Fatal(err)
-		}
-	}
-}
-
 func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -1286,7 +1245,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	if err := os.RemoveAll(home); err != nil {
 		t.Fatal(err)
 	}
-	tcbListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
+	tcbListenAddress := "localhost:" + testutil.FreePort(ctx)
 
 	cfg := NewDefaultConfig()
 	cfg.LevelDBHome = home
@@ -1541,11 +1500,7 @@ func hexToRawHeader(hexStr string) (*[80]byte, error) {
 		return nil, fmt.Errorf("attempted to convert %s to a header but length (%d) is incorrect", hexStr, len(hexStr))
 	}
 
-	parsed, err := hex.DecodeString(hexStr)
-	if err != nil {
-		return nil, err
-	}
-
+	parsed := testutil.DecodeHex(hexStr)
 	header := [80]byte{}
 	for i := 0; i < 80; i++ {
 		header[i] = parsed[i]
@@ -1559,11 +1514,7 @@ func hexToHash(hexStr string) (*[32]byte, error) {
 		return nil, fmt.Errorf("attempted to convert %s to a hash but length (%d) is incorrect", hexStr, len(hexStr))
 	}
 
-	parsed, err := hex.DecodeString(hexStr)
-	if err != nil {
-		return nil, err
-	}
-
+	parsed := testutil.DecodeHex(hexStr)
 	hash := [32]byte{}
 	for i := 0; i < 32; i++ {
 		hash[i] = parsed[i]

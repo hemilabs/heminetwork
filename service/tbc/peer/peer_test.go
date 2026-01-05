@@ -16,15 +16,9 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-)
 
-func s2ch(s string) *chainhash.Hash {
-	h, err := chainhash.NewHashFromStr(s)
-	if err != nil {
-		panic(err)
-	}
-	return h
-}
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
+)
 
 func TestPeer(t *testing.T) {
 	t.Skip("requires bitcoind access that supports mempool")
@@ -44,7 +38,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Get genesis block
-	block0Hash := s2ch("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
+	block0Hash := testutil.String2Hash("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
 	h, err := p.GetHeaders(ctx, []*chainhash.Hash{block0Hash}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +55,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Get block 1 headers
-	block1Hash := s2ch("00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206")
+	block1Hash := testutil.String2Hash("00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206")
 	h, err = p.GetHeaders(ctx, []*chainhash.Hash{block1Hash}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +83,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Ask block 2 and block 1
-	block2Hash := s2ch("000000006c02c8ea6e4ff69651f7fcde348fb9d557a06e6957b65552002a7820")
+	block2Hash := testutil.String2Hash("000000006c02c8ea6e4ff69651f7fcde348fb9d557a06e6957b65552002a7820")
 	h, err = p.GetHeaders(ctx, []*chainhash.Hash{block2Hash, block1Hash}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +166,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Get coinbase Tx from block 1, has been pruned
-	txID := s2ch("f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba")
+	txID := testutil.String2Hash("f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba")
 	tx, err := p.GetTx(ctx, txID)
 	if !errors.Is(err, ErrUnknown) {
 		t.Fatal(err)
