@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -7,7 +7,6 @@ package tbc
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -30,19 +29,6 @@ func TestZKEncodeRetrieve(t *testing.T) {
 	createFullZKDB(ctx, t, home, 10)
 }
 
-func randomHash() *chainhash.Hash {
-	b := make([]byte, len(chainhash.Hash{}))
-	_, err := rand.Read(b)
-	if err != nil {
-		panic(err)
-	}
-	h, err := chainhash.NewHash(b)
-	if err != nil {
-		panic(err)
-	}
-	return h
-}
-
 func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64) map[tbcd.ZKIndexKey][]byte {
 	cfg, err := level.NewConfig("localnet", home,
 		"", "")
@@ -57,9 +43,9 @@ func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64
 	// Create all types of indexes using encoders
 	cache := make(map[tbcd.ZKIndexKey][]byte, 5)
 	index := 99
-	blockHash := randomHash()
-	txId := randomHash()
-	prevHash := randomHash()
+	blockHash := testutil.RandomHash()
+	txId := testutil.RandomHash()
+	prevHash := testutil.RandomHash()
 
 	// ScriptHash
 	shbytes := testutil.FillBytes(fmt.Sprintf("scripthash%d", index), len(tbcd.ScriptHash{}))

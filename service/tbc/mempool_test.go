@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -36,11 +36,7 @@ func TestMempoolFees(t *testing.T) {
 			uniqueBytes := make([]byte, 8)
 			binary.BigEndian.PutUint32(uniqueBytes[0:4], uint32(k))
 			binary.BigEndian.PutUint32(uniqueBytes[4:8], uint32(i))
-
-			ch, err := chainhash.NewHashFromStr(hex.EncodeToString(uniqueBytes))
-			if err != nil {
-				t.Fatal(err)
-			}
+			ch := testutil.String2Hash(hex.EncodeToString(uniqueBytes))
 			mptx := MempoolTx{
 				id:       *ch,
 				expires:  time.Now().Add(1 * time.Minute),
@@ -84,11 +80,7 @@ func TestMempoolMassReaping(t *testing.T) {
 			uniqueBytes := make([]byte, 32)
 			binary.BigEndian.PutUint32(uniqueBytes[0:15], uint32(i))
 			binary.BigEndian.PutUint32(uniqueBytes[16:32], uint32(k))
-			ch, err := chainhash.NewHash(uniqueBytes)
-			if err != nil {
-				t.Fatal(err)
-			}
-
+			ch := testutil.Bytes2Hash(uniqueBytes)
 			mptx := MempoolTx{
 				id:      *ch,
 				expires: expire.Add(time.Duration(k) * time.Second),
@@ -230,11 +222,7 @@ func TestMempoolRemove(t *testing.T) {
 			}
 
 			for _, id := range tti.txIDs {
-				ch, err := chainhash.NewHash(testutil.FillBytes(id, 32))
-				if err != nil {
-					t.Fatal(err)
-				}
-
+				ch := testutil.Bytes2Hash(testutil.FillBytes(id, 32))
 				mptx := MempoolTx{
 					id:      *ch,
 					expires: time.Now().Add(1 * time.Hour),
@@ -246,30 +234,21 @@ func TestMempoolRemove(t *testing.T) {
 
 			remTxs := make([]chainhash.Hash, 0, len(tti.toRemove))
 			for _, id := range tti.toRemove {
-				hash, err := chainhash.NewHash(testutil.FillBytes(id, 32))
-				if err != nil {
-					panic(err)
-				}
+				hash := testutil.Bytes2Hash(testutil.FillBytes(id, 32))
 				remTxs = append(remTxs, *hash)
 			}
 
 			mp.txsRemove(ctx, remTxs)
 
 			for _, id := range tti.toRemove {
-				hash, err := chainhash.NewHash(testutil.FillBytes(id, 32))
-				if err != nil {
-					panic(err)
-				}
+				hash := testutil.Bytes2Hash(testutil.FillBytes(id, 32))
 				if _, ok := mp.txs[*hash]; ok {
 					t.Fatalf("expected %v to be removed", id)
 				}
 			}
 
 			for _, id := range tti.expectedIn {
-				hash, err := chainhash.NewHash(testutil.FillBytes(id, 32))
-				if err != nil {
-					panic(err)
-				}
+				hash := testutil.Bytes2Hash(testutil.FillBytes(id, 32))
 				if _, ok := mp.txs[*hash]; !ok {
 					t.Fatalf("expected %v be in mempool", id)
 				}
@@ -296,10 +275,7 @@ func TestMempoolFiltering(t *testing.T) {
 	for i := range txNum {
 		uniqueBytes := make([]byte, 32)
 		binary.BigEndian.PutUint32(uniqueBytes[0:32], uint32(i))
-		ch, err := chainhash.NewHash(uniqueBytes)
-		if err != nil {
-			t.Fatal(err)
-		}
+		ch := testutil.Bytes2Hash(uniqueBytes)
 		utxo := tbcd.NewUtxo([32]byte(uniqueBytes), 1000, 0)
 		utxos = append(utxos, utxo)
 
@@ -344,11 +320,7 @@ func BenchmarkMempoolFilter(b *testing.B) {
 			for k := range mempoolTxNum {
 				txIdBytes := make([]byte, 32)
 				binary.BigEndian.PutUint32(txIdBytes[0:32], uint32(k))
-				txId, err := chainhash.NewHash(txIdBytes)
-				if err != nil {
-					b.Fatal(err)
-				}
-
+				txId := testutil.Bytes2Hash(txIdBytes)
 				mptx := MempoolTx{
 					id:      *txId,
 					expires: time.Now().Add(10 * time.Hour),
@@ -394,10 +366,7 @@ func createTxs(count int, expiration time.Time, increase time.Duration) []Mempoo
 	for i := range count {
 		uniqueBytes := make([]byte, 32)
 		binary.BigEndian.PutUint32(uniqueBytes, uint32(i))
-		ch, err := chainhash.NewHash(uniqueBytes)
-		if err != nil {
-			panic(err)
-		}
+		ch := testutil.Bytes2Hash(uniqueBytes)
 
 		mptx := MempoolTx{
 			id:      *ch,

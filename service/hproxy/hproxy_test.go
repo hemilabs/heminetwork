@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -97,8 +97,8 @@ func newHproxyWithPollFrequency(t *testing.T, servers []string, filter []string,
 	hpCfg.LogLevel = "hproxy=TRACE" // XXX figure out why this isn't working
 	hpCfg.RequestTimeout = time.Second
 	hpCfg.PollFrequency = pollFrequency
-	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
-	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
+	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort(t.Context())
+	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort(t.Context())
 	hpCfg.MethodFilter = filter
 	hp, err := NewServer(hpCfg)
 	if err != nil {
@@ -157,8 +157,8 @@ func TestClientReap(t *testing.T) {
 	hpCfg.ClientIdleTimeout = mock.InfiniteDuration // will timeout manually later
 	hpCfg.RequestTimeout = time.Second
 	hpCfg.PollFrequency = time.Second
-	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
-	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
+	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort(t.Context())
+	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort(t.Context())
 	hpCfg.MethodFilter = []string{"ping"}
 	hp, err := NewServer(hpCfg)
 	if err != nil {

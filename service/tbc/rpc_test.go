@@ -1411,14 +1411,6 @@ func TestTxByIdInvalid(t *testing.T) {
 	}
 }
 
-func bytes2hash(b []byte) chainhash.Hash {
-	h, err := chainhash.NewHash(b)
-	if err != nil {
-		panic(err)
-	}
-	return *h
-}
-
 func TestRpcZK(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
@@ -1461,16 +1453,16 @@ func TestRpcZK(t *testing.T) {
 	apiSpent := tbcapi.ZKSpentOutput{
 		ScriptHash:        sh[:],
 		BlockHeight:       binary.BigEndian.Uint32(spent[32:]),
-		BlockHash:         bytes2hash(spent[32+4 : 32+4+32]),
-		TxID:              bytes2hash(spent[32+4+32 : 32+4+32+32]),
-		PrevOutpointHash:  bytes2hash(spent[32+4+32+32 : 32+4+32+32+32]),
+		BlockHash:         *testutil.Bytes2Hash(spent[32+4 : 32+4+32]),
+		TxID:              *testutil.Bytes2Hash(spent[32+4+32 : 32+4+32+32]),
+		PrevOutpointHash:  *testutil.Bytes2Hash(spent[32+4+32+32 : 32+4+32+32+32]),
 		PrevOutpointIndex: binary.BigEndian.Uint32(spent[32+4+32+32+32:]),
 		TxInIndex:         binary.BigEndian.Uint32(spent[32+4+32+32+32+4:]),
 	}
 	apiSpending := tbcapi.ZKSpendingOutpoint{
-		TxID:        bytes2hash(spending[0:32]),
+		TxID:        *testutil.Bytes2Hash(spending[0:32]),
 		BlockHeight: binary.BigEndian.Uint32(spending[32:]),
-		BlockHash:   bytes2hash(spending[32+4 : 32+4+32]),
+		BlockHash:   *testutil.Bytes2Hash(spending[32+4 : 32+4+32]),
 		VOutIndex:   binary.BigEndian.Uint32(spending[32+4+32:]),
 		SpendingOutpoint: &tbcapi.ZKSpendingOutpointValue{
 			TxID:  apiSpent.TxID,
@@ -1480,12 +1472,12 @@ func TestRpcZK(t *testing.T) {
 	apiSpendable := tbcapi.ZKSpendableOutput{
 		ScriptHash:  sh[:],
 		BlockHeight: binary.BigEndian.Uint32(spendable[32:]),
-		BlockHash:   bytes2hash(spendable[32+4 : 32+4+32]),
-		TxID:        bytes2hash(spendable[32+4+32 : 32+4+32+32]),
+		BlockHash:   *testutil.Bytes2Hash(spendable[32+4 : 32+4+32]),
+		TxID:        *testutil.Bytes2Hash(spendable[32+4+32 : 32+4+32+32]),
 		TxOutIndex:  binary.BigEndian.Uint32(spendable[32+4+32+32:]),
 	}
 
-	tcbListenAddress := fmt.Sprintf(":%s", testutil.FreePort())
+	tcbListenAddress := fmt.Sprintf(":%s", testutil.FreePort(ctx))
 
 	cfg := &Config{
 		AutoIndex:            false,
@@ -1498,7 +1490,7 @@ func TestRpcZK(t *testing.T) {
 		MaxCachedTxs:         1000,
 		MaxCachedZK:          1000,
 		Network:              networkLocalnet,
-		Seeds:                []string{"127.0.0.1:" + testutil.FreePort()},
+		Seeds:                []string{"127.0.0.1:" + testutil.FreePort(ctx)},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -2137,7 +2129,7 @@ func TestNotFoundError(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{"127.0.0.1:" + testutil.FreePort()},
+		Seeds:                   []string{"127.0.0.1:" + testutil.FreePort(ctx)},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)

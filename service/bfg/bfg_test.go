@@ -18,7 +18,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo/v2"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
@@ -53,7 +52,7 @@ func TestBFG(t *testing.T) {
 	bfgCfg.BitcoinSource = "tbc"
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
-	bfgCfg.ListenAddress = createAddress()
+	bfgCfg.ListenAddress = "localhost:" + testutil.FreePort(ctx)
 	bfgCfg.LogLevel = "bfg=TRACE; mock=Trace"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
@@ -114,7 +113,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 	bfgCfg.BitcoinSource = "tbc"
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
-	bfgCfg.ListenAddress = createAddress()
+	bfgCfg.ListenAddress = "localhost:" + testutil.FreePort(ctx)
 	// bfgCfg.LogLevel = "bfg=Info; mock=Trace"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
@@ -164,7 +163,7 @@ func TestFullMockIntegration(t *testing.T) {
 	bfgCfg.BitcoinSource = "tbc"
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
-	bfgCfg.ListenAddress = createAddress()
+	bfgCfg.ListenAddress = "localhost:" + testutil.FreePort(ctx)
 	// bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
 
 	// if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
@@ -200,7 +199,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +232,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +251,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, expectedMsg, errCh, msgCh)
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,35 +317,4 @@ func sendFinalityRequests(t *testing.T, ctx context.Context, kssList []hemi.L2Ke
 			break
 		}
 	}
-}
-
-func messageListener(t *testing.T, expected map[string]int, errCh chan error, msgCh chan string) error {
-	for {
-		select {
-		case err := <-errCh:
-			return err
-		case n := <-msgCh:
-			expected[n]--
-		case <-t.Context().Done():
-			return t.Context().Err()
-		}
-		finished := true
-		for v, k := range expected {
-			if k > 0 {
-				t.Logf("missing %d messages of type %s", k, v)
-				finished = false
-			}
-		}
-		if finished {
-			return nil
-		}
-	}
-}
-
-func createAddress() string {
-	port, err := freeport.GetFreePort()
-	if err != nil {
-		panic(fmt.Errorf("find free port: %w", err))
-	}
-	return fmt.Sprintf("localhost:%d", port)
 }

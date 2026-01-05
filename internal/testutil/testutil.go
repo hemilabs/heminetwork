@@ -1,15 +1,20 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
 package testutil
 
 import (
+	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"net"
 	"strconv"
+	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/v2/hemi"
 )
@@ -47,6 +52,33 @@ func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hem
 	return kssMap, kssList
 }
 
+// MessageListener waits until a set number of messages of specific types
+// have been received on the message channel. It exits early if an error is
+// received on the error channel, or the test context is cancelled.
+func MessageListener(t *testing.T, expected map[string]int, errCh chan error, msgCh chan string) error {
+	for {
+		select {
+		case err := <-errCh:
+			return err
+		case n := <-msgCh:
+			expected[n]--
+		case <-t.Context().Done():
+			return t.Context().Err()
+		}
+		finished := true
+		for v, k := range expected {
+			if k > 0 {
+				t.Logf("missing %d messages of type %s", k, v)
+				finished = false
+			}
+		}
+		if finished {
+			return nil
+		}
+	}
+}
+
+// SHA256 returns the SHA256 checksum of the provided byte slice.
 func SHA256(x []byte) []byte {
 	xx := sha256.Sum256(x)
 	return xx[:]
@@ -85,11 +117,71 @@ func FillBytesZero(prefix string, n int) []byte {
 }
 
 // FreePort finds a port that is currently free.
-// TODO: remove use of freeport library.
-func FreePort() string {
-	port, err := freeport.GetFreePort()
+func FreePort(ctx context.Context) string {
+	lc := net.ListenConfig{}
+	l, err := lc.Listen(ctx, "tcp", "localhost:0")
 	if err != nil {
 		panic(err)
 	}
-	return strconv.Itoa(port)
+	defer l.Close()
+	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+}
+
+// RandomBytes returns a random byte slice of size n.
+func RandomBytes(count int) []byte {
+	b := make([]byte, count)
+	_, err := rand.Read(b)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// RandomHash returns a random hash.
+func RandomHash() *chainhash.Hash {
+	b := RandomBytes(len(chainhash.Hash{}))
+	h, err := chainhash.NewHash(b)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+
+// String2Hash converts a string into a hash. If the provided string is
+// smaller than the expected size for a hash, the hash will be padded
+// with zeros.
+func String2Hash(s string) *chainhash.Hash {
+	h, err := chainhash.NewHashFromStr(s)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+
+// Bytes2Hash converts a byte slice into a hash.
+func Bytes2Hash(b []byte) *chainhash.Hash {
+	h, err := chainhash.NewHash(b)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+
+// DecodeHex returns the bytes represented by a hexadecimal string.
+func DecodeHex(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// ErrorIsOneOf verifies if err is one of the provided error types.
+func ErrorIsOneOf(err error, errs []error) bool {
+	for _, v := range errs {
+		if errors.Is(err, v) {
+			return true
+		}
+	}
+	return false
 }

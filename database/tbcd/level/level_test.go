@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -697,11 +697,7 @@ func TestHeightHashEncoding(t *testing.T) {
 	if !bytes.Equal(e[1:1+4], h[:]) {
 		t.Fatalf("encoded height != kss height (%v != %v)", e[1:1+4], h)
 	}
-
-	ehash, err := chainhash.NewHash(e[5 : 5+32])
-	if err != nil {
-		t.Fatal(err)
-	}
+	ehash := testutil.Bytes2Hash(e[5 : 5+32])
 
 	// test encoded hash
 	if !ehash.IsEqual(&hash) {
@@ -738,15 +734,8 @@ func TestDbUpgradeV4Errors(t *testing.T) {
 		EPHash:             testutil.FillBytes("v1ephash", 32),
 	}
 	abrevKss := hemi.L2KeystoneAbbreviate(ks)
-
-	fakeHash, err := chainhash.NewHashFromStr("1000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
-	if err != nil {
-		t.Fatal(err)
-	}
-	realHash, err := chainhash.NewHashFromStr("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
-	if err != nil {
-		t.Fatal(err)
-	}
+	fakeHash := testutil.String2Hash("1000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
+	realHash := testutil.String2Hash("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
 
 	invalidBlockKss := tbcd.Keystone{
 		BlockHash:           *fakeHash,
