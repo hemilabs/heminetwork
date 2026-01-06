@@ -1039,17 +1039,16 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		fmt.Printf("balance: %v\n", balance)
 
-	case "zkrollupbalancebyscripthash":
-		scripthash := args["scripthash"]
+	case "zkrollupbalancebypkscript":
+		scripthash := args["pkscript"]
 		if scripthash == "" {
-			return errors.New("scripthash: must be set")
+			return errors.New("pkscript: must be set")
 		}
-		sh, err := tbcd.NewScriptHashFromString(scripthash)
+		shs, err := hex.DecodeString(scripthash)
 		if err != nil {
-			return fmt.Errorf("scripthash: %w", err)
+			return err
 		}
-
-		balance, err := s.ZKRollBalanceByScriptHash(ctx, sh)
+		balance, err := s.ZKRollBalanceByScriptHash(ctx, shs)
 		if err != nil {
 			return err
 		}

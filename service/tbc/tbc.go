@@ -448,13 +448,13 @@ func (s *Server) getHeadersByHeights(ctx context.Context, p *rawpeer.RawPeer, he
 	return nil
 }
 
-func (s *Server) ZKRollBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
+func (s *Server) ZKRollBalanceByScriptHash(ctx context.Context, pk []byte) (uint64, error) {
 	zkri, err := NewZKRollupIndexer(s.g, 150, /* 100 blocks */
 		s.cfg.ZKIndex, s.cfg.Network, s.cfg.LevelDBHome)
 	if err != nil {
 		return 0, fmt.Errorf("create new zkrollup indexer: %w", err)
 	}
-	return zkri.(*zkRollupIndexer).BalanceByScriptHash(ctx, sh)
+	return zkri.(*zkRollupIndexer).BalanceByPkScript(ctx, pk)
 }
 
 func (s *Server) pingExpired(ctx context.Context, key any, value any) {

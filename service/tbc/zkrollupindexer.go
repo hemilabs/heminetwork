@@ -68,8 +68,8 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, h
 	return zi, nil
 }
 
-func (i *zkRollupIndexer) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
-	addr := common.BytesToAddress(sh[:])
+func (i *zkRollupIndexer) BalanceByPkScript(ctx context.Context, pk []byte) (uint64, error) {
+	addr := common.BytesToAddress(pk)
 	bh, err := i.indexerAt(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("get indexer at: %w", err)
