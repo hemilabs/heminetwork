@@ -355,9 +355,15 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 
 	waitForTxReceipt(t, ctx, l2Client, tx)
 
+	l2ReadBalancesNonSequencing, err := mybindings.NewL2ReadBalances(contractAddress, l2ClientNonSequencing)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var res []byte
 	headerCompareRetry := 30
 	for i := range headerCompareRetry {
-		res, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
+		res, err = l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -382,11 +388,6 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-	}
-
-	l2ReadBalancesNonSequencing, err := mybindings.NewL2ReadBalances(contractAddress, l2ClientNonSequencing)
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	config := client.ConnConfig{
