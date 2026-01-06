@@ -66,6 +66,23 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, h
 	return zi, nil
 }
 
+func (i *zkRollupIndexer) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
+	addr := common.BytesToAddress(sh[:])
+	bh, err := i.indexerAt(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("get indexer at: %w", err)
+	}
+	h, err := i.getStateRoot(*bh.BlockHash(), i.newCache())
+	if err != nil {
+		return 0, fmt.Errorf("get state root from block hash: %w", err)
+	}
+	acc, err := i.tr.GetAccount(addr, &h)
+	if err != nil {
+		return 0, fmt.Errorf("get account from zktrie: %w", err)
+	}
+	return acc.Balance.Uint64(), nil
+}
+
 func (i *zkRollupIndexer) newCache() indexerCache {
 	return NewCache[chainhash.Hash, []byte](i.cacheCapacity)
 }

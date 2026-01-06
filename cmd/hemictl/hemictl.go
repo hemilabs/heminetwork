@@ -1039,6 +1039,22 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		fmt.Printf("balance: %v\n", balance)
 
+	case "zkrollupbalancebyscripthash":
+		scripthash := args["scripthash"]
+		if scripthash == "" {
+			return errors.New("scripthash: must be set")
+		}
+		sh, err := tbcd.NewScriptHashFromString(scripthash)
+		if err != nil {
+			return fmt.Errorf("scripthash: %w", err)
+		}
+
+		balance, err := s.ZKRollBalanceByScriptHash(ctx, sh)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("balance: %v\n", balance)
+
 	case "zkvalueandscriptbyoutpoint":
 		outpoint := args["outpoint"]
 		if outpoint == "" {
