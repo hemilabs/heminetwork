@@ -13,17 +13,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/davecgh/go-spew/spew"
+	opbindings "github.com/ethereum-optimism/optimism/op-bindings/bindings"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts"
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
@@ -49,8 +52,6 @@ import (
 const (
 	retries                    = 10
 	SolErrClaimAlreadyResolved = "0xf1a94581"
-	// hardcoded pre-funded private key that shouldn't change with our changes
-	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 )
 
 var (
@@ -58,8 +59,20 @@ var (
 	btcAddress = os.Getenv("BTC_ADDRESS")
 )
 
+func testingMainnetFork() bool {
+	return os.Getenv("TESTING_MAINNET_FORK") == "true"
+}
+
+func testingReclaimFunds() bool {
+	if !testingMainnetFork() {
+		return false
+	}
+
+	return os.Getenv("TESTING_RECLAIM_FUNDS") == "true"
+}
+
 func testingFork() bool {
-	return os.Getenv("TESTING_FORK") == "true"
+	return os.Getenv("TESTING_MAINNET_FORK") == "true" || os.Getenv("TESTING_FORK") == "true"
 }
 
 func l1Endpoint() string {
@@ -87,6 +100,10 @@ func privateKeyForTest() string {
 }
 
 func l1ChainId() *big.Int {
+	if testingMainnetFork() {
+		return big.NewInt(1)
+	}
+
 	if testingFork() {
 		return big.NewInt(11155111)
 	}
@@ -95,6 +112,10 @@ func l1ChainId() *big.Int {
 }
 
 func l2ChainId() *big.Int {
+	if testingMainnetFork() {
+		return big.NewInt(43111)
+	}
+
 	if testingFork() {
 		return big.NewInt(743111)
 	}
@@ -123,10 +144,18 @@ func disputeGameFactory(t *testing.T) common.Address {
 }
 
 func l2OutputOracle() common.Address {
+	if testingMainnetFork() {
+		return common.HexToAddress("0x6daF3a3497D8abdFE12915aDD9829f83A79C0d51")
+	}
+
 	return common.HexToAddress("0x032d1e1dd960a4b027a9a35ff8b2b672e333bc27")
 }
 
 func l1StandardBridge(t *testing.T) common.Address {
+	if testingMainnetFork() {
+		return common.HexToAddress("0x5eaa10F99e7e6D177eF9F74E519E319aa49f191e")
+	}
+
 	if testingFork() {
 		return common.HexToAddress("0xc94b1bee63a3e101fe5f71c80f912b4f4b055925")
 	}
@@ -136,6 +165,10 @@ func l1StandardBridge(t *testing.T) common.Address {
 }
 
 func optimismPortalProxy(t *testing.T) common.Address {
+	if testingMainnetFork() {
+		return common.HexToAddress("0x39a0005415256B9863aFE2d55Edcf75ECc3A4D7e")
+	}
+
 	if testingFork() {
 		return common.HexToAddress("0xB6f9579980aE46f61217A99145645341E49E2516")
 	}
@@ -267,6 +300,10 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				l2ClientToUse = l2ClientNonSequencing
 			}
 
+			if testingReclaimFunds() {
+				testReclaimFunds(t, ctx, l1Client, l2ClientToUse, privateKey)
+			}
+
 			l1Address := deployL1TestToken(t, ctx, l1Client, privateKey)
 
 			t.Logf("the l1 address is %s", l1Address.Hex())
@@ -298,6 +335,180 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 	}
 }
 
+func testReclaimFunds(t *testing.T, ctx context.Context, l1Client *ethclient.Client, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+	for {
+
+		l1StandardBridgeCaller, err := mybindings.NewL1StandardBridgeCaller(l1StandardBridge(t), l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l1StandardBridgeContract, err := mybindings.NewL1StandardBridge(l1StandardBridge(t), l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		amount, err := l1StandardBridgeCaller.Deposits(nil, common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), common.HexToAddress("0xad11a8BEb98bbf61dbb1aa0F6d6F2ECD87b35afA"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("the amount in the contract is: %d", amount)
+
+		guardianAddress := common.HexToAddress("0xc0E743E625bBB17E3B16efC984df9678D06EcdDF")
+
+		if err := impersonateAccount(t, ctx, l1Endpoint(), guardianAddress); err != nil {
+			t.Fatal(err)
+		}
+
+		correctValue := big.NewInt(1000 * int64(math.Pow(10, 6)))
+
+		nonce, err := l1Client.PendingNonceAt(ctx, guardianAddress)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		gasPrice, err := l1Client.SuggestGasPrice(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		opts := &bind.TransactOpts{
+			Nonce: big.NewInt(int64(nonce)),
+			From:  guardianAddress,
+			Signer: func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
+				signer := types.NewCancunSigner(l1ChainId())
+				signedTxTmp, err := types.SignTx(tx, signer, privateKey)
+				if err != nil {
+					return nil, fmt.Errorf("failed to sign tx: %s", err)
+				}
+
+				return signedTxTmp, nil
+			},
+			NoSend:   true,
+			GasLimit: 9100000,
+			GasPrice: gasPrice,
+			Value:    big.NewInt(0),
+		}
+
+		t.Logf("found %d deposited, going to withdraw %d", amount, correctValue)
+
+		tx, err := l1StandardBridgeContract.GuardianWithdrawUSDCSentIncorrectly(opts, correctValue)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		txHashStr, err := sendTransaction(t, ctx, l1Endpoint(), &guardianAddress, tx.To(), tx.Data(), tx.Nonce())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for {
+			receipt := waitForTxHashReceiptForSeconds(t, ctx, l1Client, common.HexToHash(txHashStr), 13*time.Second)
+			if receipt == nil {
+				t.Logf("could not get tx receipt, will retry")
+				continue
+			}
+			if receipt.Status == types.ReceiptStatusFailed {
+				t.Fatal("receipt failed to reclaim funds")
+			}
+			break
+		}
+
+		erc20Caller, err := opbindings.NewERC20Caller(common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		balance, err := erc20Caller.BalanceOf(nil, guardianAddress)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		correctValue.Mul(correctValue, big.NewInt(3))
+
+		if balance.Cmp(correctValue) != 0 {
+			t.Fatalf("values not equal: %d != %d", balance, correctValue)
+		}
+		break
+	}
+}
+
+func sendTransaction(t *testing.T, ctx context.Context, rpcUrl string, from *common.Address, to *common.Address, input []byte, nonce uint64) (string, error) {
+	type txObject struct {
+		To    string `json:"to"`
+		From  string `json:"from"`
+		Input string `json:"input"`
+		Nonce uint64 `json:"nonce"`
+	}
+
+	type bodyJSON struct {
+		Method  string     `json:"method"`
+		ID      int        `json:"id"`
+		JSONRPC string     `json:"jsonrpc"`
+		Params  []txObject `json:"params"`
+	}
+
+	body := bodyJSON{
+		Method:  "eth_sendTransaction",
+		ID:      1,
+		JSONRPC: "2.0",
+		Params: []txObject{
+			{
+				From:  from.Hex(),
+				To:    to.Hex(),
+				Input: hex.EncodeToString(input),
+				Nonce: nonce,
+			},
+		},
+	}
+
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("cannot marshal json body: %s", err)
+	}
+
+	t.Logf("will send request body: %s", string(buf))
+
+	resp, err := http.Post(rpcUrl, "application/json", bytes.NewBuffer(buf))
+	if err != nil {
+		return "", fmt.Errorf("could not post request: %s", err)
+	}
+
+	// Clayton note: add check for RPC error field failure
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("received unexpected status: %s", resp.Status)
+	}
+
+	defer resp.Body.Close()
+
+	// Read the entire response body into a byte slice
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if strings.Contains(string(b), "error") {
+		return "", fmt.Errorf("error in response: %s", string(b))
+	}
+
+	type response struct {
+		Result string `json:"result"`
+	}
+
+	var resParse response
+	if err := json.Unmarshal(b, &resParse); err != nil {
+		return "", err
+	}
+
+	t.Logf("received response body: %s", string(b))
+
+	t.Logf("request succeeded: %d", resp.StatusCode)
+
+	t.Logf("the hash is: %s", resParse.Result)
+
+	return resParse.Result, nil
+}
+
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
@@ -318,6 +529,70 @@ func TestOperatorFeeVaultIsPresent(t *testing.T) {
 	if hex.EncodeToString(code) != operatorFeeVaultCode {
 		t.Fatalf("OperatorFeeVaultCode mismatch")
 	}
+}
+
+func impersonateAccount(t *testing.T, ctx context.Context, rpcUrl string, address common.Address) error {
+	type bodyJSON struct {
+		Method  string   `json:"method"`
+		ID      int      `json:"id"`
+		JSONRPC string   `json:"jsonrpc"`
+		Params  []string `json:"params"`
+	}
+
+	for _, body := range []bodyJSON{
+		{
+			Method:  "hardhat_impersonateAccount",
+			ID:      1,
+			JSONRPC: "2.0",
+			Params: []string{
+				address.Hex(),
+			},
+		},
+		{
+			Method:  "hardhat_setBalance",
+			ID:      1,
+			JSONRPC: "2.0",
+			Params: []string{
+				address.Hex(),
+				"0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+			},
+		},
+	} {
+		buf, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("cannot marshal json body: %s", err)
+		}
+
+		t.Logf("will send request body: %s", string(buf))
+
+		resp, err := http.Post(rpcUrl, "application/json", bytes.NewBuffer(buf))
+		if err != nil {
+			return fmt.Errorf("could not post request: %s", err)
+		}
+
+		// Clayton note: add check for RPC error field failure
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("received unexpected status: %s", resp.Status)
+		}
+
+		defer resp.Body.Close()
+
+		// Read the entire response body into a byte slice
+		b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+
+		if strings.Contains(string(b), "error") {
+			return fmt.Errorf("error in response: %s", string(b))
+		}
+
+		t.Logf("received response body: %s", string(b))
+
+		t.Logf("request succeeded: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, l2ClientNonSequencing *ethclient.Client, privateKey *ecdsa.PrivateKey) {
@@ -479,6 +754,12 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 	}
 
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	if testingReclaimFunds() {
+		if err := impersonateAccount(t, ctx, l1Endpoint(), fromAddress); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	var receipt *types.Receipt
 	var address common.Address
@@ -655,7 +936,6 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 	if testingFork() {
 		waitSequencerWindowSizeForFork(t)
 	}
-
 	for {
 		select {
 		case <-time.After(1 * time.Second):
@@ -1092,7 +1372,13 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	t.Logf("will bridge eth to %s", receiverAddress)
+	if testingReclaimFunds() {
+		if err := impersonateAccount(t, ctx, l1Endpoint(), receiverAddress); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Logf("will bridge erc20 to %s", receiverAddress)
 
 	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge(t), l1Client)
 	if err != nil {
@@ -1585,16 +1871,20 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 	}
 }
 
-func waitForTxReceiptForSeconds(t *testing.T, ctx context.Context, client *ethclient.Client, tx *types.Transaction, s time.Duration) *types.Receipt {
-	t.Logf("will wait for receipt of tx %s", tx.Hash())
+func waitForTxHashReceiptForSeconds(t *testing.T, ctx context.Context, client *ethclient.Client, hash common.Hash, s time.Duration) *types.Receipt {
+	t.Logf("will wait for receipt of tx %s", hash)
 	time.Sleep(s)
-	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
+	receipt, err := client.TransactionReceipt(ctx, hash)
 	if err != nil {
 		t.Logf("error getting tx receipt, will retry: %s", err)
 		return nil
 	} else {
 		return receipt
 	}
+}
+
+func waitForTxReceiptForSeconds(t *testing.T, ctx context.Context, client *ethclient.Client, tx *types.Transaction, s time.Duration) *types.Receipt {
+	return waitForTxHashReceiptForSeconds(t, ctx, client, tx.Hash(), s)
 }
 
 func assertSafeAndFinalBlocksAreProgressing(t *testing.T, ctx context.Context, l2Client *ethclient.Client) {
@@ -2253,13 +2543,18 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 }
 
 func waitSequencerWindowSizeForFork(t *testing.T) {
-	sequencerWindowSize := 20 * time.Second
-	blockTimeSeconds := 12 * time.Second
+	sequencerWindowSize := 20
+	blockTimeSeconds := 12
+	padding := 12
+
+	totalSeconds := sequencerWindowSize*blockTimeSeconds + padding
+	t.Logf("will wait sequencer window size for fork: %d seconds", totalSeconds)
+	defer t.Logf("done waiting sequencer window size for fork")
 
 	select {
 	case <-t.Context().Done():
 		t.Fatalf("error waiting sequencer window size: %s", t.Context().Err())
-	case <-time.After(sequencerWindowSize * blockTimeSeconds):
+	case <-time.After(time.Duration(totalSeconds) * time.Second):
 		// no-op
 	}
 }
