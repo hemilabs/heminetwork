@@ -14,6 +14,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/hemilabs/x/zktrie"
@@ -72,14 +73,17 @@ func (i *zkRollupIndexer) BalanceByScriptHash(ctx context.Context, sh tbcd.Scrip
 	if err != nil {
 		return 0, fmt.Errorf("get indexer at: %w", err)
 	}
+	log.Infof("blockheader height: %d", bh.Height)
 	h, err := i.getStateRoot(*bh.BlockHash(), i.newCache())
 	if err != nil {
 		return 0, fmt.Errorf("get state root from block hash: %w", err)
 	}
+	log.Infof("state root: %v", h.Hex())
 	acc, err := i.tr.GetAccount(addr, &h)
 	if err != nil {
 		return 0, fmt.Errorf("get account from zktrie: %w", err)
 	}
+	spew.Dump(acc)
 	return acc.Balance.Uint64(), nil
 }
 
