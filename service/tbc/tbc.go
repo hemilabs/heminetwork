@@ -449,8 +449,12 @@ func (s *Server) getHeadersByHeights(ctx context.Context, p *rawpeer.RawPeer, he
 }
 
 func (s *Server) ZKRollBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
-	zk := s.zkri.(*zkRollupIndexer)
-	return zk.BalanceByScriptHash(ctx, sh)
+	zkri, err := NewZKRollupIndexer(s.g, 150, /* 100 blocks */
+		s.cfg.ZKIndex, s.cfg.Network, s.cfg.LevelDBHome)
+	if err != nil {
+		return 0, fmt.Errorf("create new zkrollup indexer: %w", err)
+	}
+	return zkri.(*zkRollupIndexer).BalanceByScriptHash(ctx, sh)
 }
 
 func (s *Server) pingExpired(ctx context.Context, key any, value any) {
