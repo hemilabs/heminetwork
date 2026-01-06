@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -73,8 +74,19 @@ func (i *zkRollupIndexer) BalanceByScriptHash(ctx context.Context, sh tbcd.Scrip
 	if err != nil {
 		return 0, fmt.Errorf("get indexer at: %w", err)
 	}
+	var remaining uint64 = 1
+	for remaining > 0 {
+		remaining, err = i.tr.SyncProgress()
+		if err != nil {
+			return 0, fmt.Errorf("sync progress: %w", err)
+		}
+		if remaining > 0 {
+			log.Infof("%d unindexed blocks remaining", remaining)
+			time.Sleep(10 * time.Second)
+		}
+	}
 	log.Infof("blockheader height: %d", bh.Height)
-	h, err := i.getStateRoot(*bh.BlockHash(), i.newCache())
+	h, err := i.getStateRoot(*bh.ParentHash(), i.newCache())
 	if err != nil {
 		return 0, fmt.Errorf("get state root from block hash: %w", err)
 	}
