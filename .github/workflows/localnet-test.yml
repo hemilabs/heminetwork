@@ -30,11 +30,61 @@ jobs:
       - name: generate key and addresses
         run: go run ./cmd/keygen/keygen.go -net=localnet | jq -r 'to_entries[] | "\(.key)=\(.value)"' | sed -n '2s/^private_key/POPM_BTC_PRIVATE_KEY/; 4s/^bitcoin_address/BTC_ADDRESS/; 5s/^ethereum_address/ETH_ADDRESS/; 2p; 4p; 5p' >> $GITHUB_ENV
 
-      - name: "build localnet"
-        run: docker compose -f ./e2e/docker-compose.yml build
+      - name: "Calculate optimism-stack.Dockerfile hash"
+        id: dockerfile-hash
+        run: echo "hash=$(sha256sum e2e/optimism-stack.Dockerfile | cut -d' ' -f1)" >> $GITHUB_OUTPUT
 
+      - name: "Restore cached optimism-stack image"
+        id: cache-optimism-stack
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: optimism-stack-image.tar
+          key: optimism-stack-${{ steps.dockerfile-hash.outputs.hash }}
+
+      - name: "Load cached optimism-stack image"
+        if: steps.cache-optimism-stack.outputs.cache-hit == 'true'
+        run: |
+          echo "Loading cached optimism-stack image (Dockerfile unchanged)"
+          docker load -i optimism-stack-image.tar
+
+          # remove the tar file to save space
+          rm optimism-stack-image.tar
+          
+          echo "Successfully loaded cached image and tagged as optimism-stack:latest"
+
+      - name: "Build optimism-stack image"
+        if: steps.cache-optimism-stack.outputs.cache-hit != 'true'
+        run: |
+          echo "Building optimism-stack image from Dockerfile (no cache or Dockerfile changed)"
+          docker build -f ./e2e/optimism-stack.Dockerfile -t optimism-stack:latest .
+
+      - name: "build localnet"
+        run: |
+          if [ "${{ steps.cache-optimism-stack.outputs.cache-hit }}" = "true" ]; then
+            echo "Using cached optimism-stack:latest image, building remaining services"
+          else
+            echo "Using freshly built optimism-stack:latest image, building remaining services"
+          fi
+          docker compose -f ./e2e/docker-compose.yml build
+      
       - name: "remove dangling"
         run: docker system prune -f
+
+      - name: "Save optimism-stack image to cache"
+        if: steps.cache-optimism-stack.outputs.cache-hit != 'true'
+        run: |
+          echo "Saving optimism-stack:latest image to cache"
+          IMAGE_ID=$(docker images -q optimism-stack:latest)
+          if [ -z "$IMAGE_ID" ]; then
+            echo "Error: Could not find optimism-stack:latest image"
+            exit 1
+          fi
+          echo "Image ID: $IMAGE_ID"
+          IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_ID")
+          echo "Image size: $IMAGE_SIZE"
+          docker save -o optimism-stack-image.tar optimism-stack:latest
+          TAR_SIZE=$(ls -lh optimism-stack-image.tar | awk '{print $5}')
+          echo "Saved tarball size: $TAR_SIZE"
 
       - name: "run localnet"
         env:

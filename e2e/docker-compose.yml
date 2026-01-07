@@ -186,9 +186,7 @@ services:
       e2e:
 
   op-geth-l2-setup:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
+    image: optimism-stack:latest
     depends_on:
       bitcoind:
         condition: "service_started"
@@ -217,9 +215,7 @@ services:
       e2e:
 
   op-geth-l2:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
+    image: optimism-stack:latest
     depends_on:
       geth-l1:
         condition: "service_started"
@@ -261,9 +257,7 @@ services:
         ipv4_address: 192.169.199.8
 
   op-node:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
+    image: optimism-stack:latest
     depends_on:
       geth-l1:
         condition: "service_started"
@@ -315,9 +309,7 @@ services:
       - "8548:8548"
 
   op-node-non-sequencing:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
+    image: optimism-stack:latest
     depends_on:
       op-node:
         condition: "service_started"
@@ -362,9 +354,7 @@ services:
       - "18548:8548"
 
   op-geth-l2-non-sequencing:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
+    image: optimism-stack:latest
     depends_on:
       op-geth-l2:
         condition: "service_started"
@@ -398,9 +388,7 @@ services:
       - "18546:8546"
 
   op-batcher:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
+    image: optimism-stack:latest
     deploy:
       restart_policy:
         condition: "any"
@@ -433,9 +421,7 @@ services:
       e2e:
 
   op-proposer:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
+    image: optimism-stack:latest
     deploy:
       restart_policy:
         condition: "any"
