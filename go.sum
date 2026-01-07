@@ -179,8 +179,8 @@ github.com/hashicorp/go-bexpr v0.1.10 h1:9kuI5PFotCboP3dkDYFr/wi0gg0QVbSNz5oFRpx
 github.com/hashicorp/go-bexpr v0.1.10/go.mod h1:oxlubA2vC/gFVfX1A6JGp7ls7uCDlfJn732ehYYg+g0=
 github.com/hemilabs/x/eth-trie v0.0.0-20251105164544-95cd47e9e738 h1:vfq6tWheHCJnVwpGbdQInMJwLrYUpAWaDe+eSxwAsJg=
 github.com/hemilabs/x/eth-trie v0.0.0-20251105164544-95cd47e9e738/go.mod h1:Ww/u6/pC+fwKpLDw2HNxLw0PxsLDukGCMXJRe1VBym4=
-github.com/hemilabs/x/zktrie v0.0.0-20251118104240-b62f20f883b6 h1:+qSxajaQiMItAnoB/WXDnTepvExJeCaHIxNyxNN/bOI=
-github.com/hemilabs/x/zktrie v0.0.0-20251118104240-b62f20f883b6/go.mod h1:1QRJ5Zt8vXf0P1TyLqtG6GsqXeR+MlW5+PDRY7oTnNs=
+github.com/hemilabs/x/zktrie v0.0.0-20260107103721-3d27206e7566 h1:Hy7TaO6ztulRvGcD6tFslhQuity/ZOmQd2q5icMzfT0=
+github.com/hemilabs/x/zktrie v0.0.0-20260107103721-3d27206e7566/go.mod h1:rKX0pAjGaELjQLOk1MPExg+tRbFsadivtEfkOK7ftrc=
 github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db h1:IZUYC/xb3giYwBLMnr8d0TGTzPKFGNTCGgGLoyeX330=
 github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db/go.mod h1:xTEYN9KCHxuYHs+NmrmzFcnvHMzLLNiGFafCb1n3Mfg=
 github.com/holiman/bloomfilter/v2 v2.0.3 h1:73e0e/V0tCydx14a0SCYS/EWCxgwLZ18CZcZKVu0fao=
