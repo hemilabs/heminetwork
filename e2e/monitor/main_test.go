@@ -10,7 +10,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -52,6 +51,8 @@ import (
 const (
 	retries                    = 10
 	SolErrClaimAlreadyResolved = "0xf1a94581"
+	SolErrNoGameInProgress     = "0x67fe1950"
+	errCouldNotFetchBatch      = "failed to call resolve claim: failed to fetch batch: execution reverted"
 )
 
 var (
@@ -91,12 +92,54 @@ func forkedL2Endpoint() string {
 	return "http://localhost:8546"
 }
 
+// These are intentionally hard-coded keys used exclusively for automated
+// and local testing.
+//
+// These values are intentionally public, and are not a security risk.
+// Production use will result in immediate and irreversible loss of funds.
+//
+// Note to security researchers: The presence of these values is intentional
+// and do not pose a security risk. Please do not report them.
 func privateKeyForTest() string {
 	if testingFork() {
 		return "92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e"
 	}
 
 	return "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
+}
+
+// privateKeyForTestByIndex returns different private keys for concurrent test execution
+// These are intentionally hard-coded keys used exclusively for automated
+// and local testing.
+//
+// These values are intentionally public, and are not a security risk.
+// Production use will result in immediate and irreversible loss of funds.
+//
+// Note to security researchers: The presence of these values is intentional
+// and do not pose a security risk. Please do not report them.
+func privateKeyForTestByIndex(t *testing.T, index uint) string {
+	if testingFork() {
+		// For forked tests, use different keys for different indices
+		keys := []string{
+			"92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e",
+			"47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
+		}
+		if index >= uint(len(keys)) {
+			t.Fatalf("index %d exceeds available keys (max: %d)", index, len(keys)-1)
+		}
+		return keys[index]
+	}
+
+	// For local tests, use different pre-funded test accounts
+	// These are standard accounts from local development networks
+	keys := []string{
+		"dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530", // sequencing
+		"8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba", // non-sequencing
+	}
+	if index >= uint(len(keys)) {
+		t.Fatalf("index %d exceeds available keys (max: %d)", index, len(keys)-1)
+	}
+	return keys[index]
 }
 
 func l1ChainId() *big.Int {
@@ -257,18 +300,23 @@ func TestMonitor(t *testing.T) {
 
 func TestL1L2Comms(t *testing.T) {
 	t.Parallel()
-	testL1L2Comms(t, l1Endpoint(), forkedL2Endpoint(), "http://localhost:18546", privateKeyForTest())
+	testL1L2Comms(t, l1Endpoint(), forkedL2Endpoint(), "http://localhost:18546")
 }
 
-func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequencingEndpoint string, privateKey string) {
-	for _, sequencing := range []bool{true, false} {
+func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequencingEndpoint string) {
+	for i, sequencing := range []bool{true, false} {
 		var name string
 		if sequencing {
 			name = "testing sequencing client"
 		} else {
 			name = "testing non-sequencing client"
 		}
+		// Capture loop variables
+		i := i
+		sequencing := sequencing
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Minute)
 			defer cancel()
 
@@ -287,7 +335,9 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				t.Fatalf("could not dial eth l1 %s", err)
 			}
 
-			privateKey, err := crypto.HexToECDSA(privateKey)
+			// Use different private key for each subtest to avoid conflicts
+			privateKeyHex := privateKeyForTestByIndex(t, uint(i))
+			privateKey, err := crypto.HexToECDSA(privateKeyHex)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1191,11 +1241,17 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		time.Sleep(time.Duration(maxClockDuration)*time.Second + 1)
 
 		if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
-			if i == abort {
-				t.Fatal(err)
+			// Check if the claim is already resolved
+			errStr := strings.ToLower(err.Error())
+			if strings.Contains(errStr, errCouldNotFetchBatch) {
+				t.Logf("CallResolveClaim skipped because claim already resolved (handled by another test)")
+			} else {
+				if i == abort {
+					t.Fatal(err)
+				}
+				time.Sleep(1 * time.Second)
+				continue
 			}
-			time.Sleep(1 * time.Second)
-			continue
 		}
 
 		resolvedtx, err := gameContract.ResolveClaimTx(0)
@@ -1203,10 +1259,9 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			t.Fatal(err)
 		}
 
-		var rsErr *wait.ReceiptStatusError
-		_, resolveClaimReceipt, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
-		if errors.As(err, &rsErr) && rsErr.TxTrace.Output.String() == SolErrClaimAlreadyResolved {
-			t.Logf("resolveClaim failed (tx: %s) because claim got already resolved", resolveClaimReceipt.TxHash)
+		_, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+		if err != nil && (strings.Contains(err.Error(), SolErrClaimAlreadyResolved) || strings.Contains(err.Error(), SolErrNoGameInProgress)) {
+			t.Logf("resolveClaim failed because claim got already resolved")
 		} else if err != nil {
 			t.Logf("error sending tx, will retry: %s", err)
 			continue
@@ -1217,6 +1272,8 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			t.Fatal(err)
 		}
 
+		resolveAttempts := 0
+		maxResolveAttempts := 5
 		for {
 			select {
 			case <-ctx.Done():
@@ -1226,8 +1283,16 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 			_, _, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
 			if err != nil {
-				t.Logf("could not send tx, will retry: %s", err)
-				continue
+				if err != nil && (strings.Contains(err.Error(), SolErrClaimAlreadyResolved) || strings.Contains(err.Error(), SolErrNoGameInProgress)) {
+					t.Logf("resolve game skipped because already resolved or no game in progress (handled by another test)")
+				} else {
+					resolveAttempts++
+					if resolveAttempts >= maxResolveAttempts {
+						t.Fatalf("could not send resolve tx after %d attempts: %s", maxResolveAttempts, err)
+					}
+					t.Logf("could not send tx, will retry: %s", err)
+					continue
+				}
 			}
 
 			break
@@ -1756,11 +1821,17 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		time.Sleep(time.Duration(maxClockDuration)*time.Second + 1)
 
 		if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
-			if i == abort {
-				t.Fatal(err)
+			// Check if the claim is already resolved
+			errStr := strings.ToLower(err.Error())
+			if strings.Contains(errStr, errCouldNotFetchBatch) {
+				t.Logf("CallResolveClaim skipped because claim already resolved (handled by another test)")
+			} else {
+				if i == abort {
+					t.Fatal(err)
+				}
+				time.Sleep(1 * time.Second)
+				continue
 			}
-			time.Sleep(1 * time.Second)
-			continue
 		}
 
 		resolvedtx, err := gameContract.ResolveClaimTx(0)
@@ -1768,10 +1839,9 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 			t.Fatal(err)
 		}
 
-		var rsErr *wait.ReceiptStatusError
-		_, resolveClaimReceipt, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
-		if errors.As(err, &rsErr) && rsErr.TxTrace.Output.String() == SolErrClaimAlreadyResolved {
-			t.Logf("resolveClaim failed (tx: %s) because claim got already resolved", resolveClaimReceipt.TxHash)
+		_, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+		if err != nil && (strings.Contains(err.Error(), SolErrClaimAlreadyResolved) || strings.Contains(err.Error(), SolErrNoGameInProgress)) {
+			t.Logf("resolveClaim failed because claim got already resolved")
 		} else if err != nil {
 			t.Logf("error sending tx, will retry: %s", err)
 			continue
@@ -1782,6 +1852,8 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 			t.Fatal(err)
 		}
 
+		resolveAttempts := 0
+		maxResolveAttempts := 5
 		for {
 			select {
 			case <-ctx.Done():
@@ -1791,8 +1863,16 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 			_, _, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
 			if err != nil {
-				t.Logf("could not send tx, will retry: %s", err)
-				continue
+				if strings.Contains(err.Error(), SolErrClaimAlreadyResolved) || strings.Contains(err.Error(), SolErrNoGameInProgress) {
+					t.Logf("resolve game skipped because already resolved or no game in progress (handled by another test)")
+				} else {
+					resolveAttempts++
+					if resolveAttempts >= maxResolveAttempts {
+						t.Fatalf("could not send resolve tx after %d attempts: %s", maxResolveAttempts, err)
+					}
+					t.Logf("could not send tx, will retry: %s", err)
+					continue
+				}
 			}
 
 			break

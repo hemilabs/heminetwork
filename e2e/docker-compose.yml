@@ -307,7 +307,7 @@ services:
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
-      - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
+      - "./op-node-keys/op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
     networks:
       e2e:
         ipv4_address: 192.169.199.7
