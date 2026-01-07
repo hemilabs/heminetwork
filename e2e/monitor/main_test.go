@@ -355,23 +355,39 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 
 	waitForTxReceipt(t, ctx, l2Client, tx)
 
-	res, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	l2ReadBalancesNonSequencing, err := mybindings.NewL2ReadBalances(contractAddress, l2ClientNonSequencing)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	resNonSequencing, err := l2ReadBalancesNonSequencing.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var res []byte
+	headerCompareRetry := 30
+	for i := range headerCompareRetry {
+		res, err = l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	if !bytes.Equal(res, resNonSequencing) {
-		t.Fatalf("bitcoin header mismatch between sequencer and non-sequencer: %x != %x", res, resNonSequencing)
+		resNonSequencing, err := l2ReadBalancesNonSequencing.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !bytes.Equal(res, resNonSequencing) {
+			errMsg := fmt.Sprintf("bitcoin header mismatch between sequencer and non-sequencer: %x != %x", res, resNonSequencing)
+			t.Log(errMsg)
+			if i == headerCompareRetry-1 {
+				t.Fatal(errMsg)
+			}
+		} else {
+			break
+		}
+
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
 	}
 
 	config := client.ConnConfig{
