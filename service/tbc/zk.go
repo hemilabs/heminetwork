@@ -55,10 +55,3 @@ func (s *Server) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]
 
 	return s.g.db.ZKSpendableOutputs(ctx, sh)
 }
-
-func (s *Server) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
-	log.Tracef("ZKSpendingOutpoints")
-	defer log.Tracef("ZKSpendingOutpoints exit")
-
-	return s.g.db.ZKSpendingOutpoints(ctx, txid)
-}

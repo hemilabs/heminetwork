@@ -188,7 +188,6 @@ type Config struct {
 	ReplicaURI              string
 	Seeds                   []string
 	ZKIndex                 bool
-	ZKIndex                 bool
 
 	// Fields used for running TBC in External Header Mode, where P2P is disabled
 	// and TBC is used to determine consensus based on headers fed from external

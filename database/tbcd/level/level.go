@@ -425,7 +425,8 @@ func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
 		// In case of an early stoppage before they become fully synced,
 		// this will resume from the last (lexicographically greatest)
 		// key found in the destination.
-		if err := larry.Copy(ctx, true, l.pool, ddb, destTables); err != nil {
+		if err := larry.Copy(ctx, true, l.pool, ddb, destTables,
+			larry.DefaultMaxRestoreChunk); err != nil {
 			return fmt.Errorf("copy db: %w", err)
 		}
 
