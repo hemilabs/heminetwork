@@ -2725,15 +2725,17 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		}
 
 		// Perform additional keystone indexer tests.
-		keystoneBH, err := s.ki.IndexerAt(ctx)
-		if err != nil {
-			keystoneBH = &tbcd.BlockHeader{}
+		if s.cfg.HemiIndex {
+			keystoneBH, err := s.ki.IndexerAt(ctx)
+			if err != nil {
+				keystoneBH = &tbcd.BlockHeader{}
+			}
+			keystoneHH := &HashHeight{
+				Hash:   keystoneBH.Hash,
+				Height: keystoneBH.Height,
+			}
+			si.Keystone = *keystoneHH
 		}
-		keystoneHH := &HashHeight{
-			Hash:   keystoneBH.Hash,
-			Height: keystoneBH.Height,
-		}
-		si.Keystone = *keystoneHH
 	}
 
 	if s.cfg.ZKIndex {

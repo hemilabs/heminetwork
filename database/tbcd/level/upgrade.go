@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -490,7 +490,7 @@ func (l *ldb) v3(ctx context.Context) error {
 		a := l.rawPool[dbs].DB()
 		b := dst.RawDB()[dbs].DB()
 		// XXX larry, export "rawdb" dbname out of larry
-		n, err := copyOrMoveTable(ctx, modeMove, a, b, "rawdb", filter)
+		n, err := copyOrMoveTable(ctx, modeMove, a, b, "", filter)
 		if err != nil {
 			return fmt.Errorf("move raw database %v: %w", dbs, err)
 		}

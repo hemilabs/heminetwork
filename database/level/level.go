@@ -120,7 +120,7 @@ func (l *Database) openRawDB(ctx context.Context, name string, blockSize int64) 
 
 	dir := filepath.Join(l.home, name)
 	rcfg := rawdb.NewDefaultConfig(dir)
-	rcfg.DB = "level"
+	rcfg.DB = "leveldb"
 	rcfg.MaxSize = blockSize
 	rdb, err := rawdb.New(rcfg)
 	if err != nil {
@@ -148,18 +148,18 @@ func New(ctx context.Context, home string) (*Database, error) {
 	}
 
 	poolMap := map[string]string{
-		BlockHeadersDB:             "level",
-		BlocksMissingDB:            "level",
-		MetadataDB:                 "level",
-		KeystonesDB:                "level",
-		HeightHashDB:               "level",
-		OutputsDB:                  "level",
-		TransactionsDB:             "level",
-		"zkdb/" + ZKOutpointsDB:    "level",
-		"zkdb/" + ZKSpendableOutDB: "level",
-		"zkdb/" + ZKSpentOutDB:     "level",
-		"zkdb/" + ZKSpentTxDB:      "level",
-		"zkdb/" + ZKDB:             "level",
+		BlockHeadersDB:             "leveldb",
+		BlocksMissingDB:            "leveldb",
+		MetadataDB:                 "leveldb",
+		KeystonesDB:                "leveldb",
+		HeightHashDB:               "leveldb",
+		OutputsDB:                  "leveldb",
+		TransactionsDB:             "leveldb",
+		"zkdb/" + ZKOutpointsDB:    "leveldb",
+		"zkdb/" + ZKSpendableOutDB: "leveldb",
+		"zkdb/" + ZKSpentOutDB:     "leveldb",
+		"zkdb/" + ZKSpentTxDB:      "leveldb",
+		"zkdb/" + ZKDB:             "leveldb",
 	}
 
 	tables := make([]string, 0, len(poolMap))
