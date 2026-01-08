@@ -9,6 +9,19 @@ ARG OPTIMISM_COMMIT=984ab34d8f3b69ed86bdcd8d053855daf4c71bd3
 # broken
 ARG FOUNDRY_COMMIT=97fba0a51e335a174442b19d92b64df9d2ab72ab
 
+FROM golang:1.25.5-trixie@sha256:ef151f0384896831258e71065176f1e63f5a90bcbe6a98ec679a1990011a2655 AS foundry_build
+ARG FOUNDRY_COMMIT
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="${PATH}:/root/.cargo/bin"
+
+WORKDIR /git
+RUN git clone https://github.com/foundry-rs/foundry.git
+
+WORKDIR /git/foundry
+RUN git checkout $FOUNDRY_COMMIT
+RUN cargo build --package forge
+
 FROM golang:1.25.5-trixie@sha256:ef151f0384896831258e71065176f1e63f5a90bcbe6a98ec679a1990011a2655 AS build_1
 ARG OP_GETH_COMMIT
 ARG OPTIMISM_COMMIT
@@ -25,16 +38,12 @@ RUN go run build/ci.go install -static ./cmd/geth
 FROM golang:1.25.5-trixie@sha256:ef151f0384896831258e71065176f1e63f5a90bcbe6a98ec679a1990011a2655 AS build_2
 ARG OP_GETH_COMMIT
 ARG OPTIMISM_COMMIT
-ARG FOUNDRY_COMMIT
 
 # store the latest geth here, build with go 1.23
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
 
 RUN apt-get update
-RUN apt-get install -y jq nodejs npm netcat-openbsd yq
-
-RUN npm install -g pnpm
-
+RUN apt-get install -y jq yq
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="${PATH}:/root/.cargo/bin"
@@ -43,28 +52,6 @@ WORKDIR /git
 RUN git clone https://github.com/casey/just
 WORKDIR /git/just
 RUN cargo install just
-
-WORKDIR /git
-
-RUN git clone https://github.com/foundry-rs/foundry.git
-
-WORKDIR /git/foundry
-RUN git checkout $FOUNDRY_COMMIT
-RUN cargo build --release
-RUN cp /git/foundry/target/release/forge /usr/bin/forge
-
-WORKDIR /git
-
-
-RUN curl -L https://foundry.paradigm.xyz | bash
-
-RUN . /root/.bashrc
-
-ENV PATH="${PATH}:/root/.foundry/bin"
-
-RUN foundryup
-
-RUN forge --help
 
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
@@ -97,7 +84,9 @@ RUN just op-batcher
 WORKDIR /git/optimism/op-proposer
 RUN just op-proposer
 
-WORKDIR /git/optimism/op-conductor
-RUN just op-conductor
+
+COPY --from=foundry_build /git/foundry/target/debug/forge /usr/bin/forge
+
+RUN forge --help
 
 WORKDIR /git/optimism
