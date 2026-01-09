@@ -109,13 +109,13 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b larry.Database, dbname
 	}
 
 	// delete batch
-	batchA, err := a.NewBatch(ctx) // XXX larry no buffer
+	batchA, err := a.NewBatch(ctx)
 	if err != nil {
 		return &cmr, fmt.Errorf("open batch %w", err)
 	}
 
 	// copy batch
-	batchB, err := b.NewBatch(ctx) // XXX larry no buffer
+	batchB, err := b.NewBatch(ctx)
 	if err != nil {
 		return &cmr, fmt.Errorf("open batch %w", err)
 	}
@@ -489,7 +489,6 @@ func (l *ldb) v3(ctx context.Context) error {
 
 		a := l.rawPool[dbs].DB()
 		b := dst.RawDB()[dbs].DB()
-		// XXX larry, export "rawdb" dbname out of larry
 		n, err := copyOrMoveTable(ctx, modeMove, a, b, "", filter)
 		if err != nil {
 			return fmt.Errorf("move raw database %v: %w", dbs, err)

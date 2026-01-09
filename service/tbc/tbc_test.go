@@ -121,8 +121,6 @@ func countKeystones(b *btcutil.Block) int {
 	return keystonesFound
 }
 
-// XXX larry, this test relies on tared
-// leveldb database so will fail for other dbs
 func TestDbUpgradeFull(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
@@ -233,10 +231,7 @@ func TestDbUpgradeFull(t *testing.T) {
 	}
 }
 
-// XXX larry, this test relies on tared
-// leveldb database so will fail for other dbs
 func TestDbUpgradeV3(t *testing.T) {
-	t.Skip() // XXX temporarily off
 	home := t.TempDir()
 	network := "upgradetest"
 	t.Logf("temp: %v", home)
@@ -327,13 +322,21 @@ func TestDbUpgradeV3(t *testing.T) {
 
 	t.Log("Comparing DBs")
 
+	metaFilter := map[string]struct{}{
+		string([]byte("replicasync")): {},
+	}
+
 	// Compare all databases
 	a := dbv2.DB()
 	b := dbMove.DB()
 	c := dbCopy.DB()
 	for _, dbs := range keys {
+		filter := map[string]struct{}{}
+		if dbs == "metadata" {
+			filter = metaFilter
+		}
 		t.Logf("Comparing original records against dbmove (%v)", dbs)
-		records, err := cmpDB(ctx, a, b, dbs)
+		records, err := cmpDB(ctx, a, b, dbs, filter)
 		if err != nil {
 			t.Errorf("found diff in record %v: %v", records, err)
 		} else {
@@ -341,7 +344,7 @@ func TestDbUpgradeV3(t *testing.T) {
 		}
 
 		t.Logf("Comparing dbmove records against original (%v)", dbs)
-		records, err = cmpDB(ctx, b, a, dbs)
+		records, err = cmpDB(ctx, b, a, dbs, filter)
 		if err != nil {
 			t.Errorf("found diff in record %v: %v", records, err)
 		} else {
@@ -349,7 +352,7 @@ func TestDbUpgradeV3(t *testing.T) {
 		}
 
 		t.Logf("Comparing original records against dbcopy (%v)", dbs)
-		records, err = cmpDB(ctx, a, c, dbs)
+		records, err = cmpDB(ctx, a, c, dbs, filter)
 		if err != nil {
 			t.Errorf("found diff in record %v: %v", records, err)
 		} else {
@@ -357,7 +360,7 @@ func TestDbUpgradeV3(t *testing.T) {
 		}
 
 		t.Logf("Comparing dbcopy records against original (%v)", dbs)
-		records, err = cmpDB(ctx, c, a, dbs)
+		records, err = cmpDB(ctx, c, a, dbs, filter)
 		if err != nil {
 			t.Errorf("found diff in record %v: %v", records, err)
 		} else {
@@ -366,7 +369,7 @@ func TestDbUpgradeV3(t *testing.T) {
 	}
 }
 
-func cmpDB(ctx context.Context, a, b larry.Database, dbname string) (int, error) {
+func cmpDB(ctx context.Context, a, b larry.Database, dbname string, filter map[string]struct{}) (int, error) {
 	i, err := a.NewIterator(ctx, dbname)
 	if err != nil {
 		return 0, err
@@ -375,6 +378,9 @@ func cmpDB(ctx context.Context, a, b larry.Database, dbname string) (int, error)
 
 	records := 0
 	for records = 0; i.Next(ctx); records++ {
+		if _, ok := filter[string(i.Key(ctx))]; ok {
+			continue
+		}
 		v, err := b.Get(ctx, dbname, i.Key(ctx))
 		if err != nil {
 			return records, err
@@ -387,8 +393,6 @@ func cmpDB(ctx context.Context, a, b larry.Database, dbname string) (int, error)
 	return records, nil
 }
 
-// XXX larry, this test relies on tared
-// leveldb database so will fail for other dbs
 func TestDbUpgradeV4(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
