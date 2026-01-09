@@ -69,7 +69,6 @@ var (
 		},
 		"HPROXY_NETWORK": config.Config{
 			Value:        &cfg.Network,
-			DefaultValue: "sepolia", // XXX
 			Help:         "ethereum network (ex. \"mainnet\", \"sepolia\")",
 			Print:        config.PrintAll,
 		},
