@@ -47,7 +47,7 @@ jobs:
       - name: "Load cached optimism-stack image"
         env: 
           OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
-        if: $OPTIMISM_STACK_CACHE_HIT == 'true'
+        if: env.OPTIMISM_STACK_CACHE_HIT == 'true'
         run: |
           echo "Loading cached optimism-stack image (Dockerfile unchanged)"
           docker load -i optimism-stack-image.tar
@@ -58,7 +58,7 @@ jobs:
           echo "Successfully loaded cached image and tagged as $DOCKER_IMAGE_TAG"
 
       - name: "Build optimism-stack image"
-        if: $OPTIMISM_STACK_CACHE_HIT != 'true'
+        if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
         run: |
           echo "Building optimism-stack image from Dockerfile (no cache or Dockerfile changed)"
           docker build -f ./$DOCKERFILE_NAME -t $DOCKER_IMAGE_TAG .
@@ -76,7 +76,7 @@ jobs:
         run: docker system prune -f
 
       - name: "Save optimism-stack image to cache"
-        if: $OPTIMISM_STACK_CACHE_HIT != 'true'
+        if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
         run: |
           echo "Saving $DOCKER_IMAGE_TAG image to cache"
           IMAGE_ID=$(docker images -q $DOCKER_IMAGE_TAG)
