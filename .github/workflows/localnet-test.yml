@@ -18,6 +18,9 @@ jobs:
   test:
     name: "Test"
     runs-on: "ubuntu-latest"
+    env:
+      DOCKERFILE_NAME: ./e2e/optimism-stack.Dockerfile
+      DOCKER_IMAGE_TAG: optimism-stack:latest
     strategy:
       matrix:
         go-version: [ "1.25.x" ]
@@ -32,7 +35,7 @@ jobs:
 
       - name: "Calculate optimism-stack.Dockerfile hash"
         id: dockerfile-hash
-        run: echo "hash=$(sha256sum e2e/optimism-stack.Dockerfile | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+        run: echo "hash=$(sha256sum $DOCKERFILE_NAME | cut -d' ' -f1)" >> $GITHUB_OUTPUT
 
       - name: "Restore cached optimism-stack image"
         id: cache-optimism-stack
@@ -42,7 +45,9 @@ jobs:
           key: optimism-stack-${{ steps.dockerfile-hash.outputs.hash }}
 
       - name: "Load cached optimism-stack image"
-        if: steps.cache-optimism-stack.outputs.cache-hit == 'true'
+        env: 
+          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+        if: $OPTIMISM_STACK_CACHE_HIT == 'true'
         run: |
           echo "Loading cached optimism-stack image (Dockerfile unchanged)"
           docker load -i optimism-stack-image.tar
@@ -50,20 +55,20 @@ jobs:
           # remove the tar file to save space
           rm optimism-stack-image.tar
           
-          echo "Successfully loaded cached image and tagged as optimism-stack:latest"
+          echo "Successfully loaded cached image and tagged as $DOCKER_IMAGE_TAG"
 
       - name: "Build optimism-stack image"
-        if: steps.cache-optimism-stack.outputs.cache-hit != 'true'
+        if: $OPTIMISM_STACK_CACHE_HIT != 'true'
         run: |
           echo "Building optimism-stack image from Dockerfile (no cache or Dockerfile changed)"
-          docker build -f ./e2e/optimism-stack.Dockerfile -t optimism-stack:latest .
+          docker build -f ./$DOCKERFILE_NAME -t $DOCKER_IMAGE_TAG .
 
       - name: "build localnet"
         run: |
-          if [ "${{ steps.cache-optimism-stack.outputs.cache-hit }}" = "true" ]; then
-            echo "Using cached optimism-stack:latest image, building remaining services"
+          if [ "$OPTIMISM_STACK_CACHE_HIT" = "true" ]; then
+            echo "Using cached $DOCKER_IMAGE_TAG image, building remaining services"
           else
-            echo "Using freshly built optimism-stack:latest image, building remaining services"
+            echo "Using freshly built $DOCKER_IMAGE_TAG image, building remaining services"
           fi
           docker compose -f ./e2e/docker-compose.yml build
       
@@ -71,19 +76,19 @@ jobs:
         run: docker system prune -f
 
       - name: "Save optimism-stack image to cache"
-        if: steps.cache-optimism-stack.outputs.cache-hit != 'true'
+        if: $OPTIMISM_STACK_CACHE_HIT != 'true'
         run: |
-          echo "Saving optimism-stack:latest image to cache"
-          IMAGE_ID=$(docker images -q optimism-stack:latest)
+          echo "Saving $DOCKER_IMAGE_TAG image to cache"
+          IMAGE_ID=$(docker images -q $DOCKER_IMAGE_TAG)
           if [ -z "$IMAGE_ID" ]; then
-            echo "Error: Could not find optimism-stack:latest image"
+            echo "Error: Could not find $DOCKER_IMAGE_TAG image"
             exit 1
           fi
           echo "Image ID: $IMAGE_ID"
           IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_ID")
           echo "Image size: $IMAGE_SIZE"
-          docker save -o optimism-stack-image.tar optimism-stack:latest
-          TAR_SIZE=$(ls -lh optimism-stack-image.tar | awk '{print $5}')
+          docker save -o optimism-stack-image.tar $DOCKER_IMAGE_TAG
+          TAR_SIZE=$(du -hs optimism-stack-image.tar | cut -f1)
           echo "Saved tarball size: $TAR_SIZE"
 
       - name: "run localnet"

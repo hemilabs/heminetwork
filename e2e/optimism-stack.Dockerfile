@@ -31,6 +31,8 @@ ENV PATH="${PATH}:/root/.cargo/bin"
 WORKDIR /git
 RUN git clone https://github.com/casey/just
 WORKDIR /git/just
+# 1.46.0
+RUN git checkout f028de5b258a0cc4696b9dea729cc7d4d5828baa
 RUN cargo install just
 
 FROM golang:1.25.5-trixie@sha256:ef151f0384896831258e71065176f1e63f5a90bcbe6a98ec679a1990011a2655 AS build_1
