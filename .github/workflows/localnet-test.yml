@@ -39,21 +39,24 @@ jobs:
 
       - name: "Restore cached optimism-stack image"
         id: cache-optimism-stack
+        env:
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
         uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
-          path: optimism-stack-image.tar.gz
+          path: ${{ env.LOCALNET_OPTIMISM_STACK_CACHE_FILE }}
           key: optimism-stack-${{ steps.dockerfile-hash.outputs.hash }}
 
       - name: "Load cached optimism-stack image"
         env:
           OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
         if: env.OPTIMISM_STACK_CACHE_HIT == 'true'
         run: |
           echo "Loading cached optimism-stack image (Dockerfile unchanged)"
-          gunzip -c optimism-stack-image.tar.gz | docker load
+          zstd -dc $LOCALNET_OPTIMISM_STACK_CACHE_FILE | docker load
 
-          # remove the tar.gz file to save space
-          rm optimism-stack-image.tar.gz
+          # remove the tar.zst file to save space
+          rm $LOCALNET_OPTIMISM_STACK_CACHE_FILE
 
           echo "Successfully loaded cached image and tagged as $DOCKER_IMAGE_TAG"
 
@@ -82,6 +85,7 @@ jobs:
       - name: "Save optimism-stack image to cache"
         env:
           OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
         if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
         run: |
           echo "Saving $DOCKER_IMAGE_TAG image to cache"
@@ -93,8 +97,8 @@ jobs:
           echo "Image ID: $IMAGE_ID"
           IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_ID")
           echo "Image size: $IMAGE_SIZE"
-          docker save $DOCKER_IMAGE_TAG | gzip > optimism-stack-image.tar.gz
-          TAR_SIZE=$(du -hs optimism-stack-image.tar.gz | cut -f1)
+          docker save $DOCKER_IMAGE_TAG | zstd > $LOCALNET_OPTIMISM_STACK_CACHE_FILE
+          TAR_SIZE=$(du -hs $LOCALNET_OPTIMISM_STACK_CACHE_FILE | cut -f1)
           echo "Saved compressed tarball size: $TAR_SIZE"
 
       - name: "run localnet"
