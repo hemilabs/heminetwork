@@ -41,20 +41,20 @@ jobs:
         id: cache-optimism-stack
         uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
         with:
-          path: optimism-stack-image.tar
+          path: optimism-stack-image.tar.gz
           key: optimism-stack-${{ steps.dockerfile-hash.outputs.hash }}
 
       - name: "Load cached optimism-stack image"
-        env: 
+        env:
           OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
         if: env.OPTIMISM_STACK_CACHE_HIT == 'true'
         run: |
           echo "Loading cached optimism-stack image (Dockerfile unchanged)"
-          docker load -i optimism-stack-image.tar
+          gunzip -c optimism-stack-image.tar.gz | docker load
 
-          # remove the tar file to save space
-          rm optimism-stack-image.tar
-          
+          # remove the tar.gz file to save space
+          rm optimism-stack-image.tar.gz
+
           echo "Successfully loaded cached image and tagged as $DOCKER_IMAGE_TAG"
 
       - name: "Build optimism-stack image"
@@ -93,9 +93,9 @@ jobs:
           echo "Image ID: $IMAGE_ID"
           IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_ID")
           echo "Image size: $IMAGE_SIZE"
-          docker save -o optimism-stack-image.tar $DOCKER_IMAGE_TAG
-          TAR_SIZE=$(du -hs optimism-stack-image.tar | cut -f1)
-          echo "Saved tarball size: $TAR_SIZE"
+          docker save $DOCKER_IMAGE_TAG | gzip > optimism-stack-image.tar.gz
+          TAR_SIZE=$(du -hs optimism-stack-image.tar.gz | cut -f1)
+          echo "Saved compressed tarball size: $TAR_SIZE"
 
       - name: "run localnet"
         env:
