@@ -17,6 +17,7 @@ Make sure you have localnet running:
 
 from the root of the repo:
 ```
+docker build -f ./e2e/optimism-stack.Dockerfile -t optimism-stack:latest .
 docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 docker compose -f ./e2e/docker-compose.yml up
 ```

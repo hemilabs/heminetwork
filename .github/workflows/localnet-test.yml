@@ -18,6 +18,9 @@ jobs:
   test:
     name: "Test"
     runs-on: "ubuntu-latest"
+    env:
+      DOCKERFILE_NAME: ./e2e/optimism-stack.Dockerfile
+      DOCKER_IMAGE_TAG: optimism-stack:latest
     strategy:
       matrix:
         go-version: [ "1.25.x" ]
@@ -30,11 +33,73 @@ jobs:
       - name: generate key and addresses
         run: go run ./cmd/keygen/keygen.go -net=localnet | jq -r 'to_entries[] | "\(.key)=\(.value)"' | sed -n '2s/^private_key/POPM_BTC_PRIVATE_KEY/; 4s/^bitcoin_address/BTC_ADDRESS/; 5s/^ethereum_address/ETH_ADDRESS/; 2p; 4p; 5p' >> $GITHUB_ENV
 
-      - name: "build localnet"
-        run: docker compose -f ./e2e/docker-compose.yml build
+      - name: "Calculate optimism-stack.Dockerfile hash"
+        id: dockerfile-hash
+        run: echo "hash=$(sha256sum $DOCKERFILE_NAME | cut -d' ' -f1)" >> $GITHUB_OUTPUT
 
+      - name: "Restore cached optimism-stack image"
+        id: cache-optimism-stack
+        env:
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb # v5.0.1
+        with:
+          path: ${{ env.LOCALNET_OPTIMISM_STACK_CACHE_FILE }}
+          key: optimism-stack-${{ steps.dockerfile-hash.outputs.hash }}
+
+      - name: "Load cached optimism-stack image"
+        env:
+          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
+        if: env.OPTIMISM_STACK_CACHE_HIT == 'true'
+        run: |
+          echo "Loading cached optimism-stack image (Dockerfile unchanged)"
+          zstd -dc $LOCALNET_OPTIMISM_STACK_CACHE_FILE | docker load
+
+          # remove the tar.zst file to save space
+          rm $LOCALNET_OPTIMISM_STACK_CACHE_FILE
+
+          echo "Successfully loaded cached image and tagged as $DOCKER_IMAGE_TAG"
+
+      - name: "Build optimism-stack image"
+        env:
+          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+        if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
+        run: |
+          echo "Building optimism-stack image from Dockerfile (no cache or Dockerfile changed)"
+          docker build -f ./$DOCKERFILE_NAME -t $DOCKER_IMAGE_TAG .
+
+      - name: "build localnet"
+        env:
+          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+        run: |
+          if [ "$OPTIMISM_STACK_CACHE_HIT" = "true" ]; then
+            echo "Using cached $DOCKER_IMAGE_TAG image, building remaining services"
+          else
+            echo "Using freshly built $DOCKER_IMAGE_TAG image, building remaining services"
+          fi
+          docker compose -f ./e2e/docker-compose.yml build
+      
       - name: "remove dangling"
         run: docker system prune -f
+
+      - name: "Save optimism-stack image to cache"
+        env:
+          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
+        if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
+        run: |
+          echo "Saving $DOCKER_IMAGE_TAG image to cache"
+          IMAGE_ID=$(docker images -q $DOCKER_IMAGE_TAG)
+          if [ -z "$IMAGE_ID" ]; then
+            echo "Error: Could not find $DOCKER_IMAGE_TAG image"
+            exit 1
+          fi
+          echo "Image ID: $IMAGE_ID"
+          IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_ID")
+          echo "Image size: $IMAGE_SIZE"
+          docker save $DOCKER_IMAGE_TAG | zstd > $LOCALNET_OPTIMISM_STACK_CACHE_FILE
+          TAR_SIZE=$(du -hs $LOCALNET_OPTIMISM_STACK_CACHE_FILE | cut -f1)
+          echo "Saved compressed tarball size: $TAR_SIZE"
 
       - name: "run localnet"
         env:
