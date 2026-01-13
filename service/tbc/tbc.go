@@ -36,8 +36,6 @@ import (
 
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
-	"github.com/hemilabs/heminetwork/v2/database"
-	dbnames "github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
@@ -1034,7 +1032,7 @@ func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block chainha
 
 	blk, err := s.g.db.BlockByHash(ctx, block)
 	if err != nil {
-		if errors.Is(err, database.ErrBlockNotFound) {
+		if errors.Is(err, tbcd.ErrBlockNotFound) {
 			for range count {
 				err := s.downloadBlockFromRandomPeer(ctx, block)
 				if err != nil {
@@ -1253,7 +1251,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
 			var (
-				eval  database.BlockNotFoundError
+				eval  tbcd.BlockNotFoundError
 				block chainhash.Hash
 			)
 			err := s.SyncIndexersToBest(ctx)
@@ -1393,12 +1391,12 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 	}
 
 	ph := func(ctx context.Context, batches map[string]tbcd.Batch) error {
-		b, ok := batches[dbnames.MetadataDB]
+		b, ok := batches[tbcd.MetadataDB]
 		if !ok {
 			return fmt.Errorf("post hook batch not found: %v",
-				dbnames.MetadataDB)
+				tbcd.MetadataDB)
 		}
-		level.BatchAppend(ctx, dbnames.MetadataDB, b.Batch, []tbcd.Row{
+		level.BatchAppend(ctx, tbcd.MetadataDB, b.Batch, []tbcd.Row{
 			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
@@ -1448,12 +1446,12 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 	}
 
 	ph := func(ctx context.Context, batches map[string]tbcd.Batch) error {
-		b, ok := batches[dbnames.MetadataDB]
+		b, ok := batches[tbcd.MetadataDB]
 		if !ok {
 			return fmt.Errorf("post hook batch not found: %v",
-				dbnames.MetadataDB)
+				tbcd.MetadataDB)
 		}
-		level.BatchAppend(ctx, dbnames.MetadataDB, b.Batch, []tbcd.Row{
+		level.BatchAppend(ctx, tbcd.MetadataDB, b.Batch, []tbcd.Row{
 			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
@@ -1548,7 +1546,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		// starve the slower peers and eventually we end up with one
 		// peer for headers download.
 
-		if errors.Is(err, database.ErrDuplicate) {
+		if errors.Is(err, tbcd.ErrDuplicate) {
 			// This happens when all block headers we asked for
 			// already exist.
 
@@ -2235,7 +2233,7 @@ func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, 
 		}
 	}
 
-	return nil, database.ErrNotFound
+	return nil, tbcd.ErrNotFound
 }
 
 func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *rawpeer.RawPeer) error {
@@ -3060,7 +3058,7 @@ func (s *Server) Run(pctx context.Context) error {
 	// Find out where IBD is at
 	bhb, err := s.g.db.BlockHeaderBest(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
+		if !errors.Is(err, tbcd.ErrNotFound) {
 			return fmt.Errorf("block header best: %w", err)
 		}
 
@@ -3286,7 +3284,7 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 	// Check if there is already a best header in database
 	bhb, err := s.g.db.BlockHeaderBest(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
+		if !errors.Is(err, tbcd.ErrNotFound) {
 			return fmt.Errorf("block headers best: %w", err)
 		}
 

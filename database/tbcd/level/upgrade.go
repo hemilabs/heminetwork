@@ -23,7 +23,7 @@ import (
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
-	"github.com/hemilabs/heminetwork/v2/database/level"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 )
 
@@ -319,39 +319,39 @@ func (l *ldb) v2(ctx context.Context) error {
 	// update outputs index hash
 	utxoH, err := l.MetadataGet(ctx, utxoIndexHashKey)
 	if err == nil {
-		err := l.insertTable(ctx, level.OutputsDB, utxoIndexHashKey, utxoH)
+		err := l.insertTable(ctx, tbcd.OutputsDB, utxoIndexHashKey, utxoH)
 		if err != nil {
-			return fmt.Errorf("insert table %v: %w", level.OutputsDB, err)
+			return fmt.Errorf("insert table %v: %w", tbcd.OutputsDB, err)
 		}
-		err = l.deleteTable(ctx, level.MetadataDB, utxoIndexHashKey)
+		err = l.deleteTable(ctx, tbcd.MetadataDB, utxoIndexHashKey)
 		if err != nil {
-			return fmt.Errorf("delete table %v: %w", level.OutputsDB, err)
+			return fmt.Errorf("delete table %v: %w", tbcd.OutputsDB, err)
 		}
 	}
 
 	// update transaction index hash
 	txH, err := l.MetadataGet(ctx, txIndexHashKey)
 	if err == nil {
-		err := l.insertTable(ctx, level.TransactionsDB, txIndexHashKey, txH)
+		err := l.insertTable(ctx, tbcd.TransactionsDB, txIndexHashKey, txH)
 		if err != nil {
-			return fmt.Errorf("insert table %v: %w", level.TransactionsDB, err)
+			return fmt.Errorf("insert table %v: %w", tbcd.TransactionsDB, err)
 		}
-		err = l.deleteTable(ctx, level.MetadataDB, txIndexHashKey)
+		err = l.deleteTable(ctx, tbcd.MetadataDB, txIndexHashKey)
 		if err != nil {
-			return fmt.Errorf("delete table %v: %w", level.TransactionsDB, err)
+			return fmt.Errorf("delete table %v: %w", tbcd.TransactionsDB, err)
 		}
 	}
 
 	// update keystone index hash
 	keystoneH, err := l.MetadataGet(ctx, keystoneIndexHashKey)
 	if err == nil {
-		err := l.insertTable(ctx, level.KeystonesDB, keystoneIndexHashKey, keystoneH)
+		err := l.insertTable(ctx, tbcd.KeystonesDB, keystoneIndexHashKey, keystoneH)
 		if err != nil {
-			return fmt.Errorf("insert table %v: %w", level.KeystonesDB, err)
+			return fmt.Errorf("insert table %v: %w", tbcd.KeystonesDB, err)
 		}
-		err = l.deleteTable(ctx, level.MetadataDB, keystoneIndexHashKey)
+		err = l.deleteTable(ctx, tbcd.MetadataDB, keystoneIndexHashKey)
 		if err != nil {
-			return fmt.Errorf("delete table %v: %w", level.KeystonesDB, err)
+			return fmt.Errorf("delete table %v: %w", tbcd.KeystonesDB, err)
 		}
 	}
 
@@ -436,7 +436,7 @@ func (l *ldb) v3(ctx context.Context) error {
 
 	// filter is a map of [key] dbname
 	filter := map[string]string{
-		string(versionKey): level.MetadataDB,
+		string(versionKey): tbcd.MetadataDB,
 	}
 
 	// copy all databases
@@ -598,7 +598,7 @@ func (l *ldb) v4(ctx context.Context) error {
 	log.Infof("Upgrading database from v3 to v4")
 
 	// Index all keystones to H[height][hash] format.
-	i, err := l.pool.NewIterator(ctx, level.KeystonesDB)
+	i, err := l.pool.NewIterator(ctx, tbcd.KeystonesDB)
 	if err != nil {
 		return fmt.Errorf("new iterator: %w", err)
 	}
@@ -620,7 +620,7 @@ func (l *ldb) v4(ctx context.Context) error {
 			}
 		}
 		ks := decodeKeystone(value)
-		ebh, err := l.pool.Get(ctx, level.BlockHeadersDB, ks.BlockHash[:])
+		ebh, err := l.pool.Get(ctx, tbcd.BlockHeadersDB, ks.BlockHash[:])
 		if err != nil {
 			return fmt.Errorf("blockheader: %w", err)
 		}
@@ -630,13 +630,13 @@ func (l *ldb) v4(ctx context.Context) error {
 			return fmt.Errorf("hash: %w", err)
 		}
 		ehh := encodeKeystoneHeightHash(uint32(bh.Height), *ksHash)
-		err = l.pool.Put(ctx, level.KeystonesDB, ehh[:], nil)
+		err = l.pool.Put(ctx, tbcd.KeystonesDB, ehh[:], nil)
 		if err != nil {
 			return fmt.Errorf("put: %w", err)
 		}
 		ks.BlockHeight = uint32(bh.Height)
 		nv := encodeKeystone(ks)
-		err = l.pool.Put(ctx, level.KeystonesDB, key[:], nv[:])
+		err = l.pool.Put(ctx, tbcd.KeystonesDB, key[:], nv[:])
 		if err != nil {
 			return fmt.Errorf("put: %w", err)
 		}
