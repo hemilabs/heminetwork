@@ -20,9 +20,8 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/hemilabs/larry/larry"
 
-	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 )
 
@@ -79,13 +78,73 @@ func (rt RemoveType) String() string {
 }
 
 type Batch struct {
-	Batch *leveldb.Batch
+	Batch larry.Batch
 }
 
 type BatchHook func(ctx context.Context, batches map[string]Batch) error
 
+// DB Tables
+const (
+	BlockHeadersDB   = "blockheaders"
+	BlocksMissingDB  = "blocksmissing"
+	MetadataDB       = "metadata"
+	KeystonesDB      = "keystones"
+	HeightHashDB     = "heighthash"
+	OutputsDB        = "outputs"
+	TransactionsDB   = "transactions"
+	ZKDB             = "zkbalance"
+	ZKOutpointsDB    = "zkoutpoint"
+	ZKSpendableOutDB = "zkspendableout"
+	ZKSpentOutDB     = "zkspentout"
+	ZKSpentTxDB      = "zkspenttx"
+
+	BlocksDB = "blocks" // raw database
+)
+
+type NotFoundError string
+
+func (nfe NotFoundError) Error() string {
+	return string(nfe)
+}
+
+func (nfe NotFoundError) Is(target error) bool {
+	_, ok := target.(NotFoundError)
+	return ok
+}
+
+type BlockNotFoundError struct {
+	chainhash.Hash
+}
+
+func (bnfe BlockNotFoundError) Error() string {
+	return fmt.Sprintf("block not found: %v", bnfe.Hash)
+}
+
+func (bnfe BlockNotFoundError) Is(target error) bool {
+	_, ok := target.(BlockNotFoundError)
+	return ok
+}
+
+type DuplicateError string
+
+func (de DuplicateError) Error() string {
+	return string(de)
+}
+
+func (de DuplicateError) Is(target error) bool {
+	_, ok := target.(DuplicateError)
+	return ok
+}
+
+var (
+	ErrDuplicate     = DuplicateError("duplicate")
+	ErrNotFound      = NotFoundError("not found")
+	ErrBlockNotFound BlockNotFoundError
+)
+
 type Database interface {
-	database.Database
+	// Database
+	Close(ctx context.Context) error // Close database
 
 	// Metadata
 	Version(ctx context.Context) (int, error)
