@@ -22,8 +22,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
 
-	"github.com/hemilabs/heminetwork/v2/database"
-	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
@@ -45,7 +43,7 @@ func TestMD(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,8 +81,8 @@ func TestMD(t *testing.T) {
 	// fail
 	qr = append(qr, []byte{1, 2, 3, 4}) // unknown key
 	rrows, err = db.MetadataBatchGet(ctx, true, qr)
-	if !errors.Is(err, database.ErrNotFound) {
-		t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+	if !errors.Is(err, tbcd.ErrNotFound) {
+		t.Fatalf("expected '%v', got '%v'", tbcd.ErrNotFound, err)
 	}
 	if rrows != nil {
 		t.Fatal("expected no return value")
@@ -137,8 +135,8 @@ func TestMD(t *testing.T) {
 
 	// fail one
 	rv, err = db.MetadataGet(ctx, []byte("nope"))
-	if !errors.Is(err, database.ErrNotFound) {
-		t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+	if !errors.Is(err, tbcd.ErrNotFound) {
+		t.Fatalf("expected '%v', got '%v'", tbcd.ErrNotFound, err)
 	}
 	if rv != nil {
 		t.Fatal("expected no return value")
@@ -262,7 +260,7 @@ func TestHeightHashIndexing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -474,7 +472,7 @@ func TestKeystoneUpdate(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() {
-				err := db.Close()
+				err := db.Close(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -518,14 +516,14 @@ func TestKeystoneUpdate(t *testing.T) {
 				if err == nil {
 					t.Fatalf("keystone in db: %v", spew.Sdump(ks))
 				} else {
-					if !errors.Is(err, database.ErrNotFound) {
-						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+					if !errors.Is(err, tbcd.ErrNotFound) {
+						t.Fatalf("expected '%v', got '%v'", tbcd.ErrNotFound, err)
 					}
 				}
 				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
 				if err != nil {
-					if !errors.Is(err, database.ErrNotFound) {
-						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+					if !errors.Is(err, tbcd.ErrNotFound) {
+						t.Fatalf("expected '%v', got '%v'", tbcd.ErrNotFound, err)
 					}
 				}
 
@@ -572,7 +570,7 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -640,7 +638,7 @@ func TestKeystoneDBCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -806,7 +804,7 @@ func TestDbUpgradeV4Errors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := dbTemp.insertTable(level.KeystonesDB, tti.key, tti.value); err != nil {
+			if err := dbTemp.insertTable(ctx, tbcd.KeystonesDB, tti.key, tti.value); err != nil {
 				panic(err)
 			}
 
@@ -817,7 +815,7 @@ func TestDbUpgradeV4Errors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := dbTemp.Close(); err != nil {
+			if err := dbTemp.Close(ctx); err != nil {
 				t.Fatal(err)
 			}
 
