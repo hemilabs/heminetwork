@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -15,7 +15,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 
-	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
@@ -64,7 +63,7 @@ func (i *zkIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c indexerCa
 	var balance [8]byte
 	b, err := i.g.db.ZKBalanceByScriptHash(ctx, ss)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return balance[:], nil
 		}
 		return nil, err
