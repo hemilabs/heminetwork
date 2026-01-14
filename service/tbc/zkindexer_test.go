@@ -82,7 +82,7 @@ func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := db.Close(); err != nil {
+		if err := db.Close(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}()

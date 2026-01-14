@@ -28,16 +28,14 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
+	"github.com/hemilabs/larry/larry"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
-	"github.com/hemilabs/heminetwork/v2/database"
-	dbnames "github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
@@ -1045,7 +1043,7 @@ func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block chainha
 
 	blk, err := s.g.db.BlockByHash(ctx, block)
 	if err != nil {
-		if errors.Is(err, database.ErrBlockNotFound) {
+		if errors.Is(err, tbcd.ErrBlockNotFound) {
 			for range count {
 				err := s.downloadBlockFromRandomPeer(ctx, block)
 				if err != nil {
@@ -1131,7 +1129,7 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 		// Close peer.
 		if p, ok := value.(*rawpeer.RawPeer); ok {
 			p.Close() // kill peer
-			if !errors.Is(err, leveldb.ErrClosed) {
+			if !errors.Is(err, larry.ErrDBClosed) {
 				log.Errorf("block expired: %v %v", p, err)
 			}
 		}
@@ -1264,7 +1262,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
 			var (
-				eval  database.BlockNotFoundError
+				eval  tbcd.BlockNotFoundError
 				block chainhash.Hash
 			)
 			err := s.SyncIndexersToBest(ctx)
@@ -1272,7 +1270,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			case errors.Is(err, nil):
 			case errors.Is(err, context.Canceled):
 				return
-			case errors.Is(err, leveldb.ErrClosed):
+			case errors.Is(err, larry.ErrDBClosed):
 				return
 			case errors.Is(err, ErrAlreadyIndexing):
 				return
@@ -1404,12 +1402,12 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 	}
 
 	ph := func(ctx context.Context, batches map[string]tbcd.Batch) error {
-		b, ok := batches[dbnames.MetadataDB]
+		b, ok := batches[tbcd.MetadataDB]
 		if !ok {
 			return fmt.Errorf("post hook batch not found: %v",
-				dbnames.MetadataDB)
+				tbcd.MetadataDB)
 		}
-		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
+		level.BatchAppend(ctx, tbcd.MetadataDB, b.Batch, []tbcd.Row{
 			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
@@ -1459,12 +1457,12 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 	}
 
 	ph := func(ctx context.Context, batches map[string]tbcd.Batch) error {
-		b, ok := batches[dbnames.MetadataDB]
+		b, ok := batches[tbcd.MetadataDB]
 		if !ok {
 			return fmt.Errorf("post hook batch not found: %v",
-				dbnames.MetadataDB)
+				tbcd.MetadataDB)
 		}
-		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
+		level.BatchAppend(ctx, tbcd.MetadataDB, b.Batch, []tbcd.Row{
 			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
@@ -1559,7 +1557,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		// starve the slower peers and eventually we end up with one
 		// peer for headers download.
 
-		if errors.Is(err, database.ErrDuplicate) {
+		if errors.Is(err, tbcd.ErrDuplicate) {
 			// This happens when all block headers we asked for
 			// already exist.
 
@@ -2246,7 +2244,7 @@ func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, 
 		}
 	}
 
-	return nil, database.ErrNotFound
+	return nil, tbcd.ErrNotFound
 }
 
 func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *rawpeer.RawPeer) error {
@@ -2727,17 +2725,26 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		}
 	}
 
-	if s.cfg.HemiIndex {
+	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
+		!s.indexing && !blksMissing {
+		// If keystone and zk indexers are disabled we are synced.
+		if !s.cfg.HemiIndex && !s.cfg.ZKIndex {
+			si.Synced = true
+			return
+		}
+
 		// Perform additional keystone indexer tests.
-		keystoneBH, err := s.ki.IndexerAt(ctx)
-		if err != nil {
-			keystoneBH = &tbcd.BlockHeader{}
+		if s.cfg.HemiIndex {
+			keystoneBH, err := s.ki.IndexerAt(ctx)
+			if err != nil {
+				keystoneBH = &tbcd.BlockHeader{}
+			}
+			keystoneHH := &HashHeight{
+				Hash:   keystoneBH.Hash,
+				Height: keystoneBH.Height,
+			}
+			si.Keystone = *keystoneHH
 		}
-		keystoneHH := &HashHeight{
-			Hash:   keystoneBH.Hash,
-			Height: keystoneBH.Height,
-		}
-		si.Keystone = *keystoneHH
 	}
 
 	if s.cfg.ZKIndex {
@@ -2856,7 +2863,13 @@ func (s *Server) dbClose() error {
 	log.Tracef("dbClose")
 	defer log.Tracef("dbClose")
 
-	return s.g.db.Close()
+	// We can't pass in the run context, as we may be closing due to
+	// it being cancelled. Not great, but create a context with a timeout
+	// that ensures the database gets closed on exit.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	return s.g.db.Close(ctx)
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -3061,7 +3074,7 @@ func (s *Server) Run(pctx context.Context) error {
 	// Find out where IBD is at
 	bhb, err := s.g.db.BlockHeaderBest(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
+		if !errors.Is(err, tbcd.ErrNotFound) {
 			return fmt.Errorf("block header best: %w", err)
 		}
 
@@ -3247,10 +3260,10 @@ func (s *Server) Run(pctx context.Context) error {
 		// Not sure which one to pick here. The likelihood that a new
 		// blockheaders comes through is high if the box has been down
 		// for >10m but very low if it is a simple restart.
-		// err := s.SyncIndexersToBest(ctx)
-		// if err != nil {
+		//err := s.SyncIndexersToBest(ctx)
+		//if err != nil {
 		//	panic(err)
-		// }
+		//}
 	}
 
 	select {
@@ -3295,7 +3308,7 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 	// Check if there is already a best header in database
 	bhb, err := s.g.db.BlockHeaderBest(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
+		if !errors.Is(err, tbcd.ErrNotFound) {
 			return fmt.Errorf("block headers best: %w", err)
 		}
 

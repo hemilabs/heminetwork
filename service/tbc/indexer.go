@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -17,7 +17,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/dustin/go-humanize"
 
-	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
@@ -162,7 +161,7 @@ func (c *indexerCommon) String() string {
 // index calls generic.
 func (c *indexerCommon) evaluateBlockHeaderIndex(bh *tbcd.BlockHeader, err error) (*tbcd.BlockHeader, error) {
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
+		if !errors.Is(err, tbcd.ErrNotFound) {
 			return nil, err
 		}
 		bh = &tbcd.BlockHeader{
