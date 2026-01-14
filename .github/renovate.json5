@@ -40,6 +40,12 @@
     {
       matchManagers: ['gomod'],
       commitMessagePrefix: 'go.mod:',
+      postUpdateOptions: ['gomodTidy'],
+    },
+    {
+      matchManagers: ['gomod'],
+      matchDepNames: ['go'],
+      enabled: false,
     },
     {
       matchManagers: ['github-actions'],
