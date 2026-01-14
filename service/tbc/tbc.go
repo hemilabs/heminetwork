@@ -2863,6 +2863,7 @@ func (s *Server) dbClose() error {
 	log.Tracef("dbClose")
 	defer log.Tracef("dbClose")
 
+	// XXX Larry
 	// We can't pass in the run context, as we may be closing due to
 	// it being cancelled. Not great, but create a context with a timeout
 	// that ensures the database gets closed on exit.
