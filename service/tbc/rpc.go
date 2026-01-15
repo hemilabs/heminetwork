@@ -864,7 +864,7 @@ func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Conte
 			time.Since(t))
 	}()
 
-	maxDepth := uint(3)
+	maxDepth := uint(10)
 	if req.Depth > maxDepth {
 		return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
 			Error: protocol.RequestErrorf("invalid depth: %v > %v",
