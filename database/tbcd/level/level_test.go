@@ -11,10 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/big"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
 
@@ -32,7 +36,7 @@ func TestMD(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	cfg, err := NewConfig("testnet3", home, "128kb", "1m")
+	cfg, err := NewConfig("testnet3", home, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +118,21 @@ func TestMD(t *testing.T) {
 	}
 	if !bytes.Equal(rv, value) {
 		t.Fatalf("got %s, expected %s", rv, value)
+	}
+
+	// Delete one
+	if err = db.MetadataDel(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.MetadataGet(ctx, key)
+	if !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+	}
+
+	// Invalid Delete
+	err = db.MetadataDel(ctx, key)
+	if !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
 	}
 
 	// fail one
@@ -826,4 +845,263 @@ func encodeKeystoneV1(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2Keysto
 func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
 	eks := encodeKeystoneV1(ks)
 	return eks[:]
+}
+
+func createTestBlock(prevHash *chainhash.Hash, height int64) *btcutil.Block {
+	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(height))
+	bh.Timestamp = time.Unix(height, 0)
+	bh.Bits = 0x1d00ffff
+	block := wire.NewMsgBlock(bh)
+
+	// Add a coinbase transaction
+	coinbase := wire.NewMsgTx(1)
+	coinbase.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{
+			Hash:  chainhash.Hash{},
+			Index: 0xFFFFFFFF,
+		},
+		Sequence: 0xFFFFFFFF,
+	})
+	coinbase.AddTxOut(&wire.TxOut{
+		Value: 50 * 100000000, // 50 BTC
+	})
+	if err := block.AddTransaction(coinbase); err != nil {
+		panic(err)
+	}
+
+	txHash := coinbase.TxHash()
+	bh.MerkleRoot = chainhash.DoubleHashH(txHash[:])
+
+	btcBlock := btcutil.NewBlock(block)
+	return btcBlock
+}
+
+func createTestMsgHeaders(headers []*tbcd.BlockHeader) *wire.MsgHeaders {
+	msgHeaders := wire.NewMsgHeaders()
+	for _, bh := range headers {
+		wbh, err := bh.Wire()
+		if err != nil {
+			panic(err)
+		}
+		if err = msgHeaders.AddBlockHeader(wbh); err != nil {
+			panic(err)
+		}
+	}
+	return msgHeaders
+}
+
+func insertBlock(ctx context.Context, db *ldb, bh tbcd.BlockHeader) error {
+	blk := createTestBlock(bh.ParentHash(), int64(bh.Height))
+	h, err := db.BlockInsert(ctx, blk)
+	if err != nil {
+		return fmt.Errorf("block insert: %w", err)
+	}
+	if h != int64(bh.Height) {
+		return fmt.Errorf("expected height %d, got %d", bh.Height, h)
+	}
+
+	// Check if block exists
+	exists, err := db.BlockExistsByHash(ctx, *blk.Hash())
+	if err != nil {
+		return fmt.Errorf("BlockExistsByHash: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("block %d not found: %s", bh.Height, blk.Hash())
+	}
+
+	// Check if we can retrieve block
+	retrieved, err := db.BlockByHash(ctx, *blk.Hash())
+	if err != nil {
+		return fmt.Errorf("BlockByHash: %w", err)
+	}
+	if !retrieved.Hash().IsEqual(blk.Hash()) {
+		return fmt.Errorf("retrieved block hash (%s) != header hash (%s)",
+			retrieved.Hash(), blk.Hash())
+	}
+
+	return nil
+}
+
+func insertBlockHeader(ctx context.Context, db *ldb, prevHash *chainhash.Hash, height uint64) (tbcd.BlockHeader, error) {
+	blk := createTestBlock(prevHash, int64(height))
+	bh := &tbcd.BlockHeader{
+		Hash:       *blk.Hash(),
+		Height:     height,
+		Header:     h2b(&blk.MsgBlock().Header),
+		Difficulty: *big.NewInt(1),
+	}
+	bhs := []*tbcd.BlockHeader{bh}
+	msgh := createTestMsgHeaders(bhs)
+
+	if prevHash.IsEqual(&chainhash.Hash{}) {
+		genesisWire := blk.MsgBlock().Header
+		err := db.BlockHeaderGenesisInsert(ctx, genesisWire, 0, big.NewInt(1))
+		if err != nil {
+			return tbcd.BlockHeader{}, err
+		}
+	} else {
+		_, _, _, _, err := db.BlockHeadersInsert(ctx, msgh, nil)
+		if err != nil {
+			return tbcd.BlockHeader{}, err
+		}
+	}
+
+	// Check if we can retrieve header
+	retrieved, err := db.BlockHeaderByHash(ctx, *blk.Hash())
+	if err != nil {
+		return tbcd.BlockHeader{}, fmt.Errorf("BlockHeaderByHash: %w", err)
+	}
+	if !retrieved.Hash.IsEqual(blk.Hash()) {
+		return tbcd.BlockHeader{}, fmt.Errorf("retrieved header (%s) != header (%s)",
+			retrieved.BlockHash(), blk.Hash())
+	}
+
+	return *bh, nil
+}
+
+func createNewDB(t *testing.T, ctx context.Context) (*ldb, func()) {
+	home := t.TempDir()
+	cfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	discardFunc := func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	return db, discardFunc
+}
+
+func TestBlockInsertAndRetrieve(t *testing.T) {
+	const blkNum uint64 = 10
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	prevHash := &chainhash.Hash{}
+	for i := range blkNum {
+		bh, err := insertBlockHeader(ctx, db, prevHash, i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = insertBlock(ctx, db, bh); err != nil {
+			t.Fatal(err)
+		}
+
+		best, err := db.BlockHeaderBest(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !best.BlockHash().IsEqual(&bh.Hash) {
+			t.Fatalf("hash: got %v, want %v",
+				best.BlockHash(), bh.BlockHash())
+		}
+		if best.Height != bh.Height {
+			t.Fatalf("height: got %d, want %d",
+				best.Height, bh.Height)
+		}
+
+		prevHash = bh.BlockHash()
+	}
+}
+
+func TestBlockNegative(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	fakeHash := chainhash.Hash{0xFF}
+	_, err := db.BlockByHash(ctx, fakeHash)
+	if !errors.Is(err, database.ErrBlockNotFound) {
+		t.Fatalf("expected error %v, got %v", database.ErrBlockNotFound, err)
+	}
+
+	exists, err := db.BlockExistsByHash(ctx, fakeHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatalf("expected block not to exist")
+	}
+}
+
+func TestBlocksMissing(t *testing.T) {
+	const blkNum uint64 = 10
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	var (
+		err error
+		bh  tbcd.BlockHeader
+		bhs = make([]tbcd.BlockHeader, 0, blkNum-1)
+	)
+	for i := range blkNum {
+		bh, err = insertBlockHeader(ctx, db, bh.BlockHash(), i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i > 0 && i < blkNum-1 {
+			// store most headers for insertion except for genesis
+			// and last to manually verify deleting from missing
+			// blocks table.
+			bhs = append(bhs, bh)
+		}
+	}
+
+	// Check missing blocks
+	missing, err := db.BlocksMissing(ctx, int(blkNum))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != len(bhs)+1 {
+		t.Fatalf("expected %d missing blocks, got %d",
+			len(bhs)+1, len(missing))
+	}
+	if missing[0].Height != 1 {
+		t.Fatalf("expected height 1 to be missing, got %d", missing[0].Height)
+	}
+
+	// Insert blocks
+	for _, bhc := range bhs {
+		prevMissing := len(missing)
+		if err := insertBlock(ctx, db, bhc); err != nil {
+			t.Fatal(err)
+		}
+		missing, err = db.BlocksMissing(ctx, int(blkNum))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(missing) != prevMissing-1 {
+			t.Fatalf("expected %d missing blocks, got %d",
+				prevMissing, len(missing)-1)
+		}
+	}
+
+	// Delete missing block entry
+	err = db.BlockMissingDelete(ctx, int64(blkNum)-1, bh.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing, err = db.BlocksMissing(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 0 {
+		t.Fatalf("expected no missing blocks, got %d", len(missing))
+	}
 }
