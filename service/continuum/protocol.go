@@ -27,6 +27,7 @@ import (
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/hemilabs/x/tss-lib/v2/tss"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
 )
@@ -255,7 +256,9 @@ type PingResponse struct {
 }
 
 type KeygenRequest struct {
-	Curve string `json:"curve"` // Curve for TSS
+	Curve     string               `json:"curve"`     // Curve for TSS
+	Committee tss.UnSortedPartyIDs `json:"committee"` // Signing committee
+	Threshold int                  `json:"threshold"` // Sigs required
 }
 
 type KeygenResponse struct{}
