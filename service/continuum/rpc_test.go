@@ -23,9 +23,9 @@ type MockRouter struct {
 // MockParty simulates a TSS party that handles RPC messages.
 type MockParty struct {
 	id     Identity
-	secret *Secret        // Has private key for signing
-	inbox  chan any       // Receives RPC messages
-	outbox chan any       // Sends RPC messages
+	secret *Secret           // Has private key for signing
+	inbox  chan any          // Receives RPC messages
+	outbox chan any          // Sends RPC messages
 	keys   map[string][]byte // keyID -> key share (simplified)
 }
 
@@ -81,7 +81,7 @@ func (r *MockRouter) AddParty(id Identity) *MockParty {
 
 func (r *MockRouter) NewCeremonyID() CeremonyID {
 	var id CeremonyID
-	rand.Read(id[:])
+	_, _ = rand.Read(id[:])
 	return id
 }
 
@@ -276,7 +276,7 @@ func TestRPCKeygenRequestResponse(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
 		router.AddParty(id)
 	}
@@ -304,7 +304,7 @@ func TestRPCKeygenRequestResponse(t *testing.T) {
 			}
 
 			// Party acknowledges
-			router.HandleResponse(id, KeygenResponse{
+			_ = router.HandleResponse(id, KeygenResponse{
 				CeremonyID: cid,
 				Success:    true,
 			})
@@ -322,7 +322,7 @@ func TestRPCSignRequestResponse(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
 		router.AddParty(id)
 	}
@@ -331,7 +331,7 @@ func TestRPCSignRequestResponse(t *testing.T) {
 	cid := router.NewCeremonyID()
 	keyID := []byte("test-key-id")
 	data := make([]byte, 32)
-	rand.Read(data)
+	_, _ = rand.Read(data)
 
 	err := router.StartSign(cid, ids, 1, keyID, data) // 2-of-3
 	if err != nil {
@@ -358,7 +358,7 @@ func TestRPCSignRequestResponse(t *testing.T) {
 			}
 
 			// Party responds with signature
-			router.HandleResponse(id, SignResponse{
+			_ = router.HandleResponse(id, SignResponse{
 				CeremonyID: cid,
 				Success:    true,
 				R:          []byte("fake-r"),
@@ -513,7 +513,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 		From:       ids[0],
 		Broadcast:  true,
 		Data:       []byte("tampered-data"), // Different data
-		Signature:  sig,                      // Original signature
+		Signature:  sig,                     // Original signature
 	}
 
 	err = router.RouteTSSMessage(msgTampered)
@@ -539,7 +539,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 	wrongCIDSig := secrets[0].Sign(wrongHash)
 
 	msgWrongCID := TSSMessage{
-		CeremonyID: cid,     // Claims ceremony cid
+		CeremonyID: cid, // Claims ceremony cid
 		Type:       CeremonyKeygen,
 		From:       ids[0],
 		Broadcast:  true,
@@ -592,7 +592,7 @@ func TestRPCCeremonyResult(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
 		router.AddParty(id)
 	}
@@ -601,7 +601,7 @@ func TestRPCCeremonyResult(t *testing.T) {
 
 	// All parties report success
 	for _, id := range ids {
-		router.HandleResponse(id, CeremonyResult{
+		_ = router.HandleResponse(id, CeremonyResult{
 			CeremonyID: cid,
 			Success:    true,
 		})
@@ -628,7 +628,7 @@ func TestRPCKeygenInvalidThreshold(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
 		router.AddParty(id)
 	}
@@ -652,7 +652,7 @@ func TestRPCKeygenTooFewParties(t *testing.T) {
 	router := NewMockRouter()
 
 	var id Identity
-	rand.Read(id[:])
+	_, _ = rand.Read(id[:])
 	router.AddParty(id)
 
 	_, err := router.StartKeygen([]Identity{id}, 1)
@@ -669,7 +669,7 @@ func TestRPCSignInvalidDataLength(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
 		router.AddParty(id)
 	}
@@ -698,7 +698,7 @@ func TestRPCSignNotEnoughParties(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 2; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
 		router.AddParty(id)
 	}
@@ -723,7 +723,7 @@ func TestRPCTSSMessageUnknownCeremony(t *testing.T) {
 
 	// Random ceremony ID that doesn't exist
 	var fakeCID CeremonyID
-	rand.Read(fakeCID[:])
+	_, _ = rand.Read(fakeCID[:])
 
 	data := []byte("data")
 	hash := HashTSSMessage(fakeCID, data)
@@ -749,11 +749,9 @@ func TestRPCTSSMessageUnauthorizedSender(t *testing.T) {
 	router := NewMockRouter()
 
 	// Create ceremony with 2 parties
-	var secrets []*Secret
 	var ids []Identity
 	for i := 0; i < 2; i++ {
 		secret, _ := NewSecret()
-		secrets = append(secrets, secret)
 		ids = append(ids, secret.Identity)
 		router.AddPartyWithSecret(secret)
 	}
@@ -790,7 +788,7 @@ func TestRPCCeremonyAbort(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
 		router.AddParty(id)
 	}
@@ -798,7 +796,7 @@ func TestRPCCeremonyAbort(t *testing.T) {
 	cid, _ := router.StartKeygen(ids, 1)
 
 	// One party aborts
-	router.HandleResponse(ids[0], CeremonyAbort{
+	_ = router.HandleResponse(ids[0], CeremonyAbort{
 		CeremonyID: cid,
 		Reason:     "party went offline",
 	})
@@ -823,7 +821,7 @@ func TestRPCKeygenResponseFailure(t *testing.T) {
 	var ids []Identity
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
 		router.AddParty(id)
 	}
@@ -831,7 +829,7 @@ func TestRPCKeygenResponseFailure(t *testing.T) {
 	cid, _ := router.StartKeygen(ids, 1)
 
 	// One party reports failure
-	router.HandleResponse(ids[0], KeygenResponse{
+	_ = router.HandleResponse(ids[0], KeygenResponse{
 		CeremonyID: cid,
 		Success:    false,
 		Error:      "no preparams available",
@@ -854,13 +852,13 @@ func TestRPCReshareRequest(t *testing.T) {
 	var oldIDs, newIDs []Identity
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		oldIDs = append(oldIDs, id)
 		router.AddParty(id)
 	}
 	for i := 0; i < 3; i++ {
 		var id Identity
-		rand.Read(id[:])
+		_, _ = rand.Read(id[:])
 		newIDs = append(newIDs, id)
 		router.AddParty(id)
 	}
@@ -904,7 +902,7 @@ func TestRPCReshareRequest(t *testing.T) {
 				t.Fatal("ceremony ID mismatch")
 			}
 
-			router.HandleResponse(pid, ReshareResponse{
+			_ = router.HandleResponse(pid, ReshareResponse{
 				CeremonyID: cid,
 				Success:    true,
 			})
@@ -936,52 +934,52 @@ func TestRPCReshareRequest(t *testing.T) {
 func TestCriticalMITMPrevention(t *testing.T) {
 	// Scenario: Alice, Bob, Charlie in ceremony. Router is MITM.
 	// Router tries to inject fake message claiming to be from Alice.
-	
+
 	router := NewMockRouter()
-	
+
 	// Create real parties with secrets
 	alice, _ := NewSecret()
 	bob, _ := NewSecret()
 	charlie, _ := NewSecret()
-	
+
 	router.AddPartyWithSecret(alice)
 	router.AddPartyWithSecret(bob)
 	router.AddPartyWithSecret(charlie)
-	
+
 	ids := []Identity{alice.Identity, bob.Identity, charlie.Identity}
 	cid, _ := router.StartKeygen(ids, 1)
-	
+
 	// Drain setup messages
 	for _, id := range ids {
 		<-router.parties[id].inbox
 	}
-	
+
 	// ATTACK: Router (or any MITM) tries to forge a message from Alice
 	// The attacker does NOT have Alice's private key
 	attackerSecret, _ := NewSecret() // Attacker's own key
-	
+
 	forgedData := []byte("malicious-round1-data")
 	hash := HashTSSMessage(cid, forgedData)
-	
+
 	// Attacker signs with their own key but claims From=Alice
 	attackerSig := attackerSecret.Sign(hash)
-	
+
 	forgedMsg := TSSMessage{
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
-		From:       alice.Identity,     // LIES: claims to be Alice
+		From:       alice.Identity, // LIES: claims to be Alice
 		Broadcast:  true,
 		Data:       forgedData,
-		Signature:  attackerSig,        // Signed by attacker, not Alice
+		Signature:  attackerSig, // Signed by attacker, not Alice
 	}
-	
+
 	err := router.RouteTSSMessage(forgedMsg)
 	if err == nil {
 		t.Fatal("CRITICAL SECURITY FAILURE: Forged message accepted!")
 	}
-	
+
 	t.Logf("MITM attack blocked: %v ✓", err)
-	
+
 	// Verify the error is specifically about identity mismatch
 	if err.Error() != "invalid signature: "+ErrIdentityMismatch.Error() {
 		t.Logf("Error was: %v (expected identity mismatch)", err)
@@ -990,32 +988,32 @@ func TestCriticalMITMPrevention(t *testing.T) {
 
 func TestCriticalReplayPrevention(t *testing.T) {
 	// Scenario: Valid message from ceremony A cannot be replayed in ceremony B
-	
+
 	router := NewMockRouter()
-	
+
 	alice, _ := NewSecret()
 	bob, _ := NewSecret()
-	
+
 	router.AddPartyWithSecret(alice)
 	router.AddPartyWithSecret(bob)
-	
+
 	ids := []Identity{alice.Identity, bob.Identity}
-	
+
 	// Create two ceremonies
 	cidA, _ := router.StartKeygen(ids, 1)
 	cidB, _ := router.StartKeygen(ids, 1)
-	
+
 	// Drain setup
 	for _, id := range ids {
 		<-router.parties[id].inbox
 		<-router.parties[id].inbox
 	}
-	
+
 	// Alice sends valid message in ceremony A
 	data := []byte("round1-data")
 	hashA := HashTSSMessage(cidA, data)
 	sigA := alice.Sign(hashA)
-	
+
 	validMsg := TSSMessage{
 		CeremonyID: cidA,
 		Type:       CeremonyKeygen,
@@ -1024,107 +1022,107 @@ func TestCriticalReplayPrevention(t *testing.T) {
 		Data:       data,
 		Signature:  sigA,
 	}
-	
+
 	// Valid in ceremony A
 	err := router.RouteTSSMessage(validMsg)
 	if err != nil {
 		t.Fatalf("valid message rejected: %v", err)
 	}
 	t.Log("Valid message in ceremony A accepted ✓")
-	
+
 	// ATTACK: Replay the same message in ceremony B
 	replayMsg := TSSMessage{
-		CeremonyID: cidB,           // Different ceremony!
+		CeremonyID: cidB, // Different ceremony!
 		Type:       CeremonyKeygen,
 		From:       alice.Identity,
 		Broadcast:  true,
-		Data:       data,           // Same data
-		Signature:  sigA,           // Same signature (for ceremony A)
+		Data:       data, // Same data
+		Signature:  sigA, // Same signature (for ceremony A)
 	}
-	
+
 	err = router.RouteTSSMessage(replayMsg)
 	if err == nil {
 		t.Fatal("CRITICAL SECURITY FAILURE: Replay attack succeeded!")
 	}
-	
+
 	t.Logf("Replay attack blocked: %v ✓", err)
 }
 
 func TestCriticalDataIntegrity(t *testing.T) {
 	// Scenario: Routing node intercepts message and modifies Data
-	
+
 	router := NewMockRouter()
-	
+
 	alice, _ := NewSecret()
 	bob, _ := NewSecret()
-	
+
 	router.AddPartyWithSecret(alice)
 	router.AddPartyWithSecret(bob)
-	
+
 	ids := []Identity{alice.Identity, bob.Identity}
 	cid, _ := router.StartKeygen(ids, 1)
-	
+
 	// Drain setup
 	for _, id := range ids {
 		<-router.parties[id].inbox
 	}
-	
+
 	// Alice sends valid message
 	originalData := []byte("honest-round1-data")
 	hash := HashTSSMessage(cid, originalData)
 	sig := alice.Sign(hash)
-	
+
 	// ATTACK: Router modifies the data in transit
 	tamperedData := []byte("evil-modified-data")
-	
+
 	tamperedMsg := TSSMessage{
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       alice.Identity,
 		Broadcast:  true,
-		Data:       tamperedData,   // Modified!
-		Signature:  sig,            // Original signature
+		Data:       tamperedData, // Modified!
+		Signature:  sig,          // Original signature
 	}
-	
+
 	err := router.RouteTSSMessage(tamperedMsg)
 	if err == nil {
 		t.Fatal("CRITICAL SECURITY FAILURE: Tampered message accepted!")
 	}
-	
+
 	t.Logf("Data tampering blocked: %v ✓", err)
 }
 
 func TestIdentityDerivation(t *testing.T) {
 	// Verify that Identity is correctly derived from pubkey
 	// This is the foundation of the signature verification
-	
+
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Identity should be ripemd160 of compressed pubkey
 	pubkey := secret.privateKey.PubKey()
 	expectedID := NewIdentityFromPub(pubkey)
-	
+
 	if secret.Identity != expectedID {
 		t.Fatal("Identity mismatch from pubkey derivation")
 	}
-	
+
 	// Sign something and verify we can recover the identity
 	data := []byte("test data")
 	hash := sha256.Sum256(data)
 	sig := secret.Sign(hash[:])
-	
+
 	recoveredPub, err := Verify(hash[:], secret.Identity, sig)
 	if err != nil {
 		t.Fatalf("Verify failed: %v", err)
 	}
-	
+
 	recoveredID := NewIdentityFromPub(recoveredPub)
 	if recoveredID != secret.Identity {
 		t.Fatal("Recovered identity doesn't match")
 	}
-	
+
 	t.Log("Identity derivation and verification works ✓")
 }
