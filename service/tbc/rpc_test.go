@@ -34,7 +34,6 @@ import (
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin"
-	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
@@ -2115,7 +2114,7 @@ func TestNotFoundError(t *testing.T) {
 		cancel()
 	}()
 
-	var dupErr database.DuplicateError
+	var dupErr tbcd.DuplicateError
 
 	// Connect tbc service
 	cfg := &Config{

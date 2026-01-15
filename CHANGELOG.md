@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Improved signal handling in the daemons ([#763](https://github.com/hemilabs/heminetwork/pull/763)).
 
+- Replace [leveldb](https://github.com/syndtr/goleveldb) implementation of the `tbcd`
+database with [larry](https://github.com/hemilabs/larry) ([#740](https://github.com/hemilabs/heminetwork/pull/740)).
+
 ### Fixed
 
 - Fix typos across the codebase
@@ -151,7 +154,7 @@ Thank you to everyone who contributed to this release!
 
 ---
 
-_Looking for the changelog for an older version? Check https://github.com/hemilabs/heminetwork/releases_
+_Looking for the changelog for an older version? Check <https://github.com/hemilabs/heminetwork/releases>_
 
 [Unreleased]: https://github.com/hemilabs/heminetwork/compare/v2.0.0...HEAD
 [v2.0.0]: https://github.com/hemilabs/heminetwork/releases/tag/v2.0.0
