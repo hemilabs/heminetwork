@@ -2308,3 +2308,90 @@ func TestNotFoundError(t *testing.T) {
 		})
 	}
 }
+
+// TestKeystoneTxsByL2KeystoneAbrevHashRequest_DepthValidation tests the depth
+// parameter validation in the KeystoneTxsByL2KeystoneAbrevHashRequest handler.
+// The max depth is 10 to support PoPPayoutsV2 which needs to query up to 10
+// consecutive blocks from the first publication. Anything greater should return
+// an error. This test only verifies the validation logic - valid depths require
+// a fully initialized server with a database, which is tested in integration tests.
+func TestKeystoneTxsByL2KeystoneAbrevHashRequest_DepthValidation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	// Create a TBC server for testing - only needs to be created, not started
+	// The depth validation happens before any database access
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		HemiIndex:               true,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		Network:                 networkLocalnet,
+		PrometheusListenAddress: "",
+		Seeds:                   []string{"127.0.0.1:" + testutil.FreePort(ctx)},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type testTableItem struct {
+		name          string
+		depth         uint
+		errorContains string
+	}
+
+	// Only test invalid depths - these are validated before database access
+	// Max depth is 10 to support PoPPayoutsV2 queries
+	testTable := []testTableItem{
+		{
+			name:          "Depth 11 - invalid (exceeds max of 10)",
+			depth:         11,
+			errorContains: "invalid depth: 11 > 10",
+		},
+		{
+			name:          "Depth 15 - invalid",
+			depth:         15,
+			errorContains: "invalid depth: 15 > 10",
+		},
+		{
+			name:          "Depth 100 - invalid",
+			depth:         100,
+			errorContains: "invalid depth: 100 > 10",
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			req := tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest{
+				L2KeystoneAbrevHash: chainhash.Hash(testutil.FillBytes("testhash", 32)),
+				Depth:               tti.depth,
+			}
+
+			res, err := s.handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx, &req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			resp, ok := res.(*tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse)
+			if !ok {
+				t.Fatalf("unexpected response type: %T", res)
+			}
+
+			if resp.Error == nil {
+				t.Fatalf("expected error but got nil")
+			}
+			if !strings.Contains(resp.Error.Message, tti.errorContains) {
+				t.Errorf("expected error containing %q, got %q",
+					tti.errorContains, resp.Error.Message)
+			}
+		})
+	}
+}

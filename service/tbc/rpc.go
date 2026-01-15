@@ -898,7 +898,10 @@ func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Conte
 			time.Since(t))
 	}()
 
-	maxDepth := uint(3)
+	// maxDepth must be at least 10 to support PoPPayoutsV2, which rewards
+	// publications in the first 9 BTC blocks after the first publication.
+	// We allow 10 to provide some buffer room.
+	maxDepth := uint(10)
 	if req.Depth > maxDepth {
 		return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
 			Error: protocol.RequestErrorf("invalid depth: %v > %v",

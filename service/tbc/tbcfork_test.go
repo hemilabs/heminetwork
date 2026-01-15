@@ -30,6 +30,7 @@ import (
 	"github.com/go-test/deep"
 	"github.com/juju/loggo/v2"
 
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin"
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
@@ -207,6 +208,22 @@ func (b *btcNode) newKeystone(name string) *chainhash.Hash {
 	l2Keystone := hemi.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      2,
+		L2BlockNumber:      44,
+		ParentEPHash:       testutil.FillBytes(name+"parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes(name+"prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes(name+"stateroot", 32),
+		EPHash:             testutil.FillBytes(name+"ephash", 32),
+	}
+
+	b.keystones[name] = &l2Keystone
+	return hemi.L2KeystoneAbbreviate(l2Keystone).Hash()
+}
+
+// newKeystoneWithL1BlockNumber creates a keystone with a specific L1BlockNumber.
+func (b *btcNode) newKeystoneWithL1BlockNumber(name string, l1BlockNumber uint32) *chainhash.Hash {
+	l2Keystone := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      l1BlockNumber,
 		L2BlockNumber:      44,
 		ParentEPHash:       testutil.FillBytes(name+"parentephash", 32),
 		PrevKeystoneEPHash: testutil.FillBytes(name+"prevkeystoneephash", 32),
@@ -3485,6 +3502,194 @@ func TestCacheOverflow(t *testing.T) {
 	if err = mustNotHave(ctx, t, s, blocks...); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestKeystoneTxsBlockHeight tests the KeystoneTxsByL2KeystoneAbrevHash RPC endpoint
+// to verify that BlockHeight is correctly returned for keystone transactions.
+// Upstream consumers (like op-geth) use BlockHeight to calculate relative publication
+// heights for PoPPayoutsV2 reward calculation.
+func TestKeystoneTxsBlockHeight(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	port := testutil.FreePort(ctx)
+	n, err := newFakeNode(t, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	// Create PoP miner keys
+	_, _, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("pop address: %v", popAddress)
+
+	// Create two keystones to mine in different blocks
+	kss1Hash := n.newKeystoneWithL1BlockNumber("kss1", 2)
+	kss2Hash := n.newKeystoneWithL1BlockNumber("kss2", 0)
+
+	t.Logf("kss1 hash: %v", kss1Hash)
+	t.Logf("kss2 hash: %v", kss2Hash)
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	// Connect TBC service
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		HemiIndex:               true, // Enable keystone indexing
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedKeystones:      1000,
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Subscribe to TBC notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	// Wait for node to connect
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	// Mine blocks with keystones:
+	// Block 1: Empty (needed for coinbase spend)
+	// Block 2: Contains kss1
+	// Block 3: Contains kss2
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
+
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("b1 mined at height %d", b1.Height())
+
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("b2 mined at height %d (contains kss1)", b2.Height())
+
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("b3 mined at height %d (contains kss2)", b3.Height())
+
+	// Trigger block download
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for TBC to insert all blocks
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	// Index to b3
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test 1: Query kss1 via RPC endpoint and verify BlockHeight
+	t.Run("kss1_BlockHeight", func(t *testing.T) {
+		req := &tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest{
+			L2KeystoneAbrevHash: *kss1Hash,
+			Depth:               1,
+		}
+		resp, err := s.KeystoneTxsByHash(ctx, req)
+		if err != nil {
+			t.Fatalf("KeystoneTxsByHash failed: %v", err)
+		}
+		if resp.Error != nil {
+			t.Fatalf("RPC returned error: %v", resp.Error.Message)
+		}
+
+		// Should have at least 1 keystone tx
+		if len(resp.KeystoneTxs) < 1 {
+			t.Fatalf("expected at least 1 keystone tx, got %d", len(resp.KeystoneTxs))
+		}
+
+		// Verify BlockHeight for all kss1 transactions
+		for i, ktx := range resp.KeystoneTxs {
+			if ktx.BlockHeight != uint(b2.Height()) {
+				t.Errorf("ktx[%d] BlockHeight: expected %d, got %d",
+					i, b2.Height(), ktx.BlockHeight)
+			}
+			t.Logf("kss1 ktx[%d]: BlockHeight=%d", i, ktx.BlockHeight)
+		}
+	})
+
+	// Test 2: Query kss2 via RPC endpoint and verify BlockHeight
+	t.Run("kss2_BlockHeight", func(t *testing.T) {
+		req := &tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest{
+			L2KeystoneAbrevHash: *kss2Hash,
+			Depth:               1,
+		}
+		resp, err := s.KeystoneTxsByHash(ctx, req)
+		if err != nil {
+			t.Fatalf("KeystoneTxsByHash failed: %v", err)
+		}
+		if resp.Error != nil {
+			t.Fatalf("RPC returned error: %v", resp.Error.Message)
+		}
+
+		// Should have at least 1 keystone tx
+		if len(resp.KeystoneTxs) < 1 {
+			t.Fatalf("expected at least 1 keystone tx, got %d", len(resp.KeystoneTxs))
+		}
+
+		// Verify BlockHeight for all kss2 transactions
+		for i, ktx := range resp.KeystoneTxs {
+			if ktx.BlockHeight != uint(b3.Height()) {
+				t.Errorf("ktx[%d] BlockHeight: expected %d, got %d",
+					i, b3.Height(), ktx.BlockHeight)
+			}
+			t.Logf("kss2 ktx[%d]: BlockHeight=%d", i, ktx.BlockHeight)
+		}
+	})
 }
 
 func TestZKIndexFork(t *testing.T) {
