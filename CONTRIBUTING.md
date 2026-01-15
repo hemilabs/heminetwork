@@ -47,9 +47,9 @@ _All contributions to this repository must be made under the terms of the [MIT L
 > Never report security vulnerabilities publicly, especially in GitHub issues.
 
 If you discover vulnerabilities in Hemi, please report it responsibly so we can resolve it quickly. We ask you to help
-us better protect Hemi and our users by reporting vulnerabilities through HackerOne.
+us better protect Hemi and our users by reporting vulnerabilities through Bugcrowd.
 
-- [Submit a report through Hemi's HackerOne VDP program](https://hackerone.com/hemi_labs_vdp)
+- [Submit a report through Hemi's Bugcrowd program](https://bugcrowd.com/engagements/hemi)
 
 If you have discovered a security vulnerability, please report it in accordance with
 our [Security Policy](https://github.com/hemilabs/.github/blob/main/SECURITY.md).
