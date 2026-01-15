@@ -76,3 +76,6 @@ flycheck_*.el
 ### Other files
 ## macOS
 .DS_Store
+
+# Local AI tools
+.rags2riches/
