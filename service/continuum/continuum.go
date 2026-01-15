@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
+	"github.com/hemilabs/x/tss-lib/v2/tss"
 
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
@@ -153,6 +155,22 @@ func (s *Server) deleteAllSessions() {
 	s.sessions = nil
 }
 
+func (s *Server) allSessionIDs() tss.UnSortedPartyIDs {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	ids := make(tss.UnSortedPartyIDs, 0, len(s.sessions)+1)
+	for k := range s.sessions {
+		id := tss.NewPartyID(k.String(), k.String(), new(big.Int).SetBytes(k[:]))
+		ids = append(ids, id)
+	}
+	// XXX include self, this is a little clunky but roll with it for now
+	self := s.secret.Identity.String()
+	ids = append(ids, tss.NewPartyID(self, self,
+		new(big.Int).SetBytes(s.secret.Identity[:])))
+	return ids
+}
+
 func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, error) {
 	transport, err := NewTransportFromCurve(ecdh.X25519()) // XXX config option
 	if err != nil {
@@ -201,10 +219,12 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			}
 
 			// XXX use ping request for now to kick off keygen
+			committee := s.allSessionIDs()
+			log.Infof("%v", spew.Sdump(committee))
 			err = t.Write(s.secret.Identity, KeygenRequest{
-				Curve: "secp256k1",
-				// Committee: committee,
-				// Threashold, len(committee) - 1,
+				Curve:     "secp256k1",
+				Committee: committee,
+				Threshold: len(committee) - 1,
 			})
 			if err != nil {
 				panic(err)
