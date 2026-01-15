@@ -7,7 +7,7 @@
 name: "Release"
 on:
   push:
-    tags: [ "v*.*.*" ]
+#    tags: [ "v*.*.*" ]
 
 concurrency:
   group: "release-${{ github.ref }}"
