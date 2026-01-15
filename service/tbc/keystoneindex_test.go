@@ -107,8 +107,16 @@ func createTestBlockWithKeystone(t *testing.T, blockHeight int32, l2Keystone hem
 
 	// Create the wire.MsgBlock
 	msgBlock := wire.NewMsgBlock(header)
-	msgBlock.AddTransaction(coinbaseTx)
-	msgBlock.AddTransaction(popMsgTx)
+
+	err = msgBlock.AddTransaction(coinbaseTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = msgBlock.AddTransaction(popMsgTx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Create btcutil.Block and set height
 	block := btcutil.NewBlock(msgBlock)
@@ -246,8 +254,16 @@ func TestBlockKeystonesByHash_MultipleKeystones(t *testing.T) {
 	merkleRoot := chainhash.Hash(testutil.FillBytes("merkleroot", 32))
 	header := wire.NewBlockHeader(1, &prevBlockHash, &merkleRoot, 0, 0)
 	msgBlock := wire.NewMsgBlock(header)
-	msgBlock.AddTransaction(coinbaseTx)
-	msgBlock.AddTransaction(popMsgTx)
+
+	err = msgBlock.AddTransaction(coinbaseTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = msgBlock.AddTransaction(popMsgTx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	block := btcutil.NewBlock(msgBlock)
 	block.SetHeight(blockHeight)
@@ -338,8 +354,16 @@ func TestBlockKeystonesByHash_FilterByHash(t *testing.T) {
 	merkleRoot := chainhash.Hash(testutil.FillBytes("merkleroot", 32))
 	header := wire.NewBlockHeader(1, &prevBlockHash, &merkleRoot, 0, 0)
 	msgBlock := wire.NewMsgBlock(header)
-	msgBlock.AddTransaction(coinbaseTx)
-	msgBlock.AddTransaction(popMsgTx)
+
+	err := msgBlock.AddTransaction(coinbaseTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = msgBlock.AddTransaction(popMsgTx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	block := btcutil.NewBlock(msgBlock)
 	block.SetHeight(blockHeight)
@@ -407,8 +431,16 @@ func TestBlockKeystonesByHash_NoKeystones(t *testing.T) {
 	merkleRoot := chainhash.Hash(testutil.FillBytes("merkleroot", 32))
 	header := wire.NewBlockHeader(1, &prevBlockHash, &merkleRoot, 0, 0)
 	msgBlock := wire.NewMsgBlock(header)
-	msgBlock.AddTransaction(coinbaseTx)
-	msgBlock.AddTransaction(regularTx)
+
+	err := msgBlock.AddTransaction(coinbaseTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = msgBlock.AddTransaction(regularTx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	block := btcutil.NewBlock(msgBlock)
 	block.SetHeight(blockHeight)

@@ -798,7 +798,8 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		}
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
-		mempool = []*btcutil.Tx{tx}
+		mempool = make([]*btcutil.Tx, 0, 2)
+		mempool = append(mempool, tx)
 
 		// spend above tx in same block
 		tx2, err := b.newSignedTxFromTx(name+":1", tx, 3000000000)
@@ -916,7 +917,8 @@ func (b *btcNode) mineKss(name string, from *chainhash.Hash, payToAddress btcuti
 		}
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
-		mempool = []*btcutil.Tx{tx}
+		mempool = make([]*btcutil.Tx, 0, 3)
+		mempool = append(mempool, tx)
 
 		// Add keystone
 		l2Keystone, err := b.lookupKeystone("kss1")
@@ -962,7 +964,8 @@ func (b *btcNode) mineKss(name string, from *chainhash.Hash, payToAddress btcuti
 		}
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
-		mempool = []*btcutil.Tx{tx}
+		mempool = make([]*btcutil.Tx, 0, 3)
+		mempool = append(mempool, tx)
 
 		// Add keystone
 		l2Keystonedup, err := b.lookupKeystone("kss1")
@@ -3841,8 +3844,8 @@ func TestZKIndexFork(t *testing.T) {
 	}
 
 	// append every zkInfo to verify everything gets unwound
-	zki := make([]zkTxInInfo, 0)
-	zko := make([]zkTxOutInfo, 0)
+	zki := make([]zkTxInInfo, 0, 4)
+	zko := make([]zkTxOutInfo, 0, 6)
 
 	// Check b2 TX
 	txInfo := zkTxInfo{tx: b2.TxByIndex(1)}
@@ -4054,8 +4057,8 @@ func TestZKIndexFork(t *testing.T) {
 	}
 
 	// append every zkInfo to verify everything gets unwound
-	zki = make([]zkTxInInfo, 0)
-	zko = make([]zkTxOutInfo, 0)
+	zki = make([]zkTxInInfo, 0, 1)
+	zko = make([]zkTxOutInfo, 0, 2)
 
 	// Check b2a TX
 	txInfo = zkTxInfo{tx: b2a.TxByIndex(1)}
@@ -4154,8 +4157,8 @@ func TestZKIndexFork(t *testing.T) {
 	}
 
 	// append every zkInfo to verify everything gets unwound
-	zki = make([]zkTxInInfo, 0)
-	zko = make([]zkTxOutInfo, 0)
+	zki = make([]zkTxInInfo, 0, 1)
+	zko = make([]zkTxOutInfo, 0, 2)
 
 	// Check b2b TX
 	txInfo = zkTxInfo{tx: b2b.TxByIndex(1)}

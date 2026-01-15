@@ -46,7 +46,7 @@ type TransactionL2 struct {
 func (tx *TransactionL2) Serialize() []byte {
 	khb := tx.L2Keystone.Serialize()
 
-	var b []byte
+	b := make([]byte, 0, len(magic)+len(khb))
 	b = append(b, magic...)
 	b = append(b, khb[:]...)
 
@@ -101,7 +101,7 @@ type Transaction struct {
 func (tx *Transaction) Serialize() []byte {
 	khb := tx.Keystone.Serialize()
 
-	var b []byte
+	b := make([]byte, 0, len(magic)+len(khb))
 	b = append(b, magic...)
 	b = append(b, khb[:]...)
 
