@@ -179,6 +179,394 @@ func TestPayloadHash(t *testing.T) {
 	}
 }
 
+
+func TestCeremonyID(t *testing.T) {
+	// Create a ceremony ID
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test String()
+	cidStr := cid.String()
+	if len(cidStr) != 64 {
+		t.Fatalf("expected 64 hex chars, got %d", len(cidStr))
+	}
+
+	// Test JSON marshal/unmarshal
+	m := map[string]CeremonyID{"ceremony": cid}
+	em, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mm map[string]CeremonyID
+	err = json.Unmarshal(em, &mm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mm["ceremony"]
+	if !bytes.Equal(got[:], cid[:]) {
+		t.Fatal("ceremony id not equal after json roundtrip")
+	}
+
+	// Test individual marshal/unmarshal
+	el, err := cid.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(el) != `"`+cid.String()+`"` {
+		t.Fatal("unexpected json")
+	}
+	var cid2 CeremonyID
+	err = cid2.UnmarshalJSON(el)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(cid2[:], cid[:]) {
+		t.Fatal("json line not equal to original")
+	}
+
+	// Negative tests
+	var cid3 CeremonyID
+	err = cid3.UnmarshalJSON([]byte(`"tooshort"`))
+	if err == nil {
+		t.Fatal("expected error for short hex")
+	}
+	err = cid3.UnmarshalJSON([]byte(`"not valid hex!!"`))
+	if err == nil {
+		t.Fatal("expected error for invalid hex")
+	}
+}
+
+func TestTSSRPCTypes(t *testing.T) {
+	// Test that all TSS RPC types are properly registered in pt2str/str2pt
+	tssTypes := []struct {
+		name     string
+		pt       PayloadType
+		instance any
+	}{
+		{"KeygenRequest", PKeygenRequest, KeygenRequest{}},
+		{"KeygenResponse", PKeygenResponse, KeygenResponse{}},
+		{"ReshareRequest", PReshareRequest, ReshareRequest{}},
+		{"ReshareResponse", PReshareResponse, ReshareResponse{}},
+		{"SignRequest", PSignRequest, SignRequest{}},
+		{"SignResponse", PSignResponse, SignResponse{}},
+		{"TSSMessage", PTSSMessage, TSSMessage{}},
+		{"CeremonyResult", PCeremonyResult, CeremonyResult{}},
+		{"CeremonyAbort", PCeremonyAbort, CeremonyAbort{}},
+	}
+
+	for _, tc := range tssTypes {
+		t.Run(tc.name, func(t *testing.T) {
+			// Check pt2str mapping
+			rt := reflect.TypeOf(tc.instance)
+			pt, ok := pt2str[rt]
+			if !ok {
+				t.Fatalf("%s not found in pt2str", tc.name)
+			}
+			if pt != tc.pt {
+				t.Fatalf("pt2str[%s] = %q, want %q", tc.name, pt, tc.pt)
+			}
+
+			// Check str2pt mapping (reverse)
+			gotType, ok := str2pt[tc.pt]
+			if !ok {
+				t.Fatalf("%q not found in str2pt", tc.pt)
+			}
+			if gotType != rt {
+				t.Fatalf("str2pt[%q] = %v, want %v", tc.pt, gotType, rt)
+			}
+		})
+	}
+}
+
+func TestTSSMessageJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var id Identity
+	_, err = rand.Read(id[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyReshare,
+		From:       id,
+		Broadcast:  true,
+		Data:       []byte("tss wire bytes"),
+		Signature:  []byte("signature bytes"),
+	}
+
+	// Marshal
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal TSSMessage: %v", err)
+	}
+
+	// Unmarshal
+	var got TSSMessage
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal TSSMessage: %v", err)
+	}
+
+	// Verify
+	if !bytes.Equal(got.CeremonyID[:], msg.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Type != msg.Type {
+		t.Fatalf("Type = %d, want %d", got.Type, msg.Type)
+	}
+	if !bytes.Equal(got.From[:], msg.From[:]) {
+		t.Fatal("From mismatch")
+	}
+	if got.Broadcast != msg.Broadcast {
+		t.Fatal("Broadcast mismatch")
+	}
+	if !bytes.Equal(got.Data, msg.Data) {
+		t.Fatal("Data mismatch")
+	}
+	if !bytes.Equal(got.Signature, msg.Signature) {
+		t.Fatal("Signature mismatch")
+	}
+}
+
+func TestReshareRequestJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := ReshareRequest{
+		CeremonyID:   cid,
+		Curve:        "secp256k1",
+		OldThreshold: 2,
+		NewThreshold: 3,
+		// Note: OldCommittee/NewCommittee are tss.UnSortedPartyIDs which have their own marshaling
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal ReshareRequest: %v", err)
+	}
+
+	var got ReshareRequest
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal ReshareRequest: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], req.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Curve != req.Curve {
+		t.Fatalf("Curve = %q, want %q", got.Curve, req.Curve)
+	}
+	if got.OldThreshold != req.OldThreshold {
+		t.Fatalf("OldThreshold = %d, want %d", got.OldThreshold, req.OldThreshold)
+	}
+	if got.NewThreshold != req.NewThreshold {
+		t.Fatalf("NewThreshold = %d, want %d", got.NewThreshold, req.NewThreshold)
+	}
+}
+
+func TestSignRequestJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := SignRequest{
+		CeremonyID: cid,
+		KeyID:      []byte("key-identifier"),
+		Threshold:  2,
+		Data:       make([]byte, 32), // 32-byte hash
+	}
+	_, err = rand.Read(req.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal SignRequest: %v", err)
+	}
+
+	var got SignRequest
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal SignRequest: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], req.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if !bytes.Equal(got.KeyID, req.KeyID) {
+		t.Fatal("KeyID mismatch")
+	}
+	if got.Threshold != req.Threshold {
+		t.Fatalf("Threshold = %d, want %d", got.Threshold, req.Threshold)
+	}
+	if !bytes.Equal(got.Data, req.Data) {
+		t.Fatal("Data mismatch")
+	}
+}
+
+func TestSignResponseJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := SignResponse{
+		CeremonyID: cid,
+		Success:    true,
+		R:          []byte("r-component"),
+		S:          []byte("s-component"),
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal SignResponse: %v", err)
+	}
+
+	var got SignResponse
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal SignResponse: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], resp.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Success != resp.Success {
+		t.Fatal("Success mismatch")
+	}
+	if !bytes.Equal(got.R, resp.R) {
+		t.Fatal("R mismatch")
+	}
+	if !bytes.Equal(got.S, resp.S) {
+		t.Fatal("S mismatch")
+	}
+}
+
+func TestCeremonyResultJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Success case
+	result := CeremonyResult{
+		CeremonyID: cid,
+		Success:    true,
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal CeremonyResult: %v", err)
+	}
+
+	var got CeremonyResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal CeremonyResult: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], result.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Success != result.Success {
+		t.Fatal("Success mismatch")
+	}
+
+	// Error case
+	result2 := CeremonyResult{
+		CeremonyID: cid,
+		Success:    false,
+		Error:      "timeout waiting for round 2",
+	}
+
+	data2, err := json.Marshal(result2)
+	if err != nil {
+		t.Fatalf("marshal CeremonyResult with error: %v", err)
+	}
+
+	var got2 CeremonyResult
+	if err := json.Unmarshal(data2, &got2); err != nil {
+		t.Fatalf("unmarshal CeremonyResult with error: %v", err)
+	}
+
+	if got2.Error != result2.Error {
+		t.Fatalf("Error = %q, want %q", got2.Error, result2.Error)
+	}
+}
+
+func TestCeremonyAbortJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	abort := CeremonyAbort{
+		CeremonyID: cid,
+		Reason:     "party went offline",
+	}
+
+	data, err := json.Marshal(abort)
+	if err != nil {
+		t.Fatalf("marshal CeremonyAbort: %v", err)
+	}
+
+	var got CeremonyAbort
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal CeremonyAbort: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], abort.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Reason != abort.Reason {
+		t.Fatalf("Reason = %q, want %q", got.Reason, abort.Reason)
+	}
+}
+
+func TestCeremonyTypeValues(t *testing.T) {
+	// Verify enum values are distinct and as expected
+	if CeremonyKeygen != 1 {
+		t.Fatalf("CeremonyKeygen = %d, want 1", CeremonyKeygen)
+	}
+	if CeremonyReshare != 2 {
+		t.Fatalf("CeremonyReshare = %d, want 2", CeremonyReshare)
+	}
+	if CeremonySign != 3 {
+		t.Fatalf("CeremonySign = %d, want 3", CeremonySign)
+	}
+
+	// Verify String()
+	if CeremonyKeygen.String() != "keygen" {
+		t.Fatalf("CeremonyKeygen.String() = %q, want %q", CeremonyKeygen.String(), "keygen")
+	}
+	if CeremonyReshare.String() != "reshare" {
+		t.Fatalf("CeremonyReshare.String() = %q, want %q", CeremonyReshare.String(), "reshare")
+	}
+	if CeremonySign.String() != "sign" {
+		t.Fatalf("CeremonySign.String() = %q, want %q", CeremonySign.String(), "sign")
+	}
+
+	// Verify unknown value
+	unknown := CeremonyType(99)
+	if unknown.String() != "unknown(99)" {
+		t.Fatalf("unknown.String() = %q, want %q", unknown.String(), "unknown(99)")
+	}
+}
+
 func TestNonce(t *testing.T) {
 	n, err := NewNonce()
 	if err != nil {
