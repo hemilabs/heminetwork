@@ -12,13 +12,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
 
@@ -165,46 +162,25 @@ func createDNSNodes(domain string, count byte) *dnsHandler {
 	return handler
 }
 
-func newDNSServer(address string, handler dns.Handler) *dns.Server {
+func newDNSServer(ctx context.Context, handler dns.Handler) *dns.Server {
+	started := make(chan struct{})
 	srv := &dns.Server{
-		Addr:    address,
-		Net:     "tcp",
-		Handler: handler,
+		Addr:              "127.0.0.1:0",
+		Net:               "tcp",
+		Handler:           handler,
+		NotifyStartedFunc: func(_ context.Context) { close(started) },
 	}
-	if err := srv.ListenAndServe(); err != nil {
-		panic(err)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			panic(err)
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		panic(fmt.Errorf("panic while starting DNS server: %w", ctx.Err()))
+	case <-started:
 	}
 	return srv
-}
-
-func waitForDNSServer(address string, t *testing.T) {
-	// All of this to replace a sleep!
-	d := net.Dialer{}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	for {
-		conn, err := d.DialContext(ctx, "tcp", address)
-		if err == nil {
-			err = conn.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
-			break
-		}
-
-		fts := syscall.ECONNREFUSED
-		if errors.Is(func() *os.SyscallError {
-			target := &os.SyscallError{}
-			_ = errors.As(func() *net.OpError {
-				target := &net.OpError{}
-				_ = errors.As(err, &target)
-				return target
-			}().Err, &target)
-			return target
-		}().Err, &fts) {
-			continue
-		}
-	}
 }
 
 func TestID(t *testing.T) {

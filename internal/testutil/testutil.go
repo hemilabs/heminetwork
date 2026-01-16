@@ -5,13 +5,10 @@
 package testutil
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"net"
-	"strconv"
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -114,17 +111,6 @@ func FillBytesZero(prefix string, n int) []byte {
 	result := make([]byte, n)
 	copy(result, prefix)
 	return result
-}
-
-// FreePort finds a port that is currently free.
-func FreePort(ctx context.Context) string {
-	lc := net.ListenConfig{}
-	l, err := lc.Listen(ctx, "tcp", "localhost:0")
-	if err != nil {
-		panic(err)
-	}
-	defer l.Close()
-	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
 }
 
 // RandomBytes returns a random byte slice of size n.

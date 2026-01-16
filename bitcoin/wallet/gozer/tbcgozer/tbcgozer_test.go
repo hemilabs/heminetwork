@@ -27,8 +27,6 @@ func TestTBCGozerConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
-	port := testutil.FreePort(ctx)
-
 	// Connect tbc service
 	tbcCfg := &tbc.Config{
 		AutoIndex:               false,
@@ -42,7 +40,7 @@ func TestTBCGozerConnection(t *testing.T) {
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:18444"},
-		ListenAddress:           "localhost:" + port,
+		ListenAddress:           "127.0.0.1:0",
 	}
 	_ = loggo.ConfigureLoggers(tbcCfg.LogLevel)
 	s, err := tbc.NewServer(tbcCfg)
@@ -56,9 +54,21 @@ func TestTBCGozerConnection(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(1 * time.Second)
+	// Wait for HTTP server to start
+	var tbcAddr string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := s.HTTPAddress(); addr != nil {
+			tbcAddr = addr.String()
+			break
+		}
+	}
 
-	b := New(fmt.Sprintf("http://%s/v1/ws", tbcCfg.ListenAddress))
+	b := New(fmt.Sprintf("http://%s/v1/ws", tbcAddr))
 	err = b.Run(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
