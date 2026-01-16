@@ -847,9 +847,9 @@ func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
 	return eks[:]
 }
 
-func createTestBlock(prevHash *chainhash.Hash, height int64) *btcutil.Block {
-	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(height))
-	bh.Timestamp = time.Unix(height, 0)
+func createTestBlock(prevHash *chainhash.Hash, nonce int64) *btcutil.Block {
+	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
+	bh.Timestamp = time.Unix(nonce, 0)
 	bh.Bits = 0x1d00ffff
 	block := wire.NewMsgBlock(bh)
 
@@ -922,8 +922,8 @@ func insertBlock(ctx context.Context, db *ldb, bh tbcd.BlockHeader) error {
 	return nil
 }
 
-func insertBlockHeader(ctx context.Context, db *ldb, prevHash *chainhash.Hash, height uint64) (tbcd.BlockHeader, error) {
-	blk := createTestBlock(prevHash, int64(height))
+func insertBlockHeader(ctx context.Context, db *ldb, prevHash *chainhash.Hash, height, nonce uint64) (tbcd.BlockHeader, tbcd.InsertType, error) {
+	blk := createTestBlock(prevHash, int64(nonce))
 	bh := &tbcd.BlockHeader{
 		Hash:       *blk.Hash(),
 		Height:     height,
@@ -932,31 +932,35 @@ func insertBlockHeader(ctx context.Context, db *ldb, prevHash *chainhash.Hash, h
 	}
 	bhs := []*tbcd.BlockHeader{bh}
 	msgh := createTestMsgHeaders(bhs)
-
+	var (
+		it  tbcd.InsertType
+		err error
+	)
 	if prevHash.IsEqual(&chainhash.Hash{}) {
 		genesisWire := blk.MsgBlock().Header
 		err := db.BlockHeaderGenesisInsert(ctx, genesisWire, 0, big.NewInt(1))
 		if err != nil {
-			return tbcd.BlockHeader{}, err
+			return tbcd.BlockHeader{}, 0, err
 		}
+		it = tbcd.ITChainExtend
 	} else {
-		_, _, _, _, err := db.BlockHeadersInsert(ctx, msgh, nil)
+		it, _, _, _, err = db.BlockHeadersInsert(ctx, msgh, nil)
 		if err != nil {
-			return tbcd.BlockHeader{}, err
+			return tbcd.BlockHeader{}, 0, err
 		}
 	}
 
 	// Check if we can retrieve header
 	retrieved, err := db.BlockHeaderByHash(ctx, *blk.Hash())
 	if err != nil {
-		return tbcd.BlockHeader{}, fmt.Errorf("BlockHeaderByHash: %w", err)
+		return tbcd.BlockHeader{}, 0, fmt.Errorf("BlockHeaderByHash: %w", err)
 	}
 	if !retrieved.Hash.IsEqual(blk.Hash()) {
-		return tbcd.BlockHeader{}, fmt.Errorf("retrieved header (%s) != header (%s)",
+		return tbcd.BlockHeader{}, 0, fmt.Errorf("retrieved header (%s) != header (%s)",
 			retrieved.BlockHash(), blk.Hash())
 	}
 
-	return *bh, nil
+	return *bh, it, nil
 }
 
 func createNewDB(t *testing.T, ctx context.Context) (*ldb, func()) {
@@ -974,7 +978,6 @@ func createNewDB(t *testing.T, ctx context.Context) (*ldb, func()) {
 			t.Fatal(err)
 		}
 	}
-
 	return db, discardFunc
 }
 
@@ -989,14 +992,17 @@ func TestBlockInsertAndRetrieve(t *testing.T) {
 
 	prevHash := &chainhash.Hash{}
 	for i := range blkNum {
-		bh, err := insertBlockHeader(ctx, db, prevHash, i)
+		bh, it, err := insertBlockHeader(ctx, db, prevHash, i, i)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if it != tbcd.ITChainExtend {
+			t.Fatalf("expected insert type %d, got %d",
+				tbcd.ITChainExtend, it)
 		}
 		if err = insertBlock(ctx, db, bh); err != nil {
 			t.Fatal(err)
 		}
-
 		best, err := db.BlockHeaderBest(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -1009,7 +1015,6 @@ func TestBlockInsertAndRetrieve(t *testing.T) {
 			t.Fatalf("height: got %d, want %d",
 				best.Height, bh.Height)
 		}
-
 		prevHash = bh.BlockHash()
 	}
 }
@@ -1048,12 +1053,17 @@ func TestBlocksMissing(t *testing.T) {
 	var (
 		err error
 		bh  tbcd.BlockHeader
+		it  tbcd.InsertType
 		bhs = make([]tbcd.BlockHeader, 0, blkNum-1)
 	)
 	for i := range blkNum {
-		bh, err = insertBlockHeader(ctx, db, bh.BlockHash(), i)
+		bh, it, err = insertBlockHeader(ctx, db, bh.BlockHash(), i, i)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if it != tbcd.ITChainExtend {
+			t.Fatalf("expected insert type %d, got %d",
+				tbcd.ITChainExtend, it)
 		}
 		if i > 0 && i < blkNum-1 {
 			// store most headers for insertion except for genesis
@@ -1103,5 +1113,113 @@ func TestBlocksMissing(t *testing.T) {
 	}
 	if len(missing) != 0 {
 		t.Fatalf("expected no missing blocks, got %d", len(missing))
+	}
+}
+
+func TestBlockHeadersFork(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	hashes := []*chainhash.Hash{{}}
+	for i := range 2 {
+		bh, it, err := insertBlockHeader(ctx, db, hashes[i], uint64(i), uint64(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it != tbcd.ITChainExtend {
+			t.Fatalf("expected insert type %d, got %d",
+				tbcd.ITChainExtend, it)
+		}
+		hashes = append(hashes, bh.BlockHash())
+	}
+
+	// Create a fork (non-canonical)
+	bh, it, err := insertBlockHeader(ctx, db, hashes[1], 1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it != tbcd.ITForkExtend {
+		t.Fatalf("expected insert type %d, got %d",
+			tbcd.ITForkExtend, it)
+	}
+	best, err := db.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !best.BlockHash().IsEqual(hashes[2]) {
+		t.Fatalf("hash: got %v, want %v", best.BlockHash(), hashes[2])
+	}
+
+	// Fork from main chain
+	bh, it, err = insertBlockHeader(ctx, db, bh.BlockHash(), 2, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it != tbcd.ITChainFork {
+		t.Fatalf("expected insert type %d, got %d",
+			tbcd.ITChainFork, it)
+	}
+	best, err = db.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !best.BlockHash().IsEqual(bh.BlockHash()) {
+		t.Fatalf("hash: got %v, want %v", best.BlockHash(), bh.BlockHash())
+	}
+}
+
+func TestBlockHeadersByHeight(t *testing.T) {
+	const (
+		blkNum  uint64 = 3
+		forkNum uint64 = 3
+	)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	gen, _, err := insertBlockHeader(ctx, db, &chainhash.Hash{}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert N headers per height
+	allHashes := make(map[uint64]map[chainhash.Hash]struct{}, blkNum)
+	for k := range forkNum {
+		hashes := []*chainhash.Hash{gen.BlockHash()}
+		for i := range blkNum {
+			bh, _, err := insertBlockHeader(ctx, db, hashes[i], i+1, i+k+1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := allHashes[i+1]; !ok {
+				allHashes[i+1] = make(map[chainhash.Hash]struct{}, forkNum)
+			}
+			allHashes[i+1][*bh.BlockHash()] = struct{}{}
+			hashes = append(hashes, bh.BlockHash())
+		}
+	}
+
+	// Check if retrieved headers match inserted headers
+	for i := range blkNum {
+		headers, err := db.BlockHeadersByHeight(ctx, i+1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(headers) != len(allHashes[i+1]) {
+			t.Fatalf("expected %d retrieved headers @ %d, got %d",
+				len(headers), i+1, len(allHashes[i+1]))
+		}
+		for _, h := range headers {
+			if _, ok := allHashes[i+1][*h.BlockHash()]; !ok {
+				spew.Dump(allHashes)
+				t.Fatalf("unexpected header %v @ %d", h.BlockHash(), i+1)
+			}
+		}
 	}
 }
