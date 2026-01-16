@@ -90,10 +90,9 @@ type namedKey struct {
 }
 
 type btcNode struct {
-	t    *testing.T // for logging
-	le   bool       // log enable
-	port string
-	p    *rawpeer.RawPeer
+	t  *testing.T // for logging
+	le bool       // log enable
+	p  *rawpeer.RawPeer
 
 	mtx            sync.RWMutex
 	chain          map[string]*block
@@ -111,16 +110,23 @@ type btcNode struct {
 	keys      map[string]*namedKey        // keys used to sign various tx'
 	keystones map[string]*hemi.L2Keystone // keystones found in various tx'
 
-	listener net.Listener
+	ln net.Listener
 }
 
-func newFakeNode(t *testing.T, port string) (*btcNode, error) {
+func newFakeNode(t *testing.T) (*btcNode, error) {
+	// Create listener early so we can get its address before Run()
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+
 	genesis := btcutil.NewBlock(chaincfg.RegressionNetParams.GenesisBlock)
 	genesis.SetHeight(0)
 	node := &btcNode{
 		t:              t,
 		le:             false,
-		port:           port,
+		ln:             ln,
 		chain:          make(map[string]*block, 10),
 		blocksAtHeight: make(map[int32][]*block, 10),
 		height:         0,
@@ -131,7 +137,6 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 	}
 
 	// Add miner key to key pool
-	var err error
 	node.private, node.public, node.address, err = node.newKey("miner")
 	if err != nil {
 		return nil, err
@@ -1078,21 +1083,18 @@ func (b *btcNode) MineAndSendEmpty(ctx context.Context) error {
 }
 
 func (b *btcNode) Run(ctx context.Context) error {
-	lc := &net.ListenConfig{}
-	l, err := lc.Listen(ctx, "tcp", "localhost:"+b.port)
-	if err != nil {
-		return err
-	}
-
 	b.logf("waiting for connection")
-	conn, err := l.Accept()
+	conn, err := b.ln.Accept()
 	if err != nil {
 		return err
 	}
-
-	b.listener = l
 
 	return b.handleRPC(ctx, conn)
+}
+
+// Address returns the address the fake node is listening on.
+func (b *btcNode) Address() string {
+	return b.ln.Addr().String()
 }
 
 func (b *btcNode) Stop() error {
@@ -1108,7 +1110,7 @@ func (b *btcNode) Stop() error {
 		return err
 	}
 
-	return b.listener.Close()
+	return b.ln.Close()
 }
 
 type zkTxInfo struct {
@@ -1406,8 +1408,7 @@ func TestFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort(ctx)
-	n, err := newFakeNode(t, port)
+	n, err := newFakeNode(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1458,7 +1459,7 @@ func TestFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{"127.0.0.1:" + port},
+		Seeds:                   []string{n.Address()},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -1669,8 +1670,7 @@ func TestIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort(ctx)
-	n, err := newFakeNode(t, port)
+	n, err := newFakeNode(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1700,7 +1700,7 @@ func TestIndexNoFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{"127.0.0.1:" + port},
+		Seeds:                   []string{n.Address()},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -1866,8 +1866,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort(ctx)
-	n, err := newFakeNode(t, port)
+	n, err := newFakeNode(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1912,7 +1911,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
-		Seeds:                   []string{"127.0.0.1:" + port},
+		Seeds:                   []string{n.Address()},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -2206,8 +2205,7 @@ func TestIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort(ctx)
-	n, err := newFakeNode(t, port)
+	n, err := newFakeNode(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2236,7 +2234,7 @@ func TestIndexFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
-		Seeds:                   []string{"127.0.0.1:" + port},
+		Seeds:                   []string{n.Address()},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -2535,8 +2533,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort(ctx)
-	n, err := newFakeNode(t, port)
+	n, err := newFakeNode(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2580,7 +2577,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
-		Seeds:                   []string{"127.0.0.1:" + port},
+		Seeds:                   []string{n.Address()},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -3137,8 +3134,7 @@ func TestForkCanonicity(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort(ctx)
-	n, err := newFakeNode(t, port)
+	n, err := newFakeNode(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3167,7 +3163,7 @@ func TestForkCanonicity(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
-		Seeds:                   []string{"127.0.0.1:" + port},
+		Seeds:                   []string{n.Address()},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -3320,8 +3316,7 @@ func TestCacheOverflow(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort(ctx)
-	n, err := newFakeNode(t, port)
+	n, err := newFakeNode(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3360,7 +3355,7 @@ func TestCacheOverflow(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
-		Seeds:                   []string{"127.0.0.1:" + port},
+		Seeds:                   []string{n.Address()},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -3493,8 +3488,7 @@ func TestZKIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.FreePort(ctx)
-	n, err := newFakeNode(t, port)
+	n, err := newFakeNode(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3527,7 +3521,7 @@ func TestZKIndexFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
-		Seeds:                   []string{"127.0.0.1:" + port},
+		Seeds:                   []string{n.Address()},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)

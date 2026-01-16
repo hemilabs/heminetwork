@@ -11,12 +11,9 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -24,7 +21,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/go-test/deep"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer/tbcgozer"
@@ -37,42 +33,11 @@ import (
 	"github.com/hemilabs/heminetwork/v2/service/tbc"
 )
 
-func nextPort(ctx context.Context, t *testing.T) int {
-	var dialer net.Dialer
-	dialer.Timeout = 1 * time.Second
-
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		default:
-		}
-
-		port, err := freeport.GetFreePort()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port))); err != nil {
-			if errors.Is(err, syscall.ECONNREFUSED) {
-				// connection error, port is open
-				return port
-			}
-
-			t.Fatal(err)
-		}
-	}
-}
-
 func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opgethWsUrl string) (*bfg.Server, string) {
 	_, tbcPublicUrl := createTbcServer(ctx, t, levelDbHome)
 
-	port := nextPort(ctx, t)
-
-	bfgPublicListenAddress := net.JoinHostPort("", fmt.Sprintf("%d", port))
-
 	cfg := &bfg.Config{
-		ListenAddress: bfgPublicListenAddress,
+		ListenAddress: "127.0.0.1:0",
 		BitcoinURL:    tbcPublicUrl,
 		BitcoinSource: "tbc",
 		Network:       "localnet",
@@ -90,9 +55,20 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second) // Let bfg settle
 
-	bfgPublicUrl := net.JoinHostPort("localhost", fmt.Sprintf("%d", port))
+	// Wait for HTTP server to start
+	var bfgPublicUrl string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := bfgServer.HTTPAddress(); addr != nil {
+			bfgPublicUrl = addr.String()
+			break
+		}
+	}
 
 	if err := EnsureCanConnectHTTP(t, fmt.Sprintf("http://%s/somethinginvalid", bfgPublicUrl)); err != nil {
 		t.Fatalf("could not make http request to bfg in timeout: %s", err)
@@ -132,12 +108,9 @@ func EnsureCanConnectHTTP(t *testing.T, url string) error {
 }
 
 func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tbc.Server, string) {
-	port := nextPort(ctx, t)
-	tbcPublicListenAddress := net.JoinHostPort("", fmt.Sprintf("%d", port))
-
 	cfg := tbc.NewDefaultConfig()
 
-	cfg.ListenAddress = tbcPublicListenAddress
+	cfg.ListenAddress = "127.0.0.1:0"
 	cfg.Network = "localnet"
 	cfg.LevelDBHome = levelDbHome
 
@@ -152,10 +125,20 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second) // Let tbc settle
 
-	tbcPublicUrl := fmt.Sprintf("http://%s/v1/ws",
-		net.JoinHostPort("localhost", fmt.Sprintf("%d", port)))
+	// Wait for HTTP server to start
+	var tbcPublicUrl string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := tbcServer.HTTPAddress(); addr != nil {
+			tbcPublicUrl = fmt.Sprintf("http://%s/v1/ws", addr.String())
+			break
+		}
+	}
 
 	// Connect with gozer to ensure connectedness
 	g := tbcgozer.New(tbcPublicUrl)

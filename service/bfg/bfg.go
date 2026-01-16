@@ -113,9 +113,10 @@ type Server struct {
 
 	cfg *Config
 
-	params *chaincfg.Params
-	gozer  gozer.Gozer
-	server *http.ServeMux
+	params       *chaincfg.Params
+	gozer        gozer.Gozer
+	server       *http.ServeMux
+	httpListener net.Listener
 
 	// opgeth
 	opgethClient *ethclient.Client // access via Server.geth
@@ -194,6 +195,17 @@ func (s *Server) Connected() bool {
 		return s.gozer.Connected()
 	}
 	return false
+}
+
+// HTTPAddress returns the address the HTTP server is listening on.
+// This is useful when the server is configured to listen on ":0".
+func (s *Server) HTTPAddress() net.Addr {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.httpListener != nil {
+		return s.httpListener.Addr()
+	}
+	return nil
 }
 
 func random(n int) []byte {
@@ -839,18 +851,26 @@ func (s *Server) Run(pctx context.Context) error {
 	// HTTP server
 	httpErrCh := make(chan error)
 	if s.cfg.ListenAddress != "" {
+		var lc net.ListenConfig
+		ln, err := lc.Listen(ctx, "tcp", s.cfg.ListenAddress)
+		if err != nil {
+			return fmt.Errorf("listen %s: %w", s.cfg.ListenAddress, err)
+		}
+		s.mtx.Lock()
+		s.httpListener = ln
+		s.mtx.Unlock()
+
 		mux := http.NewServeMux()
 		log.Infof("handle keystone finality: %s", bfgapi.RouteKeystoneFinality)
 		mux.HandleFunc(bfgapi.RouteKeystoneFinality, s.handleKeystoneFinality)
 
 		httpServer := &http.Server{
-			Addr:        s.cfg.ListenAddress,
 			Handler:     mux,
 			BaseContext: func(_ net.Listener) context.Context { return ctx },
 		}
 		go func() {
-			log.Infof("Listening: %s", s.cfg.ListenAddress)
-			httpErrCh <- httpServer.ListenAndServe()
+			log.Infof("Listening: %s", ln.Addr())
+			httpErrCh <- httpServer.Serve(ln)
 		}()
 		defer func() {
 			if err := httpServer.Shutdown(ctx); err != nil {

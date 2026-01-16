@@ -190,7 +190,8 @@ type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
-	httpServer *http.Server // We need the BaseContext in client requests
+	httpServer   *http.Server // We need the BaseContext in client requests
+	httpListener net.Listener
 
 	cfg *Config
 
@@ -419,6 +420,17 @@ func (s *Server) running() bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	return s.isRunning
+}
+
+// HTTPAddress returns the address the HTTP server is listening on.
+// This is useful when the server is configured to listen on ":0".
+func (s *Server) HTTPAddress() net.Addr {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.httpListener != nil {
+		return s.httpListener.Addr()
+	}
+	return nil
 }
 
 func (s *Server) testAndSetRunning(b bool) bool {
@@ -1036,17 +1048,25 @@ func (s *Server) Run(pctx context.Context) error {
 	if s.cfg.ListenAddress == "" {
 		return errors.New("must provide listen address")
 	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", s.cfg.ListenAddress)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", s.cfg.ListenAddress, err)
+	}
+	s.mtx.Lock()
+	s.httpListener = ln
+	s.mtx.Unlock()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleProxyRequest)
 
 	s.httpServer = &http.Server{
-		Addr:        s.cfg.ListenAddress,
 		Handler:     mux,
 		BaseContext: func(_ net.Listener) context.Context { return ctx },
 	}
 	go func() {
-		log.Infof("Listening: %s", s.cfg.ListenAddress)
-		httpErrCh <- s.httpServer.ListenAndServe()
+		log.Infof("Listening: %s", ln.Addr())
+		httpErrCh <- s.httpServer.Serve(ln)
 	}()
 	defer func() {
 		if err := s.httpServer.Shutdown(ctx); err != nil {
@@ -1134,7 +1154,6 @@ func (s *Server) Run(pctx context.Context) error {
 	runtime.Gosched() // just for pretty print
 	log.Infof("Starting hproxy")
 
-	var err error
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()

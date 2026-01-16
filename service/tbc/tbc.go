@@ -274,7 +274,8 @@ type Server struct {
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
 
-	// WebSockets
+	// HTTP/WebSockets
+	httpListener   net.Listener
 	sessions       map[string]*tbcWs
 	requestTimeout time.Duration
 }
@@ -699,6 +700,17 @@ func (s *Server) Running() bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return s.isRunning
+}
+
+// HTTPAddress returns the address the HTTP server is listening on.
+// This is useful when the server is configured to listen on ":0".
+func (s *Server) HTTPAddress() net.Addr {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.httpListener != nil {
+		return s.httpListener.Addr()
+	}
+	return nil
 }
 
 func (s *Server) testAndSetRunning(b bool) bool {
@@ -3069,18 +3081,26 @@ func (s *Server) Run(pctx context.Context) error {
 	// HTTP server
 	httpErrCh := make(chan error)
 	if s.cfg.ListenAddress != "" {
+		var lc net.ListenConfig
+		ln, err := lc.Listen(ctx, "tcp", s.cfg.ListenAddress)
+		if err != nil {
+			return fmt.Errorf("listen %s: %w", s.cfg.ListenAddress, err)
+		}
+		s.mtx.Lock()
+		s.httpListener = ln
+		s.mtx.Unlock()
+
 		mux := http.NewServeMux()
 		log.Infof("handle (tbc): %s", tbcapi.RouteWebsocket)
 		mux.HandleFunc(tbcapi.RouteWebsocket, s.handleWebsocket)
 
 		httpServer := &http.Server{
-			Addr:        s.cfg.ListenAddress,
 			Handler:     mux,
 			BaseContext: func(_ net.Listener) context.Context { return ctx },
 		}
 		go func() {
-			log.Infof("Listening: %s", s.cfg.ListenAddress)
-			httpErrCh <- httpServer.ListenAndServe()
+			log.Infof("Listening: %s", ln.Addr())
+			httpErrCh <- httpServer.Serve(ln)
 		}()
 		defer func() {
 			if err := httpServer.Shutdown(ctx); err != nil {

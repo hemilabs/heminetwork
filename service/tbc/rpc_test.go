@@ -1477,8 +1477,6 @@ func TestRpcZK(t *testing.T) {
 		TxOutIndex:  binary.BigEndian.Uint32(spendable[32+4+32+32:]),
 	}
 
-	tcbListenAddress := fmt.Sprintf(":%s", testutil.FreePort(ctx))
-
 	cfg := &Config{
 		AutoIndex:            false,
 		BlockCacheSize:       "10mb",
@@ -1486,11 +1484,11 @@ func TestRpcZK(t *testing.T) {
 		BlockSanity:          false,
 		ZKIndex:              true,
 		LevelDBHome:          home,
-		ListenAddress:        tcbListenAddress,
+		ListenAddress:        "127.0.0.1:0",
 		MaxCachedTxs:         1000,
 		MaxCachedZK:          1000,
 		Network:              networkLocalnet,
-		Seeds:                []string{"127.0.0.1:" + testutil.FreePort(ctx)},
+		Seeds:                []string{"192.0.2.1:8333"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1505,18 +1503,21 @@ func TestRpcZK(t *testing.T) {
 		}
 	}()
 
-	// wait for server to start
-	var running bool
-	for !running {
+	// Wait for HTTP server to start
+	var tbcAddr string
+	for {
 		select {
-		case <-time.Tick(1 * time.Second):
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
 		}
-		running = s.Running()
+		if addr := s.HTTPAddress(); addr != nil {
+			tbcAddr = addr.String()
+			break
+		}
 	}
 
-	tbcUrl := fmt.Sprintf("http://localhost%s%s", tcbListenAddress, tbcapi.RouteWebsocket)
+	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
 
 	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
 	if err != nil {
@@ -2129,7 +2130,7 @@ func TestNotFoundError(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{"127.0.0.1:" + testutil.FreePort(ctx)},
+		Seeds:                   []string{"192.0.2.1:8333"},
 		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)

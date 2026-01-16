@@ -52,7 +52,7 @@ func TestBFG(t *testing.T) {
 	bfgCfg.BitcoinSource = "tbc"
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
-	bfgCfg.ListenAddress = "localhost:" + testutil.FreePort(ctx)
+	bfgCfg.ListenAddress = "127.0.0.1:0"
 	bfgCfg.LogLevel = "bfg=TRACE; mock=Trace"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
@@ -74,7 +74,7 @@ func TestBFG(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
+	sendFinalityRequests(t, ctx, kssList, s.HTTPAddress().String(), 9, 10000)
 }
 
 func TestKeystoneFinalityInheritance(t *testing.T) {
@@ -113,7 +113,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 	bfgCfg.BitcoinSource = "tbc"
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
-	bfgCfg.ListenAddress = "localhost:" + testutil.FreePort(ctx)
+	bfgCfg.ListenAddress = "127.0.0.1:0"
 	// bfgCfg.LogLevel = "bfg=Info; mock=Trace"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
@@ -135,7 +135,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
+	sendFinalityRequests(t, ctx, kssList, s.HTTPAddress().String(), 9, 10000)
 }
 
 func TestFullMockIntegration(t *testing.T) {
@@ -163,7 +163,7 @@ func TestFullMockIntegration(t *testing.T) {
 	bfgCfg.BitcoinSource = "tbc"
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
-	bfgCfg.ListenAddress = "localhost:" + testutil.FreePort(ctx)
+	bfgCfg.ListenAddress = "127.0.0.1:0"
 	// bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
 
 	// if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
@@ -185,12 +185,14 @@ func TestFullMockIntegration(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	bfgAddr := s.HTTPAddress().String()
+
 	// send finality requests to bfg, which should not return super finality
 	go func() {
 		defer func() {
 			msgCh <- "finalityRequestDone"
 		}()
-		sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 0, 0)
+		sendFinalityRequests(t, ctx, kssList, bfgAddr, 0, 0)
 	}()
 
 	// wait until all keystones are mined and broadcast
@@ -242,7 +244,7 @@ func TestFullMockIntegration(t *testing.T) {
 		defer func() {
 			msgCh <- "finalityRequestDone"
 		}()
-		sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
+		sendFinalityRequests(t, ctx, kssList, bfgAddr, 9, 10000)
 	}()
 
 	// wait until all keystones are mined and broadcast

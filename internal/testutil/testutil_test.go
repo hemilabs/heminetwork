@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net"
 	"reflect"
 	"testing"
 	"testing/synctest"
@@ -206,18 +205,6 @@ func TestRandomBytes(t *testing.T) {
 		if len(b) != i {
 			t.Fatalf("expected len %d, go %d", i, len(b))
 		}
-	}
-}
-
-func TestFreePort(t *testing.T) {
-	for range 10 {
-		port := FreePort(t.Context())
-		lc := net.ListenConfig{}
-		l, err := lc.Listen(t.Context(), "tcp", ":"+port)
-		if err != nil {
-			t.Fatal(err)
-		}
-		l.Close()
 	}
 }
 

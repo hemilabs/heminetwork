@@ -1245,12 +1245,11 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	if err := os.RemoveAll(home); err != nil {
 		t.Fatal(err)
 	}
-	tcbListenAddress := ":" + testutil.FreePort(ctx)
 
 	cfg := NewDefaultConfig()
 	cfg.LevelDBHome = home
 	cfg.Network = networkLocalnet
-	cfg.ListenAddress = tcbListenAddress
+	cfg.ListenAddress = "127.0.0.1:0"
 	cfg.Seeds = []string{
 		fmt.Sprintf("127.0.0.1:%s", mappedPeerPort.Port()),
 	}
@@ -1267,14 +1266,21 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 		}
 	}()
 
-	// let tbc index
-	select {
-	case <-time.Tick(1 * time.Second):
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+	// Wait for HTTP server to start
+	var tbcAddr string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := tbcServer.HTTPAddress(); addr != nil {
+			tbcAddr = addr.String()
+			break
+		}
 	}
 
-	tbcUrl := fmt.Sprintf("http://localhost%s%s", tcbListenAddress, tbcapi.RouteWebsocket)
+	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
 	err = EnsureCanConnect(t, tbcUrl, 5*time.Second)
 	if err != nil {
 		t.Fatalf("could not connect to %s: %s", tbcUrl, err.Error())
