@@ -26,8 +26,6 @@ import (
 	"codeberg.org/miekg/dns"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-
-	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
 
 func TestEncryptDecrypt(t *testing.T) {
@@ -864,12 +862,11 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 		testName := fmt.Sprintf("%v", curve)
 		t.Run(testName, func(t *testing.T) {
 			nodes := byte(2)
-			dnsPort := testutil.FreePort(t.Context())
-			dnsAddress := "127.0.0.1:" + dnsPort
 			domain := "moop.gfy"
 			handler := createDNSNodes(domain, nodes)
-			go func() { newDNSServer(dnsAddress, handler) }()
-			waitForDNSServer(dnsAddress, t)
+			srv := newDNSServer(t.Context(), handler)
+			defer srv.Shutdown(t.Context())
+			dnsAddress := srv.Listener.Addr().String()
 			r := newResolver(dnsAddress)
 
 			node1 := handler.nodes["node1.moop.gfy."]
@@ -1146,12 +1143,11 @@ func TestDNSServerSetup(t *testing.T) {
 		t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
 	}
 	nodes := byte(200)
-	dnsPort := testutil.FreePort(t.Context())
-	dnsAddress := "127.0.0.1:" + dnsPort
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)
-	go func() { newDNSServer(dnsAddress, handler) }()
-	waitForDNSServer(dnsAddress, t)
+	srv := newDNSServer(t.Context(), handler)
+	defer srv.Shutdown(t.Context())
+	dnsAddress := srv.Listener.Addr().String()
 	r := newResolver(dnsAddress)
 
 	// Lookup all nodes
@@ -1348,12 +1344,11 @@ func TestDNSTXTRecord(t *testing.T) {
 		t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
 	}
 	nodes := byte(1)
-	dnsPort := testutil.FreePort(t.Context())
-	dnsAddress := "127.0.0.1:" + dnsPort
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)
-	go func() { newDNSServer(dnsAddress, handler) }()
-	waitForDNSServer(dnsAddress, t)
+	srv := newDNSServer(t.Context(), handler)
+	defer srv.Shutdown(t.Context())
+	dnsAddress := srv.Listener.Addr().String()
 	r := newResolver(dnsAddress)
 
 	node1 := handler.nodes["node1.moop.gfy."]

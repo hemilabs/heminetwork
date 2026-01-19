@@ -22,7 +22,6 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
 )
 
@@ -97,8 +96,8 @@ func newHproxyWithPollFrequency(t *testing.T, servers []string, filter []string,
 	hpCfg.LogLevel = "hproxy=TRACE" // XXX figure out why this isn't working
 	hpCfg.RequestTimeout = time.Second
 	hpCfg.PollFrequency = pollFrequency
-	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort(t.Context())
-	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort(t.Context())
+	hpCfg.ListenAddress = "127.0.0.1:0"
+	hpCfg.ControlAddress = "127.0.0.1:0"
 	hpCfg.MethodFilter = filter
 	hp, err := NewServer(hpCfg)
 	if err != nil {
@@ -110,6 +109,20 @@ func newHproxyWithPollFrequency(t *testing.T, servers []string, filter []string,
 			panic(err)
 		}
 	}()
+
+	// Wait for HTTP server to start
+	for {
+		select {
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := hp.HTTPAddress(); addr != nil {
+			hpCfg.ListenAddress = addr.String()
+			break
+		}
+	}
+
 	return hp, hpCfg
 }
 
@@ -157,8 +170,8 @@ func TestClientReap(t *testing.T) {
 	hpCfg.ClientIdleTimeout = mock.InfiniteDuration // will timeout manually later
 	hpCfg.RequestTimeout = time.Second
 	hpCfg.PollFrequency = time.Second
-	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort(t.Context())
-	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort(t.Context())
+	hpCfg.ListenAddress = "127.0.0.1:0"
+	hpCfg.ControlAddress = "127.0.0.1:0"
 	hpCfg.MethodFilter = []string{"ping"}
 	hp, err := NewServer(hpCfg)
 	if err != nil {
@@ -171,7 +184,18 @@ func TestClientReap(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(250 * time.Millisecond)
+	// Wait for HTTP server to start
+	for {
+		select {
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := hp.HTTPAddress(); addr != nil {
+			hpCfg.ListenAddress = addr.String()
+			break
+		}
+	}
 
 	testDuration := 5 * time.Second
 	ctx, cancel := context.WithTimeout(t.Context(), testDuration)
