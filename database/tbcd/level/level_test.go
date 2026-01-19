@@ -1223,3 +1223,98 @@ func TestBlockHeadersByHeight(t *testing.T) {
 		}
 	}
 }
+
+func TestBlockHeadersRemove(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	type test struct {
+		name        string
+		insert      [2]int // blocks for canon (a) and fork (b) chains
+		remove, tip []string
+		removeType  []tbcd.RemoveType
+		expectedErr error
+	}
+
+	tests := []test{
+		{
+			name:   "valid",
+			insert: [2]int{3, 0},
+			remove: []string{"3a", "2a", "1a"},
+			removeType: []tbcd.RemoveType{
+				tbcd.RTChainDescend,
+				tbcd.RTChainDescend,
+				tbcd.RTChainDescend,
+			},
+			tip: []string{"2a", "1a", "0"},
+		},
+		{
+			name:   "fork",
+			insert: [2]int{3, 3},
+			remove: []string{"3b", "3a", "2a", "2b"},
+			removeType: []tbcd.RemoveType{
+				tbcd.RTForkDescend,
+				tbcd.RTChainDescend,
+				tbcd.RTChainFork,
+				tbcd.RTChainFork,
+			},
+			tip: []string{"3a", "2a", "2b", "1a"},
+		},
+		{
+			name:   "invalid tip",
+			insert: [2]int{3, 0},
+			remove: []string{"3a"},
+			removeType: []tbcd.RemoveType{
+				tbcd.RTChainFork,
+			},
+			tip:         []string{"1a"},
+			expectedErr: errors.New("placeholder"),
+		},
+	}
+
+	for _, tti := range tests {
+		t.Run(tti.name, func(t *testing.T) {
+			db, discard := createNewDB(t, ctx)
+			defer discard()
+
+			gen, _, err := insertBlockHeader(ctx, db, &chainhash.Hash{}, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			bhMap := map[string]tbcd.BlockHeader{"0": gen}
+
+			for k, chain := range []string{"a", "b"} {
+				for i := range tti.insert[k] {
+					prev := bhMap["0"].BlockHash()
+					if i > 0 {
+						prev = bhMap[fmt.Sprintf("%d%s", i, chain)].BlockHash()
+					}
+					bh, _, err := insertBlockHeader(ctx, db, prev,
+						uint64(i+1), uint64(i+k*100))
+					if err != nil {
+						t.Fatal(err)
+					}
+					bhMap[fmt.Sprintf("%d%s", i+1, chain)] = bh
+				}
+			}
+
+			for i, r := range tti.remove {
+				tbhw, err := bhMap[tti.tip[i]].Wire()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rbh := bhMap[r]
+				msg := createTestMsgHeaders([]*tbcd.BlockHeader{&rbh})
+				rt, _, err := db.BlockHeadersRemove(ctx, msg, tbhw, nil)
+				if !errors.Is(err, tti.expectedErr) {
+					t.Errorf("expected error %v, got %v", tti.expectedErr, err)
+				}
+				if tti.removeType[i] != rt {
+					t.Errorf("expected removeType (%v), got (%v)",
+						tti.removeType[i], rt)
+				}
+			}
+		})
+	}
+}
