@@ -961,7 +961,7 @@ func createNewDB(t *testing.T, ctx context.Context) (*ldb, func()) {
 	return db, discardFunc
 }
 
-func TestBlockInsertAndRetrieve(t *testing.T) {
+func TestBlockInsert(t *testing.T) {
 	const blkNum uint64 = 10
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -997,6 +997,22 @@ func TestBlockInsertAndRetrieve(t *testing.T) {
 		}
 		prevHash = bh.BlockHash()
 	}
+
+	// Insert duplicates
+	_, _, err := insertBlockHeader(ctx, db, &chainhash.Hash{}, 0, 0)
+	if !errors.Is(err, database.ErrDuplicate) {
+		t.Fatalf("expected err %v, got %v", database.ErrDuplicate, err)
+	}
+
+	bh, err := db.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = insertBlockHeader(ctx, db, bh.ParentHash(), bh.Height, bh.Height)
+	if !errors.Is(err, database.ErrDuplicate) {
+		t.Fatalf("expected err %v, got %v", database.ErrDuplicate, err)
+	}
 }
 
 func TestBlockNegative(t *testing.T) {
@@ -1007,7 +1023,20 @@ func TestBlockNegative(t *testing.T) {
 	defer discard()
 
 	fakeHash := chainhash.Hash{0xFF}
-	_, err := db.BlockByHash(ctx, fakeHash)
+
+	// Blockheader tests
+	_, err := db.BlockHeaderByHash(ctx, fakeHash)
+	if !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("expected error %v, got %v", database.ErrNotFound, err)
+	}
+
+	_, err = db.BlockHeaderBest(ctx)
+	if !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("expected error %v, got %v", database.ErrNotFound, err)
+	}
+
+	// Block tests
+	_, err = db.BlockByHash(ctx, fakeHash)
 	if !errors.Is(err, database.ErrBlockNotFound) {
 		t.Fatalf("expected error %v, got %v", database.ErrBlockNotFound, err)
 	}
@@ -1312,10 +1341,8 @@ func TestBlockHeadersRemove(t *testing.T) {
 					}
 					t.Logf("received error: %v", err)
 					return
-				} else {
-					if tti.expectErr {
-						t.Fatal("expected error")
-					}
+				} else if tti.expectErr {
+					t.Fatal("expected error")
 				}
 				if tti.removeType[i] != rt {
 					t.Fatalf("expected removeType (%v), got (%v)",
