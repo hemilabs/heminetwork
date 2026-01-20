@@ -852,26 +852,6 @@ func createTestBlock(prevHash *chainhash.Hash, nonce int64) *btcutil.Block {
 	bh.Timestamp = time.Unix(nonce, 0)
 	bh.Bits = 0x1d00ffff
 	block := wire.NewMsgBlock(bh)
-
-	// Add a coinbase transaction
-	coinbase := wire.NewMsgTx(1)
-	coinbase.AddTxIn(&wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  chainhash.Hash{},
-			Index: 0xFFFFFFFF,
-		},
-		Sequence: 0xFFFFFFFF,
-	})
-	coinbase.AddTxOut(&wire.TxOut{
-		Value: 50 * 100000000, // 50 BTC
-	})
-	if err := block.AddTransaction(coinbase); err != nil {
-		panic(err)
-	}
-
-	txHash := coinbase.TxHash()
-	bh.MerkleRoot = chainhash.DoubleHashH(txHash[:])
-
 	btcBlock := btcutil.NewBlock(block)
 	return btcBlock
 }
@@ -1233,7 +1213,7 @@ func TestBlockHeadersRemove(t *testing.T) {
 		insert      [2]int // blocks for canon (a) and fork (b) chains
 		remove, tip []string
 		removeType  []tbcd.RemoveType
-		expectedErr error
+		expectErr   bool
 	}
 
 	tests := []test{
@@ -1261,14 +1241,32 @@ func TestBlockHeadersRemove(t *testing.T) {
 			tip: []string{"3a", "2a", "2b", "1a"},
 		},
 		{
-			name:   "invalid tip",
-			insert: [2]int{3, 0},
-			remove: []string{"3a"},
-			removeType: []tbcd.RemoveType{
-				tbcd.RTChainFork,
-			},
-			tip:         []string{"1a"},
-			expectedErr: errors.New("placeholder"),
+			name:      "remove passed tip",
+			insert:    [2]int{3, 0},
+			remove:    []string{"2a"},
+			tip:       []string{"2a"},
+			expectErr: true,
+		},
+		{
+			name:      "dangling child",
+			insert:    [2]int{3, 0},
+			remove:    []string{"2a"},
+			tip:       []string{"1a"},
+			expectErr: true,
+		},
+		{
+			name:      "invalid header",
+			insert:    [2]int{3, 0},
+			remove:    []string{"5a"},
+			tip:       []string{"3a"},
+			expectErr: true,
+		},
+		{
+			name:      "unknown tip",
+			insert:    [2]int{3, 0},
+			remove:    []string{"3a"},
+			tip:       []string{"6a"},
+			expectErr: true,
 		},
 	}
 
@@ -1300,18 +1298,27 @@ func TestBlockHeadersRemove(t *testing.T) {
 			}
 
 			for i, r := range tti.remove {
-				tbhw, err := bhMap[tti.tip[i]].Wire()
+				bh := bhMap[tti.tip[i]]
+				tbhw, err := bh.Wire()
 				if err != nil {
 					t.Fatal(err)
 				}
 				rbh := bhMap[r]
 				msg := createTestMsgHeaders([]*tbcd.BlockHeader{&rbh})
 				rt, _, err := db.BlockHeadersRemove(ctx, msg, tbhw, nil)
-				if !errors.Is(err, tti.expectedErr) {
-					t.Errorf("expected error %v, got %v", tti.expectedErr, err)
+				if err != nil {
+					if !tti.expectErr {
+						t.Fatal(err)
+					}
+					t.Logf("received error: %v", err)
+					return
+				} else {
+					if tti.expectErr {
+						t.Fatal("expected error")
+					}
 				}
 				if tti.removeType[i] != rt {
-					t.Errorf("expected removeType (%v), got (%v)",
+					t.Fatalf("expected removeType (%v), got (%v)",
 						tti.removeType[i], rt)
 				}
 			}
