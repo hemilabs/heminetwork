@@ -31,7 +31,6 @@ import (
 	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin"
-	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
@@ -1219,7 +1218,7 @@ func spendingOutByTxIn(ctx context.Context, s *Server, prevTxId, txId chainhash.
 			return so, nil
 		}
 	}
-	return tbcd.ZKSpendingOutpoint{}, database.NotFoundError("spending outpoint by txIn")
+	return tbcd.ZKSpendingOutpoint{}, tbcd.NotFoundError("spending outpoint by txIn")
 }
 
 func spendingOutByTxOut(ctx context.Context, s *Server, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
@@ -1232,7 +1231,7 @@ func spendingOutByTxOut(ctx context.Context, s *Server, txId chainhash.Hash, ind
 			return so, nil
 		}
 	}
-	return tbcd.ZKSpendingOutpoint{}, database.NotFoundError("spending outpoint by txOut")
+	return tbcd.ZKSpendingOutpoint{}, tbcd.NotFoundError("spending outpoint by txOut")
 }
 
 func spentOutByTxIn(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId chainhash.Hash, inIndex int) (tbcd.ZKSpentOutput, error) {
@@ -1245,7 +1244,7 @@ func spentOutByTxIn(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId cha
 			return so, nil
 		}
 	}
-	return tbcd.ZKSpentOutput{}, database.NotFoundError("spent outpoint")
+	return tbcd.ZKSpentOutput{}, tbcd.NotFoundError("spent outpoint")
 }
 
 func spendableOutByTxOut(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId *chainhash.Hash, outIndex int) (tbcd.ZKSpendableOutput, error) {
@@ -1258,7 +1257,7 @@ func spendableOutByTxOut(ctx context.Context, s *Server, sh tbcd.ScriptHash, txI
 			return so, nil
 		}
 	}
-	return tbcd.ZKSpendableOutput{}, database.NotFoundError("spendable output")
+	return tbcd.ZKSpendableOutput{}, tbcd.NotFoundError("spendable output")
 }
 
 func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
@@ -1343,7 +1342,7 @@ func mustNotHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 					return fmt.Errorf("invalid tx hash: %w", err)
 				}
 				_, err = s.SpentOutputsByTxId(ctx, *tx)
-				var expected database.NotFoundError
+				var expected tbcd.NotFoundError
 				if !errors.Is(err, expected) {
 					return fmt.Errorf("expected invalid spend infos %v: %w", tx, err)
 				}
@@ -1354,7 +1353,7 @@ func mustNotHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
 				_, err = s.TxById(ctx, *txId)
-				var expected database.NotFoundError
+				var expected tbcd.NotFoundError
 				if !errors.Is(err, expected) {
 					return fmt.Errorf("expected no tx by id %v: %w", txId, err)
 				}
@@ -1372,7 +1371,7 @@ func (s *Server) hasAllBlocks(ctx context.Context, m map[int32][]*block) (bool, 
 		for _, blk := range k {
 			_, err := s.g.db.BlockByHash(ctx, *blk.Hash())
 			if err != nil {
-				if !errors.Is(err, database.ErrBlockNotFound) {
+				if !errors.Is(err, tbcd.ErrBlockNotFound) {
 					return false, err
 				}
 				return false, nil
@@ -3471,7 +3470,7 @@ func TestCacheOverflow(t *testing.T) {
 		}
 		kssHash := hemi.L2KeystoneAbbreviate(*kss).Hash()
 		_, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kssHash)
-		var expected database.NotFoundError
+		var expected tbcd.NotFoundError
 		if !errors.Is(err, expected) {
 			t.Fatal(err)
 		}

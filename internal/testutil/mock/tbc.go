@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -25,7 +25,6 @@ import (
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
-	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
@@ -234,7 +233,7 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 
 		if len(kssList) < 1 {
 			resp = tbcapi.KeystonesByHeightResponse{
-				Error: protocol.RequestErrorf("%v", database.ErrNotFound),
+				Error: protocol.RequestErrorf("%v", tbcd.ErrNotFound),
 			}
 		} else {
 			resp = tbcapi.KeystonesByHeightResponse{
