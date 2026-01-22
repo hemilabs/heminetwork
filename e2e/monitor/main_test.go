@@ -893,7 +893,10 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 
 		tx, err = testToken.Approve(auth, l1StandardBridge(t), big.NewInt(100))
 		if err != nil {
-			t.Fatal(err)
+			if i == abort {
+				t.Fatal(err)
+			}
+			continue
 		}
 
 		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
