@@ -31,11 +31,11 @@ The Hemi Network is composed of many services. The core Hemi services in this re
 
 This repository also contains several utility binaries.
 
-| Name                       | Description                   |
-|----------------------------|-------------------------------|
-| [`btctool`](./cmd/btctool) | Bitcoin utility tool          |
-| [`hemictl`](./cmd/hemictl) | Hemi network controller CLI   |
-| [`keygen`](./cmd/keygen)   | Keypair generation tool       |
+| Name                       | Description                 |
+|----------------------------|-----------------------------|
+| [`btctool`](./cmd/btctool) | Bitcoin utility tool        |
+| [`hemictl`](./cmd/hemictl) | Hemi network controller CLI |
+| [`keygen`](./cmd/keygen)   | Keypair generation tool     |
 
 ## Installation
 
@@ -99,10 +99,10 @@ Discord server](https://discord.gg/hemixyz).
 
 If you discover vulnerabilities in Hemi, we encourage responsible disclosure of the vulnerability so that we can take
 steps to resolve the vulnerability as quickly as possible. We ask you to help us better protect Hemi and our users by
-reporting vulnerabilities through HackerOne. **Never report security vulnerabilities publicly, especially on GitHub
+reporting vulnerabilities through Bugcrowd. **Never report security vulnerabilities publicly, especially on GitHub
 issues.**
 
-- [Submit a report through Hemi's HackerOne VDP program](https://hackerone.com/hemi_labs_vdp)
+- [Submit a report through Hemi's Bugcrowd program](https://bugcrowd.com/engagements/hemi)
 
 If you have discovered a security vulnerability, please report it in accordance with
 our [Security Policy](https://github.com/hemilabs/.github/blob/main/SECURITY.md).
