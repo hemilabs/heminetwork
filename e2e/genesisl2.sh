@@ -77,6 +77,9 @@ echo "$(jq '.sequencerWindowSize = 200' /shared-dir/deploy-config.json)" > /shar
 echo "$(jq '.l1BlockTime = 3' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 echo "$(jq '.proofMaturityDelaySeconds = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 echo "$(jq '.preimageOracleChallengePeriod = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq 'del(.customGasTokenAddress)' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq '.operatorFeeVaultRecipient = "0x78697c88847dfbbb40523e42c1f2e28a13a170be"' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq '.operatorFeeVaultWithdrawalNetwork = 1' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 
 /git/optimism/op-deployer/bin/op-deployer inspect l1 --workdir .deployer 901 > /shared-dir/l1deployments.json
 
