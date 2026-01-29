@@ -1114,7 +1114,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 
 	log.Infof("Block expired: %v %v", p, hash)
 
-	// XXX we really want to kick of syncing here when blocks missing hits
+	// XXX we really want to kick off syncing here when blocks missing hits
 	// 0. If not we stall until the next block comes in before downloading
 	// it and then starting the sync.
 
@@ -1305,7 +1305,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 					return err == nil
 				})
 
-				// Flush out blocks we saw during quiece.
+				// Flush out blocks we saw during quiesce.
 				log.Debugf("download missed block headers %v", len(ib))
 
 				if len(ib) == 0 {
