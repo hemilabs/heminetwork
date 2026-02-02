@@ -1,40 +1,18 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
-    'config:best-practices',
-    ':configMigration',
-    ':pinVersions',
-    ':prConcurrentLimit10',
-    ':rebaseStalePrs',
-    'schedule:weekly',
-    'docker:enableMajor',
-    'docker:pinDigests',
-    'preview:dockerCompose',
-    'preview:dockerVersions',
-    'customManagers:dockerfileVersions',
-    'customManagers:githubActionsVersions',
-    'helpers:pinGitHubActionDigests',
+    'local>hemilabs/.github:renovate-config.json5',
     ':assignAndReview(joshuasing)',
   ],
   commitMessagePrefix: 'all:',
   commitMessageAction: 'update',
   commitMessageTopic: '{{depName}}',
-  labels: [
-    'type: dependencies',
+  addLabels: [
     'changelog: skip',
   ],
-  minimumReleaseAge: '3 days',
   packageRules: [
     {
-      matchDatasources: [
-        'go',
-      ],
-      commitMessageTopic: '{{depName}}'
-    },
-    {
-      matchDatasources: [
-        'docker',
-      ],
+      matchDatasources: ['docker'],
       commitMessageTopic: 'image {{depName}}',
     },
     {
@@ -43,6 +21,7 @@
       postUpdateOptions: ['gomodTidy'],
     },
     {
+      description: 'Prevent updating minimum Go version in go.mod',
       matchManagers: ['gomod'],
       matchDepNames: ['go'],
       enabled: false,
@@ -56,16 +35,6 @@
       commitMessageAction: 'pin',
     },
   ],
-  osvVulnerabilityAlerts: true,
-  vulnerabilityAlerts: {
-    enabled: true,
-    addLabels: [
-      'type: security',
-    ],
-    additionalReviewers: [
-      'team:secops',
-    ],
-  },
   customManagers: [
     {
       customType: 'regex',
