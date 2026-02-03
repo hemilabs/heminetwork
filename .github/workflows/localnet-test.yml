@@ -109,6 +109,26 @@ jobs:
       - name: "remove more dangling"
         run: docker system prune -f
 
+      - name: "build synctest"
+        working-directory: ./synctest
+        run: docker build -t synctest:latest .
+
+      - name: "run synctest"
+        working-directory: ./synctest
+        env: 
+          SYNCTESTER_CONTROL_OP_GETH_ENDPOINT: http://localhost:8546 # sequencing
+          SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT: http://localhost:18546 # non-sequencing
+          SYNCTESTER_EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT: http://localhost:5555/health
+        run: |
+          docker run \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -e SYNCTESTER_CONTROL_OP_GETH_ENDPOINT=$SYNCTESTER_CONTROL_OP_GETH_ENDPOINT \
+            -e SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT=$SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT \
+            -e SYNCTESTER_EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT=$SYNCTESTER_EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT \
+            --network host \
+            synctest:latest
+
+
       - name: "get localnet stats"
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
