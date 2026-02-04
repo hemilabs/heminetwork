@@ -297,7 +297,7 @@ func TestTSSMessageJSON(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyReshare,
 		From:       id,
-		Broadcast:  true,
+		Flags:      TSSFlagBroadcast,
 		Data:       []byte("tss wire bytes"),
 		Signature:  []byte("signature bytes"),
 	}
@@ -324,8 +324,8 @@ func TestTSSMessageJSON(t *testing.T) {
 	if !bytes.Equal(got.From[:], msg.From[:]) {
 		t.Fatal("From mismatch")
 	}
-	if got.Broadcast != msg.Broadcast {
-		t.Fatal("Broadcast mismatch")
+	if got.Flags != msg.Flags {
+		t.Fatalf("Flags = %d, want %d", got.Flags, msg.Flags)
 	}
 	if !bytes.Equal(got.Data, msg.Data) {
 		t.Fatal("Data mismatch")
