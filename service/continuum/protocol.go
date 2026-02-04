@@ -400,6 +400,24 @@ func (m TSSMessage) IsBroadcast() bool {
 	return m.Flags&TSSFlagBroadcast != 0
 }
 
+// HashTSSMessage computes the hash that must be signed for a
+// TSSMessage. Hash = SHA256(CeremonyID || Data).
+func HashTSSMessage(cid CeremonyID, data []byte) []byte {
+	h := sha256.New()
+	h.Write(cid[:])
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+// NewCeremonyID generates a random ceremony identifier.
+func NewCeremonyID() CeremonyID {
+	var cid CeremonyID
+	if _, err := rand.Read(cid[:]); err != nil {
+		panic(fmt.Errorf("read random: %w", err))
+	}
+	return cid
+}
+
 // CeremonyResult signals ceremony completion to the router.
 type CeremonyResult struct {
 	CeremonyID CeremonyID `json:"ceremonyid"`
