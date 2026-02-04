@@ -65,6 +65,11 @@ type rpcTSSNode struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// corruptFn, if set, is called on each outgoing TSSMessage
+	// before it is written to the wire. May modify msg in place.
+	// Used by negative tests to simulate corrupt signers.
+	corruptFn func(msg *TSSMessage)
 }
 
 // rpcCeremony tracks an active TSS ceremony.
@@ -555,6 +560,10 @@ func (n *rpcTSSNode) pumpKeysign(cid CeremonyID, c *rpcCeremony) {
 				Signature:  sig,
 			}
 
+			if n.corruptFn != nil {
+				n.corruptFn(&tssMsg)
+			}
+
 			n.sendTSSMsg(c, tssMsg, msg.GetTo())
 
 		case <-n.ctx.Done():
@@ -621,6 +630,10 @@ func (n *rpcTSSNode) pumpReshare(cid CeremonyID, c *rpcCeremony) {
 				Flags:      flags,
 				Data:       wireData,
 				Signature:  sig,
+			}
+
+			if n.corruptFn != nil {
+				n.corruptFn(&tssMsg)
 			}
 
 			// Route to all unique peers across both committees.
@@ -1374,4 +1387,281 @@ func TestRPCTSSReshare(t *testing.T) {
 		t.Logf("node %s: sign done, r=%x..",
 			node.id, sig.R[:8])
 	}
+}
+
+// =============================================================================
+// Negative tests — corrupt signer scenarios
+//
+// Each test hooks corruptFn on one node's outgoing TSSMessage pump
+// and verifies the ceremony fails gracefully: no valid result is
+// produced, no panic, honest nodes time out waiting.
+// =============================================================================
+
+// TestRPCTSSKeygenCorruptPostSign verifies that post-sign data
+// corruption (bit flip in Data after signing) is caught by
+// signature verification on the receiver. The corrupt node's
+// messages are rejected at Verify and the ceremony times out.
+func TestRPCTSSKeygenCorruptPostSign(t *testing.T) {
+	nodes := setupRPCMesh(t, 3)
+	defer teardownRPCMesh(t, nodes)
+
+	// Node 2 flips a bit in Data after signing. Receivers
+	// compute Hash(CeremonyID||corrupt_data) which won't match
+	// the signature computed over the original data.
+	nodes[2].corruptFn = func(msg *TSSMessage) {
+		if len(msg.Data) > 0 {
+			msg.Data[0] ^= 0xff
+		}
+	}
+
+	committee := rpcCommittee(nodes)
+	cid := NewCeremonyID()
+	threshold := 1 // 2-of-3
+
+	t.Log("=== Keygen with post-sign corruption (node 2) ===")
+
+	rpcInitKeygen(t, nodes, committee, cid, threshold)
+
+	ctx, cancel := context.WithTimeout(context.Background(),
+		30*time.Second)
+	defer cancel()
+
+	for _, node := range nodes {
+		_, err := node.waitCeremony(ctx, cid)
+		if err == nil {
+			t.Fatal("ceremony must fail with corrupt signer")
+		}
+		t.Logf("node %s: %v (expected)", node.id, err)
+	}
+	t.Log("post-sign corruption rejected ✓")
+}
+
+// TestRPCTSSKeygenCorruptResigned verifies that a signer who
+// corrupts tss-lib wire data and re-signs the corrupt payload
+// passes signature verification but is caught at the tss-lib
+// protocol level (ParseWireMessage or party.Update failure).
+func TestRPCTSSKeygenCorruptResigned(t *testing.T) {
+	nodes := setupRPCMesh(t, 3)
+	defer teardownRPCMesh(t, nodes)
+
+	// Node 2 corrupts wire data then re-signs so Verify passes.
+	// tss-lib rejects the garbage at protocol level.
+	corruptNode := nodes[2]
+	corruptNode.corruptFn = func(msg *TSSMessage) {
+		if len(msg.Data) > 0 {
+			msg.Data[0] ^= 0xff
+			hash := HashTSSMessage(msg.CeremonyID, msg.Data)
+			msg.Signature = corruptNode.secret.Sign(hash)
+		}
+	}
+
+	committee := rpcCommittee(nodes)
+	cid := NewCeremonyID()
+	threshold := 1
+
+	t.Log("=== Keygen with re-signed corruption (node 2) ===")
+
+	rpcInitKeygen(t, nodes, committee, cid, threshold)
+
+	ctx, cancel := context.WithTimeout(context.Background(),
+		30*time.Second)
+	defer cancel()
+
+	for _, node := range nodes {
+		_, err := node.waitCeremony(ctx, cid)
+		if err == nil {
+			t.Fatal("ceremony must fail with corrupt wire data")
+		}
+		t.Logf("node %s: %v (expected)", node.id, err)
+	}
+	t.Log("re-signed corruption caught at protocol level ✓")
+}
+
+// TestRPCTSSKeygenBadSignature verifies that messages with zeroed
+// signatures are rejected at the Verify step.
+func TestRPCTSSKeygenBadSignature(t *testing.T) {
+	nodes := setupRPCMesh(t, 3)
+	defer teardownRPCMesh(t, nodes)
+
+	// Node 2 zeros its signature on every outgoing message.
+	nodes[2].corruptFn = func(msg *TSSMessage) {
+		for i := range msg.Signature {
+			msg.Signature[i] = 0
+		}
+	}
+
+	committee := rpcCommittee(nodes)
+	cid := NewCeremonyID()
+	threshold := 1
+
+	t.Log("=== Keygen with zeroed signature (node 2) ===")
+
+	rpcInitKeygen(t, nodes, committee, cid, threshold)
+
+	ctx, cancel := context.WithTimeout(context.Background(),
+		30*time.Second)
+	defer cancel()
+
+	for _, node := range nodes {
+		_, err := node.waitCeremony(ctx, cid)
+		if err == nil {
+			t.Fatal("ceremony must fail with bad signature")
+		}
+		t.Logf("node %s: %v (expected)", node.id, err)
+	}
+	t.Log("zeroed signature rejected ✓")
+}
+
+// TestRPCTSSKeygenSpoofIdentity verifies that a signer claiming
+// to be another party (From field mismatch) is caught by Verify.
+// The signature was made with node 2's key, so verifying against
+// node 0's identity fails.
+func TestRPCTSSKeygenSpoofIdentity(t *testing.T) {
+	nodes := setupRPCMesh(t, 3)
+	defer teardownRPCMesh(t, nodes)
+
+	// Node 2 claims to be node 0.
+	spoofTarget := nodes[0].id
+	nodes[2].corruptFn = func(msg *TSSMessage) {
+		msg.From = spoofTarget
+	}
+
+	committee := rpcCommittee(nodes)
+	cid := NewCeremonyID()
+	threshold := 1
+
+	t.Log("=== Keygen with spoofed identity (node 2 → node 0) ===")
+
+	rpcInitKeygen(t, nodes, committee, cid, threshold)
+
+	ctx, cancel := context.WithTimeout(context.Background(),
+		30*time.Second)
+	defer cancel()
+
+	for _, node := range nodes {
+		_, err := node.waitCeremony(ctx, cid)
+		if err == nil {
+			t.Fatal("ceremony must fail with spoofed identity")
+		}
+		t.Logf("node %s: %v (expected)", node.id, err)
+	}
+	t.Log("spoofed identity rejected ✓")
+}
+
+// TestRPCTSSSignCorruptPostSign verifies that an honest keygen
+// followed by a corrupt signer during the signing ceremony causes
+// signing to fail. The keygen result remains valid; only the
+// signing phase is affected.
+func TestRPCTSSSignCorruptPostSign(t *testing.T) {
+	nodes := setupRPCMesh(t, 3)
+	defer teardownRPCMesh(t, nodes)
+
+	committee := rpcCommittee(nodes)
+	threshold := 1 // 2-of-3
+
+	ctx, cancel := context.WithTimeout(context.Background(),
+		3*time.Minute)
+	defer cancel()
+
+	// === Honest keygen ===
+	keygenCID := NewCeremonyID()
+	t.Log("=== Honest keygen ===")
+
+	rpcInitKeygen(t, nodes, committee, keygenCID, threshold)
+
+	var keyID string
+	for _, node := range nodes {
+		result, err := node.waitCeremony(ctx, keygenCID)
+		if err != nil {
+			t.Fatalf("keygen: %v", err)
+		}
+		save := result.(*keygen.LocalPartySaveData)
+		keyID = save.ECDSAPub.X().Text(16)[:16]
+	}
+	t.Logf("keygen done, keyID=%s", keyID)
+
+	// === Corrupt sign: node 2 flips bits post-sign ===
+	nodes[2].corruptFn = func(msg *TSSMessage) {
+		if len(msg.Data) > 0 {
+			msg.Data[0] ^= 0xff
+		}
+	}
+
+	signCID := NewCeremonyID()
+	data := sha256.Sum256([]byte("corrupt signer test"))
+	t.Log("=== Sign with post-sign corruption (node 2) ===")
+
+	rpcInitSign(t, nodes, committee, signCID,
+		[]byte(keyID), threshold, data)
+
+	shortCtx, shortCancel := context.WithTimeout(
+		context.Background(), 30*time.Second)
+	defer shortCancel()
+
+	for _, node := range nodes {
+		_, err := node.waitCeremony(shortCtx, signCID)
+		if err == nil {
+			t.Fatal("signing must fail with corrupt signer")
+		}
+		t.Logf("node %s: %v (expected)", node.id, err)
+	}
+	t.Log("sign-phase corruption rejected ✓")
+}
+
+// TestRPCTSSReshareCorruptPostSign verifies that an honest keygen
+// followed by a corrupt signer during reshare causes the reshare
+// to fail. Node 2 is in both old and new committees (overlapping).
+func TestRPCTSSReshareCorruptPostSign(t *testing.T) {
+	// 4 nodes: keygen {0,1,2}, reshare → {1,2,3}.
+	// Node 2 overlaps both committees and corrupts.
+	nodes := setupRPCMesh(t, 4)
+	defer teardownRPCMesh(t, nodes)
+
+	oldCommittee := rpcCommittee(nodes[:3])
+	threshold := 1
+
+	ctx, cancel := context.WithTimeout(context.Background(),
+		3*time.Minute)
+	defer cancel()
+
+	// === Honest keygen ===
+	keygenCID := NewCeremonyID()
+	t.Log("=== Honest keygen with {0,1,2} ===")
+
+	rpcInitKeygen(t, nodes[:3], oldCommittee, keygenCID, threshold)
+
+	for _, node := range nodes[:3] {
+		_, err := node.waitCeremony(ctx, keygenCID)
+		if err != nil {
+			t.Fatalf("keygen: %v", err)
+		}
+	}
+	t.Log("keygen done")
+
+	// === Corrupt reshare: node 2 flips bits ===
+	nodes[2].corruptFn = func(msg *TSSMessage) {
+		if len(msg.Data) > 0 {
+			msg.Data[0] ^= 0xff
+		}
+	}
+
+	newCommittee := rpcCommittee(nodes[1:])
+	reshareCID := NewCeremonyID()
+	t.Log("=== Reshare with corruption (node 2) ===")
+
+	rpcInitReshare(t, nodes, oldCommittee, newCommittee,
+		reshareCID, threshold, threshold)
+
+	shortCtx, shortCancel := context.WithTimeout(
+		context.Background(), 30*time.Second)
+	defer shortCancel()
+
+	for _, node := range nodes {
+		err := node.waitReshare(shortCtx, reshareCID)
+		if err == nil {
+			t.Fatal("reshare must fail with corrupt signer")
+		}
+		t.Logf("node %s: %v (expected)", node.id, err)
+	}
+	t.Log("reshare corruption rejected ✓")
 }
