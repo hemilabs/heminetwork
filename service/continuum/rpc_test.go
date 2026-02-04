@@ -194,7 +194,7 @@ func (r *MockRouter) RouteTSSMessage(msg TSSMessage) error {
 	ceremony.messages = append(ceremony.messages, msg)
 
 	// Route to recipients
-	if msg.Broadcast {
+	if msg.IsBroadcast() {
 		for _, pid := range ceremony.parties {
 			if pid == msg.From {
 				continue
@@ -405,7 +405,7 @@ func TestRPCTSSMessageRouting(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       ids[0],
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  sig,
 	}
@@ -478,7 +478,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       ids[0],
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  sig,
 	}
@@ -495,7 +495,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       ids[0], // Claims to be party 0
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  wrongSig, // But signed by party 1
 	}
@@ -511,7 +511,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       ids[0],
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       []byte("tampered-data"), // Different data
 		Signature:  sig,                     // Original signature
 	}
@@ -542,7 +542,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 		CeremonyID: cid, // Claims ceremony cid
 		Type:       CeremonyKeygen,
 		From:       ids[0],
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  wrongCIDSig, // But signed for otherCID
 	}
@@ -558,7 +558,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       ids[0],
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  nil,
 	}
@@ -574,7 +574,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       ids[0],
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  []byte("garbage"),
 	}
@@ -732,7 +732,7 @@ func TestRPCTSSMessageUnknownCeremony(t *testing.T) {
 	msg := TSSMessage{
 		CeremonyID: fakeCID,
 		From:       secret.Identity,
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  sig,
 	}
@@ -769,7 +769,7 @@ func TestRPCTSSMessageUnauthorizedSender(t *testing.T) {
 	msg := TSSMessage{
 		CeremonyID: cid,
 		From:       outsider.Identity,
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  sig,
 	}
@@ -968,7 +968,7 @@ func TestCriticalMITMPrevention(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       alice.Identity, // LIES: claims to be Alice
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       forgedData,
 		Signature:  attackerSig, // Signed by attacker, not Alice
 	}
@@ -1018,7 +1018,7 @@ func TestCriticalReplayPrevention(t *testing.T) {
 		CeremonyID: cidA,
 		Type:       CeremonyKeygen,
 		From:       alice.Identity,
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data,
 		Signature:  sigA,
 	}
@@ -1035,7 +1035,7 @@ func TestCriticalReplayPrevention(t *testing.T) {
 		CeremonyID: cidB, // Different ceremony!
 		Type:       CeremonyKeygen,
 		From:       alice.Identity,
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       data, // Same data
 		Signature:  sigA, // Same signature (for ceremony A)
 	}
@@ -1079,7 +1079,7 @@ func TestCriticalDataIntegrity(t *testing.T) {
 		CeremonyID: cid,
 		Type:       CeremonyKeygen,
 		From:       alice.Identity,
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       tamperedData, // Modified!
 		Signature:  sig,          // Original signature
 	}

@@ -140,7 +140,7 @@ func (r *TSSRouter) Broadcast(from Identity, cid CeremonyID, msg tss.Message) {
 		tssMsg := TSSMessage{
 			CeremonyID: cid,
 			From:       from,
-			Broadcast:  true,
+			Flags:     TSSFlagBroadcast,
 			Data:       data,
 			Signature:  sig,
 		}
@@ -165,7 +165,6 @@ func (r *TSSRouter) SendP2P(from Identity, cid CeremonyID, to []*tss.PartyID, ms
 				tssMsg := TSSMessage{
 					CeremonyID: cid,
 					From:       from,
-					Broadcast:  false,
 					Data:       data,
 					Signature:  sig,
 				}
@@ -359,7 +358,7 @@ func (n *TSSNode) handleTSSMessage(msg TSSMessage) {
 	}
 
 	// Parse wire message
-	parsed, err := tss.ParseWireMessage(msg.Data, fromPid, msg.Broadcast)
+	parsed, err := tss.ParseWireMessage(msg.Data, fromPid, msg.IsBroadcast())
 	if err != nil {
 		n.t.Logf("Node %s: parse error: %v", n.id, err)
 		return
@@ -743,7 +742,7 @@ func TestRPCIntegrationMITMMessageInjection(t *testing.T) {
 	fakeMsg := TSSMessage{
 		CeremonyID: cid,
 		From:       nodes[1].id, // Claims to be node 1
-		Broadcast:  true,
+		Flags:     TSSFlagBroadcast,
 		Data:       fakeData,
 		Signature:  fakeSig, // But signed by attacker
 	}
