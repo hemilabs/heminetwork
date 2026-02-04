@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -27,7 +26,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
-	"github.com/hemilabs/x/tss-lib/v2/tss"
 
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
@@ -76,6 +74,10 @@ type Server struct {
 
 	// TSS
 	preParams keygen.LocalPreParams
+	tss       TSS
+	tssStore  TSSStore
+	stt       *serverTSSTransport
+	tssCtx    context.Context
 
 	// Listener
 	listenConfig *net.ListenConfig
@@ -159,22 +161,6 @@ func (s *Server) deleteAllSessions() {
 	}
 }
 
-func (s *Server) allSessionIDs() tss.UnSortedPartyIDs {
-	s.mtx.RLock()
-	defer s.mtx.RUnlock()
-
-	ids := make(tss.UnSortedPartyIDs, 0, len(s.sessions)+1)
-	for k := range s.sessions {
-		id := tss.NewPartyID(k.String(), k.String(), new(big.Int).SetBytes(k[:]))
-		ids = append(ids, id)
-	}
-	// XXX include self, this is a little clunky but roll with it for now
-	self := s.secret.Identity.String()
-	ids = append(ids, tss.NewPartyID(self, self,
-		new(big.Int).SetBytes(s.secret.Identity[:])))
-	return ids
-}
-
 func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, error) {
 	transport, err := NewTransportFromCurve(ecdh.X25519()) // XXX config option
 	if err != nil {
@@ -212,7 +198,7 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 		log.Infof("%v", spew.Sdump(payload))
 
 		// XXX make this a map like str2pt with callbacks
-		switch payload.(type) {
+		switch v := payload.(type) {
 		case *PingRequest:
 			err := t.Write(s.secret.Identity, PingResponse{
 				OriginTimestamp: payload.(*PingRequest).OriginTimestamp,
@@ -222,19 +208,20 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 				panic(err)
 			}
 
-			// XXX use ping request for now to kick off keygen
-			committee := s.allSessionIDs()
-			log.Infof("%v", spew.Sdump(committee))
-			err = t.Write(s.secret.Identity, KeygenRequest{
-				Curve:     "secp256k1",
-				Committee: committee,
-				Threshold: len(committee) - 1,
-			})
-			if err != nil {
-				panic(err)
-			}
+		case *KeygenRequest:
+			s.dispatchKeygen(*v)
+
+		case *SignRequest:
+			s.dispatchSign(*v)
+
+		case *ReshareRequest:
+			s.dispatchReshare(*v)
+
+		case *TSSMessage:
+			s.dispatchTSSMessage(*v)
 
 		default:
+			log.Debugf("handle %v: unhandled %T", id, payload)
 		}
 	}
 }
@@ -519,6 +506,16 @@ func (s *Server) Run(pctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("party: %w", err)
 	}
+
+	// Initialize TSS engine with encrypted transport bridge.
+	s.tssCtx = ctx
+	s.stt = newServerTSSTransport(s)
+	tssDir := filepath.Join(s.data, "tss")
+	s.tssStore, err = NewTSSStore(tssDir, s.secret)
+	if err != nil {
+		return fmt.Errorf("tss store: %w", err)
+	}
+	s.tss = NewTSS(s.secret.Identity, s.tssStore, s.stt)
 
 	// pprof
 	if s.cfg.PprofListenAddress != "" {

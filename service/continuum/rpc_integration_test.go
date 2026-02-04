@@ -6,7 +6,6 @@ package continuum
 
 import (
 	"crypto/ecdsa"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -839,11 +838,4 @@ func FuzzCeremonyID(f *testing.F) {
 			t.Error("Round-trip mismatch")
 		}
 	})
-}
-
-// NewCeremonyID creates a random ceremony ID
-func NewCeremonyID() CeremonyID {
-	var cid CeremonyID
-	_, _ = rand.Read(cid[:])
-	return cid
 }
