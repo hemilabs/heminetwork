@@ -153,15 +153,6 @@ func (r *MockRouter) StartSign(cid CeremonyID, parties []Identity, threshold int
 	return nil
 }
 
-// HashTSSMessage computes the hash that should be signed for a TSSMessage.
-// Hash = SHA256(CeremonyID || Data)
-func HashTSSMessage(cid CeremonyID, data []byte) []byte {
-	h := sha256.New()
-	h.Write(cid[:])
-	h.Write(data)
-	return h.Sum(nil)
-}
-
 // RouteTSSMessage routes a message after verifying the signature.
 func (r *MockRouter) RouteTSSMessage(msg TSSMessage) error {
 	r.mu.Lock()
