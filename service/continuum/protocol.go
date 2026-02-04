@@ -373,15 +373,31 @@ type SignResponse struct {
 	Error      string     `json:"error,omitempty"`
 }
 
+// TSSMsgFlags encodes broadcast and committee routing metadata as a
+// single bitfield on TSSMessage.
+type TSSMsgFlags byte
+
+const (
+	TSSFlagBroadcast TSSMsgFlags = 1 << iota // Broadcast to all parties
+	TSSFlagToOld                              // Route to old committee (reshare)
+	TSSFlagToNew                              // Route to new committee (reshare)
+	TSSFlagFromNew                            // Sender is new committee (reshare)
+)
+
 // TSSMessage wraps tss-lib protocol messages exchanged between parties.
 // The message MUST be signed to prevent injection by routing nodes.
 type TSSMessage struct {
 	CeremonyID CeremonyID   `json:"ceremonyid"` // Which ceremony this belongs to
-	Type       CeremonyType `json:"type"`       // Ceremony type hint
-	From       Identity     `json:"from"`       // Originating party (for sig verification)
-	Broadcast  bool         `json:"broadcast"`  // True if broadcast, false if P2P
-	Data       []byte       `json:"data"`       // tss-lib WireBytes()
-	Signature  []byte       `json:"signature"`  // Sign(Hash(CeremonyID || Data))
+	Type       CeremonyType `json:"type"`        // Ceremony type hint
+	From       Identity     `json:"from"`        // Originating party (for sig verification)
+	Flags      TSSMsgFlags  `json:"flags"`       // Broadcast + committee routing
+	Data       []byte       `json:"data"`        // tss-lib WireBytes()
+	Signature  []byte       `json:"signature"`   // Sign(Hash(CeremonyID || Data))
+}
+
+// IsBroadcast reports whether the message is broadcast to all parties.
+func (m TSSMessage) IsBroadcast() bool {
+	return m.Flags&TSSFlagBroadcast != 0
 }
 
 // CeremonyResult signals ceremony completion to the router.
