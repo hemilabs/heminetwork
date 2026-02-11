@@ -23,8 +23,8 @@ const (
 	daemonName      = "transfunctionerd"
 	defaultLogLevel = daemonName + "=INFO"
 	// defaultNetwork  = "mainnet"
-	defaultHome           = "~/." + daemonName
-	defaultMaxConnections = 8
+	defaultHome        = "~/." + daemonName
+	defaultPeersWanted = 8
 )
 
 var (
@@ -57,10 +57,10 @@ var (
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
 		},
-		"TRF_MAX_CONNECTIONS": config.Config{
-			Value:        &cfg.MaxConnections,
-			DefaultValue: defaultMaxConnections,
-			Help:         "maximum allowed connections to transfuctionerd at a time",
+		"TRF_PEERS_WANTED": config.Config{
+			Value:        &cfg.PeersWanted,
+			DefaultValue: defaultPeersWanted,
+			Help:         "target number of peer connections to maintain",
 			Print:        config.PrintAll,
 		},
 		"TRF_PPROF_ADDRESS": config.Config{
