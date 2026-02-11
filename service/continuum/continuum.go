@@ -757,7 +757,12 @@ func (s *Server) Run(pctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("secret: %w", err)
 	}
-	s.cfg.PrivateKey = "" // hopefully PrivateKey is reaped later.
+	// TODO(go1.26): wrap key loading in runtime/secret.Do for forward
+	// secrecy.  Go strings are immutable so we cannot zero the backing
+	// array; setting to "" only drops the reference.  secret.Do will
+	// zero stack, registers, and heap allocations when they become
+	// unreachable.  Requires GOEXPERIMENT=runtimesecret.
+	s.cfg.PrivateKey = ""
 
 	// Setup home
 	s.cfg.Home, err = homedir.Expand(s.cfg.Home)
