@@ -5,6 +5,7 @@
 package continuum
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/json"
@@ -395,7 +396,7 @@ func (n *TSSNode) waitKeygenEnd(cid CeremonyID, endCh <-chan *keygen.LocalPartyS
 
 		n.t.Logf("Node %s: keygen complete, keyID=%s", n.id, keyID)
 
-	case <-time.After(5 * time.Minute):
+	case <-n.t.Context().Done():
 		n.t.Logf("Node %s: keygen timeout", n.id)
 	}
 }
@@ -411,33 +412,38 @@ func (n *TSSNode) waitSignEnd(cid CeremonyID, endCh <-chan *common.SignatureData
 
 		n.t.Logf("Node %s: signing complete", n.id)
 
-	case <-time.After(5 * time.Minute):
+	case <-n.t.Context().Done():
 		n.t.Logf("Node %s: signing timeout", n.id)
 	}
 }
 
 func (n *TSSNode) WaitCeremony(cid CeremonyID, timeout time.Duration) (any, error) {
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(n.t.Context(), timeout)
+	defer cancel()
 
 	// Wait for ceremony to be registered (async message processing)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
 	var ac *activeCeremony
-	for time.Now().Before(deadline) {
+	for ac == nil {
 		n.ceremoniesMu.Lock()
 		ac = n.ceremonies[cid]
 		n.ceremoniesMu.Unlock()
 		if ac != nil {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if ac == nil {
-		return nil, errors.New("unknown ceremony")
+		select {
+		case <-ctx.Done():
+			return nil, errors.New("unknown ceremony")
+		case <-tick.C:
+		}
 	}
 
 	select {
 	case result := <-ac.endCh:
 		return result, nil
-	case <-time.After(time.Until(deadline)):
+	case <-ctx.Done():
 		return nil, errors.New("timeout")
 	}
 }
@@ -523,7 +529,7 @@ func TestRPCIntegrationKeygen(t *testing.T) {
 	// Wait for completion
 	var keyID string
 	for _, node := range nodes {
-		result, err := node.WaitCeremony(cid, 2*time.Minute)
+		result, err := node.WaitCeremony(cid, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Node %s failed: %v", node.id, err)
 		}
@@ -579,7 +585,7 @@ func TestRPCIntegrationKeygenAndSign(t *testing.T) {
 	var keyID string
 	var pubKey *ecdsa.PublicKey
 	for _, node := range nodes {
-		result, err := node.WaitCeremony(keygenCID, 2*time.Minute)
+		result, err := node.WaitCeremony(keygenCID, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Keygen failed: %v", err)
 		}
@@ -614,7 +620,7 @@ func TestRPCIntegrationKeygenAndSign(t *testing.T) {
 
 	// Wait for signatures and verify
 	for _, node := range nodes {
-		result, err := node.WaitCeremony(signCID, 2*time.Minute)
+		result, err := node.WaitCeremony(signCID, 30*time.Second)
 		if err != nil {
 			t.Fatalf("Sign failed: %v", err)
 		}
@@ -699,7 +705,7 @@ func TestRPCIntegrationSignWithoutKey(t *testing.T) {
 	}
 
 	// Should fail - no key
-	_, err := nodes[0].WaitCeremony(cid, 5*time.Second)
+	_, err := nodes[0].WaitCeremony(cid, 2*time.Second)
 	if err == nil {
 		t.Fatal("Should have failed - no key exists")
 	}
