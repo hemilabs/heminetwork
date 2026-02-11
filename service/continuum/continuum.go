@@ -223,11 +223,12 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 		switch v := payload.(type) {
 		case *PingRequest:
 			err := t.Write(s.secret.Identity, PingResponse{
-				OriginTimestamp: payload.(*PingRequest).OriginTimestamp,
+				OriginTimestamp: v.OriginTimestamp,
 				PeerTimestamp:   time.Now().Unix(),
 			})
 			if err != nil {
-				panic(err)
+				log.Warningf("ping response %v: %v", id, err)
+				return
 			}
 
 		case *PeerNotify:
