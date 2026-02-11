@@ -98,12 +98,14 @@ func newRPCTSSNode(t *testing.T, preParams *keygen.LocalPreParams) *rpcTSSNode {
 		t.Fatalf("NewSecret: %v", err)
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	lc := &net.ListenConfig{}
+	listener, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
+		cancel()
 		t.Fatalf("listen: %v", err)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	return &rpcTSSNode{
 		t:          t,
