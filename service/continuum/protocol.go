@@ -153,6 +153,11 @@ const (
 	PTSSMessage      PayloadType = "tss"
 	PCeremonyResult  PayloadType = "ceremony-result"
 	PCeremonyAbort   PayloadType = "ceremony-abort"
+
+	// Gossip
+	PPeerNotify       PayloadType = "peer-notify"
+	PPeerListRequest  PayloadType = "peer-list-request"
+	PPeerListResponse PayloadType = "peer-list-response"
 )
 
 var (
@@ -170,6 +175,9 @@ var (
 		reflect.TypeOf(TSSMessage{}):      PTSSMessage,
 		reflect.TypeOf(CeremonyResult{}):  PCeremonyResult,
 		reflect.TypeOf(CeremonyAbort{}):   PCeremonyAbort,
+		reflect.TypeOf(PeerNotify{}):      PPeerNotify,
+		reflect.TypeOf(PeerListRequest{}):  PPeerListRequest,
+		reflect.TypeOf(PeerListResponse{}): PPeerListResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -267,6 +275,28 @@ type PingRequest struct {
 type PingResponse struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Copy the value back
 	PeerTimestamp   int64 `json:"peertimestamp"`   // Remote timestamp
+}
+
+// PeerRecord describes a known peer for gossip exchange.
+type PeerRecord struct {
+	Identity Identity `json:"identity"`
+	Address  string   `json:"address"`   // host:port
+	Version  uint32   `json:"version"`   // ProtocolVersion at time of discovery
+	LastSeen int64    `json:"last_seen"` // unix timestamp
+}
+
+// PeerNotify announces that the sender has new peer information.
+// The receiver may request the full list if interested.
+type PeerNotify struct {
+	Count int `json:"count"` // number of peers we know about
+}
+
+// PeerListRequest requests the sender's known peer list.
+type PeerListRequest struct{}
+
+// PeerListResponse contains the sender's known peer list.
+type PeerListResponse struct {
+	Peers []PeerRecord `json:"peers"`
 }
 
 type KeygenRequest struct {
@@ -379,20 +409,20 @@ type TSSMsgFlags byte
 
 const (
 	TSSFlagBroadcast TSSMsgFlags = 1 << iota // Broadcast to all parties
-	TSSFlagToOld                              // Route to old committee (reshare)
-	TSSFlagToNew                              // Route to new committee (reshare)
-	TSSFlagFromNew                            // Sender is new committee (reshare)
+	TSSFlagToOld                             // Route to old committee (reshare)
+	TSSFlagToNew                             // Route to new committee (reshare)
+	TSSFlagFromNew                           // Sender is new committee (reshare)
 )
 
 // TSSMessage wraps tss-lib protocol messages exchanged between parties.
 // The message MUST be signed to prevent injection by routing nodes.
 type TSSMessage struct {
 	CeremonyID CeremonyID   `json:"ceremonyid"` // Which ceremony this belongs to
-	Type       CeremonyType `json:"type"`        // Ceremony type hint
-	From       Identity     `json:"from"`        // Originating party (for sig verification)
-	Flags      TSSMsgFlags  `json:"flags"`       // Broadcast + committee routing
-	Data       []byte       `json:"data"`        // tss-lib WireBytes()
-	Signature  []byte       `json:"signature"`   // Sign(Hash(CeremonyID || Data))
+	Type       CeremonyType `json:"type"`       // Ceremony type hint
+	From       Identity     `json:"from"`       // Originating party (for sig verification)
+	Flags      TSSMsgFlags  `json:"flags"`      // Broadcast + committee routing
+	Data       []byte       `json:"data"`       // tss-lib WireBytes()
+	Signature  []byte       `json:"signature"`  // Sign(Hash(CeremonyID || Data))
 }
 
 // IsBroadcast reports whether the message is broadcast to all parties.
@@ -792,6 +822,31 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
 	return &encryptionKey, nil
 }
 
+// readJSONLine reads from conn one byte at a time until it encounters a
+// newline, then unmarshals the accumulated bytes into v.  This avoids
+// json.NewDecoder which buffers ahead and can consume bytes that belong
+// to subsequent encrypted messages on the same connection.
+func readJSONLine(conn net.Conn, v any) error {
+	const maxLen = 4096
+	var buf []byte
+	b := make([]byte, 1)
+	for {
+		n, err := conn.Read(b)
+		if err != nil {
+			return err
+		}
+		if n == 1 {
+			buf = append(buf, b[0])
+			if len(buf) > maxLen {
+				return fmt.Errorf("transport request too large: %d bytes", len(buf))
+			}
+			if b[0] == '\n' {
+				return json.Unmarshal(buf, v)
+			}
+		}
+	}
+}
+
 // KeyExchange performs a series of reads and writes to establish a transport
 // encryption key between the server and the client. Note that the server
 // dictates the curve.
@@ -827,13 +882,13 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		}
 
 		// Read TransportRequest
-		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+		if err := readJSONLine(conn, &tr); err != nil {
 			return err
 		}
 		// log.Infof("server read %v", spew.Sdump(tr))
 	} else {
 		// Read TransportRequest
-		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+		if err := readJSONLine(conn, &tr); err != nil {
 			return err
 		}
 		// log.Infof("client read %v", spew.Sdump(tr))
