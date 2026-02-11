@@ -43,7 +43,7 @@ import (
 // receiver will drop the connection and potentially blacklist the caller.
 //
 // Communication should occur between a transport "client" and a "server",
-// where the server determines the type of Curve and encryption key shared
+// where the server determines the type of Curve and encryption keys derived
 // by both. Communication between these two parties is initiated by performing
 // a key exchange, followed by a handshake where the other party's identity
 // is verified. After this, envelopes can be shared freely between both sides.
@@ -84,17 +84,22 @@ import (
 //
 //	3. Both sides verify the transport protocol version in TransportRequest.
 //	4. Both sides calculate the shared transport secret using Elliptic
-//	Curve Diffie-Hellman (ECDH). Next they derive a shared transport
-//	encryption key (STK) using an HMAC-based key derivation function (HKDF).
-//	The hash used is SHA256, salt remains unused at this time and the info
-//	is "continuum-transport-v1".
+//	Curve Diffie-Hellman (ECDH). Next they derive two directional
+//	shared transport encryption keys using an HMAC-based key derivation
+//	function (HKDF). The hash used is SHA256, salt is
+//	"continuum-hkdf-salt-v1" and the info strings are
+//	"continuum-s2c-v1" (server-to-client) and "continuum-c2s-v1"
+//	(client-to-server). This ensures that each direction uses a
+//	unique key, containing the blast radius if a nonce ever repeats.
 //
-// At this point, both sides have an identical STK which they use to encrypt
-// all packets going forward using NaCl's secretbox. Protocol requires one
+// At this point, both sides have directional keys which they use to encrypt
+// all packets going forward using NaCl's secretbox. The server encrypts with
+// the s2c key and decrypts with the c2s key; the client does the inverse.
+// Protocol requires one
 // packet per secretbox and the wire format is 24 bits of cleartext that
 // designates encrypted blob length. The encrypted blob comprises of a 24 byte
 // nonce plus ciphertext. Decrypting is done by calling secretbox open using
-// STK and nonce.
+// the directional key and nonce.
 //
 // Note on nonces: When using secretbox it is imperative to not use duplicate
 // nonces. In order to prevent reuse both sides generate a random 256 bit key
@@ -713,12 +718,13 @@ type Transport struct {
 	mtx sync.Mutex
 
 	// Transport encryption bits
-	isServer      bool             // server or client
-	curve         ecdh.Curve       // transport encryption curve
-	us            *ecdh.PrivateKey // our transport ephemeral private key
-	them          *ecdh.PublicKey  // their ephemeral public key
-	encryptionKey *[32]byte        // shared symmetric ephemeral encryption key
-	nonce         *Nonce           // transport nonce
+	isServer   bool             // server or client
+	curve      ecdh.Curve       // transport encryption curve
+	us         *ecdh.PrivateKey // our transport ephemeral private key
+	them       *ecdh.PublicKey  // their ephemeral public key
+	encryptKey *[32]byte        // directional encryption key (our sends)
+	decryptKey *[32]byte        // directional decryption key (their sends)
+	nonce      *Nonce           // transport nonce
 
 	conn net.Conn
 }
@@ -802,24 +808,34 @@ func (t *Transport) Close() error {
 	return t.conn.Close()
 }
 
-// KeyExchange returns a shared encryption key for the provided private and
-// public keys. The returned encryption key is derived from the shared ECDH
-// secret using HKDF and has 256 bits of entropy.
-func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
+// KeyExchange returns directional encryption keys for the provided private and
+// public keys. The keys are derived from the shared ECDH secret using HKDF
+// with SHA256, a protocol-specific salt, and directional info strings.
+// Returns (serverToClientKey, clientToServerKey, error).
+func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, *[32]byte, error) {
 	// Shared secret seed.
 	shared, err := us.ECDH(them)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Derive shared ephemeral encryption key.
-	var encryptionKey [32]byte
-	er := hkdf.New(sha256.New, shared, nil, []byte("continuum-transport-v1"))
-	if _, err := io.ReadFull(er, encryptionKey[:]); err != nil {
-		return nil, err
+	hkdfSalt := []byte("continuum-hkdf-salt-v1")
+
+	// Derive server-to-client key.
+	var s2cKey [32]byte
+	s2c := hkdf.New(sha256.New, shared, hkdfSalt, []byte("continuum-s2c-v1"))
+	if _, err := io.ReadFull(s2c, s2cKey[:]); err != nil {
+		return nil, nil, err
 	}
 
-	return &encryptionKey, nil
+	// Derive client-to-server key.
+	var c2sKey [32]byte
+	c2s := hkdf.New(sha256.New, shared, hkdfSalt, []byte("continuum-c2s-v1"))
+	if _, err := io.ReadFull(c2s, c2sKey[:]); err != nil {
+		return nil, nil, err
+	}
+
+	return &s2cKey, &c2sKey, nil
 }
 
 // readJSONLine reads from conn one byte at a time until it encounters a
@@ -847,8 +863,9 @@ func readJSONLine(conn net.Conn, v any) error {
 	}
 }
 
-// KeyExchange performs a series of reads and writes to establish a transport
-// encryption key between the server and the client. Note that the server
+// KeyExchange performs a series of reads and writes to establish directional
+// transport encryption keys between the server and the client. Each side
+// derives a server-to-client and client-to-server key from ECDH. The server
 // dictates the curve.
 func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	var (
@@ -918,7 +935,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	encryptionKey, err := KeyExchange(t.us, them)
+	s2cKey, c2sKey, err := KeyExchange(t.us, them)
 	if err != nil {
 		return err
 	}
@@ -933,9 +950,15 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		return err
 	}
 
-	// Finish KX
+	// Assign directional keys based on role.
 	t.mtx.Lock()
-	t.encryptionKey = encryptionKey
+	if t.isServer {
+		t.encryptKey = s2cKey
+		t.decryptKey = c2sKey
+	} else {
+		t.encryptKey = c2sKey
+		t.decryptKey = s2cKey
+	}
 	t.them = them
 	t.nonce = nonce
 	t.conn = conn
@@ -960,7 +983,7 @@ func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
 	binary.BigEndian.PutUint32(size[:], uint32(ts))
 	nonce := t.nonce.Next()
 	blob := secretbox.Seal(append(size[1:4], nonce[:]...), cleartext, nonce,
-		t.encryptionKey)
+		t.encryptKey)
 
 	// diagnostic
 	if ts != len(blob)-3 {
@@ -981,7 +1004,7 @@ func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
 	var nonce [TransportNonceSize]byte
 	copy(nonce[:], ciphertext[:TransportNonceSize])
 	cleartext, ok := secretbox.Open(nil, ciphertext[TransportNonceSize:], &nonce,
-		t.encryptionKey)
+		t.decryptKey)
 	if !ok {
 		return nil, ErrDecrypt
 	}
