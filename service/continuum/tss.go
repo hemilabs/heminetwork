@@ -698,6 +698,7 @@ func (t *tssImpl) buildSigningPartyContext(
 
 	return sorted, ourPid, pidToID, nil
 }
+
 // For the new committee, keys are XORed with 1 so tss-lib sees
 // disjoint committees even when parties overlap. Returns both
 // id-based and key-based identity maps for message routing.
@@ -706,8 +707,8 @@ func (t *tssImpl) buildResharePartyContext(
 	isNew bool,
 ) (tss.SortedPartyIDs, *tss.PartyID, map[string]Identity, map[string]Identity, error) {
 	pids := make([]*tss.PartyID, len(parties))
-	pidToID := make(map[string]Identity)   // PartyID.Id → Identity
-	keyToID := make(map[string]Identity)   // PartyID key bytes → Identity
+	pidToID := make(map[string]Identity) // PartyID.Id → Identity
+	keyToID := make(map[string]Identity) // PartyID key bytes → Identity
 	for i, id := range parties {
 		idStr := id.String()
 		key := new(big.Int).SetBytes(id[:])
