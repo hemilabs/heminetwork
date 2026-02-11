@@ -900,7 +900,7 @@ func TestConnKeyExchange(t *testing.T) {
 			// Create blank transport
 			clientTransport := new(Transport)
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			var wg sync.WaitGroup
 
@@ -1062,7 +1062,7 @@ func TestKeyExchangeErrors(t *testing.T) {
 				transport = new(Transport)
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 
 			// Server
@@ -1341,7 +1341,7 @@ func TestHandshakeErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 
 			// Server
@@ -1448,7 +1448,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 			// Create blank transport
 			clientTransport := new(Transport)
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			var wg sync.WaitGroup
 
@@ -1588,7 +1588,7 @@ func TestConnHandshake(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			var wg sync.WaitGroup
 
