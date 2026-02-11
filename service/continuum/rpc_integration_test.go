@@ -139,7 +139,7 @@ func (r *TSSRouter) Broadcast(from Identity, cid CeremonyID, msg tss.Message) {
 		tssMsg := TSSMessage{
 			CeremonyID: cid,
 			From:       from,
-			Flags:     TSSFlagBroadcast,
+			Flags:      TSSFlagBroadcast,
 			Data:       data,
 			Signature:  sig,
 		}
@@ -741,7 +741,7 @@ func TestRPCIntegrationMITMMessageInjection(t *testing.T) {
 	fakeMsg := TSSMessage{
 		CeremonyID: cid,
 		From:       nodes[1].id, // Claims to be node 1
-		Flags:     TSSFlagBroadcast,
+		Flags:      TSSFlagBroadcast,
 		Data:       fakeData,
 		Signature:  fakeSig, // But signed by attacker
 	}
