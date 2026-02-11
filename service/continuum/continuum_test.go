@@ -12,10 +12,17 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,6 +31,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
 )
@@ -308,5 +316,456 @@ func TestECDHSecretBox(t *testing.T) {
 	}
 	if !bytes.Equal(decrMsg2, msg2) {
 		t.Fatal("failed to decrypt")
+	}
+}
+
+// newTestServer creates a Server pre-configured for testing. It generates a
+// fresh identity, sets up a temporary home directory with cached Paillier
+// primes, and returns the configured server. The caller must call Run().
+func newTestServer(t *testing.T, preParams []keygen.LocalPreParams, idx int, listenAddr string, connect []string) *Server {
+	t.Helper()
+
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	privKeyHex := hex.EncodeToString(secret.privateKey.Serialize())
+
+	home := filepath.Join(t.TempDir(), fmt.Sprintf("node%d", idx))
+	dataDir := filepath.Join(home, secret.String())
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write cached preparams to avoid slow generation.
+	if idx < len(preParams) {
+		pp, err := json.MarshalIndent(preParams[idx], "  ", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dataDir, "preparams.json"), pp, 0o400); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &Config{
+		Home:          home,
+		ListenAddress: listenAddr,
+		LogLevel:      "continuum=DEBUG",
+		PrivateKey:    privKeyHex,
+		PeersWanted:   8,
+		Connect:       connect,
+	}
+
+	server, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return server
+}
+
+// waitForListenAddress polls until the server has a bound listen address.
+func waitForListenAddress(t *testing.T, s *Server, timeout time.Duration) string {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		addr := s.ListenAddress()
+		if addr != "" {
+			return addr
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("server did not bind listen address")
+	return ""
+}
+
+// waitForSessions polls until the server has at least n sessions.
+func waitForSessions(t *testing.T, s *Server, n int, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ids := s.SessionIdentities()
+		if len(ids) >= n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server %v: expected %d sessions, got %d",
+		s.Identity(), n, len(s.SessionIdentities()))
+}
+
+// waitForPeers polls until the server knows at least n peers.
+func waitForPeers(t *testing.T, s *Server, n int, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if s.PeerCount() >= n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server %v: expected %d peers, got %d",
+		s.Identity(), n, s.PeerCount())
+}
+
+func TestSessionSymmetry(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	// Server A: listens, no outbound connections.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errA := make(chan error, 1)
+	go func() {
+		errA <- serverA.Run(ctx)
+	}()
+
+	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	t.Logf("server A listening on %v, identity %v", addrA, serverA.Identity())
+
+	// Server B: connects to A.
+	serverB := newTestServer(t, preParams, 1, "localhost:0", []string{addrA})
+
+	errB := make(chan error, 1)
+	go func() {
+		errB <- serverB.Run(ctx)
+	}()
+
+	waitForListenAddress(t, serverB, 5*time.Second)
+	t.Logf("server B identity %v", serverB.Identity())
+
+	// Both sides must register each other.
+	waitForSessions(t, serverA, 1, 10*time.Second)
+	waitForSessions(t, serverB, 1, 10*time.Second)
+
+	// Verify A has B's identity.
+	aSessions := serverA.SessionIdentities()
+	if len(aSessions) != 1 {
+		t.Fatalf("server A: expected 1 session, got %d", len(aSessions))
+	}
+	if aSessions[0] != serverB.Identity() {
+		t.Fatalf("server A session mismatch: got %v, want %v",
+			aSessions[0], serverB.Identity())
+	}
+
+	// Verify B has A's identity.
+	bSessions := serverB.SessionIdentities()
+	if len(bSessions) != 1 {
+		t.Fatalf("server B: expected 1 session, got %d", len(bSessions))
+	}
+	if bSessions[0] != serverA.Identity() {
+		t.Fatalf("server B session mismatch: got %v, want %v",
+			bSessions[0], serverA.Identity())
+	}
+
+	t.Logf("session symmetry verified: A sees B, B sees A")
+
+	cancel()
+
+	// Drain errors.
+	if err := <-errA; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server A: %v", err)
+	}
+	if err := <-errB; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server B: %v", err)
+	}
+}
+
+func TestValidatePeerAddress(t *testing.T) {
+	tests := []struct {
+		name    string
+		addr    string
+		wantErr bool
+	}{
+		{"valid ip4", "192.168.1.1:8080", false},
+		{"valid ip6", "[::1]:8080", false},
+		{"valid hostname", "example.com:8080", false},
+		{"valid localhost", "127.0.0.1:45067", false},
+		{"empty", "", true},
+		{"no port", "192.168.1.1", true},
+		{"port zero", "192.168.1.1:0", true},
+		{"empty host", ":8080", true},
+		{"control char null", "192.168.1.1\x00:8080", true},
+		{"control char tab", "192.168.1.1\t:8080", true},
+		{"control char newline", "192.168.1.1\n:8080", true},
+		{"just port", ":0", true},
+		{"too long", string(make([]byte, 300)), true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validatePeerAddress(tc.addr)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validatePeerAddress(%q) = %v, wantErr %v",
+					tc.addr, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestAddPeerSelf(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() {
+		errC <- s.Run(ctx)
+	}()
+	waitForListenAddress(t, s, 5*time.Second)
+
+	// addPeer with self identity must return false.
+	got := s.addPeer(ctx, PeerRecord{
+		Identity: s.Identity(),
+		Address:  "10.0.0.1:9999",
+	})
+	if got {
+		t.Fatal("addPeer accepted self identity")
+	}
+
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server: %v", err)
+	}
+}
+
+func TestGossipThreeNodes(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Topology: A <-> B <-> C
+	// A and C never connect directly.
+	// Gossip must propagate: A learns C, C learns A.
+
+	// Start A.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	t.Logf("A: %v at %s", serverA.Identity(), addrA)
+
+	// Start B, connects to A.
+	serverB := newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrA})
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+	addrB := waitForListenAddress(t, serverB, 5*time.Second)
+	t.Logf("B: %v at %s", serverB.Identity(), addrB)
+
+	// Wait for A<->B session.
+	waitForSessions(t, serverA, 1, 10*time.Second)
+	waitForSessions(t, serverB, 1, 10*time.Second)
+	t.Logf("A<->B session established")
+
+	// Start C, connects to B.
+	serverC := newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrB})
+	errC := make(chan error, 1)
+	go func() { errC <- serverC.Run(ctx) }()
+	waitForListenAddress(t, serverC, 5*time.Second)
+	t.Logf("C: %v", serverC.Identity())
+
+	// Wait for B<->C session.
+	waitForSessions(t, serverB, 2, 10*time.Second)
+	waitForSessions(t, serverC, 1, 10*time.Second)
+	t.Logf("B<->C session established")
+
+	// Gossip: A must learn about C (3 peers: self + B + C).
+	// C must learn about A (3 peers: self + B + A).
+	waitForPeers(t, serverA, 3, 15*time.Second)
+	waitForPeers(t, serverC, 3, 15*time.Second)
+
+	// Verify A knows C's identity.
+	aPeers := serverA.KnownPeers()
+	foundC := false
+	for _, pr := range aPeers {
+		if pr.Identity == serverC.Identity() {
+			foundC = true
+			break
+		}
+	}
+	if !foundC {
+		t.Fatalf("A does not know C; A peers: %v", aPeers)
+	}
+
+	// Verify C knows A's identity.
+	cPeers := serverC.KnownPeers()
+	foundA := false
+	for _, pr := range cPeers {
+		if pr.Identity == serverA.Identity() {
+			foundA = true
+			break
+		}
+	}
+	if !foundA {
+		t.Fatalf("C does not know A; C peers: %v", cPeers)
+	}
+
+	t.Logf("gossip verified: A knows C, C knows A")
+
+	cancel()
+
+	if err := <-errA; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server A: %v", err)
+	}
+	if err := <-errB; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server B: %v", err)
+	}
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server C: %v", err)
+	}
+}
+
+// TestPeerVersionNonZero verifies that all peer records — both self and
+// gossip-learned — carry a non-zero Version.  Zero is reserved as an
+// invalid sentinel to catch uninitialized structs.
+func TestPeerVersionNonZero(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+
+	serverB := newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrA})
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+	waitForListenAddress(t, serverB, 5*time.Second)
+
+	// Wait for gossip to propagate.
+	waitForPeers(t, serverA, 2, 10*time.Second)
+	waitForPeers(t, serverB, 2, 10*time.Second)
+
+	// Every peer record must have Version > 0.
+	for _, pr := range serverA.KnownPeers() {
+		if pr.Version == 0 {
+			t.Fatalf("peer %v has Version 0 (zero-value sentinel)",
+				pr.Identity)
+		}
+	}
+	for _, pr := range serverB.KnownPeers() {
+		if pr.Version == 0 {
+			t.Fatalf("peer %v has Version 0 (zero-value sentinel)",
+				pr.Identity)
+		}
+	}
+
+	cancel()
+	if err := <-errA; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server A: %v", err)
+	}
+	if err := <-errB; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server B: %v", err)
+	}
+}
+
+
+func FuzzValidatePeerAddress(f *testing.F) {
+	f.Add("192.168.1.1:8080")
+	f.Add("[::1]:8080")
+	f.Add("example.com:8080")
+	f.Add("")
+	f.Add(":0")
+	f.Add(":8080")
+	f.Add("192.168.1.1:0")
+	f.Add("192.168.1.1")
+	f.Add(string(make([]byte, 300)))
+
+	f.Fuzz(func(t *testing.T, addr string) {
+		_ = validatePeerAddress(addr) // must not panic
+	})
+}
+
+func TestReadJSONLine(t *testing.T) {
+	type msg struct {
+		Name string `json:"name"`
+	}
+
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+		want    string
+	}{
+		{"valid", `{"name":"alice"}` + "\n", false, "alice"},
+		{"valid trailing data", `{"name":"bob"}` + "\nextra", false, "bob"},
+		{"malformed json", `{bad json}` + "\n", true, ""},
+		{"empty line", "\n", true, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server, client := net.Pipe()
+			defer server.Close()
+			defer client.Close()
+
+			go func() {
+				server.Write([]byte(tc.input))
+				server.Close()
+			}()
+
+			var got msg
+			err := readJSONLine(client, &got)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("readJSONLine() = %v, wantErr %v",
+					err, tc.wantErr)
+			}
+			if !tc.wantErr && got.Name != tc.want {
+				t.Fatalf("got name %q, want %q",
+					got.Name, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadJSONLineOverflow(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	// Write 5000 bytes without a newline — must trigger
+	// the 4096 max size guard.
+	go func() {
+		buf := make([]byte, 5000)
+		for i := range buf {
+			buf[i] = 'x'
+		}
+		server.Write(buf)
+		server.Close()
+	}()
+
+	var got struct{}
+	err := readJSONLine(client, &got)
+	if err == nil {
+		t.Fatal("expected overflow error")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadJSONLineEOF(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+
+	// Close immediately — readJSONLine must return an error,
+	// not hang.
+	server.Close()
+
+	var got struct{}
+	err := readJSONLine(client, &got)
+	if err == nil {
+		t.Fatal("expected EOF error")
 	}
 }
