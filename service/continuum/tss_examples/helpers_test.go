@@ -9,12 +9,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
-	"fmt"
 	"testing"
 	"time"
 
@@ -305,8 +305,7 @@ func doReshare(t *testing.T, curve *tss.Parameters, oldThreshold, newThreshold i
 
 			if !msg.IsToOldCommittee() || msg.IsToOldAndNewCommittees() {
 				for _, destPID := range dest {
-					destKey := string(destPID.GetKey())
-					if p, ok := newPartyByKey[destKey]; ok {
+					if p, ok := newPartyByKey[string(destPID.GetKey())]; ok {
 						go partyUpdateByKey(p, msg, errCh)
 					}
 				}
@@ -406,7 +405,7 @@ func loadOrGeneratePreParams(t *testing.T, count int) []keygen.LocalPreParams {
 	data, err := json.MarshalIndent(params, "", "  ")
 	if err != nil {
 		t.Logf("Warning: failed to marshal preparams: %v", err)
-	} else if err := os.WriteFile(path, data, 0644); err != nil {
+	} else if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Logf("Warning: failed to save preparams to %s: %v", path, err)
 	} else {
 		t.Logf("Saved %d preparams to %s", count, path)
