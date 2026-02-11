@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -453,6 +453,8 @@ func (n *TSSNode) GetKey(keyID string) *keygen.LocalPartySaveData {
 // =============================================================================
 
 func loadPreParams(t *testing.T, count int) []keygen.LocalPreParams {
+	t.Helper()
+
 	_, thisFile, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(thisFile)
 	path := filepath.Join(dir, "tss_examples", "preparams.json")

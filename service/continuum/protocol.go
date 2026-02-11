@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -162,20 +162,20 @@ const (
 
 var (
 	pt2str = map[reflect.Type]PayloadType{
-		reflect.TypeOf(HelloRequest{}):    PHelloRequest,
-		reflect.TypeOf(HelloResponse{}):   PHelloResponse,
-		reflect.TypeOf(PingRequest{}):     PPingRequest,
-		reflect.TypeOf(PingResponse{}):    PPingResponse,
-		reflect.TypeOf(KeygenRequest{}):   PKeygenRequest,
-		reflect.TypeOf(KeygenResponse{}):  PKeygenResponse,
-		reflect.TypeOf(ReshareRequest{}):  PReshareRequest,
-		reflect.TypeOf(ReshareResponse{}): PReshareResponse,
-		reflect.TypeOf(SignRequest{}):     PSignRequest,
-		reflect.TypeOf(SignResponse{}):    PSignResponse,
-		reflect.TypeOf(TSSMessage{}):      PTSSMessage,
-		reflect.TypeOf(CeremonyResult{}):  PCeremonyResult,
-		reflect.TypeOf(CeremonyAbort{}):   PCeremonyAbort,
-		reflect.TypeOf(PeerNotify{}):      PPeerNotify,
+		reflect.TypeOf(HelloRequest{}):     PHelloRequest,
+		reflect.TypeOf(HelloResponse{}):    PHelloResponse,
+		reflect.TypeOf(PingRequest{}):      PPingRequest,
+		reflect.TypeOf(PingResponse{}):     PPingResponse,
+		reflect.TypeOf(KeygenRequest{}):    PKeygenRequest,
+		reflect.TypeOf(KeygenResponse{}):   PKeygenResponse,
+		reflect.TypeOf(ReshareRequest{}):   PReshareRequest,
+		reflect.TypeOf(ReshareResponse{}):  PReshareResponse,
+		reflect.TypeOf(SignRequest{}):      PSignRequest,
+		reflect.TypeOf(SignResponse{}):     PSignResponse,
+		reflect.TypeOf(TSSMessage{}):       PTSSMessage,
+		reflect.TypeOf(CeremonyResult{}):   PCeremonyResult,
+		reflect.TypeOf(CeremonyAbort{}):    PCeremonyAbort,
+		reflect.TypeOf(PeerNotify{}):       PPeerNotify,
 		reflect.TypeOf(PeerListRequest{}):  PPeerListRequest,
 		reflect.TypeOf(PeerListResponse{}): PPeerListResponse,
 	}
@@ -838,7 +838,7 @@ func readJSONLine(conn net.Conn, v any) error {
 		if n == 1 {
 			buf = append(buf, b[0])
 			if len(buf) > maxLen {
-				return fmt.Errorf("transport request too large: %d bytes", len(buf))
+				return fmt.Errorf("%w: %d bytes", ErrMessageTooLarge, len(buf))
 			}
 			if b[0] == '\n' {
 				return json.Unmarshal(buf, v)

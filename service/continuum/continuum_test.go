@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -21,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -524,9 +523,57 @@ func TestAddPeerSelf(t *testing.T) {
 	got := s.addPeer(ctx, PeerRecord{
 		Identity: s.Identity(),
 		Address:  "10.0.0.1:9999",
+		Version:  ProtocolVersion,
 	})
 	if got {
 		t.Fatal("addPeer accepted self identity")
+	}
+
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server: %v", err)
+	}
+}
+
+func TestAddPeerBadVersion(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() {
+		errC <- s.Run(ctx)
+	}()
+	waitForListenAddress(t, s, 5*time.Second)
+
+	other, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		version uint32
+		want    bool
+	}{
+		{"zero value sentinel", 0, false},
+		{"wrong version", ProtocolVersion + 1, false},
+		{"correct version", ProtocolVersion, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := s.addPeer(ctx, PeerRecord{
+				Identity: other.Identity,
+				Address:  "10.0.0.1:9999",
+				Version:  tc.version,
+			})
+			if got != tc.want {
+				t.Fatalf("addPeer(Version=%d) = %v, want %v",
+					tc.version, got, tc.want)
+			}
+		})
 	}
 
 	cancel()
@@ -671,7 +718,6 @@ func TestPeerVersionNonZero(t *testing.T) {
 	}
 }
 
-
 func FuzzValidatePeerAddress(f *testing.F) {
 	f.Add("192.168.1.1:8080")
 	f.Add("[::1]:8080")
@@ -711,7 +757,7 @@ func TestReadJSONLine(t *testing.T) {
 			defer client.Close()
 
 			go func() {
-				server.Write([]byte(tc.input))
+				_, _ = server.Write([]byte(tc.input))
 				server.Close()
 			}()
 
@@ -741,7 +787,7 @@ func TestReadJSONLineOverflow(t *testing.T) {
 		for i := range buf {
 			buf[i] = 'x'
 		}
-		server.Write(buf)
+		_, _ = server.Write(buf)
 		server.Close()
 	}()
 
@@ -750,8 +796,8 @@ func TestReadJSONLineOverflow(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected overflow error")
 	}
-	if !strings.Contains(err.Error(), "too large") {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, ErrMessageTooLarge) {
+		t.Fatalf("expected ErrMessageTooLarge, got: %v", err)
 	}
 }
 
