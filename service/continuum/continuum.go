@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	mrand "math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -45,6 +46,14 @@ const (
 	// single PeerListResponse to prevent memory exhaustion from a
 	// malicious peer.
 	maxGossipPeers = 256
+
+	// pingInterval is how often each session sends a heartbeat.
+	// Prime to avoid resonance with other periodic timers.
+	pingInterval = 61 * time.Second
+
+	// maintainInterval is how often the server checks whether it
+	// needs to dial additional peers.  Prime, distinct from ping.
+	maintainInterval = 67 * time.Second
 )
 
 var log = loggo.GetLogger(appName)
@@ -62,6 +71,8 @@ type Config struct {
 	ListenAddress           string
 	LogLevel                string
 	PeersWanted             int
+	PingInterval            time.Duration // 0 uses default (61s)
+	MaintainInterval        time.Duration // 0 uses default (67s)
 	PprofListenAddress      string
 	PrivateKey              string
 	PrometheusListenAddress string
@@ -193,6 +204,10 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 }
 
 func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
+	// Per-session context: cancelled when handle() exits (read
+	// error, shutdown, etc.), which also stops the pingLoop.
+	sessionCtx, sessionCancel := context.WithCancel(ctx)
+	defer sessionCancel()
 	defer func() {
 		if err := s.deleteSession(id); err != nil {
 			log.Errorf("delete session %v: %v", id, err)
@@ -202,6 +217,11 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 
 	log.Debugf("handle: %v", id)
 	defer log.Debugf("handle exit: %v", id)
+
+	// Start heartbeat goroutine.  It exits when sessionCtx is
+	// cancelled or when a ping write fails.
+	s.wg.Add(1)
+	go s.pingLoop(sessionCtx, id, t)
 
 	// Announce our peer count and request their list.  On initial
 	// session we always exchange; the count comparison in the
@@ -237,6 +257,11 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 				log.Warningf("ping response %v: %v", id, err)
 				return
 			}
+
+		case *PingResponse:
+			// Heartbeat received — peer is alive.  Refresh
+			// its TTL and update LastSeen.
+			s.refreshPeerLastSeen(sessionCtx, *id)
 
 		case *PeerNotify:
 			// Remote has v.Count peers.  If they know more
@@ -301,6 +326,167 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			log.Debugf("handle %v: unhandled %T", id, payload)
 		}
 	}
+}
+
+// pingLoop sends periodic PingRequest heartbeats to the peer.  It exits
+// when ctx is cancelled (handle() returned) or a write fails.
+func (s *Server) pingLoop(ctx context.Context, id *Identity, t *Transport) {
+	defer s.wg.Done()
+
+	interval := s.cfg.PingInterval
+	if interval == 0 {
+		interval = pingInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			err := t.Write(s.secret.Identity, PingRequest{
+				OriginTimestamp: time.Now().Unix(),
+			})
+			if err != nil {
+				log.Debugf("ping %v failed: %v", id, err)
+				return
+			}
+		}
+	}
+}
+
+// refreshPeerLastSeen updates a peer's LastSeen timestamp and refreshes
+// its TTL entry to prevent expiry.
+func (s *Server) refreshPeerLastSeen(ctx context.Context, id Identity) {
+	s.mtx.Lock()
+	pr, ok := s.peers[id]
+	if ok {
+		pr.LastSeen = time.Now().Unix()
+	}
+	s.mtx.Unlock()
+
+	if ok {
+		s.peersTTL.Put(ctx, peerTTL, id,
+			nil, s.peerExpired, nil)
+	}
+}
+
+// maintainConnections periodically checks whether the session count is
+// below PeersWanted and dials randomly-chosen known-but-unconnected
+// peers to fill the gap.
+func (s *Server) maintainConnections(ctx context.Context) {
+	defer s.wg.Done()
+
+	interval := s.cfg.MaintainInterval
+	if interval == 0 {
+		interval = maintainInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.mtx.RLock()
+			active := len(s.sessions)
+			want := s.cfg.PeersWanted
+			s.mtx.RUnlock()
+
+			if active < want {
+				s.connectRandom(ctx)
+			}
+		}
+	}
+}
+
+// connectRandom picks a random known peer that has no active session
+// and dials it.  Errors are logged, not fatal.
+func (s *Server) connectRandom(ctx context.Context) {
+	s.mtx.RLock()
+	candidates := make([]PeerRecord, 0, len(s.peers))
+	for id, pr := range s.peers {
+		if id == s.secret.Identity {
+			continue // skip self
+		}
+		if _, active := s.sessions[id]; active {
+			continue // already connected
+		}
+		candidates = append(candidates, *pr)
+	}
+	s.mtx.RUnlock()
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Pick one at random to avoid topology clustering.
+	pr := candidates[mrand.IntN(len(candidates))]
+	log.Infof("maintainConnections: dialing %v at %v",
+		pr.Identity, pr.Address)
+
+	s.wg.Add(1)
+	go s.connectPeer(ctx, pr.Address)
+}
+
+// connectPeer dials addr, performs key exchange and handshake, registers
+// the session, and enters handle().  Unlike connect(), errors are logged
+// rather than sent to errC — failed maintenance dials must not kill the
+// server.
+func (s *Server) connectPeer(ctx context.Context, addr string) {
+	defer s.wg.Done()
+
+	log.Debugf("connectPeer: %v", addr)
+	defer log.Debugf("connectPeer: %v exit", addr)
+
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		log.Warningf("connectPeer dial %v: %v", addr, err)
+		return
+	}
+
+	transport := new(Transport)
+	greatSuccess := false
+	defer func() {
+		if !greatSuccess {
+			if err := transport.Close(); err != nil {
+				log.Errorf("connectPeer close %v: %v", addr, err)
+			}
+		}
+	}()
+
+	if err := transport.KeyExchange(ctx, conn); err != nil {
+		log.Warningf("connectPeer kx %v: %v", addr, err)
+		return
+	}
+	them, err := transport.Handshake(ctx, s.secret)
+	if err != nil {
+		log.Warningf("connectPeer handshake %v: %v", addr, err)
+		return
+	}
+
+	if err := s.newSession(them, transport); err != nil {
+		log.Warningf("connectPeer session %v: %v", them, err)
+		return
+	}
+
+	s.addPeer(ctx, PeerRecord{
+		Identity: *them,
+		Address:  addr,
+		Version:  ProtocolVersion,
+		LastSeen: time.Now().Unix(),
+	})
+
+	log.Infof("connectPeer connected %v: %v", conn.RemoteAddr(), them)
+
+	greatSuccess = true
+	s.wg.Add(1)
+	s.handle(ctx, them, transport)
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -870,6 +1056,10 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go s.connectAll(ctx, errC)
 	}
+
+	// Periodically dial gossip-learned peers when below PeersWanted.
+	s.wg.Add(1)
+	go s.maintainConnections(ctx)
 
 	log.Infof("Identity: %v", s.secret)
 
