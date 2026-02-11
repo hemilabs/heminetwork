@@ -1167,7 +1167,7 @@ func (t *Transport) Read() (*Header, any, error) {
 func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 	request, err := t.encrypt(cleartext)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("encrypt: %w", err)
 	}
 
 	// Don't interleave writes
