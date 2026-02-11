@@ -366,47 +366,71 @@ func newTestServer(t *testing.T, preParams []keygen.LocalPreParams, idx int, lis
 func waitForListenAddress(t *testing.T, s *Server, timeout time.Duration) string {
 	t.Helper()
 
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
 		addr := s.ListenAddress()
 		if addr != "" {
 			return addr
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			t.Fatal("server did not bind listen address")
+			return ""
+		case <-tick.C:
+		}
 	}
-	t.Fatal("server did not bind listen address")
-	return ""
 }
 
 // waitForSessions polls until the server has at least n sessions.
 func waitForSessions(t *testing.T, s *Server, n int, timeout time.Duration) {
 	t.Helper()
 
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
 		ids := s.SessionIdentities()
 		if len(ids) >= n {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			t.Fatalf("server %v: expected %d sessions, got %d",
+				s.Identity(), n, len(s.SessionIdentities()))
+		case <-tick.C:
+		}
 	}
-	t.Fatalf("server %v: expected %d sessions, got %d",
-		s.Identity(), n, len(s.SessionIdentities()))
 }
 
 // waitForPeers polls until the server knows at least n peers.
 func waitForPeers(t *testing.T, s *Server, n int, timeout time.Duration) {
 	t.Helper()
 
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
 		if s.PeerCount() >= n {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			t.Fatalf("server %v: expected %d peers, got %d",
+				s.Identity(), n, s.PeerCount())
+		case <-tick.C:
+		}
 	}
-	t.Fatalf("server %v: expected %d peers, got %d",
-		s.Identity(), n, s.PeerCount())
 }
 
 func TestSessionSymmetry(t *testing.T) {
@@ -423,7 +447,7 @@ func TestSessionSymmetry(t *testing.T) {
 		errA <- serverA.Run(ctx)
 	}()
 
-	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
 	t.Logf("server A listening on %v, identity %v", addrA, serverA.Identity())
 
 	// Server B: connects to A.
@@ -434,12 +458,12 @@ func TestSessionSymmetry(t *testing.T) {
 		errB <- serverB.Run(ctx)
 	}()
 
-	waitForListenAddress(t, serverB, 5*time.Second)
+	waitForListenAddress(t, serverB, 2*time.Second)
 	t.Logf("server B identity %v", serverB.Identity())
 
 	// Both sides must register each other.
-	waitForSessions(t, serverA, 1, 10*time.Second)
-	waitForSessions(t, serverB, 1, 10*time.Second)
+	waitForSessions(t, serverA, 1, 5*time.Second)
+	waitForSessions(t, serverB, 1, 5*time.Second)
 
 	// Verify A has B's identity.
 	aSessions := serverA.SessionIdentities()
@@ -516,7 +540,7 @@ func TestAddPeerSelf(t *testing.T) {
 	go func() {
 		errC <- s.Run(ctx)
 	}()
-	waitForListenAddress(t, s, 5*time.Second)
+	waitForListenAddress(t, s, 2*time.Second)
 
 	// addPeer with self identity must return false.
 	got := s.addPeer(ctx, PeerRecord{
@@ -545,7 +569,7 @@ func TestAddPeerBadVersion(t *testing.T) {
 	go func() {
 		errC <- s.Run(ctx)
 	}()
-	waitForListenAddress(t, s, 5*time.Second)
+	waitForListenAddress(t, s, 2*time.Second)
 
 	other, err := NewSecret()
 	if err != nil {
@@ -595,7 +619,7 @@ func TestGossipThreeNodes(t *testing.T) {
 	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
 	errA := make(chan error, 1)
 	go func() { errA <- serverA.Run(ctx) }()
-	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
 	t.Logf("A: %v at %s", serverA.Identity(), addrA)
 
 	// Start B, connects to A.
@@ -603,12 +627,12 @@ func TestGossipThreeNodes(t *testing.T) {
 		[]string{addrA})
 	errB := make(chan error, 1)
 	go func() { errB <- serverB.Run(ctx) }()
-	addrB := waitForListenAddress(t, serverB, 5*time.Second)
+	addrB := waitForListenAddress(t, serverB, 2*time.Second)
 	t.Logf("B: %v at %s", serverB.Identity(), addrB)
 
 	// Wait for A<->B session.
-	waitForSessions(t, serverA, 1, 10*time.Second)
-	waitForSessions(t, serverB, 1, 10*time.Second)
+	waitForSessions(t, serverA, 1, 5*time.Second)
+	waitForSessions(t, serverB, 1, 5*time.Second)
 	t.Logf("A<->B session established")
 
 	// Start C, connects to B.
@@ -616,18 +640,18 @@ func TestGossipThreeNodes(t *testing.T) {
 		[]string{addrB})
 	errC := make(chan error, 1)
 	go func() { errC <- serverC.Run(ctx) }()
-	waitForListenAddress(t, serverC, 5*time.Second)
+	waitForListenAddress(t, serverC, 2*time.Second)
 	t.Logf("C: %v", serverC.Identity())
 
 	// Wait for B<->C session.
-	waitForSessions(t, serverB, 2, 10*time.Second)
-	waitForSessions(t, serverC, 1, 10*time.Second)
+	waitForSessions(t, serverB, 2, 5*time.Second)
+	waitForSessions(t, serverC, 1, 5*time.Second)
 	t.Logf("B<->C session established")
 
 	// Gossip: A must learn about C (3 peers: self + B + C).
 	// C must learn about A (3 peers: self + B + A).
-	waitForPeers(t, serverA, 3, 15*time.Second)
-	waitForPeers(t, serverC, 3, 15*time.Second)
+	waitForPeers(t, serverA, 3, 5*time.Second)
+	waitForPeers(t, serverC, 3, 5*time.Second)
 
 	// Verify A knows C's identity.
 	aPeers := serverA.KnownPeers()
@@ -682,17 +706,17 @@ func TestPeerVersionNonZero(t *testing.T) {
 	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
 	errA := make(chan error, 1)
 	go func() { errA <- serverA.Run(ctx) }()
-	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
 
 	serverB := newTestServer(t, preParams, 1, "localhost:0",
 		[]string{addrA})
 	errB := make(chan error, 1)
 	go func() { errB <- serverB.Run(ctx) }()
-	waitForListenAddress(t, serverB, 5*time.Second)
+	waitForListenAddress(t, serverB, 2*time.Second)
 
 	// Wait for gossip to propagate.
-	waitForPeers(t, serverA, 2, 10*time.Second)
-	waitForPeers(t, serverB, 2, 10*time.Second)
+	waitForPeers(t, serverA, 2, 5*time.Second)
+	waitForPeers(t, serverB, 2, 5*time.Second)
 
 	// Every peer record must have Version > 0.
 	for _, pr := range serverA.KnownPeers() {
@@ -824,14 +848,14 @@ func TestPingHeartbeat(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Use a fast ping interval for testing.
-	const fastPing = 500 * time.Millisecond
+	const fastPing = 50 * time.Millisecond
 
 	// Start A.
 	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
 	serverA.cfg.PingInterval = fastPing
 	errA := make(chan error, 1)
 	go func() { errA <- serverA.Run(ctx) }()
-	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
 
 	// Start B, connects to A.
 	serverB := newTestServer(t, preParams, 1, "localhost:0",
@@ -841,8 +865,8 @@ func TestPingHeartbeat(t *testing.T) {
 	go func() { errB <- serverB.Run(ctx) }()
 
 	// Wait for A<->B session.
-	waitForSessions(t, serverA, 1, 10*time.Second)
-	waitForSessions(t, serverB, 1, 10*time.Second)
+	waitForSessions(t, serverA, 1, 3*time.Second)
+	waitForSessions(t, serverB, 1, 3*time.Second)
 
 	idA := serverA.Identity()
 	idB := serverB.Identity()
@@ -857,22 +881,28 @@ func TestPingHeartbeat(t *testing.T) {
 		return 0
 	}()
 
-	// Wait for a few pings to exchange.
-	time.Sleep(3 * fastPing)
+	// Poll until LastSeen advances (ping exchanged).
+	pollCtx, pollCancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer pollCancel()
 
-	// Verify LastSeen was refreshed.
-	updatedLastSeen := func() int64 {
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	var updatedLastSeen int64
+	for {
 		for _, pr := range serverB.KnownPeers() {
 			if pr.Identity == idA {
-				return pr.LastSeen
+				updatedLastSeen = pr.LastSeen
 			}
 		}
-		return 0
-	}()
-
-	if updatedLastSeen < initialLastSeen {
-		t.Fatalf("LastSeen went backwards: %d -> %d",
-			initialLastSeen, updatedLastSeen)
+		if updatedLastSeen > initialLastSeen {
+			break
+		}
+		select {
+		case <-pollCtx.Done():
+			t.Fatal("LastSeen was not refreshed by ping")
+		case <-tick.C:
+		}
 	}
 
 	// Also verify A has B in its peer table.
@@ -907,14 +937,14 @@ func TestSessionReaping(t *testing.T) {
 	ctxB, cancelB := context.WithCancel(t.Context())
 	t.Cleanup(cancelB)
 
-	const fastPing = 500 * time.Millisecond
+	const fastPing = 50 * time.Millisecond
 
 	// Start A.
 	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
 	serverA.cfg.PingInterval = fastPing
 	errA := make(chan error, 1)
 	go func() { errA <- serverA.Run(ctxA) }()
-	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
 
 	// Start B, connects to A.
 	serverB := newTestServer(t, preParams, 1, "localhost:0",
@@ -924,8 +954,8 @@ func TestSessionReaping(t *testing.T) {
 	go func() { errB <- serverB.Run(ctxB) }()
 
 	// Wait for A<->B session.
-	waitForSessions(t, serverA, 1, 10*time.Second)
-	waitForSessions(t, serverB, 1, 10*time.Second)
+	waitForSessions(t, serverA, 1, 3*time.Second)
+	waitForSessions(t, serverB, 1, 3*time.Second)
 	t.Log("A<->B session established")
 
 	// Kill B.
@@ -938,8 +968,13 @@ func TestSessionReaping(t *testing.T) {
 	// A should detect the dead session.  The read in handle() will
 	// return an error when the TCP connection is closed, which causes
 	// handle() to exit and deleteSession to run.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	reapCtx, reapCancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer reapCancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
 		ids := serverA.SessionIdentities()
 		if len(ids) == 0 {
 			t.Log("A reaped dead session")
@@ -949,9 +984,12 @@ func TestSessionReaping(t *testing.T) {
 			}
 			return
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-reapCtx.Done():
+			t.Fatal("A did not reap dead session within timeout")
+		case <-tick.C:
+		}
 	}
-	t.Fatal("A did not reap dead session within timeout")
 }
 
 // TestMaintainConnections verifies that when a node is below PeersWanted
@@ -963,7 +1001,7 @@ func TestMaintainConnections(t *testing.T) {
 	t.Cleanup(cancel)
 
 	const (
-		fastMaintain = 500 * time.Millisecond
+		fastMaintain = 50 * time.Millisecond
 		peersWanted  = 3 // want more than the initial 1 session
 	)
 
@@ -973,7 +1011,7 @@ func TestMaintainConnections(t *testing.T) {
 	serverA.cfg.PeersWanted = peersWanted
 	errA := make(chan error, 1)
 	go func() { errA <- serverA.Run(ctx) }()
-	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
 	t.Logf("A: %v at %s", serverA.Identity(), addrA)
 
 	// Start B, connects to A.
@@ -983,12 +1021,12 @@ func TestMaintainConnections(t *testing.T) {
 	serverB.cfg.PeersWanted = peersWanted
 	errB := make(chan error, 1)
 	go func() { errB <- serverB.Run(ctx) }()
-	addrB := waitForListenAddress(t, serverB, 5*time.Second)
+	addrB := waitForListenAddress(t, serverB, 2*time.Second)
 	t.Logf("B: %v at %s", serverB.Identity(), addrB)
 
 	// Wait for A<->B session.
-	waitForSessions(t, serverA, 1, 10*time.Second)
-	waitForSessions(t, serverB, 1, 10*time.Second)
+	waitForSessions(t, serverA, 1, 5*time.Second)
+	waitForSessions(t, serverB, 1, 5*time.Second)
 	t.Log("A<->B session established")
 
 	// Start C, connects to B.
@@ -998,25 +1036,25 @@ func TestMaintainConnections(t *testing.T) {
 	serverC.cfg.PeersWanted = peersWanted
 	errC := make(chan error, 1)
 	go func() { errC <- serverC.Run(ctx) }()
-	addrC := waitForListenAddress(t, serverC, 5*time.Second)
+	addrC := waitForListenAddress(t, serverC, 2*time.Second)
 	t.Logf("C: %v at %s", serverC.Identity(), addrC)
 
 	// Wait for B<->C session.
-	waitForSessions(t, serverB, 2, 10*time.Second)
+	waitForSessions(t, serverB, 2, 5*time.Second)
 	t.Log("B<->C session established")
 
 	// Wait for gossip to propagate: A should learn about C.
-	waitForPeers(t, serverA, 3, 15*time.Second)
+	waitForPeers(t, serverA, 3, 5*time.Second)
 	t.Log("A knows about C via gossip")
 
 	// Now maintainConnections should kick in: A is below PeersWanted
 	// (has 1 session, wants 3) and knows about C.  It should
 	// autonomously dial C, giving A a second session.
-	waitForSessions(t, serverA, 2, 15*time.Second)
+	waitForSessions(t, serverA, 2, 5*time.Second)
 	t.Log("A autonomously connected to C via maintainConnections")
 
 	// Verify C also sees 2 sessions (B + A).
-	waitForSessions(t, serverC, 2, 15*time.Second)
+	waitForSessions(t, serverC, 2, 5*time.Second)
 	t.Log("C confirmed 2 sessions")
 
 	cancel()

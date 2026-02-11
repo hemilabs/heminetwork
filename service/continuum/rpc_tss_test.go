@@ -766,6 +766,9 @@ func (n *rpcTSSNode) awaitReshareEnd(c *rpcCeremony, endCh <-chan *keygen.LocalP
 // waitCeremony blocks until the ceremony completes or ctx expires.
 func (n *rpcTSSNode) waitCeremony(ctx context.Context, cid CeremonyID) (any, error) {
 	// Poll for ceremony registration.
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
 	var c *rpcCeremony
 	for {
 		n.ceremoniesMu.Lock()
@@ -777,7 +780,7 @@ func (n *rpcTSSNode) waitCeremony(ctx context.Context, cid CeremonyID) (any, err
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(10 * time.Millisecond):
+		case <-tick.C:
 		}
 	}
 
@@ -792,6 +795,9 @@ func (n *rpcTSSNode) waitCeremony(ctx context.Context, cid CeremonyID) (any, err
 // waitReshare collects results from both old and new party
 // instances, stores the new key share.
 func (n *rpcTSSNode) waitReshare(ctx context.Context, cid CeremonyID) error {
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
 	var c *rpcCeremony
 	for {
 		n.ceremoniesMu.Lock()
@@ -803,7 +809,7 @@ func (n *rpcTSSNode) waitReshare(ctx context.Context, cid CeremonyID) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(10 * time.Millisecond):
+		case <-tick.C:
 		}
 	}
 
@@ -1232,7 +1238,7 @@ func TestRPCTSSKeygen(t *testing.T) {
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		2*time.Minute)
+		30*time.Second)
 	defer cancel()
 
 	var keyID string
@@ -1273,7 +1279,7 @@ func TestRPCTSSKeygenAndSign(t *testing.T) {
 	threshold := 1 // 2-of-3
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		3*time.Minute)
+		30*time.Second)
 	defer cancel()
 
 	// === Keygen ===
@@ -1336,7 +1342,7 @@ func TestRPCTSSReshare(t *testing.T) {
 	threshold := 1 // 2-of-3
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		5*time.Minute)
+		60*time.Second)
 	defer cancel()
 
 	// --- Keygen with old committee {0, 1, 2} ---
@@ -1425,7 +1431,7 @@ func TestRPCTSSKeygenCorruptPostSign(t *testing.T) {
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		30*time.Second)
+		2*time.Second)
 	defer cancel()
 
 	for _, node := range nodes {
@@ -1466,7 +1472,7 @@ func TestRPCTSSKeygenCorruptResigned(t *testing.T) {
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		30*time.Second)
+		2*time.Second)
 	defer cancel()
 
 	for _, node := range nodes {
@@ -1501,7 +1507,7 @@ func TestRPCTSSKeygenBadSignature(t *testing.T) {
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		30*time.Second)
+		2*time.Second)
 	defer cancel()
 
 	for _, node := range nodes {
@@ -1537,7 +1543,7 @@ func TestRPCTSSKeygenSpoofIdentity(t *testing.T) {
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		30*time.Second)
+		2*time.Second)
 	defer cancel()
 
 	for _, node := range nodes {
@@ -1562,7 +1568,7 @@ func TestRPCTSSSignCorruptPostSign(t *testing.T) {
 	threshold := 1 // 2-of-3
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		3*time.Minute)
+		30*time.Second)
 	defer cancel()
 
 	// === Honest keygen ===
@@ -1597,7 +1603,7 @@ func TestRPCTSSSignCorruptPostSign(t *testing.T) {
 		[]byte(keyID), threshold, data)
 
 	shortCtx, shortCancel := context.WithTimeout(
-		context.Background(), 30*time.Second)
+		context.Background(), 2*time.Second)
 	defer shortCancel()
 
 	for _, node := range nodes {
@@ -1623,7 +1629,7 @@ func TestRPCTSSReshareCorruptPostSign(t *testing.T) {
 	threshold := 1
 
 	ctx, cancel := context.WithTimeout(context.Background(),
-		3*time.Minute)
+		30*time.Second)
 	defer cancel()
 
 	// === Honest keygen ===
@@ -1655,7 +1661,7 @@ func TestRPCTSSReshareCorruptPostSign(t *testing.T) {
 		reshareCID, threshold, threshold)
 
 	shortCtx, shortCancel := context.WithTimeout(
-		context.Background(), 30*time.Second)
+		context.Background(), 2*time.Second)
 	defer shortCancel()
 
 	for _, node := range nodes {

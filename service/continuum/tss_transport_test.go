@@ -718,7 +718,7 @@ func (n *tssTransportNode) waitKeygenEnd(cid CeremonyID, endCh <-chan *keygen.Lo
 		n.t.Logf("Node %s: keygen complete, keyID=%s",
 			n.id, keyID)
 
-	case <-time.After(5 * time.Minute):
+	case <-n.t.Context().Done():
 		n.t.Logf("Node %s: keygen timeout", n.id)
 	}
 }
@@ -734,7 +734,7 @@ func (n *tssTransportNode) waitSignEnd(cid CeremonyID, endCh <-chan *common.Sign
 
 		n.t.Logf("Node %s: signing complete", n.id)
 
-	case <-time.After(5 * time.Minute):
+	case <-n.t.Context().Done():
 		n.t.Logf("Node %s: signing timeout", n.id)
 	}
 }
@@ -742,27 +742,32 @@ func (n *tssTransportNode) waitSignEnd(cid CeremonyID, endCh <-chan *common.Sign
 // WaitCeremony waits for a keygen or sign ceremony to complete and
 // returns the result (keygen.LocalPartySaveData or common.SignatureData).
 func (n *tssTransportNode) WaitCeremony(cid CeremonyID, timeout time.Duration) (any, error) {
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(n.t.Context(), timeout)
+	defer cancel()
 
 	// Wait for ceremony to be registered (async message processing).
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
 	var tc *transportCeremony
-	for time.Now().Before(deadline) {
+	for tc == nil {
 		n.ceremoniesMu.Lock()
 		tc = n.ceremonies[cid]
 		n.ceremoniesMu.Unlock()
 		if tc != nil {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if tc == nil {
-		return nil, errors.New("unknown ceremony")
+		select {
+		case <-ctx.Done():
+			return nil, errors.New("unknown ceremony")
+		case <-tick.C:
+		}
 	}
 
 	select {
 	case result := <-tc.endCh:
 		return result, nil
-	case <-time.After(time.Until(deadline)):
+	case <-ctx.Done():
 		return nil, errors.New("timeout")
 	}
 }
@@ -771,20 +776,25 @@ func (n *tssTransportNode) WaitCeremony(cid CeremonyID, timeout time.Duration) (
 // results from both old and new party instances. It stores the new
 // key share on the node if this node is in the new committee.
 func (n *tssTransportNode) WaitReshare(cid CeremonyID, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
+	ctx, cancel := context.WithTimeout(n.t.Context(), timeout)
+	defer cancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
 
 	var tc *transportCeremony
-	for time.Now().Before(deadline) {
+	for tc == nil {
 		n.ceremoniesMu.Lock()
 		tc = n.ceremonies[cid]
 		n.ceremoniesMu.Unlock()
 		if tc != nil {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if tc == nil {
-		return errors.New("unknown ceremony")
+		select {
+		case <-ctx.Done():
+			return errors.New("unknown ceremony")
+		case <-tick.C:
+		}
 	}
 
 	expectedEnds := 0
@@ -803,7 +813,7 @@ func (n *tssTransportNode) WaitReshare(cid CeremonyID, timeout time.Duration) er
 			if save.Xi != nil && save.Xi.Sign() != 0 {
 				newSave = save
 			}
-		case <-time.After(time.Until(deadline)):
+		case <-ctx.Done():
 			return errors.New("reshare timeout")
 		}
 	}
