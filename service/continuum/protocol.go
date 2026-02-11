@@ -1022,45 +1022,54 @@ func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
 
 // Handshake advertises to the other side what version and options this
 // transport wishes to use. It is also used to verify that the derived Identity
-// did indeed sign the challenge.
-func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, error) {
+// did indeed sign the challenge. If dnsName is non-empty, it is advertised
+// in the hello options so the remote can verify our identity via DNS TXT
+// lookup. Returns the remote identity and their advertised DNS name (empty
+// if they did not advertise one).
+func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName string) (*Identity, string, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+
+	opts := map[string]string{
+		"encoding":    "json",
+		"compression": "none",
+	}
+	if dnsName != "" {
+		opts["dns"] = dnsName
+	}
+
 	// Write HelloRequest
 	err = t.Write(secret.Identity, HelloRequest{
 		Version:   ProtocolVersion,
 		Identity:  secret.Identity,
 		Challenge: ourChallenge[:],
-		Options: map[string]string{
-			"encoding":    "json",
-			"compression": "none",
-		},
+		Options:   opts,
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Read Hello
 	_, cmd, err := t.read(readTimeout)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	helloRequest, ok := cmd.(*HelloRequest)
 	if !ok {
-		return nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
+		return nil, "", fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
 	}
 	// Validate HelloRequest
 	if helloRequest.Version != ProtocolVersion {
-		return nil, ErrUnsupportedVersion
+		return nil, "", ErrUnsupportedVersion
 	}
 	if len(helloRequest.Challenge) != ChallengeSize {
-		return nil, ErrInvalidChallenge
+		return nil, "", ErrInvalidChallenge
 	}
 	if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
-		return nil, ErrInvalidChallenge
+		return nil, "", ErrInvalidChallenge
 	}
 
 	// Sign combined challenge that is represented by the sha256 hash of
@@ -1069,18 +1078,18 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Read HelloResponse
 	header2, cmd2, err := t.read(readTimeout)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	_ = header2
 	helloResponse, ok := cmd2.(*HelloResponse)
 	if !ok {
-		return nil, fmt.Errorf("unexpected command: %T", cmd2)
+		return nil, "", fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
 	// Verify signature over sha256(our challenge + our transport public key)
@@ -1088,14 +1097,13 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	// XXX do something with options
-
 	themID := NewIdentityFromPub(themPub)
+	theirDNS := helloRequest.Options["dns"]
 
-	return &themID, nil
+	return &themID, theirDNS, nil
 }
 
 // readBlob locks the connection and reads a size and the associated blob into
@@ -1263,7 +1271,7 @@ func kvFromTxt(txt string) (map[string]string, error) {
 	s := strings.Split(txt, "; ")
 	m := make(map[string]string)
 	for _, v := range s {
-		kv := strings.Split(v, "=")
+		kv := strings.SplitN(v, "=", 2)
 		if len(kv) != 2 {
 			return nil, ErrInvalidTXTRecord
 		}
