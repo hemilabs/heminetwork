@@ -369,8 +369,7 @@ func TestTSSNetworkMessageDelivery(t *testing.T) {
 		t.Fatalf("Send failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
-	t.Log("Message sent, checking if ceremony received it")
+	t.Log("Message sent successfully")
 }
 
 func TestTSSNetworkRouting(t *testing.T) {
@@ -408,6 +407,5 @@ func TestTSSNetworkRouting(t *testing.T) {
 	_ = nodes[0].transport.Send(nodes[1].id, cid, []byte{0x01, 0x00})
 	msgCount.Add(1)
 
-	time.Sleep(100 * time.Millisecond)
-	t.Logf("Node 1 received %d messages", msgCount.Load())
+	t.Logf("Messages sent to node 1: %d", msgCount.Load())
 }
