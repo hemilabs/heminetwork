@@ -1458,3 +1458,171 @@ func TestVerifyDNSIdentityByName(t *testing.T) {
 		break // one is enough
 	}
 }
+
+// TestFiveNodeMesh validates gossip-based discovery at scale beyond
+// trivial 2-3 node setups.  Five nodes are arranged in a chain
+// (0→1→2→3→4) where no node initially knows all others.  Through
+// gossip propagation, every node must discover every other node's
+// identity.  With PeersWanted > initial connections, endpoint nodes
+// (0 and 4) must autonomously dial gossip-learned peers via
+// maintainConnections.
+func TestFiveNodeMesh(t *testing.T) {
+	const n = 5
+	preParams := loadPreParams(t, n)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	const (
+		fastMaintain = 100 * time.Millisecond
+		peersWanted  = 3
+	)
+
+	servers := make([]*Server, n)
+	errChs := make([]chan error, n)
+	addrs := make([]string, n)
+
+	// Start node 0 (no outbound connections — chain head).
+	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
+	servers[0].cfg.MaintainInterval = fastMaintain
+	servers[0].cfg.PeersWanted = peersWanted
+	errChs[0] = make(chan error, 1)
+	go func() { errChs[0] <- servers[0].Run(ctx) }()
+	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+	t.Logf("node 0: %v at %s", servers[0].Identity(), addrs[0])
+
+	// Start nodes 1-4, each connecting to the previous node (chain).
+	for i := 1; i < n; i++ {
+		servers[i] = newTestServer(t, preParams, i, "localhost:0",
+			[]string{addrs[i-1]})
+		servers[i].cfg.MaintainInterval = fastMaintain
+		servers[i].cfg.PeersWanted = peersWanted
+		errChs[i] = make(chan error, 1)
+		idx := i
+		go func() { errChs[idx] <- servers[idx].Run(ctx) }()
+		addrs[i] = waitForListenAddress(t, servers[i], 2*time.Second)
+		t.Logf("node %d: %v at %s", idx, servers[idx].Identity(), addrs[idx])
+
+		// Wait for the chain link to establish before starting the
+		// next node, so gossip has a stable path to propagate.
+		waitForSessions(t, servers[i-1], 1, 5*time.Second)
+		waitForSessions(t, servers[i], 1, 5*time.Second)
+		t.Logf("node %d <-> node %d session established", i-1, i)
+	}
+
+	// Wait for full gossip convergence: every node knows all 5 peers
+	// (including itself).
+	for i := 0; i < n; i++ {
+		waitForPeers(t, servers[i], n, 10*time.Second)
+	}
+	t.Log("gossip converged: all nodes know all peers")
+
+	// Verify every node knows every other node's identity.
+	for i := 0; i < n; i++ {
+		peers := servers[i].KnownPeers()
+		known := make(map[Identity]bool)
+		for _, pr := range peers {
+			known[pr.Identity] = true
+		}
+		for j := 0; j < n; j++ {
+			id := servers[j].Identity()
+			if !known[id] {
+				t.Fatalf("node %d does not know node %d (%v); "+
+					"known peers: %v", i, j, id, peers)
+			}
+		}
+	}
+	t.Log("identity cross-check passed")
+
+	// Endpoint nodes (0 and 4) start with 1 session but want 3.
+	// maintainConnections should dial gossip-learned peers,
+	// giving them additional sessions beyond the initial chain link.
+	waitForSessions(t, servers[0], 2, 10*time.Second)
+	waitForSessions(t, servers[n-1], 2, 10*time.Second)
+	t.Log("endpoint nodes made gossip-initiated connections")
+
+	cancel()
+	for i := 0; i < n; i++ {
+		if err := <-errChs[i]; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("node %d: %v", i, err)
+		}
+	}
+}
+
+// TestHundredNodeMesh validates gossip convergence and autonomous
+// connection management at scale.  100 nodes are chained
+// (0→1→2→...→99), each with PeersWanted=8.  Gossip must propagate
+// all identities across the full chain, and maintainConnections must
+// fill each node's session count toward the target.
+func TestHundredNodeMesh(t *testing.T) {
+	if testing.Short() {
+		t.Skip("100-node mesh test is slow")
+	}
+
+	const n = 100
+	preParams := loadPreParams(t, n)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	const (
+		fastMaintain = 50 * time.Millisecond
+		peersWanted  = 8
+	)
+
+	servers := make([]*Server, n)
+	errChs := make([]chan error, n)
+	addrs := make([]string, n)
+
+	// Start all nodes in chain order.  Each node connects to the
+	// previous one.  waitForListenAddress ensures the previous
+	// node's listener is up before the next node dials, so the
+	// chain link TCP connection succeeds.  Unlike the 5-node test
+	// we don't wait for full session establishment between each
+	// pair — that would add ~100 sequential handshakes.  The
+	// chain forms concurrently while nodes start.
+	for i := 0; i < n; i++ {
+		var connect []string
+		if i > 0 {
+			connect = []string{addrs[i-1]}
+		}
+		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
+		servers[i].cfg.MaintainInterval = fastMaintain
+		servers[i].cfg.PeersWanted = peersWanted
+		errChs[i] = make(chan error, 1)
+		idx := i
+		go func() { errChs[idx] <- servers[idx].Run(ctx) }()
+		addrs[i] = waitForListenAddress(t, servers[i], 2*time.Second)
+	}
+	t.Logf("all %d nodes started", n)
+
+	// Wait for full gossip convergence: every node knows all n
+	// peers.  Chain topology means gossip must traverse up to 99
+	// hops.  30s allows 10x headroom over typical ~3s runtime;
+	// -short skip protects CI.
+	for i := 0; i < n; i++ {
+		waitForPeers(t, servers[i], n, 30*time.Second)
+	}
+	t.Log("gossip converged: all nodes know all peers")
+
+	// Every node should reach at least half of PeersWanted via
+	// maintainConnections.  Reaching the exact target is subject
+	// to a saturation race: the listen side rejects connections
+	// when sessions >= PeersWanted, so when most nodes fill up
+	// the last few struggle to find non-full peers.
+	// Asserting >= peersWanted/2 proves maintain is working
+	// without depending on perfect graph packing.
+	minSessions := peersWanted / 2
+	for i := 0; i < n; i++ {
+		waitForSessions(t, servers[i], minSessions, 30*time.Second)
+	}
+	t.Logf("all nodes reached at least %d sessions (target %d)",
+		minSessions, peersWanted)
+
+	cancel()
+	for i := 0; i < n; i++ {
+		if err := <-errChs[i]; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("node %d: %v", i, err)
+		}
+	}
+}
