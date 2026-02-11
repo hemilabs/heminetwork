@@ -2,6 +2,8 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
+//go:build tssexamples
+
 // Package tss_examples contains illustrative tests demonstrating the use of
 // tss-lib for distributed key generation, signing, and resharing.
 //
