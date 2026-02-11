@@ -10,7 +10,6 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,22 +20,31 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
-
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
+	"github.com/hemilabs/heminetwork/v2/ttl"
 )
 
 const (
 	logLevel = "INFO"
 	appName  = "continuum"
 
-	defaultListenAddress  = "localhost:45067"
-	defaultMaxConnections = 8
+	defaultListenAddress = "localhost:45067"
+	defaultPeersWanted   = 8
+
+	// peerTTL is the duration a peer record stays alive without
+	// refresh.  Prime to avoid resonance with other timers.
+	peerTTL = 67 * time.Second
+
+	// maxGossipPeers caps the number of peer records accepted in a
+	// single PeerListResponse to prevent memory exhaustion from a
+	// malicious peer.
+	maxGossipPeers = 256
 )
 
 var log = loggo.GetLogger(appName)
@@ -52,7 +60,7 @@ type Config struct {
 	Home                    string
 	ListenAddress           string
 	LogLevel                string
-	MaxConnections          int
+	PeersWanted             int
 	PprofListenAddress      string
 	PrivateKey              string
 	PrometheusListenAddress string
@@ -80,7 +88,12 @@ type Server struct {
 	tssCtx    context.Context
 
 	// Listener
-	listenConfig *net.ListenConfig
+	listenConfig  *net.ListenConfig
+	listenAddress string // Actual bound address after Listen()
+
+	// Peer tracking
+	peers    map[Identity]*PeerRecord // all known peers
+	peersTTL *ttl.TTL                 // expiry for known peers
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -98,7 +111,7 @@ func NewDefaultConfig() *Config {
 		PrometheusNamespace: appName,
 		PrivateKey:          "",
 		ListenAddress:       defaultListenAddress,
-		MaxConnections:      defaultMaxConnections,
+		PeersWanted:         defaultPeersWanted,
 	}
 }
 
@@ -109,17 +122,9 @@ func NewServer(cfg *Config) (*Server, error) {
 	return &Server{
 		cfg:          cfg,
 		listenConfig: &net.ListenConfig{},
-		sessions:     make(map[Identity]*Transport, cfg.MaxConnections),
+		sessions:     make(map[Identity]*Transport, cfg.PeersWanted),
+		peers:        make(map[Identity]*PeerRecord),
 	}, nil
-}
-
-// genID is used in testing only.
-func genID() string {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		panic(fmt.Errorf("read random: %w", err))
-	}
-	return hex.EncodeToString(buf)
 }
 
 func (s *Server) newSession(id *Identity, t *Transport) error {
@@ -181,11 +186,28 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 }
 
 func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
-	defer s.deleteSession(id)
+	defer func() {
+		if err := s.deleteSession(id); err != nil {
+			log.Errorf("delete session %v: %v", id, err)
+		}
+	}()
 	defer s.wg.Done()
 
 	log.Debugf("handle: %v", id)
 	defer log.Debugf("handle exit: %v", id)
+
+	// Announce our peer count and request their list.  On initial
+	// session we always exchange; the count comparison in the
+	// PeerNotify handler is for ongoing gossip only.
+	if err := t.Write(s.secret.Identity, PeerNotify{
+		Count: s.PeerCount(),
+	}); err != nil {
+		log.Warningf("initial peer notify %v: %v", id, err)
+	}
+	if err := t.Write(s.secret.Identity,
+		PeerListRequest{}); err != nil {
+		log.Warningf("initial peer list request %v: %v", id, err)
+	}
 
 	for {
 		header, payload, err := t.Read()
@@ -206,6 +228,48 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			})
 			if err != nil {
 				panic(err)
+			}
+
+		case *PeerNotify:
+			// Remote has v.Count peers.  If they know more
+			// than us, request their list.
+			if v.Count > s.PeerCount() {
+				if err := t.Write(s.secret.Identity,
+					PeerListRequest{}); err != nil {
+					log.Warningf("peer list request %v: %v",
+						id, err)
+				}
+			}
+
+		case *PeerListRequest:
+			peers := s.knownPeerList(*id)
+			if err := t.Write(s.secret.Identity,
+				PeerListResponse{Peers: peers}); err != nil {
+				log.Warningf("peer list response %v: %v",
+					id, err)
+			}
+
+		case *PeerListResponse:
+			peers := v.Peers
+			if len(peers) > maxGossipPeers {
+				log.Warningf("peer list from %v truncated: "+
+					"%d > %d", id, len(peers),
+					maxGossipPeers)
+				peers = peers[:maxGossipPeers]
+			}
+			var learned int
+			for _, pr := range peers {
+				if err := validatePeerAddress(pr.Address); err != nil {
+					log.Warningf("peer %v bad address %q: %v",
+						pr.Identity, pr.Address, err)
+					continue
+				}
+				if s.addPeer(ctx, pr) {
+					learned++
+				}
+			}
+			if learned > 0 {
+				s.notifyAllPeers(ctx)
 			}
 
 		case *KeygenRequest:
@@ -248,6 +312,198 @@ func (s *Server) Running() bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return s.isRunning
+}
+
+// ListenAddress returns the actual address the server is listening on.
+func (s *Server) ListenAddress() string {
+	log.Tracef("ListenAddress")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return s.listenAddress
+}
+
+// Identity returns the server's identity. Only valid after Run() has been
+// called.
+func (s *Server) Identity() Identity {
+	log.Tracef("Identity")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.secret == nil {
+		return Identity{}
+	}
+	return s.secret.Identity
+}
+
+// SessionIdentities returns the identities of all active sessions.
+func (s *Server) SessionIdentities() []Identity {
+	log.Tracef("SessionIdentities")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	ids := make([]Identity, 0, len(s.sessions))
+	for id := range s.sessions {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// PeerCount returns the number of known peers.
+func (s *Server) PeerCount() int {
+	log.Tracef("PeerCount")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return len(s.peers)
+}
+
+// KnownPeers returns all known peer records.
+func (s *Server) KnownPeers() []PeerRecord {
+	log.Tracef("KnownPeers")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	records := make([]PeerRecord, 0, len(s.peers))
+	for _, pr := range s.peers {
+		records = append(records, *pr)
+	}
+	return records
+}
+
+// validatePeerAddress checks that a peer address is a well-formed
+// host:port with reasonable length and no control characters.
+// Loopback/private-range filtering happens at connect time, not here,
+// because locally-learned addresses (e.g. our own) are valid records.
+func validatePeerAddress(addr string) error {
+	if len(addr) > 256 {
+		return fmt.Errorf("address too long: %d", len(addr))
+	}
+	for _, c := range addr {
+		if c < 0x20 {
+			return fmt.Errorf("control character in address")
+		}
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("split host port: %w", err)
+	}
+	if host == "" {
+		return fmt.Errorf("empty host")
+	}
+	if port == "" || port == "0" {
+		return fmt.Errorf("invalid port: %q", port)
+	}
+	return nil
+}
+
+// peerExpired is the TTL expiry callback for peer records.  It runs
+// in its own goroutine (dispatched by the ttl package).
+func (s *Server) peerExpired(_ context.Context, key, _ any) {
+	id, ok := key.(Identity)
+	if !ok {
+		log.Errorf("peer expired: unexpected key type %T", key)
+		return
+	}
+	s.mtx.Lock()
+	delete(s.peers, id)
+	s.mtx.Unlock()
+	log.Debugf("peer expired: %v", id)
+}
+
+// addPeer adds or refreshes a peer record.  Returns true if the peer
+// was previously unknown.
+func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
+	log.Tracef("addPeer %v", pr.Identity)
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	// Don't track ourselves.
+	if pr.Identity == s.secret.Identity {
+		return false
+	}
+
+	_, existed := s.peers[pr.Identity]
+	s.peers[pr.Identity] = &pr
+	s.peersTTL.Put(ctx, peerTTL, pr.Identity, &pr, s.peerExpired, nil)
+
+	if !existed {
+		log.Debugf("new peer: %v at %s", pr.Identity, pr.Address)
+	}
+	return !existed
+}
+
+// knownPeerList returns peer records suitable for gossip, excluding
+// only the specified identity (typically the requester, so we don't
+// tell them about themselves).  Our own record IS included so that
+// remote peers learn about us.
+func (s *Server) knownPeerList(exclude Identity) []PeerRecord {
+	log.Tracef("knownPeerList")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	records := make([]PeerRecord, 0, len(s.peers))
+	for id, pr := range s.peers {
+		if id == exclude {
+			continue
+		}
+		records = append(records, *pr)
+	}
+	return records
+}
+
+// notifyAllPeers sends a PeerNotify to all active sessions.
+// Each write is bounded by the transport's 4s write deadline so
+// a hung peer cannot block others.  We don't wait for completion
+// because errors are logged by the goroutine and the caller has
+// no use for the results.
+func (s *Server) notifyAllPeers(ctx context.Context) {
+	log.Tracef("notifyAllPeers")
+
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
+	s.mtx.RLock()
+	count := len(s.peers)
+	type dest struct {
+		id Identity
+		t  *Transport
+	}
+	targets := make([]dest, 0, len(s.sessions))
+	for id, t := range s.sessions {
+		targets = append(targets, dest{id: id, t: t})
+	}
+	s.mtx.RUnlock()
+
+	notify := PeerNotify{Count: count}
+	for _, d := range targets {
+		go func(d dest) {
+			if err := d.t.Write(s.secret.Identity, notify); err != nil {
+				log.Warningf("peer notify %v: %v", d.id, err)
+			}
+		}(d)
+	}
+}
+
+// registerSelfAsPeer adds our own record to the peer map so that we
+// are included in gossip responses.  Self is stored directly (not via
+// addPeer which skips self) and has no TTL — we never expire ourselves.
+func (s *Server) registerSelfAsPeer() {
+	log.Tracef("registerSelfAsPeer")
+
+	s.mtx.Lock()
+	s.peers[s.secret.Identity] = &PeerRecord{
+		Identity: s.secret.Identity,
+		Address:  s.listenAddress,
+		Version:  ProtocolVersion,
+		LastSeen: time.Now().Unix(),
+	}
+	s.mtx.Unlock()
 }
 
 func (s *Server) testAndSetRunning(b bool) bool {
@@ -295,69 +551,58 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	return s.isHealthy(ctx), Info{Online: true}, nil
 }
 
-func (s *Server) client(ctx context.Context, them *Identity, t *Transport) error {
-	log.Infof("client: %v", them)
-	defer log.Infof("client: %v exit", them)
-
-	// Always ping
-	// XXX make this a call, not a write.
-	err := t.Write(s.secret.Identity, PingRequest{
-		OriginTimestamp: time.Now().Unix(),
-	})
-	if err != nil {
-		return fmt.Errorf("ping %v: %w", them, err)
-	}
-
-	for {
-		header, cmd, err := t.Read()
-		if err != nil {
-			return fmt.Errorf("read %v: %w", them, err)
-		}
-		log.Infof("%v", spew.Sdump(header))
-		log.Infof("%v", spew.Sdump(cmd))
-	}
-
-	return nil
-}
-
 func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	defer s.wg.Done()
-
-	// XXX timeout
 
 	log.Infof("connect: %v", c)
 	defer log.Infof("connect: %v exit", c)
 
-	d := &net.Dialer{}
+	d := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := d.DialContext(ctx, "tcp", c)
 	if err != nil {
 		errC <- err
 		return
 	}
-	clientTransport := new(Transport)
+
+	transport := new(Transport)
+	greatSuccess := false
 	defer func() {
-		if err := clientTransport.Close(); err != nil {
-			log.Errorf("client close: %v", err)
-			return
+		if !greatSuccess {
+			if err := transport.Close(); err != nil {
+				log.Errorf("connect close %v: %v", c, err)
+			}
 		}
 	}()
 
-	if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+	if err := transport.KeyExchange(ctx, conn); err != nil {
 		errC <- err
 		return
 	}
-	them, err := clientTransport.Handshake(ctx, s.secret)
+	them, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		errC <- err
 		return
 	}
 
-	// This should no longer be terminal since we made it through key
-	// exchange.
-	if err := s.client(ctx, them, clientTransport); err != nil {
-		log.Errorf("client: %v", err)
+	if err := s.newSession(them, transport); err != nil {
+		log.Errorf("connect session %v: %v", them, err)
 		return
 	}
+
+	// Register the peer we connected to.  We know their listen
+	// address (c) — the listen side will learn ours via gossip.
+	s.addPeer(ctx, PeerRecord{
+		Identity: *them,
+		Address:  c,
+		Version:  ProtocolVersion,
+		LastSeen: time.Now().Unix(),
+	})
+
+	log.Infof("connected %v: %v", conn.RemoteAddr(), them)
+
+	greatSuccess = true
+	s.wg.Add(1)
+	s.handle(ctx, them, transport)
 }
 
 func (s *Server) connectAll(ctx context.Context, errC chan error) {
@@ -381,6 +626,10 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 		errC <- err
 		return
 	}
+	s.mtx.Lock()
+	s.listenAddress = listener.Addr().String()
+	s.mtx.Unlock()
+	s.registerSelfAsPeer()
 	go func() {
 		<-ctx.Done()
 		if err := listener.Close(); err != nil {
@@ -402,12 +651,13 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 		s.mtx.RLock()
 		conNum := len(s.sessions)
 		s.mtx.RUnlock()
-		if conNum >= s.cfg.MaxConnections {
+		if conNum >= s.cfg.PeersWanted {
 			// XXX send a "busy" message?
 			log.Debugf("server full, connection rejected: %s",
 				conn.RemoteAddr())
 			if err := conn.Close(); err != nil {
-				log.Errorf("close connection %s:  %v", err)
+				log.Errorf("close connection %s: %v",
+					conn.RemoteAddr(), err)
 			}
 			continue
 		}
@@ -492,7 +742,7 @@ func (s *Server) Run(pctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("expand: %w", err)
 	}
-	s.data = filepath.Join(s.cfg.Home, s.secret.Identity.String())
+	s.data = filepath.Join(s.cfg.Home, s.secret.String())
 	err = os.MkdirAll(s.data, 0o700)
 	if err != nil {
 		return fmt.Errorf("mkdir: %w", err)
@@ -500,6 +750,13 @@ func (s *Server) Run(pctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
+
+	// Initialize peer TTL map.
+	peersTTL, err := ttl.New(s.cfg.PeersWanted*2, true)
+	if err != nil {
+		return fmt.Errorf("peer ttl: %w", err)
+	}
+	s.peersTTL = peersTTL
 
 	// Read or generate Paillier primes.
 	err = s.initPaillierPrimes(ctx)
