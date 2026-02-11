@@ -35,10 +35,10 @@ import (
 // The continuum protocol is a simple gossipy P2P system.
 //
 // The continuum transfunctioner is a very mysterious and powerful device and
-// it's mystery is exceeded only by it's power.
+// its mystery is exceeded only by its power.
 //
 // Continuum runs directly on top of TCP and can run in the clear since it does
-// it's own encryption. It is a streaming protocol that prefixes encrypted
+// its own encryption. It is a streaming protocol that prefixes encrypted
 // payloads with a size (that is capped). If the message is too large the
 // receiver will drop the connection and potentially blacklist the caller.
 //
@@ -112,7 +112,7 @@ import (
 // an envelope (see below).
 //	1. Both sides send a HelloRequest that contains a version, their
 //	identity, a challenge, options etc.
-//	2. Both sides read the HelloRequest and validate it's contents prior to
+//	2. Both sides read the HelloRequest and validate its contents prior to
 //	replying with a HelloResponse. By protocol, either side can hang up at
 //	any time if they feel their counterparty is misbehaving. It is
 //	important to note that the challenge that must be signed is the SHA256
@@ -120,7 +120,7 @@ import (
 //	3. Both sides read the HelloResponse and derive the remote's ETP from
 //	the signature. The derived ETP must match the provided identity to
 //	prove ownership of the accompanying private key. Additionally, the
-//	identity may be stores in a DNS TXT record that is associated with the
+//	identity may be stored in a DNS TXT record that is associated with the
 //	remote host.
 //	TODO: define DNS mechanism in more detail.
 //
@@ -131,7 +131,7 @@ import (
 // the protocol.
 //
 // An envelope is defined as an encrypted blob that contains a header and a
-// command. A headers is akin to a TCP header that contains routing
+// command. A header is akin to a TCP header that contains routing
 // information, TTL and hints for the remote side to aid in command decoding.
 //
 // TODO:
@@ -142,8 +142,10 @@ import (
 //	* envelope wrapped in envelope (encrypted routing)
 //	* commands
 
+// PayloadType identifies the command type carried by an envelope.
 type PayloadType string
 
+// Payload type constants for all protocol commands.
 const (
 	PHelloRequest    PayloadType = "hello"
 	PHelloResponse   PayloadType = "hello-response"
@@ -256,7 +258,7 @@ type Header struct {
 }
 
 // HelloRequest is the first command that is sent to the other side after the
-// key exchange pahse. It advertises the version the node is running and some
+// key exchange phase. It advertises the version the node is running and some
 // desired options. The challenge must be signed by the remote node.
 type HelloRequest struct {
 	Version   uint32            `json:"version"`           // Version number
@@ -265,7 +267,7 @@ type HelloRequest struct {
 	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
 }
 
-// HelloResponse returns the signed challenge. The remote identity is dervied
+// HelloResponse returns the signed challenge. The remote identity is derived
 // from the signature.
 type HelloResponse struct {
 	Signature []byte `json:"signature"` // Signature of Challenge
@@ -276,7 +278,7 @@ type PingRequest struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Sender timestamp
 }
 
-// PingResponse is the response to a pin request.
+// PingResponse is the response to a ping request.
 type PingResponse struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Copy the value back
 	PeerTimestamp   int64 `json:"peertimestamp"`   // Remote timestamp
@@ -304,6 +306,8 @@ type PeerListResponse struct {
 	Peers []PeerRecord `json:"peers"`
 }
 
+// KeygenRequest initiates a key generation ceremony.
+// Sent by the router to all participating parties.
 type KeygenRequest struct {
 	CeremonyID CeremonyID           `json:"ceremonyid"` // Unique ceremony identifier
 	Curve      string               `json:"curve"`      // Curve for TSS
@@ -311,6 +315,7 @@ type KeygenRequest struct {
 	Threshold  int                  `json:"threshold"`  // Threshold (t, need t+1 to sign)
 }
 
+// KeygenResponse acknowledges a keygen request.
 type KeygenResponse struct {
 	CeremonyID CeremonyID `json:"ceremonyid"` // Echo back ceremony ID
 	Success    bool       `json:"success"`    // Whether party accepted
@@ -467,6 +472,7 @@ type CeremonyAbort struct {
 	Reason     string     `json:"reason"`
 }
 
+// Protocol and transport wire constants.
 const (
 	TransportVersion = 1 // Transport protocol version
 
@@ -480,7 +486,9 @@ const (
 	dnsAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
 )
 
-var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is an invalid challenge
+// ZeroChallenge is an all-zeros challenge value used as an invalid sentinel.
+// Handshake rejects challenges that compare equal to this.
+var ZeroChallenge = [ChallengeSize]byte{}
 
 // Nonce is used by transport for message encryption / decryption.
 // It is first generated during key exchange, and is atomically
@@ -527,7 +535,7 @@ func Hash160(data []byte) []byte {
 	return ripemd.Sum(nil)
 }
 
-// Hash160 is a utility function that returns the sha256 of multiple byte
+// Hash256 is a utility function that returns the sha256 of multiple byte
 // slices.
 func Hash256(data []byte, extraData ...[]byte) []byte {
 	hash := sha256.New()
@@ -548,14 +556,14 @@ func Hash256(data []byte, extraData ...[]byte) []byte {
 // public key.
 type Identity [ripemd160.Size]byte // ripemd160 of compressed pubkey
 
-// String returns the hex endoded string of the identity.
+// String returns the hex encoded string of the identity.
 func (i Identity) String() string {
 	return hex.EncodeToString(i[:])
 }
 
 // Bytes returns a copy of identity as a byte slice.
 func (i Identity) Bytes() []byte {
-	return append([]byte{}, i[:]...) // Fucking linter rejects append(i[:])
+	return append([]byte{}, i[:]...) // Copy; append(i[:]) rejected by linter.
 }
 
 // UnmarshalJSON satisfies the JSON Decode interface.
@@ -645,8 +653,8 @@ func NewSecretFromPrivate(privateKey *secp256k1.PrivateKey) *Secret {
 	}
 }
 
-// NewSecretFromString returns a secret type for the provided string encoded
-// private key.
+// NewSecretFromString returns a Secret for the provided hex-encoded private
+// key string.
 func NewSecretFromString(secret string) (*Secret, error) {
 	s, err := hex.DecodeString(secret)
 	if err != nil {
@@ -675,6 +683,7 @@ type TransportRequest struct {
 	PublicKey []byte `json:"publickey"`
 }
 
+// Sentinel errors returned by transport and handshake operations.
 var (
 	ErrDecrypt                = errors.New("could not decrypt")
 	ErrIdentityMismatch       = errors.New("identity mismatch")
@@ -1074,7 +1083,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
-	// Verify signature over sha256(our challenge + our tranport public key)
+	// Verify signature over sha256(our challenge + our transport public key)
 	linkedChallenge := Hash256(ourChallenge[:], t.us.PublicKey().Bytes())
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
@@ -1222,7 +1231,7 @@ func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 	}
 }
 
-// Write creats a new payload and header and sends that to the peer.
+// Write creates a new payload and header and sends that to the peer.
 //
 // XXX think about header construction and if we need like a WriteTo which adds
 // an explicit origin that may need routing.
@@ -1248,9 +1257,9 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 	return t.write(writeTimeout, append(header, payload...))
 }
 
-// kvFomTxt converts a TXT record to a key value map. The format is typical INI
+// kvFromTxt converts a TXT record to a key value map. The format is typical INI
 // file style. E.g. "v=transfunctioner identity=myidentity key=value".
-func kvFomTxt(txt string) (map[string]string, error) {
+func kvFromTxt(txt string) (map[string]string, error) {
 	s := strings.Split(txt, "; ")
 	m := make(map[string]string)
 	for _, v := range s {
@@ -1293,10 +1302,10 @@ func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.
 	if len(txts) != 1 {
 		return nil, fmt.Errorf("dns no txt records: %v", len(txts))
 	}
-	return kvFomTxt(txts[0])
+	return kvFromTxt(txts[0])
 }
 
-// VerifyRemoteDNSIdentity verifies that passed in identity matches it's
+// VerifyRemoteDNSIdentity verifies that passed in identity matches its
 // associated TXT record identity. This can be used to determine if a server or
 // client are indeed who they claim they are.
 //
