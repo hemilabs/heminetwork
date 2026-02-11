@@ -359,6 +359,9 @@ func newTestServer(t *testing.T, preParams []keygen.LocalPreParams, idx int, lis
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Pre-set secret so Identity() works before Run().  Run() will
+	// reconstruct the same secret from cfg.PrivateKey.
+	server.secret = secret
 	return server
 }
 
@@ -428,6 +431,33 @@ func waitForPeers(t *testing.T, s *Server, n int, timeout time.Duration) {
 		case <-ctx.Done():
 			t.Fatalf("server %v: expected %d peers, got %d",
 				s.Identity(), n, s.PeerCount())
+		case <-tick.C:
+		}
+	}
+}
+
+// waitForSessionCount polls until the server has exactly n sessions.
+// Unlike waitForSessions (at least n), this waits for an exact count,
+// which is useful for verifying that rejected connections leave zero
+// sessions.
+func waitForSessionCount(t *testing.T, s *Server, n int, timeout time.Duration) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
+		ids := s.SessionIdentities()
+		if len(ids) == n {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("server %v: expected %d sessions, got %d",
+				s.Identity(), n, len(s.SessionIdentities()))
 		case <-tick.C:
 		}
 	}
@@ -1062,5 +1092,369 @@ func TestMaintainConnections(t *testing.T) {
 		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("server: %v", err)
 		}
+	}
+}
+
+func TestDNSSeeding(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Start seed node A.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
+	t.Logf("A: %v at %s", serverA.Identity(), addrA)
+
+	// Parse A's listen address for DNS records.
+	host, port, err := net.SplitHostPort(addrA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		t.Fatalf("failed to parse IP: %v", host)
+	}
+
+	// Build a mock DNS handler with A's identity at seed1.test.gfy.
+	seedDomain := "test.gfy"
+	seedName := "seed1"
+	seedFQDN := seedName + "." + seedDomain + "."
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &dnsHandler{
+		lookup: make(map[string][]dns.RR),
+		nodes:  make(map[string]*node),
+	}
+	handler.lookup[seedFQDN] = []dns.RR{
+		&dns.A{
+			Hdr: dns.Header{
+				Name:  seedFQDN,
+				Class: dns.ClassINET,
+			},
+			A: ip,
+		},
+		&dns.TXT{
+			Hdr: dns.Header{
+				Name:  seedFQDN,
+				Class: dns.ClassINET,
+			},
+			Txt: []string{fmt.Sprintf("v=%v; identity=%v; port=%v",
+				dnsAppName, serverA.Identity(), portNum)},
+		},
+	}
+
+	// Start mock DNS server.
+	dnsSrv := newDNSServer(ctx, handler)
+	dnsAddress := dnsSrv.Listener.Addr().String()
+	t.Logf("DNS server at %s", dnsAddress)
+
+	// Start node B with Seeds pointing at the DNS hostname.
+	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
+	serverB.cfg.Seeds = []string{seedName + "." + seedDomain + ":" + port}
+	serverB.resolver = newResolver(dnsAddress)
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+	waitForListenAddress(t, serverB, 2*time.Second)
+	t.Logf("B: %v", serverB.Identity())
+
+	// B should connect to A through DNS seeding.
+	waitForSessions(t, serverA, 1, 5*time.Second)
+	waitForSessions(t, serverB, 1, 5*time.Second)
+	t.Log("B connected to A via DNS seeding")
+
+	cancel()
+	for _, errCh := range []chan error{errA, errB} {
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("server: %v", err)
+		}
+	}
+}
+
+func TestDNSHelloAdvertise(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Start A with a DNS name.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	serverA.cfg.DNSName = "nodeA.test.gfy"
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
+
+	// Start B connecting to A, also with a DNS name.
+	serverB := newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrA})
+	serverB.cfg.DNSName = "nodeB.test.gfy"
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+
+	// Wait for connection.
+	waitForSessions(t, serverA, 1, 5*time.Second)
+	waitForSessions(t, serverB, 1, 5*time.Second)
+	t.Log("A<->B session established with DNS names advertised")
+
+	cancel()
+	for _, errCh := range []chan error{errA, errB} {
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("server: %v", err)
+		}
+	}
+}
+
+func TestDNSRequired(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Start A which requires DNS from peers.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	serverA.cfg.DNSRequired = true
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
+
+	// Start B WITHOUT a DNS name, connecting to A.
+	serverB := newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrA})
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+	waitForListenAddress(t, serverB, 2*time.Second)
+
+	// B's handshake succeeds from B's perspective, but A rejects
+	// the connection in newTransport because B didn't advertise a
+	// DNS name.  A closes the conn, so B's handle() gets EOF and
+	// exits.  Wait for A to confirm zero sessions.
+	waitForSessionCount(t, serverA, 0, 5*time.Second)
+	t.Log("A correctly rejected B (no DNS name advertised)")
+
+	cancel()
+	for _, errCh := range []chan error{errA, errB} {
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("server: %v", err)
+		}
+	}
+}
+
+func TestDNSRequiredWithValidDNS(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	domain := "test.gfy"
+
+	// We need to create the servers first to get their identities,
+	// then set up DNS records, then run them.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
+
+	// Build mock DNS handler with records for both nodes.
+	handler := &dnsHandler{
+		lookup: make(map[string][]dns.RR),
+		nodes:  make(map[string]*node),
+	}
+
+	// A's DNS record — uses 127.0.0.1 since we don't know the port yet,
+	// but the TXT record with identity is what matters for verification.
+	aFQDN := "nodeA." + domain + "."
+	handler.lookup[aFQDN] = []dns.RR{
+		&dns.A{
+			Hdr: dns.Header{Name: aFQDN, Class: dns.ClassINET},
+			A:   net.IPv4(127, 0, 0, 1),
+		},
+		&dns.TXT{
+			Hdr: dns.Header{Name: aFQDN, Class: dns.ClassINET},
+			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
+				dnsAppName, serverA.Identity())},
+		},
+	}
+
+	bFQDN := "nodeB." + domain + "."
+	handler.lookup[bFQDN] = []dns.RR{
+		&dns.A{
+			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
+			A:   net.IPv4(127, 0, 0, 1),
+		},
+		&dns.TXT{
+			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
+			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
+				dnsAppName, serverB.Identity())},
+		},
+	}
+
+	// Start mock DNS.
+	dnsSrv := newDNSServer(ctx, handler)
+	dnsAddress := dnsSrv.Listener.Addr().String()
+	t.Logf("DNS server at %s", dnsAddress)
+	mockResolver := newResolver(dnsAddress)
+
+	// Configure both nodes: require DNS, advertise DNS name, use
+	// mock resolver.
+	serverA.cfg.DNSRequired = true
+	serverA.cfg.DNSName = "nodeA." + domain
+	serverA.resolver = mockResolver
+
+	serverB.cfg.DNSRequired = true
+	serverB.cfg.DNSName = "nodeB." + domain
+	serverB.resolver = mockResolver
+
+	// Start A.
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
+	t.Logf("A: %v at %s", serverA.Identity(), addrA)
+
+	// Start B connecting to A.
+	serverB.cfg.Connect = []string{addrA}
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+
+	// Both should connect successfully with DNS verification.
+	waitForSessions(t, serverA, 1, 5*time.Second)
+	waitForSessions(t, serverB, 1, 5*time.Second)
+	t.Log("A<->B connected with mutual DNS verification")
+
+	cancel()
+	for _, errCh := range []chan error{errA, errB} {
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("server: %v", err)
+		}
+	}
+}
+
+func TestDNSIdentityMismatch(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	domain := "test.gfy"
+
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
+
+	// Build mock DNS with WRONG identity for B — use a random identity.
+	wrongSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := &dnsHandler{
+		lookup: make(map[string][]dns.RR),
+		nodes:  make(map[string]*node),
+	}
+
+	bFQDN := "nodeB." + domain + "."
+	handler.lookup[bFQDN] = []dns.RR{
+		&dns.A{
+			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
+			A:   net.IPv4(127, 0, 0, 1),
+		},
+		&dns.TXT{
+			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
+			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
+				dnsAppName, wrongSecret.Identity)},
+		},
+	}
+
+	dnsSrv := newDNSServer(ctx, handler)
+	dnsAddress := dnsSrv.Listener.Addr().String()
+	mockResolver := newResolver(dnsAddress)
+
+	// A requires DNS, uses mock resolver.
+	serverA.cfg.DNSRequired = true
+	serverA.resolver = mockResolver
+
+	// B advertises DNS name but TXT has wrong identity.
+	serverB.cfg.DNSName = "nodeB." + domain
+
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
+
+	// B connects to A. A will verify B's DNS and find mismatch.
+	serverB.cfg.Connect = []string{addrA}
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+
+	// B's connect should fail because A rejects the DNS mismatch.
+	// The error surfaces on B's side (connect sends to errC).
+	// But wait — the DNS verification happens on A's listen side
+	// (newTransport), not on B's connect side. B's connect will
+	// succeed from B's perspective, but A will reject the transport.
+	// B will then get a read error when A closes the connection.
+	//
+	// Actually, looking at the flow: B dials A, B does KX+handshake.
+	// On A's side, newTransport does KX+handshake+DNS verify. If DNS
+	// verify fails, newTransport returns error, A logs it and
+	// continues accepting. B's handshake completes successfully from
+	// B's side but A never calls newSession, so A closes the conn.
+	// B's connect() gets the error from handshake read timeout or
+	// connection reset.
+
+	// Give B time to attempt and fail.
+	time.Sleep(500 * time.Millisecond)
+
+	// A should have no sessions (rejected B).
+	serverA.mtx.RLock()
+	sessions := len(serverA.sessions)
+	serverA.mtx.RUnlock()
+	if sessions != 0 {
+		t.Fatalf("A has %d sessions, want 0", sessions)
+	}
+	t.Log("A correctly rejected B due to DNS identity mismatch")
+
+	cancel()
+	// Don't fail on B's error — it's expected.
+	if err := <-errA; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server A: %v", err)
+	}
+	<-errB // drain
+}
+
+func TestVerifyDNSIdentityByName(t *testing.T) {
+	ctx := t.Context()
+	domain := "test.gfy"
+
+	// Create a DNS node and mock server.
+	handler := createDNSNodes(domain, 3)
+	dnsSrv := newDNSServer(ctx, handler)
+	dnsAddress := dnsSrv.Listener.Addr().String()
+
+	// Create a minimal server to test verifyDNSIdentity.
+	s := &Server{
+		resolver: newResolver(dnsAddress),
+	}
+
+	// Verify each node's identity.
+	for name, n := range handler.nodes {
+		t.Run(name, func(t *testing.T) {
+			err := s.verifyDNSIdentity(ctx, name, n.Secret.Identity)
+			if err != nil {
+				t.Fatalf("verifyDNSIdentity(%v): %v", name, err)
+			}
+		})
+	}
+
+	// Negative: wrong identity should fail.
+	wrongSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range handler.nodes {
+		err := s.verifyDNSIdentity(ctx, name, wrongSecret.Identity)
+		if err == nil {
+			t.Fatalf("verifyDNSIdentity(%v) should have failed with wrong identity", name)
+		}
+		t.Logf("correctly rejected wrong identity for %v: %v", name, err)
+		break // one is enough
 	}
 }
