@@ -55,6 +55,7 @@ func init() {
 	}
 }
 
+// Config holds the configuration for a continuum Server.
 type Config struct {
 	Connect                 []string
 	Home                    string
@@ -67,6 +68,8 @@ type Config struct {
 	PrometheusNamespace     string
 }
 
+// Server is a continuum protocol node that manages encrypted peer
+// connections, gossip-based peer discovery, and TSS ceremonies.
 type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
@@ -101,10 +104,12 @@ type Server struct {
 	isRunning       bool
 }
 
+// Info reports the current status of the server.
 type Info struct {
 	Online bool
 }
 
+// NewDefaultConfig returns a Config with sensible defaults.
 func NewDefaultConfig() *Config {
 	return &Config{
 		LogLevel:            logLevel,
@@ -115,6 +120,8 @@ func NewDefaultConfig() *Config {
 	}
 }
 
+// NewServer creates a new Server from the provided config.
+// If cfg is nil, NewDefaultConfig is used.
 func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
@@ -314,6 +321,7 @@ func (s *Server) Collectors() []prometheus.Collector {
 	return s.promCollectors
 }
 
+// Running reports whether the server is currently running.
 func (s *Server) Running() bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
@@ -742,6 +750,8 @@ func (s *Server) initPaillierPrimes(pctx context.Context) error {
 	return ppf.Close()
 }
 
+// Run starts the server, listens for connections, and blocks until the
+// context is cancelled or a fatal error occurs.
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
