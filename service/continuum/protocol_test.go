@@ -178,7 +178,6 @@ func TestPayloadHash(t *testing.T) {
 	}
 }
 
-
 func TestCeremonyID(t *testing.T) {
 	// Create a ceremony ID
 	var cid CeremonyID
