@@ -815,3 +815,215 @@ func TestReadJSONLineEOF(t *testing.T) {
 		t.Fatal("expected EOF error")
 	}
 }
+
+// TestPingHeartbeat verifies that the ping loop sends heartbeats and
+// that receiving a PingResponse updates the peer's LastSeen timestamp.
+func TestPingHeartbeat(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Use a fast ping interval for testing.
+	const fastPing = 500 * time.Millisecond
+
+	// Start A.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	serverA.cfg.PingInterval = fastPing
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+
+	// Start B, connects to A.
+	serverB := newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrA})
+	serverB.cfg.PingInterval = fastPing
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+
+	// Wait for A<->B session.
+	waitForSessions(t, serverA, 1, 10*time.Second)
+	waitForSessions(t, serverB, 1, 10*time.Second)
+
+	idA := serverA.Identity()
+	idB := serverB.Identity()
+
+	// Record initial LastSeen for B's record of A.
+	initialLastSeen := func() int64 {
+		for _, pr := range serverB.KnownPeers() {
+			if pr.Identity == idA {
+				return pr.LastSeen
+			}
+		}
+		return 0
+	}()
+
+	// Wait for a few pings to exchange.
+	time.Sleep(3 * fastPing)
+
+	// Verify LastSeen was refreshed.
+	updatedLastSeen := func() int64 {
+		for _, pr := range serverB.KnownPeers() {
+			if pr.Identity == idA {
+				return pr.LastSeen
+			}
+		}
+		return 0
+	}()
+
+	if updatedLastSeen < initialLastSeen {
+		t.Fatalf("LastSeen went backwards: %d -> %d",
+			initialLastSeen, updatedLastSeen)
+	}
+
+	// Also verify A has B in its peer table.
+	found := false
+	for _, pr := range serverA.KnownPeers() {
+		if pr.Identity == idB {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("A does not know B")
+	}
+
+	cancel()
+	if err := <-errA; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("serverA: %v", err)
+	}
+	if err := <-errB; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("serverB: %v", err)
+	}
+}
+
+// TestSessionReaping verifies that when a peer dies, the surviving node
+// detects the dead session and removes it.
+func TestSessionReaping(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctxA, cancelA := context.WithCancel(t.Context())
+	t.Cleanup(cancelA)
+
+	ctxB, cancelB := context.WithCancel(t.Context())
+	t.Cleanup(cancelB)
+
+	const fastPing = 500 * time.Millisecond
+
+	// Start A.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	serverA.cfg.PingInterval = fastPing
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctxA) }()
+	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+
+	// Start B, connects to A.
+	serverB := newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrA})
+	serverB.cfg.PingInterval = fastPing
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctxB) }()
+
+	// Wait for A<->B session.
+	waitForSessions(t, serverA, 1, 10*time.Second)
+	waitForSessions(t, serverB, 1, 10*time.Second)
+	t.Log("A<->B session established")
+
+	// Kill B.
+	cancelB()
+	if err := <-errB; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("serverB: %v", err)
+	}
+	t.Log("B shut down")
+
+	// A should detect the dead session.  The read in handle() will
+	// return an error when the TCP connection is closed, which causes
+	// handle() to exit and deleteSession to run.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		ids := serverA.SessionIdentities()
+		if len(ids) == 0 {
+			t.Log("A reaped dead session")
+			cancelA()
+			if err := <-errA; err != nil && !errors.Is(err, context.Canceled) {
+				t.Fatalf("serverA: %v", err)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("A did not reap dead session within timeout")
+}
+
+// TestMaintainConnections verifies that when a node is below PeersWanted
+// and knows about gossip-learned peers, it autonomously dials them.
+func TestMaintainConnections(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	const (
+		fastMaintain = 500 * time.Millisecond
+		peersWanted  = 3 // want more than the initial 1 session
+	)
+
+	// Start A.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	serverA.cfg.MaintainInterval = fastMaintain
+	serverA.cfg.PeersWanted = peersWanted
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 5*time.Second)
+	t.Logf("A: %v at %s", serverA.Identity(), addrA)
+
+	// Start B, connects to A.
+	serverB := newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrA})
+	serverB.cfg.MaintainInterval = fastMaintain
+	serverB.cfg.PeersWanted = peersWanted
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+	addrB := waitForListenAddress(t, serverB, 5*time.Second)
+	t.Logf("B: %v at %s", serverB.Identity(), addrB)
+
+	// Wait for A<->B session.
+	waitForSessions(t, serverA, 1, 10*time.Second)
+	waitForSessions(t, serverB, 1, 10*time.Second)
+	t.Log("A<->B session established")
+
+	// Start C, connects to B.
+	serverC := newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrB})
+	serverC.cfg.MaintainInterval = fastMaintain
+	serverC.cfg.PeersWanted = peersWanted
+	errC := make(chan error, 1)
+	go func() { errC <- serverC.Run(ctx) }()
+	addrC := waitForListenAddress(t, serverC, 5*time.Second)
+	t.Logf("C: %v at %s", serverC.Identity(), addrC)
+
+	// Wait for B<->C session.
+	waitForSessions(t, serverB, 2, 10*time.Second)
+	t.Log("B<->C session established")
+
+	// Wait for gossip to propagate: A should learn about C.
+	waitForPeers(t, serverA, 3, 15*time.Second)
+	t.Log("A knows about C via gossip")
+
+	// Now maintainConnections should kick in: A is below PeersWanted
+	// (has 1 session, wants 3) and knows about C.  It should
+	// autonomously dial C, giving A a second session.
+	waitForSessions(t, serverA, 2, 15*time.Second)
+	t.Log("A autonomously connected to C via maintainConnections")
+
+	// Verify C also sees 2 sessions (B + A).
+	waitForSessions(t, serverC, 2, 15*time.Second)
+	t.Log("C confirmed 2 sessions")
+
+	cancel()
+	for _, errCh := range []chan error{errA, errB, errC} {
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("server: %v", err)
+		}
+	}
+}
