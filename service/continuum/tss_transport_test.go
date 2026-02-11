@@ -369,17 +369,17 @@ func (n *tssTransportNode) handleReshareRequest(req ReshareRequest) {
 	}
 
 	tc := &transportCeremony{
-		ctype:    CeremonyReshare,
-		party:    newParty,
-		oldParty: oldParty,
-		oldPids:  oldPids,
-		newPids:  newPids,
-		pidToID:  allPidToID,
-		outCh:    outCh,
-		endCh:    make(chan any, expectedEnds),
-		done:     make(chan struct{}),
+		ctype:     CeremonyReshare,
+		party:     newParty,
+		oldParty:  oldParty,
+		oldPids:   oldPids,
+		newPids:   newPids,
+		pidToID:   allPidToID,
+		outCh:     outCh,
+		endCh:     make(chan any, expectedEnds),
+		done:      make(chan struct{}),
 		threshold: req.NewThreshold,
-		keyID:    keyID,
+		keyID:     keyID,
 	}
 	n.ceremonies[req.CeremonyID] = tc
 
