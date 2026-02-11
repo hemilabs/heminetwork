@@ -1424,7 +1424,7 @@ func TestHandshakeErrors(t *testing.T) {
 				}
 			}()
 
-			_, err = serverTransport.Handshake(ctx, serverSecret)
+			_, _, err = serverTransport.Handshake(ctx, serverSecret, "")
 			if err != nil {
 				if errors.Is(err, tti.expectedError) ||
 					errors.Is(tti.expectedError, ErrNoType) {
@@ -1540,7 +1540,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				defer wg.Done()
 
 				var err error // prevent data race
-				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
+				derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret, "")
 				if err != nil {
 					panic(err)
 				}
@@ -1568,7 +1568,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				}()
 
 				var err error // prevent data race
-				derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
+				derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret, "")
 				if err != nil {
 					panic(err)
 				}
@@ -1691,7 +1691,7 @@ func TestConnHandshake(t *testing.T) {
 
 				var err error
 
-				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
+				derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret, "")
 				if err != nil {
 					panic(err)
 				}
@@ -1709,7 +1709,7 @@ func TestConnHandshake(t *testing.T) {
 					}
 				}()
 
-				derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
+				derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret, "")
 				if err != nil {
 					panic(err)
 				}
@@ -2009,4 +2009,94 @@ func TestDNSTXTRecord(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected lame referral")
 	}
+}
+
+func TestKvFromTxt(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    map[string]string
+		wantErr bool
+	}{
+		{
+			name:  "valid record",
+			input: "v=transfunctioner; identity=deadbeef; port=1234",
+			want: map[string]string{
+				"v":        "transfunctioner",
+				"identity": "deadbeef",
+				"port":     "1234",
+			},
+		},
+		{
+			name:  "value containing equals",
+			input: "v=transfunctioner; data=abc=def=ghi",
+			want: map[string]string{
+				"v":    "transfunctioner",
+				"data": "abc=def=ghi",
+			},
+		},
+		{
+			name:  "single pair",
+			input: "v=transfunctioner",
+			want:  map[string]string{"v": "transfunctioner"},
+		},
+		{
+			name:  "whitespace trimming",
+			input: " v = transfunctioner ;  identity = deadbeef ",
+			want: map[string]string{
+				"v":        "transfunctioner",
+				"identity": "deadbeef",
+			},
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "no equals sign",
+			input:   "noequals",
+			wantErr: true,
+		},
+		{
+			name:    "missing value in pair",
+			input:   "v=transfunctioner; novalue",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := kvFromTxt(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("kvFromTxt(%q) = %v, want error",
+						tt.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("kvFromTxt(%q) error: %v", tt.input, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("kvFromTxt(%q) = %v, want %v",
+					tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func FuzzKvFromTxt(f *testing.F) {
+	f.Add("v=transfunctioner; identity=deadbeef; port=1234")
+	f.Add("")
+	f.Add("noequals")
+	f.Add("a=b; c=d; e=f")
+	f.Add("key=val=ue")
+	f.Add("; ; ; ")
+	f.Add("===")
+	f.Add("v=transfunctioner; identity=abc123abc123abc123abc123abc123abc123abc1")
+
+	f.Fuzz(func(t *testing.T, input string) {
+		// Must not panic.
+		_, _ = kvFromTxt(input)
+	})
 }
