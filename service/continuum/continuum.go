@@ -7,6 +7,7 @@
 package continuum
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
@@ -67,6 +68,8 @@ func init() {
 // Config holds the configuration for a continuum Server.
 type Config struct {
 	Connect                 []string
+	DNSName                 string // Hostname to advertise in hello, empty = don't
+	DNSRequired             bool   // Require remote to advertise and verify DNS
 	Home                    string
 	ListenAddress           string
 	LogLevel                string
@@ -77,6 +80,7 @@ type Config struct {
 	PrivateKey              string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
+	Seeds                   []string // DNS seed hostnames, format host:port
 }
 
 // Server is a continuum protocol node that manages encrypted peer
@@ -104,6 +108,10 @@ type Server struct {
 	// Listener
 	listenConfig  *net.ListenConfig
 	listenAddress string // Actual bound address after Listen()
+
+	// DNS resolver; nil uses net.DefaultResolver.  Tests inject a
+	// mock resolver pointing at an in-process DNS server.
+	resolver *net.Resolver
 
 	// Peer tracking
 	peers    map[Identity]*PeerRecord // all known peers
@@ -195,11 +203,34 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 		return nil, nil, fmt.Errorf("key exchange: %w", err) // XXX too loud?
 	}
 
-	id, err := transport.Handshake(ctx, s.secret)
+	// After KX, transport owns conn.  Ensure cleanup on failure so
+	// the remote side gets a connection reset instead of hanging.
+	ok := false
+	defer func() {
+		if !ok {
+			transport.Close()
+		}
+	}()
+
+	id, theirDNS, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("handshake: %w", err) // XXX too loud?
 	}
 
+	if s.cfg.DNSRequired {
+		if theirDNS == "" {
+			return nil, nil, errors.New("remote did not advertise dns name")
+		}
+		// XXX no rate limiting on DNS lookups here — an attacker
+		// can open connections with fake DNS names and force
+		// unbounded TXT queries.  Entangled with the accept-loop
+		// blocking issue below.
+		if err := s.verifyDNSIdentity(ctx, theirDNS, *id); err != nil {
+			return nil, nil, fmt.Errorf("dns verify: %w", err)
+		}
+	}
+
+	ok = true
 	return id, transport, nil
 }
 
@@ -404,6 +435,93 @@ func (s *Server) maintainConnections(ctx context.Context) {
 	}
 }
 
+// dnsResolver returns the server's DNS resolver. If none was injected
+// (e.g. by tests), it returns the default system resolver.
+func (s *Server) dnsResolver() *net.Resolver {
+	if s.resolver != nil {
+		return s.resolver
+	}
+	return net.DefaultResolver
+}
+
+// seed resolves DNS seed hostnames to IP addresses and kicks off
+// connections. Errors are logged, not fatal — a node can still
+// operate in listen-only mode or learn peers via inbound gossip.
+func (s *Server) seed(ctx context.Context) {
+	log.Tracef("seed")
+	defer log.Tracef("seed exit")
+
+	resolver := s.dnsResolver()
+	seedCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	for _, v := range s.cfg.Seeds {
+		host, port, err := net.SplitHostPort(v)
+		if err != nil {
+			log.Errorf("seed parse: %v", err)
+			continue
+		}
+		ips, err := resolver.LookupHost(seedCtx, host)
+		if err != nil {
+			log.Errorf("seed lookup %v: %v", host, err)
+			continue
+		}
+		for _, ip := range ips {
+			addr := net.JoinHostPort(ip, port)
+			log.Infof("seed resolved %v -> %v", v, addr)
+			s.wg.Add(1)
+			go s.connectPeer(ctx, addr)
+		}
+	}
+}
+
+// verifyDNSIdentity does a forward TXT lookup on hostname and verifies
+// the identity in the TXT record matches the expected identity. This
+// avoids reverse DNS lookups which are unreliable.
+//
+// NOTE: DNS is NOT an authentication mechanism.  The real identity
+// proof comes from the KX + secretbox layer.  DNS verification is
+// defense-in-depth for operational assurance — it lets operators
+// detect misconfigured or rogue nodes early.  An attacker who
+// controls DNS responses can forge TXT records; the crypto layer
+// prevents them from impersonating a node regardless.
+//
+// If multiple TXT records exist, only the first with v=transfunctioner
+// is considered authoritative.  A hostname should publish exactly one
+// record for this application.
+func (s *Server) verifyDNSIdentity(ctx context.Context, hostname string, id Identity) error {
+	log.Tracef("verifyDNSIdentity %v", hostname)
+	defer log.Tracef("verifyDNSIdentity %v exit", hostname)
+	resolver := s.dnsResolver()
+	txts, err := resolver.LookupTXT(ctx, hostname)
+	if err != nil {
+		return fmt.Errorf("dns txt lookup %v: %w", hostname, err)
+	}
+	if len(txts) == 0 {
+		return fmt.Errorf("dns no txt records for %v", hostname)
+	}
+	// Try each TXT record — there may be multiple.
+	for _, txt := range txts {
+		m, err := kvFromTxt(txt)
+		if err != nil {
+			continue
+		}
+		if m["v"] != dnsAppName {
+			continue
+		}
+		remoteDNSID, err := NewIdentityFromString(m["identity"])
+		if err != nil {
+			continue
+		}
+		if bytes.Equal(id[:], remoteDNSID[:]) {
+			return nil
+		}
+		return fmt.Errorf("dns identity mismatch: got %v, want %v",
+			remoteDNSID, id)
+	}
+	return fmt.Errorf("dns no valid txt record for %v", hostname)
+}
+
 // connectRandom picks a random known peer that has no active session
 // and dials it.  Errors are logged, not fatal.
 func (s *Server) connectRandom(ctx context.Context) {
@@ -464,10 +582,21 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 		log.Warningf("connectPeer kx %v: %v", addr, err)
 		return
 	}
-	them, err := transport.Handshake(ctx, s.secret)
+	them, theirDNS, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
 	if err != nil {
 		log.Warningf("connectPeer handshake %v: %v", addr, err)
 		return
+	}
+
+	if s.cfg.DNSRequired {
+		if theirDNS == "" {
+			log.Warningf("connectPeer %v: remote did not advertise dns name", addr)
+			return
+		}
+		if err := s.verifyDNSIdentity(ctx, theirDNS, *them); err != nil {
+			log.Warningf("connectPeer dns verify %v: %v", addr, err)
+			return
+		}
 	}
 
 	if err := s.newSession(them, transport); err != nil {
@@ -791,10 +920,21 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		errC <- err
 		return
 	}
-	them, err := transport.Handshake(ctx, s.secret)
+	them, theirDNS, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
 	if err != nil {
 		errC <- err
 		return
+	}
+
+	if s.cfg.DNSRequired {
+		if theirDNS == "" {
+			errC <- errors.New("remote did not advertise dns name")
+			return
+		}
+		if err := s.verifyDNSIdentity(ctx, theirDNS, *them); err != nil {
+			errC <- fmt.Errorf("dns verify: %w", err)
+			return
+		}
 	}
 
 	if err := s.newSession(them, transport); err != nil {
@@ -1055,6 +1195,8 @@ func (s *Server) Run(pctx context.Context) error {
 	if len(s.cfg.Connect) != 0 {
 		s.wg.Add(1)
 		go s.connectAll(ctx, errC)
+	} else if len(s.cfg.Seeds) != 0 {
+		s.seed(ctx)
 	}
 
 	// Periodically dial gossip-learned peers when below PeersWanted.

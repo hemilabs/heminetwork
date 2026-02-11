@@ -81,7 +81,24 @@ var (
 			Help:         "address and port transfunctionerd prometheus listens on",
 			Print:        config.PrintAll,
 		},
-		// XXX add DNS security toggle
+		"TRF_DNS_NAME": config.Config{
+			Value:        &cfg.DNSName,
+			DefaultValue: "",
+			Help:         "hostname to advertise in hello for DNS identity verification",
+			Print:        config.PrintAll,
+		},
+		"TRF_DNS_REQUIRED": config.Config{
+			Value:        &cfg.DNSRequired,
+			DefaultValue: false,
+			Help:         "require remote peers to advertise and verify DNS identity",
+			Print:        config.PrintAll,
+		},
+		"TRF_SEEDS": config.Config{
+			Value:        &cfg.Seeds,
+			DefaultValue: []string{},
+			Help:         "DNS seed hostnames (host:port), ignored when TRF_CONNECT is set",
+			Print:        config.PrintAll,
+		},
 		// XXX add max queue depth per connection
 		// XXX maybe add max commands / second
 		// XXX maybe add white/black list of ips/hosts
