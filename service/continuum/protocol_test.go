@@ -48,21 +48,30 @@ func TestEncryptDecrypt(t *testing.T) {
 		}
 
 		// Perform actual key exchange
-		encryptionKeyServer, err := KeyExchange(server.us, client.us.PublicKey())
+		s2cKeyServer, c2sKeyServer, err := KeyExchange(server.us, client.us.PublicKey())
 		if err != nil {
 			t.Fatal(err)
 		}
-		encryptionKeyClient, err := KeyExchange(client.us, server.us.PublicKey())
+		s2cKeyClient, c2sKeyClient, err := KeyExchange(client.us, server.us.PublicKey())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(encryptionKeyServer[:], encryptionKeyClient[:]) {
-			t.Fatal("shared key not equal")
+		if !bytes.Equal(s2cKeyServer[:], s2cKeyClient[:]) {
+			t.Fatal("s2c key not equal")
+		}
+		if !bytes.Equal(c2sKeyServer[:], c2sKeyClient[:]) {
+			t.Fatal("c2s key not equal")
+		}
+		if bytes.Equal(s2cKeyServer[:], c2sKeyServer[:]) {
+			t.Fatal("directional keys must differ")
 		}
 
-		// Set keys to simulate incomming key exchange message
-		server.encryptionKey = encryptionKeyServer
-		client.encryptionKey = encryptionKeyClient
+		// Set directional keys: server encrypts with s2c, client
+		// decrypts with s2c.
+		server.encryptKey = s2cKeyServer
+		server.decryptKey = c2sKeyServer
+		client.encryptKey = c2sKeyClient
+		client.decryptKey = s2cKeyClient
 
 		// Encrypt a message
 		message := []byte("this is a super secret message y'all!")
@@ -83,6 +92,183 @@ func TestEncryptDecrypt(t *testing.T) {
 		if !errors.Is(ErrInvalidSecretboxLength, err) {
 			t.Fatalf("expected length error: %v", err)
 		}
+	}
+}
+
+// TestDirectionalKeys proves that the s2c and c2s keys are independent
+// and that using the wrong directional key for decryption fails.
+func TestDirectionalKeys(t *testing.T) {
+	server, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.nonce, err = NewNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := newTransportFromPublicKey(server.us.PublicKey().Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.nonce, err = NewNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Derive directional keys.
+	s2cKey, c2sKey, err := KeyExchange(server.us, client.us.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2cKey2, c2sKey2, err := KeyExchange(client.us, server.us.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity: both sides derive the same pair.
+	if !bytes.Equal(s2cKey[:], s2cKey2[:]) {
+		t.Fatal("s2c keys differ between sides")
+	}
+	if !bytes.Equal(c2sKey[:], c2sKey2[:]) {
+		t.Fatal("c2s keys differ between sides")
+	}
+
+	// Keys MUST differ from each other.
+	if bytes.Equal(s2cKey[:], c2sKey[:]) {
+		t.Fatal("directional keys are identical")
+	}
+
+	// Assign: server encrypts s2c, decrypts c2s.
+	server.encryptKey = s2cKey
+	server.decryptKey = c2sKey
+	client.encryptKey = c2sKey2
+	client.decryptKey = s2cKey2
+
+	message := []byte("directional key test payload")
+
+	// Server→client: client decrypts with s2c key.
+	cipherS2C, err := server.encrypt(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleartext, err := client.decrypt(cipherS2C[3:])
+	if err != nil {
+		t.Fatalf("client failed to decrypt server message: %v", err)
+	}
+	if !bytes.Equal(message, cleartext) {
+		t.Fatal("decrypted message mismatch")
+	}
+
+	// Client→server: server decrypts with c2s key.
+	cipherC2S, err := client.encrypt(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleartext, err = server.decrypt(cipherC2S[3:])
+	if err != nil {
+		t.Fatalf("server failed to decrypt client message: %v", err)
+	}
+	if !bytes.Equal(message, cleartext) {
+		t.Fatal("decrypted message mismatch")
+	}
+
+	// Wrong direction: server cannot decrypt its own s2c message.
+	// Server's decryptKey is c2s which is the wrong key for s2c
+	// ciphertext.
+	_, err = server.decrypt(cipherS2C[3:])
+	if !errors.Is(err, ErrDecrypt) {
+		t.Fatalf("expected ErrDecrypt for wrong-direction decrypt, got: %v", err)
+	}
+
+	// Wrong direction: client cannot decrypt its own c2s message.
+	_, err = client.decrypt(cipherC2S[3:])
+	if !errors.Is(err, ErrDecrypt) {
+		t.Fatalf("expected ErrDecrypt for wrong-direction decrypt, got: %v", err)
+	}
+
+	// Cleartext never appears in ciphertext (basic sanity).
+	if bytes.Contains(cipherS2C, message) {
+		t.Fatal("cleartext found in s2c ciphertext")
+	}
+	if bytes.Contains(cipherC2S, message) {
+		t.Fatal("cleartext found in c2s ciphertext")
+	}
+}
+
+// TestWireEncryption proves that data written through Transport.write to a
+// live connection does not contain cleartext.  It taps the raw bytes on a
+// net.Pipe after a full KeyExchange to verify that the known plaintext
+// never appears on the wire.
+func TestWireEncryption(t *testing.T) {
+	ctx := context.Background()
+	serverPipe, clientPipe := net.Pipe()
+
+	serverTr, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTr := new(Transport)
+
+	// Perform key exchange over the pipe.
+	errCh := make(chan error, 2)
+	go func() { errCh <- serverTr.KeyExchange(ctx, serverPipe) }()
+	go func() { errCh <- clientTr.KeyExchange(ctx, clientPipe) }()
+	for i := 0; i < 2; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("KeyExchange: %v", err)
+		}
+	}
+
+	// Replace server's conn with a tee so we can capture raw wire bytes.
+	spy, spyServer := net.Pipe()
+	var wireBuf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Relay server→spy into wireBuf and forward to original conn.
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := spy.Read(buf)
+			if n > 0 {
+				wireBuf.Write(buf[:n])
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	// Point server transport at our spy pipe.
+	serverTr.mtx.Lock()
+	serverTr.conn = spyServer
+	serverTr.mtx.Unlock()
+
+	// Write a known plaintext through the encrypted transport.
+	plaintext := []byte("SUPER SECRET PLAINTEXT THAT MUST NOT APPEAR ON WIRE")
+	if err := serverTr.write(time.Second, plaintext); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Close to flush the relay goroutine.
+	spyServer.Close()
+	spy.Close()
+	<-done
+
+	raw := wireBuf.Bytes()
+	if len(raw) == 0 {
+		t.Fatal("no bytes captured on wire")
+	}
+	if bytes.Contains(raw, plaintext) {
+		t.Fatal("cleartext found in raw wire bytes — encryption is broken")
+	}
+	if bytes.Equal(raw, plaintext) {
+		t.Fatal("wire bytes are identical to plaintext")
+	}
+
+	// Verify the wire payload is longer than plaintext (nonce + overhead).
+	if len(raw) <= len(plaintext) {
+		t.Fatalf("wire bytes (%d) shorter than plaintext (%d) — missing crypto overhead",
+			len(raw), len(plaintext))
 	}
 }
 
@@ -681,20 +867,26 @@ func TestKeyExchange(t *testing.T) {
 
 	// Send server client public key
 
-	// Server derives ephemeral shared key
-	serverEncryptionKey, err := KeyExchange(serverTransport.us,
+	// Server derives directional keys
+	s2cServer, c2sServer, err := KeyExchange(serverTransport.us,
 		clientTransport.us.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientEncryptionKey, err := KeyExchange(clientTransport.us,
+	s2cClient, c2sClient, err := KeyExchange(clientTransport.us,
 		serverTransport.us.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !bytes.Equal(serverEncryptionKey[:], clientEncryptionKey[:]) {
-		t.Fatal("derived shared key not equal")
+	if !bytes.Equal(s2cServer[:], s2cClient[:]) {
+		t.Fatal("s2c key not equal")
+	}
+	if !bytes.Equal(c2sServer[:], c2sClient[:]) {
+		t.Fatal("c2s key not equal")
+	}
+	if bytes.Equal(s2cServer[:], c2sServer[:]) {
+		t.Fatal("directional keys must differ")
 	}
 }
 
@@ -770,9 +962,13 @@ func TestConnKeyExchange(t *testing.T) {
 
 			wg.Wait()
 
-			if !bytes.Equal(serverTransport.encryptionKey[:],
-				clientTransport.encryptionKey[:]) {
-				t.Fatal("derived shared key not equal")
+			if !bytes.Equal(serverTransport.encryptKey[:],
+				clientTransport.decryptKey[:]) {
+				t.Fatal("server encrypt key != client decrypt key")
+			}
+			if bytes.Equal(serverTransport.encryptKey[:],
+				serverTransport.decryptKey[:]) {
+				t.Fatal("directional keys must differ")
 			}
 		})
 	}
@@ -1327,9 +1523,13 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 
 			wg.Wait()
 
-			if !bytes.Equal(serverTransport.encryptionKey[:],
-				clientTransport.encryptionKey[:]) {
-				t.Fatal("derived shared key not equal")
+			if !bytes.Equal(serverTransport.encryptKey[:],
+				clientTransport.decryptKey[:]) {
+				t.Fatal("server encrypt key != client decrypt key")
+			}
+			if bytes.Equal(serverTransport.encryptKey[:],
+				serverTransport.decryptKey[:]) {
+				t.Fatal("directional keys must differ")
 			}
 
 			// Handshake
@@ -1473,9 +1673,13 @@ func TestConnHandshake(t *testing.T) {
 
 			wg.Wait()
 
-			if !bytes.Equal(serverTransport.encryptionKey[:],
-				clientTransport.encryptionKey[:]) {
-				t.Fatal("derived shared key not equal")
+			if !bytes.Equal(serverTransport.encryptKey[:],
+				clientTransport.decryptKey[:]) {
+				t.Fatal("server encrypt key != client decrypt key")
+			}
+			if bytes.Equal(serverTransport.encryptKey[:],
+				serverTransport.decryptKey[:]) {
+				t.Fatal("directional keys must differ")
 			}
 
 			// Handshake
