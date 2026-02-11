@@ -21,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"testing"
 	"time"
 
