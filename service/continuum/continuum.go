@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -216,8 +216,8 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			log.Errorf("read %v: %v", id, err)
 			return
 		}
-		log.Infof("%v", spew.Sdump(header))
-		log.Infof("%v", spew.Sdump(payload))
+		log.Debugf("%v", spew.Sdump(header))
+		log.Debugf("%v", spew.Sdump(payload))
 
 		// XXX make this a map like str2pt with callbacks
 		switch v := payload.(type) {
@@ -260,6 +260,11 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			}
 			var learned int
 			for _, pr := range peers {
+				if pr.Version != ProtocolVersion {
+					log.Warningf("peer %v version %d != %d, rejected",
+						pr.Identity, pr.Version, ProtocolVersion)
+					continue
+				}
 				if err := validatePeerAddress(pr.Address); err != nil {
 					log.Warningf("peer %v bad address %q: %v",
 						pr.Identity, pr.Address, err)
@@ -413,9 +418,15 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 }
 
 // addPeer adds or refreshes a peer record.  Returns true if the peer
-// was previously unknown.
+// was previously unknown.  Rejects self and version mismatches.
 func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 	log.Tracef("addPeer %v", pr.Identity)
+
+	if pr.Version != ProtocolVersion {
+		log.Warningf("addPeer %v: version %d != %d, rejected",
+			pr.Identity, pr.Version, ProtocolVersion)
+		return false
+	}
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -457,9 +468,13 @@ func (s *Server) knownPeerList(exclude Identity) []PeerRecord {
 
 // notifyAllPeers sends a PeerNotify to all active sessions.
 // Each write is bounded by the transport's 4s write deadline so
-// a hung peer cannot block others.  We don't wait for completion
-// because errors are logged by the goroutine and the caller has
-// no use for the results.
+// a hung peer cannot block others.  Goroutines are intentionally
+// orphaned (not tracked by s.wg) — if the write fails, we close
+// the transport to aggressively cull dead sessions.
+//
+// XXX(marco): if a transport is closed here while a TSS keygen,
+// reshare, or sign is in flight on that session, the TSS operation
+// will fail.  The coordinator layer needs to handle this.
 func (s *Server) notifyAllPeers(ctx context.Context) {
 	log.Tracef("notifyAllPeers")
 
@@ -485,7 +500,10 @@ func (s *Server) notifyAllPeers(ctx context.Context) {
 	for _, d := range targets {
 		go func(d dest) {
 			if err := d.t.Write(s.secret.Identity, notify); err != nil {
-				log.Warningf("peer notify %v: %v", d.id, err)
+				log.Warningf("peer notify %v: %v, closing", d.id, err)
+				if cerr := d.t.Close(); cerr != nil {
+					log.Errorf("peer notify close %v: %v", d.id, cerr)
+				}
 			}
 		}(d)
 	}
@@ -586,6 +604,9 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	}
 
 	if err := s.newSession(them, transport); err != nil {
+		// Duplicate session is transient (peer reconnected before
+		// old session was reaped).  Don't send to errC — that
+		// kills the server.  Deferred cleanup closes transport.
 		log.Errorf("connect session %v: %v", them, err)
 		return
 	}
