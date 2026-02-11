@@ -137,14 +137,18 @@ func (s *Server) deleteSession(id string) {
 }
 
 func (s *Server) deleteAllSessions() {
+	// XXX holds mutex for duration of all Close() calls.  If a
+	// transport's Close() blocks (broken TCP, slow FIN), every
+	// goroutine needing s.mtx stalls.  Consider collecting
+	// transports under lock, then closing outside it.
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	for id, t := range s.sessions {
 		if err := t.Close(); err != nil {
 			log.Errorf("close session %s: %v", id, err)
 		}
+		delete(s.sessions, id)
 	}
-	s.sessions = nil
 }
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
