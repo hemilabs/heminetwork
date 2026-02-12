@@ -1183,7 +1183,8 @@ func (s *Server) promPoll(ctx context.Context) error {
 
 		if s.promPollVerbose {
 			s.mtx.RLock()
-			log.Infof("promPoll XXX")
+			log.Infof("promPoll: peers %d sessions %d",
+				len(s.peers), len(s.sessions))
 			s.mtx.RUnlock()
 		}
 	}
