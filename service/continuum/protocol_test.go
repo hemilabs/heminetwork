@@ -1315,7 +1315,7 @@ func TestHandshakeErrors(t *testing.T) {
 					return err
 				}
 				// Read Hello
-				_, cmd, err := tr.read(readTimeout)
+				_, cmd, _, err := tr.read(readTimeout)
 				if err != nil {
 					return err
 				}

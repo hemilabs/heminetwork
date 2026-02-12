@@ -11,8 +11,6 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
@@ -66,6 +65,9 @@ const (
 	// seenCapacity is the maximum number of entries in the message
 	// dedup cache.
 	seenCapacity = 1024
+
+	// DefaultTTL is the default hop count for routed messages.
+	DefaultTTL uint8 = 8
 )
 
 var log = loggo.GetLogger(appName)
@@ -131,6 +133,10 @@ type Server struct {
 	// Message deduplication — prevents forwarding loops in
 	// non-tree topologies.
 	seen *ttl.TTL
+
+	// Routing counters for observability and testing.
+	routedReceived atomic.Int64 // messages received at final destination
+	forwarded      atomic.Int64 // messages forwarded to next hop
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -249,17 +255,62 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 	return id, transport, naclPub, nil
 }
 
-// isDuplicate returns true if cleartext has been seen before within
-// seenTTL.  On first encounter it records the hash and returns false.
-// Uses a truncated SHA256 (128 bits) as the cache key.
-func (s *Server) isDuplicate(ctx context.Context, cleartext []byte) bool {
-	hash := sha256.Sum256(cleartext)
-	key := hex.EncodeToString(hash[:16])
+// isDuplicate returns true if the message identified by header hash
+// has been seen before within seenTTL.  On first encounter it records
+// the hash and returns false.  Uses the PayloadHash from the header
+// which is invariant across forwarding hops (unlike cleartext which
+// changes as TTL is decremented and transport re-encrypts).
+func (s *Server) isDuplicate(ctx context.Context, h *Header) bool {
+	key := h.PayloadHash.String()
 	if _, _, err := s.seen.Get(key); err == nil {
 		return true
 	}
 	s.seen.Put(ctx, seenTTL, key, struct{}{}, nil, nil)
 	return false
+}
+
+// defaultTTL is the hop count for originated routed messages.
+const defaultTTL = 8
+
+// forward relays a message that is not destined for us.  If TTL is
+// zero, the message is dropped.  Otherwise TTL is decremented and the
+// message is sent to the destination (if directly connected) or
+// flooded to all peers except the source.
+func (s *Server) forward(header *Header, payload any, from *Identity) {
+	if header.TTL == 0 {
+		log.Debugf("forward: TTL expired, dropping")
+		return
+	}
+
+	fwd := *header
+	fwd.TTL--
+
+	dest := *header.Destination
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	// Direct: destination is a connected peer.
+	if t, ok := s.sessions[dest]; ok {
+		if err := t.WriteHeader(fwd, payload); err != nil {
+			log.Debugf("forward to %v: %v", dest, err)
+		} else {
+			s.forwarded.Add(1)
+		}
+		return
+	}
+
+	// Flood: send to all connected peers except the source.
+	for id, t := range s.sessions {
+		if from != nil && id == *from {
+			continue
+		}
+		if err := t.WriteHeader(fwd, payload); err != nil {
+			log.Debugf("flood forward to %v: %v", id, err)
+		} else {
+			s.forwarded.Add(1)
+		}
+	}
 }
 
 func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
@@ -296,12 +347,37 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 	}
 
 	for {
-		header, payload, err := t.Read()
+		header, payload, _, err := t.ReadEnvelope()
 		if err != nil {
 			// XXX too loud?
 			log.Errorf("read %v: %v", id, err)
 			return
 		}
+
+		// Dedup: drop messages we have already seen.
+		// Only applied to routed messages (those with a
+		// destination).  Local one-hop messages like ping,
+		// gossip are unique per exchange and don't need dedup.
+		if header.Destination != nil {
+			if s.isDuplicate(sessionCtx, header) {
+				log.Debugf("handle %v: duplicate message dropped", id)
+				continue
+			}
+		}
+
+		// Forward: if destination is set and is not us,
+		// decrement TTL and relay to the next hop.
+		if header.Destination != nil && *header.Destination != s.secret.Identity {
+			s.forward(header, payload, id)
+			continue
+		}
+
+		// If this message was routed to us (has destination == us),
+		// count it for observability.
+		if header.Destination != nil {
+			s.routedReceived.Add(1)
+		}
+
 		log.Debugf("%v", spew.Sdump(header))
 		log.Debugf("%v", spew.Sdump(payload))
 
@@ -714,6 +790,37 @@ func (s *Server) PeerCount() int {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return len(s.peers)
+}
+
+// SendTo sends a command to a remote peer, routing through the mesh if
+// no direct session exists.  Returns an error if no route is available.
+func (s *Server) SendTo(dest Identity, cmd any) error {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	// Direct session: send with routing header so the destination
+	// knows this was an addressed message.
+	if t, ok := s.sessions[dest]; ok {
+		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+	}
+
+	// No direct session: flood through first available peer.
+	for _, t := range s.sessions {
+		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+	}
+	return errors.New("no route to destination")
+}
+
+// RoutedReceived returns the count of messages that arrived at this
+// node as their final destination via routing.
+func (s *Server) RoutedReceived() int64 {
+	return s.routedReceived.Load()
+}
+
+// Forwarded returns the count of messages this node has forwarded
+// to other peers.
+func (s *Server) Forwarded() int64 {
+	return s.forwarded.Load()
 }
 
 // KnownPeers returns all known peer records.
