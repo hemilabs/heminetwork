@@ -11,6 +11,8 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +57,15 @@ const (
 	// maintainInterval is how often the server checks whether it
 	// needs to dial additional peers.  Prime, distinct from ping.
 	maintainInterval = 67 * time.Second
+
+	// seenTTL is the duration a message hash stays in the dedup
+	// cache.  Prime, ~1 minute.  After expiry the same message
+	// can be processed again.
+	seenTTL = 67 * time.Second
+
+	// seenCapacity is the maximum number of entries in the message
+	// dedup cache.
+	seenCapacity = 1024
 )
 
 var log = loggo.GetLogger(appName)
@@ -116,6 +127,10 @@ type Server struct {
 	// Peer tracking
 	peers    map[Identity]*PeerRecord // all known peers
 	peersTTL *ttl.TTL                 // expiry for known peers
+
+	// Message deduplication — prevents forwarding loops in
+	// non-tree topologies.
+	seen *ttl.TTL
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -232,6 +247,19 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 
 	ok = true
 	return id, transport, naclPub, nil
+}
+
+// isDuplicate returns true if cleartext has been seen before within
+// seenTTL.  On first encounter it records the hash and returns false.
+// Uses a truncated SHA256 (128 bits) as the cache key.
+func (s *Server) isDuplicate(ctx context.Context, cleartext []byte) bool {
+	hash := sha256.Sum256(cleartext)
+	key := hex.EncodeToString(hash[:16])
+	if _, _, err := s.seen.Get(key); err == nil {
+		return true
+	}
+	s.seen.Put(ctx, seenTTL, key, struct{}{}, nil, nil)
+	return false
 }
 
 func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
@@ -1153,6 +1181,13 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("peer ttl: %w", err)
 	}
 	s.peersTTL = peersTTL
+
+	// Initialize message dedup cache.
+	seen, err := ttl.New(seenCapacity, true)
+	if err != nil {
+		return fmt.Errorf("seen ttl: %w", err)
+	}
+	s.seen = seen
 
 	// Read or generate Paillier primes.
 	err = s.initPaillierPrimes(ctx)
