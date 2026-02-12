@@ -66,9 +66,6 @@ const (
 	// seenCapacity is the maximum number of entries in the message
 	// dedup cache.
 	seenCapacity = 1024
-
-	// DefaultTTL is the default hop count for routed messages.
-	DefaultTTL uint8 = 8
 )
 
 var log = loggo.GetLogger(appName)
@@ -261,7 +258,14 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 // the hash and returns false.  Uses the PayloadHash from the header
 // which is invariant across forwarding hops (unlike cleartext which
 // changes as TTL is decremented and transport re-encrypts).
+//
+// NOTE: after seenTTL expires (~67s), a replayed message will be
+// accepted again.  This is acceptable for idempotent commands
+// (PingRequest) but should be reconsidered if non-idempotent
+// commands are routed through the mesh.
 func (s *Server) isDuplicate(ctx context.Context, h *Header) bool {
+	log.Tracef("isDuplicate %v", h.PayloadHash)
+
 	key := h.PayloadHash.String()
 	if _, _, err := s.seen.Get(key); err == nil {
 		return true
@@ -277,7 +281,14 @@ const defaultTTL = 8
 // zero, the message is dropped.  Otherwise TTL is decremented and the
 // message is sent to the destination (if directly connected) or
 // flooded to all peers except the source.
+//
+// Complexity: O(1) for direct send, O(n) over connected sessions for
+// flood.  RLock is held during transport writes which are bounded by
+// writeTimeout (4s).  This matches the existing notifyAllPeers
+// pattern.
 func (s *Server) forward(header *Header, payload any, from *Identity) {
+	log.Tracef("forward %v -> %v TTL %d", header.Origin, header.Destination, header.TTL)
+
 	if header.TTL == 0 {
 		log.Debugf("forward: TTL expired, dropping")
 		return
@@ -294,14 +305,16 @@ func (s *Server) forward(header *Header, payload any, from *Identity) {
 	// Direct: destination is a connected peer.
 	if t, ok := s.sessions[dest]; ok {
 		if err := t.WriteHeader(fwd, payload); err != nil {
-			log.Debugf("forward to %v: %v", dest, err)
+			log.Debugf("forward direct to %v: %v", dest, err)
 		} else {
+			log.Debugf("forward direct to %v TTL %d", dest, fwd.TTL)
 			s.forwarded.Add(1)
 		}
 		return
 	}
 
 	// Flood: send to all connected peers except the source.
+	var sent int
 	for id, t := range s.sessions {
 		if from != nil && id == *from {
 			continue
@@ -310,8 +323,11 @@ func (s *Server) forward(header *Header, payload any, from *Identity) {
 			log.Debugf("flood forward to %v: %v", id, err)
 		} else {
 			s.forwarded.Add(1)
+			sent++
 		}
 	}
+	log.Debugf("forward flood %v -> %v: sent to %d peer(s) TTL %d",
+		header.Origin, dest, sent, fwd.TTL)
 }
 
 func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
@@ -828,8 +844,12 @@ func (s *Server) PeerCount() int {
 }
 
 // SendTo sends a command to a remote peer, routing through the mesh if
-// no direct session exists.  Returns an error if no route is available.
+// no direct session exists.  When no direct session is available, the
+// message is sent via an arbitrary connected peer for multi-hop
+// forwarding.  Returns an error if no sessions are available.
 func (s *Server) SendTo(dest Identity, cmd any) error {
+	log.Tracef("SendTo %v", dest)
+
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 
@@ -839,7 +859,9 @@ func (s *Server) SendTo(dest Identity, cmd any) error {
 		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
 	}
 
-	// No direct session: flood through first available peer.
+	// No direct session: send via first available peer for
+	// multi-hop routing.  The recipient will forward based on
+	// the destination header.
 	for _, t := range s.sessions {
 		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
 	}
@@ -850,6 +872,8 @@ func (s *Server) SendTo(dest Identity, cmd any) error {
 // public key, then routes the EncryptedPayload through the mesh.
 // Intermediate nodes can read the routing header but not the payload.
 func (s *Server) SendEncrypted(dest Identity, cmd any) error {
+	log.Tracef("SendEncrypted %v %T", dest, cmd)
+
 	// Look up the inner command's PayloadType.
 	innerType, ok := pt2str[reflect.TypeOf(cmd)]
 	if !ok {
@@ -891,7 +915,10 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 // decryptPayload decrypts an EncryptedPayload received at this node.
 // Looks up the sender's NaCl public key from the peer map, derives
 // our private key, opens the nacl box, and decodes using InnerType.
+// The nacl box authenticates the sender implicitly — if Sender is
+// tampered, the wrong public key is used and Open fails.
 func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
+	log.Tracef("decryptPayload sender %v type %v", ep.Sender, ep.InnerType)
 	s.mtx.RLock()
 	senderPR, ok := s.peers[ep.Sender]
 	s.mtx.RUnlock()
@@ -911,6 +938,16 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// XXX Replay protection: the routing-layer dedup cache (67s TTL)
+	// suppresses flood storms but does not prevent replay of encrypted
+	// messages after expiry.  Once e2e encryption is used for real
+	// traffic, add a per-sender nonce registry here — reject if
+	// (Sender, Nonce) was already seen.  The nonce is random and
+	// invariant across replays so collision == replay.  Separate
+	// concern from routing dedup; needs its own TTL (ceremony
+	// lifetime or similar).  TSS ceremony state machines may
+	// reject stale messages anyway but defense in depth is cheap.
 
 	// Decode using the InnerType hint.
 	ct, ok := str2pt[ep.InnerType]
@@ -999,6 +1036,14 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 	if pr.Version != ProtocolVersion {
 		log.Warningf("addPeer %v: version %d != %d, rejected",
 			pr.Identity, pr.Version, ProtocolVersion)
+		return false
+	}
+	// Reject malformed NaCl public keys.  Zero-length is fine (peer
+	// may not support e2e yet) but any other length must be exactly
+	// NaClPubSize.
+	if len(pr.NaClPub) > 0 && len(pr.NaClPub) != NaClPubSize {
+		log.Warningf("addPeer %v: bad NaClPub length %d, rejected",
+			pr.Identity, len(pr.NaClPub))
 		return false
 	}
 
