@@ -785,7 +785,7 @@ func (s *Server) Collectors() []prometheus.Collector {
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
-				Help:      "Whether the TBC service is running",
+				Help:      "Whether the continuum service is running",
 			}, s.promRunning),
 		}
 	}
