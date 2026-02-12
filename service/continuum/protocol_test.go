@@ -26,6 +26,8 @@ import (
 	"codeberg.org/miekg/dns"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+
+	"golang.org/x/crypto/nacl/box"
 )
 
 func TestEncryptDecrypt(t *testing.T) {
@@ -1403,7 +1405,7 @@ func TestHandshakeErrors(t *testing.T) {
 				}
 			}()
 
-			_, _, err = serverTransport.Handshake(ctx, serverSecret, "")
+			_, _, _, err = serverTransport.Handshake(ctx, serverSecret, "")
 			if err != nil {
 				if errors.Is(err, tti.expectedError) ||
 					errors.Is(tti.expectedError, ErrNoType) {
@@ -1510,7 +1512,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 
 			wg.Go(func() {
 				var err error // prevent data race
-				derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret, "")
+				derivedClient, _, _, err = serverTransport.Handshake(ctx, serverSecret, "")
 				if err != nil {
 					panic(err)
 				}
@@ -1535,7 +1537,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				}()
 
 				var err error // prevent data race
-				derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret, "")
+				derivedServer, _, _, err = clientTransport.Handshake(ctx, clientSecret, "")
 				if err != nil {
 					panic(err)
 				}
@@ -1649,7 +1651,7 @@ func TestConnHandshake(t *testing.T) {
 			wg.Go(func() {
 				var err error
 
-				derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret, "")
+				derivedClient, _, _, err = serverTransport.Handshake(ctx, serverSecret, "")
 				if err != nil {
 					panic(err)
 				}
@@ -1664,7 +1666,7 @@ func TestConnHandshake(t *testing.T) {
 					}
 				}()
 
-				derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret, "")
+				derivedServer, _, _, err = clientTransport.Handshake(ctx, clientSecret, "")
 				if err != nil {
 					panic(err)
 				}
@@ -1789,6 +1791,83 @@ func TestSecret(t *testing.T) {
 	}
 	if !recPub.IsEqual(pk.PubKey()) {
 		t.Fatalf("pubKey mismatch: %v != %v", recPub, pk.PubKey())
+	}
+}
+
+// TestNaClKeyDerivation verifies that X25519 keypairs are deterministically
+// derived from secp256k1 private keys, that two different secrets produce
+// different X25519 keys, and that a nacl box round-trip works between the
+// two derived keypairs.
+func TestNaClKeyDerivation(t *testing.T) {
+	secret1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret2, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Determinism: same secret produces same key every time.
+	priv1a, err := secret1.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv1b, err := secret1.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(priv1a.Bytes(), priv1b.Bytes()) {
+		t.Fatal("NaClPrivateKey not deterministic")
+	}
+
+	pub1, err := secret1.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub2, err := secret2.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Different secrets produce different keys.
+	if bytes.Equal(pub1, pub2) {
+		t.Fatal("different secrets produced same NaCl public key")
+	}
+
+	// Key length: X25519 keys are 32 bytes.
+	if len(pub1) != 32 {
+		t.Fatalf("NaCl public key length: got %d, want 32", len(pub1))
+	}
+
+	// nacl box round-trip between the two derived keypairs.
+	priv2, err := secret2.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plaintext := []byte("test message for nacl box round-trip")
+	var nonce [24]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	var pub2Arr, priv1Arr [32]byte
+	copy(pub2Arr[:], pub2)
+	copy(priv1Arr[:], priv1a.Bytes())
+
+	sealed := box.Seal(nil, plaintext, &nonce, &pub2Arr, &priv1Arr)
+
+	var pub1Arr, priv2Arr [32]byte
+	copy(pub1Arr[:], pub1)
+	copy(priv2Arr[:], priv2.Bytes())
+
+	opened, ok := box.Open(nil, sealed, &nonce, &pub1Arr, &priv2Arr)
+	if !ok {
+		t.Fatal("nacl box open failed")
+	}
+	if !bytes.Equal(plaintext, opened) {
+		t.Fatal("nacl box round-trip plaintext mismatch")
 	}
 }
 
