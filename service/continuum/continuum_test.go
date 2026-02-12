@@ -465,6 +465,28 @@ func waitForSessionCount(t *testing.T, s *Server, n int, timeout time.Duration) 
 	}
 }
 
+// waitForCondition polls fn until it returns true or timeout expires.
+func waitForCondition(t *testing.T, msg string, timeout time.Duration, fn func() bool) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
+		if fn() {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timeout: %s", msg)
+		case <-tick.C:
+		}
+	}
+}
+
 func TestSessionSymmetry(t *testing.T) {
 	preParams := loadPreParams(t, 2)
 
@@ -1491,6 +1513,221 @@ func TestIsDuplicate(t *testing.T) {
 	}
 }
 
+// TestForwardTTLExpiry verifies that forward() drops messages when
+// TTL reaches zero and does not increment the forwarded counter.
+func TestForwardTTLExpiry(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		sessions: make(map[Identity]*Transport),
+	}
+
+	dest := Identity{1, 2, 3}
+	header := &Header{
+		PayloadType: PPingRequest,
+		PayloadHash: *NewPayloadHash([]byte("ttl-test")),
+		Origin:      s.secret.Identity,
+		Destination: &dest,
+		TTL:         0, // expired
+	}
+
+	s.forward(header, &PingRequest{OriginTimestamp: 1}, nil)
+
+	if s.Forwarded() != 0 {
+		t.Fatalf("expected 0 forwarded, got %d", s.Forwarded())
+	}
+}
+
+// TestSealBoxBadKey verifies SealBox rejects keys with wrong length.
+func TestSealBoxBadKey(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, err := secret.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		key  []byte
+	}{
+		{"nil key", nil},
+		{"empty key", []byte{}},
+		{"short key", make([]byte, 16)},
+		{"long key", make([]byte, 64)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := SealBox([]byte("hello"), tt.key, priv,
+				secret.Identity, PPingRequest)
+			if !errors.Is(err, ErrInvalidNaClPub) {
+				t.Fatalf("want ErrInvalidNaClPub, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestOpenBoxWrongKey verifies OpenBox fails when the sender's public
+// key doesn't match the actual sender (authentication property of
+// nacl box).
+func TestOpenBoxWrongKey(t *testing.T) {
+	sender, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipient, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	imposter, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recipientPub, err := recipient.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderPriv, err := sender.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ep, err := SealBox([]byte("secret"), recipientPub, senderPriv,
+		sender.Identity, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Decrypt with imposter's public key — should fail.
+	imposterPub, err := imposter.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipientPriv, err := recipient.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = OpenBox(ep, imposterPub, recipientPriv)
+	if err == nil {
+		t.Fatal("OpenBox with wrong sender key should fail")
+	}
+
+	// Decrypt with bad-length key.
+	_, err = OpenBox(ep, []byte("short"), recipientPriv)
+	if !errors.Is(err, ErrInvalidNaClPub) {
+		t.Fatalf("want ErrInvalidNaClPub, got: %v", err)
+	}
+}
+
+// TestSendEncryptedErrors exercises SendEncrypted failure paths:
+// unknown destination, missing NaCl key, and unknown command type.
+func TestSendEncryptedErrors(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		peers:    make(map[Identity]*PeerRecord),
+		sessions: make(map[Identity]*Transport),
+	}
+
+	unknownDest := Identity{9, 9, 9}
+
+	// Unknown peer.
+	err = s.SendEncrypted(unknownDest, PingRequest{})
+	if err == nil {
+		t.Fatal("SendEncrypted to unknown peer should fail")
+	}
+
+	// Peer exists but has no NaCl key.
+	s.peers[unknownDest] = &PeerRecord{
+		Identity: unknownDest,
+		Version:  ProtocolVersion,
+	}
+	err = s.SendEncrypted(unknownDest, PingRequest{})
+	if err == nil {
+		t.Fatal("SendEncrypted to peer without NaClPub should fail")
+	}
+
+	// Unknown command type (unregistered struct).
+	s.peers[unknownDest].NaClPub = make([]byte, NaClPubSize)
+	type bogusCmd struct{}
+	err = s.SendEncrypted(unknownDest, bogusCmd{})
+	if err == nil {
+		t.Fatal("SendEncrypted with unknown command type should fail")
+	}
+}
+
+// TestAddPeerBadNaClPub verifies addPeer rejects peers with malformed
+// NaCl public keys while accepting empty (no e2e support) and valid
+// 32-byte keys.
+func TestAddPeerBadNaClPub(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peersTTL, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		peers:    make(map[Identity]*PeerRecord),
+		peersTTL: peersTTL,
+	}
+	ctx := t.Context()
+
+	tests := []struct {
+		name    string
+		naclPub []byte
+		want    bool // expected addPeer return
+	}{
+		{"nil key (no e2e)", nil, true},
+		{"empty key (no e2e)", []byte{}, true},
+		{"valid 32-byte key", make([]byte, 32), true},
+		{"short 16-byte key", make([]byte, 16), false},
+		{"long 64-byte key", make([]byte, 64), false},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id := Identity{byte(i + 10)}
+			got := s.addPeer(ctx, PeerRecord{
+				Identity: id,
+				NaClPub:  tt.naclPub,
+				Version:  ProtocolVersion,
+				LastSeen: time.Now().Unix(),
+			})
+			if got != tt.want {
+				t.Fatalf("addPeer(%s) = %v, want %v",
+					tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestThreeNodeE2E launches A↔B↔C and verifies end-to-end nacl box
 // encryption: A encrypts a PingRequest to C, B forwards the opaque
 // EncryptedPayload, C decrypts and receives the inner PingRequest.
@@ -1539,19 +1776,16 @@ func TestThreeNodeE2E(t *testing.T) {
 
 	// Wait for gossip to propagate NaCl keys.  A needs to know C's
 	// NaCl public key to encrypt.
-	deadline := time.Now().Add(5 * time.Second)
 	destC := servers[2].Identity()
-	for time.Now().Before(deadline) {
-		peers := servers[0].KnownPeers()
-		for _, pr := range peers {
-			if pr.Identity == destC && len(pr.NaClPub) > 0 {
-				goto ready
+	waitForCondition(t, "A never learned C's NaCl public key via gossip",
+		5*time.Second, func() bool {
+			for _, pr := range servers[0].KnownPeers() {
+				if pr.Identity == destC && len(pr.NaClPub) > 0 {
+					return true
+				}
 			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatal("A never learned C's NaCl public key via gossip")
-ready:
+			return false
+		})
 	t.Log("A knows C's NaCl public key")
 
 	// A sends encrypted PingRequest to C.
@@ -1565,16 +1799,10 @@ ready:
 	t.Log("A sent encrypted PingRequest to C")
 
 	// Wait for C to receive the routed+encrypted message.
-	deadline = time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if servers[2].RoutedReceived() > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if servers[2].RoutedReceived() == 0 {
-		t.Fatal("C did not receive encrypted message")
-	}
+	waitForCondition(t, "C did not receive encrypted message",
+		5*time.Second, func() bool {
+			return servers[2].RoutedReceived() > 0
+		})
 	t.Logf("C received %d routed message(s)", servers[2].RoutedReceived())
 
 	// B forwarded but did NOT process the inner payload (its
@@ -1661,16 +1889,10 @@ func TestThreeNodeForwarding(t *testing.T) {
 	t.Log("A sent routed PingRequest to C")
 
 	// Wait for C to receive the routed message.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if servers[2].RoutedReceived() > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if servers[2].RoutedReceived() == 0 {
-		t.Fatal("C did not receive routed message")
-	}
+	waitForCondition(t, "C did not receive routed message",
+		5*time.Second, func() bool {
+			return servers[2].RoutedReceived() > 0
+		})
 	t.Logf("C received %d routed message(s)", servers[2].RoutedReceived())
 
 	// Verify B forwarded the message.

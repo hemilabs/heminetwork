@@ -317,6 +317,11 @@ type PeerListResponse struct {
 // encryption.  The outer Header carries routing information in the
 // clear; the payload is encrypted to the destination's X25519 public
 // key.  Intermediate routers can read the Header but not the Payload.
+//
+// Sender is self-asserted but implicitly authenticated: the recipient
+// uses Sender to look up the NaCl public key for box.Open, which will
+// fail if the actual sender's private key doesn't match.  A tampered
+// Sender field causes decryption failure, not impersonation.
 type EncryptedPayload struct {
 	Nonce      [24]byte    `json:"nonce"`      // nacl box nonce
 	Ciphertext []byte      `json:"ciphertext"` // nacl box sealed
@@ -501,6 +506,8 @@ const (
 
 	ChallengeSize = 32 // 32 bytes random data
 
+	NaClPubSize = 32 // X25519 public key length
+
 	dnsAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
 )
 
@@ -670,6 +677,10 @@ func (s Secret) NaClPublicKey() ([]byte, error) {
 // using the sender's X25519 private key.  Returns an EncryptedPayload
 // with a random nonce, the sender's identity, and the inner type hint.
 func SealBox(plaintext []byte, recipientPub []byte, senderPriv *ecdh.PrivateKey, senderID Identity, innerType PayloadType) (*EncryptedPayload, error) {
+	if len(recipientPub) != NaClPubSize {
+		return nil, fmt.Errorf("recipient %w: len %d", ErrInvalidNaClPub, len(recipientPub))
+	}
+
 	var nonce [24]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, err
@@ -691,6 +702,10 @@ func SealBox(plaintext []byte, recipientPub []byte, senderPriv *ecdh.PrivateKey,
 // OpenBox decrypts an EncryptedPayload using the recipient's X25519
 // private key and the sender's X25519 public key.
 func OpenBox(ep *EncryptedPayload, senderPub []byte, recipientPriv *ecdh.PrivateKey) ([]byte, error) {
+	if len(senderPub) != NaClPubSize {
+		return nil, fmt.Errorf("sender %w: len %d", ErrInvalidNaClPub, len(senderPub))
+	}
+
 	var pub, priv [32]byte
 	copy(pub[:], senderPub)
 	copy(priv[:], recipientPriv.Bytes())
@@ -770,6 +785,7 @@ var (
 	ErrNoSuitableCurve        = errors.New("no suitable curve found")
 	ErrUnsupportedVersion     = errors.New("unsupported version")
 	ErrMessageTooLarge        = errors.New("message too large")
+	ErrInvalidNaClPub         = errors.New("invalid nacl public key")
 
 	// placeholders until we decide on timeout handling
 	readTimeout  time.Duration = 4 * time.Second
@@ -1151,6 +1167,10 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 	}
 	if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
 		return nil, "", nil, ErrInvalidChallenge
+	}
+	// Validate NaCl public key length when present.
+	if len(helloRequest.NaClPub) > 0 && len(helloRequest.NaClPub) != NaClPubSize {
+		return nil, "", nil, fmt.Errorf("%w: len %d", ErrInvalidNaClPub, len(helloRequest.NaClPub))
 	}
 
 	// Sign combined challenge that is represented by the sha256 hash of
