@@ -785,7 +785,7 @@ func (s *Server) Collectors() []prometheus.Collector {
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
-				Help:      "Whether the TBC service is running",
+				Help:      "Whether the continuum service is running",
 			}, s.promRunning),
 		}
 	}
@@ -1306,7 +1306,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 	go func() {
 		<-ctx.Done()
 		if err := listener.Close(); err != nil {
-			log.Errorf("listner close: %v", err)
+			log.Errorf("listener close: %v", err)
 		}
 		s.deleteAllSessions()
 	}()
