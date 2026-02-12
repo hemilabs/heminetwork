@@ -18,6 +18,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -432,10 +433,16 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 						pr.Identity, pr.Version, ProtocolVersion)
 					continue
 				}
-				if err := validatePeerAddress(pr.Address); err != nil {
-					log.Warningf("peer %v bad address %q: %v",
-						pr.Identity, pr.Address, err)
-					continue
+				// Validate address only if present.  Peers learned
+				// from the listen path may not know their own
+				// address yet — they still carry useful fields
+				// like NaClPub for e2e encryption.
+				if pr.Address != "" {
+					if err := validatePeerAddress(pr.Address); err != nil {
+						log.Warningf("peer %v bad address %q: %v",
+							pr.Identity, pr.Address, err)
+						continue
+					}
 				}
 				if s.addPeer(ctx, pr) {
 					learned++
@@ -456,6 +463,30 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 
 		case *TSSMessage:
 			s.dispatchTSSMessage(*v)
+
+		case *EncryptedPayload:
+			inner, err := s.decryptPayload(v)
+			if err != nil {
+				log.Warningf("handle %v: decrypt: %v", id, err)
+				continue
+			}
+			// Re-dispatch the decrypted inner command.
+			switch iv := inner.(type) {
+			case *PingRequest:
+				err := t.Write(s.secret.Identity, PingResponse{
+					OriginTimestamp: iv.OriginTimestamp,
+					PeerTimestamp:   time.Now().Unix(),
+				})
+				if err != nil {
+					log.Warningf("ping response %v: %v", id, err)
+					return
+				}
+			case *TSSMessage:
+				s.dispatchTSSMessage(*iv)
+			default:
+				log.Debugf("handle %v: unhandled encrypted inner %T",
+					id, inner)
+			}
 
 		default:
 			log.Debugf("handle %v: unhandled %T", id, payload)
@@ -638,6 +669,9 @@ func (s *Server) connectRandom(ctx context.Context) {
 		if _, active := s.sessions[id]; active {
 			continue // already connected
 		}
+		if pr.Address == "" {
+			continue // no address to dial
+		}
 		candidates = append(candidates, *pr)
 	}
 	s.mtx.RUnlock()
@@ -715,6 +749,7 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
+	s.notifyAllPeers(ctx)
 
 	log.Infof("connectPeer connected %v: %v", conn.RemoteAddr(), them)
 
@@ -809,6 +844,84 @@ func (s *Server) SendTo(dest Identity, cmd any) error {
 		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
 	}
 	return errors.New("no route to destination")
+}
+
+// SendEncrypted encrypts cmd with nacl box to the destination's X25519
+// public key, then routes the EncryptedPayload through the mesh.
+// Intermediate nodes can read the routing header but not the payload.
+func (s *Server) SendEncrypted(dest Identity, cmd any) error {
+	// Look up the inner command's PayloadType.
+	innerType, ok := pt2str[reflect.TypeOf(cmd)]
+	if !ok {
+		return fmt.Errorf("unknown command type: %T", cmd)
+	}
+
+	// Look up destination's NaCl public key.
+	s.mtx.RLock()
+	pr, ok := s.peers[dest]
+	s.mtx.RUnlock()
+	if !ok {
+		return fmt.Errorf("unknown peer: %v", dest)
+	}
+	if len(pr.NaClPub) == 0 {
+		return fmt.Errorf("peer %v has no NaCl public key", dest)
+	}
+
+	// Serialize the inner command.
+	plaintext, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("marshal inner: %w", err)
+	}
+
+	// Derive our NaCl private key.
+	senderPriv, err := s.secret.NaClPrivateKey()
+	if err != nil {
+		return fmt.Errorf("nacl private key: %w", err)
+	}
+
+	// Encrypt.
+	ep, err := SealBox(plaintext, pr.NaClPub, senderPriv, s.secret.Identity, innerType)
+	if err != nil {
+		return fmt.Errorf("seal: %w", err)
+	}
+
+	return s.SendTo(dest, *ep)
+}
+
+// decryptPayload decrypts an EncryptedPayload received at this node.
+// Looks up the sender's NaCl public key from the peer map, derives
+// our private key, opens the nacl box, and decodes using InnerType.
+func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
+	s.mtx.RLock()
+	senderPR, ok := s.peers[ep.Sender]
+	s.mtx.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("unknown sender: %v", ep.Sender)
+	}
+	if len(senderPR.NaClPub) == 0 {
+		return nil, fmt.Errorf("sender %v has no NaCl public key", ep.Sender)
+	}
+
+	recipientPriv, err := s.secret.NaClPrivateKey()
+	if err != nil {
+		return nil, fmt.Errorf("nacl private key: %w", err)
+	}
+
+	plaintext, err := OpenBox(ep, senderPR.NaClPub, recipientPriv)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decode using the InnerType hint.
+	ct, ok := str2pt[ep.InnerType]
+	if !ok {
+		return nil, fmt.Errorf("unknown inner type: %v", ep.InnerType)
+	}
+	cmd := reflect.New(ct)
+	if err := json.Unmarshal(plaintext, cmd.Interface()); err != nil {
+		return nil, fmt.Errorf("unmarshal inner: %w", err)
+	}
+	return cmd.Interface(), nil
 }
 
 // RoutedReceived returns the count of messages that arrived at this
@@ -1111,6 +1224,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
+	s.notifyAllPeers(ctx)
 
 	log.Infof("connected %v: %v", conn.RemoteAddr(), them)
 
@@ -1199,6 +1313,10 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 			Version:  ProtocolVersion,
 			LastSeen: time.Now().Unix(),
 		})
+
+		// Tell existing peers we learned about someone new so
+		// they can request our updated peer list.
+		s.notifyAllPeers(ctx)
 
 		log.Infof("connected %v: %v", conn.RemoteAddr(), id)
 

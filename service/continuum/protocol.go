@@ -29,6 +29,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/hemilabs/x/tss-lib/v2/tss"
 	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -165,6 +166,9 @@ const (
 	PPeerNotify       PayloadType = "peer-notify"
 	PPeerListRequest  PayloadType = "peer-list-request"
 	PPeerListResponse PayloadType = "peer-list-response"
+
+	// End-to-end encryption
+	PEncryptedPayload PayloadType = "encrypted"
 )
 
 var (
@@ -185,6 +189,7 @@ var (
 		reflect.TypeOf(PeerNotify{}):       PPeerNotify,
 		reflect.TypeOf(PeerListRequest{}):  PPeerListRequest,
 		reflect.TypeOf(PeerListResponse{}): PPeerListResponse,
+		reflect.TypeOf(EncryptedPayload{}): PEncryptedPayload,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -288,10 +293,10 @@ type PingResponse struct {
 // PeerRecord describes a known peer for gossip exchange.
 type PeerRecord struct {
 	Identity Identity `json:"identity"`
-	Address  string   `json:"address"`              // host:port
-	NaClPub  []byte   `json:"nacl_pub,omitempty"`   // X25519 public key for e2e encryption
-	Version  uint32   `json:"version"`              // ProtocolVersion at time of discovery
-	LastSeen int64    `json:"last_seen"`            // unix timestamp
+	Address  string   `json:"address"`            // host:port
+	NaClPub  []byte   `json:"nacl_pub,omitempty"` // X25519 public key for e2e encryption
+	Version  uint32   `json:"version"`            // ProtocolVersion at time of discovery
+	LastSeen int64    `json:"last_seen"`          // unix timestamp
 }
 
 // PeerNotify announces that the sender has new peer information.
@@ -306,6 +311,17 @@ type PeerListRequest struct{}
 // PeerListResponse contains the sender's known peer list.
 type PeerListResponse struct {
 	Peers []PeerRecord `json:"peers"`
+}
+
+// EncryptedPayload wraps a nacl box-encrypted payload for end-to-end
+// encryption.  The outer Header carries routing information in the
+// clear; the payload is encrypted to the destination's X25519 public
+// key.  Intermediate routers can read the Header but not the Payload.
+type EncryptedPayload struct {
+	Nonce      [24]byte    `json:"nonce"`      // nacl box nonce
+	Ciphertext []byte      `json:"ciphertext"` // nacl box sealed
+	Sender     Identity    `json:"sender"`     // for recipient to look up sender's NaCl pub
+	InnerType  PayloadType `json:"inner_type"` // type hint for decoding after decryption
 }
 
 // KeygenRequest initiates a key generation ceremony.
@@ -648,6 +664,42 @@ func (s Secret) NaClPublicKey() ([]byte, error) {
 		return nil, err
 	}
 	return priv.PublicKey().Bytes(), nil
+}
+
+// SealBox encrypts plaintext to the recipient's X25519 public key
+// using the sender's X25519 private key.  Returns an EncryptedPayload
+// with a random nonce, the sender's identity, and the inner type hint.
+func SealBox(plaintext []byte, recipientPub []byte, senderPriv *ecdh.PrivateKey, senderID Identity, innerType PayloadType) (*EncryptedPayload, error) {
+	var nonce [24]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, err
+	}
+
+	var pub, priv [32]byte
+	copy(pub[:], recipientPub)
+	copy(priv[:], senderPriv.Bytes())
+
+	sealed := box.Seal(nil, plaintext, &nonce, &pub, &priv)
+	return &EncryptedPayload{
+		Nonce:      nonce,
+		Ciphertext: sealed,
+		Sender:     senderID,
+		InnerType:  innerType,
+	}, nil
+}
+
+// OpenBox decrypts an EncryptedPayload using the recipient's X25519
+// private key and the sender's X25519 public key.
+func OpenBox(ep *EncryptedPayload, senderPub []byte, recipientPriv *ecdh.PrivateKey) ([]byte, error) {
+	var pub, priv [32]byte
+	copy(pub[:], senderPub)
+	copy(priv[:], recipientPriv.Bytes())
+
+	plaintext, ok := box.Open(nil, ep.Ciphertext, &ep.Nonce, &pub, &priv)
+	if !ok {
+		return nil, errors.New("nacl box open failed")
+	}
+	return plaintext, nil
 }
 
 // Verify verifies that hash was signed by the provided identity. It returns
