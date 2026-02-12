@@ -1082,7 +1082,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 	}
 
 	// Read Hello
-	_, cmd, err := t.read(readTimeout)
+	_, cmd, _, err := t.read(readTimeout)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -1111,7 +1111,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 	}
 
 	// Read HelloResponse
-	header2, cmd2, err := t.read(readTimeout)
+	header2, cmd2, _, err := t.read(readTimeout)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -1192,21 +1192,24 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 }
 
 // read reads the next encrypted blob from the connection stream.
-func (t *Transport) read(timeout time.Duration) (*Header, any, error) {
+// Returns the parsed header, payload, and the raw cleartext bytes
+// (header+payload before JSON parsing).  The cleartext is used for
+// message deduplication and forwarding.
+func (t *Transport) read(timeout time.Duration) (*Header, any, []byte, error) {
 	ciphertext, err := t.readBlob(timeout)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	cleartext, err := t.decrypt(ciphertext)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// log.Infof("%v: read cleartext %v", t, spew.Sdump(cleartext))
 	jd := json.NewDecoder(bytes.NewReader(cleartext))
 	var header Header
 	if err := jd.Decode(&header); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// log.Infof("%v: read %v", t, header.PayloadType)
 	// XXX i was too clever to make the payload hash in the write
@@ -1216,18 +1219,26 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, error) {
 	//
 	ct, ok := str2pt[header.PayloadType]
 	if !ok {
-		return nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
+		return nil, nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
 	}
 	cmd := reflect.New(ct)
 	if err := jd.Decode(cmd.Interface()); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return &header, cmd.Interface(), nil
+	return &header, cmd.Interface(), cleartext, nil
 }
 
 // Read reads and decrypts the next command from the connection stream. It
 // returns the header and command.
 func (t *Transport) Read() (*Header, any, error) {
+	h, cmd, _, err := t.read(0 * time.Second) // XXX timeout
+	return h, cmd, err
+}
+
+// ReadEnvelope reads the next command and also returns the raw cleartext
+// bytes (transport-decrypted but not yet parsed).  Used by handle() for
+// message deduplication and forwarding.
+func (t *Transport) ReadEnvelope() (*Header, any, []byte, error) {
 	return t.read(0 * time.Second) // XXX timeout
 }
 
@@ -1288,6 +1299,46 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		Destination: nil,
 		TTL:         1, // expires at the receiver
 	})
+	if err != nil {
+		return err
+	}
+	return t.write(writeTimeout, append(header, payload...))
+}
+
+// WriteTo creates a routed payload with a specific destination and TTL,
+// then sends it through the transport.  Used for messages that may need
+// multi-hop forwarding.
+func (t *Transport) WriteTo(origin, destination Identity, ttlHops uint8, cmd any) error {
+	pt, ok := pt2str[reflect.TypeOf(cmd)]
+	if !ok {
+		return fmt.Errorf("invalid command type: %T", cmd)
+	}
+	hash, payload, err := NewPayloadFromCommand(cmd)
+	if err != nil {
+		return err
+	}
+	header, err := json.Marshal(Header{
+		PayloadType: pt,
+		PayloadHash: *hash,
+		Origin:      origin,
+		Destination: &destination,
+		TTL:         ttlHops,
+	})
+	if err != nil {
+		return err
+	}
+	return t.write(writeTimeout, append(header, payload...))
+}
+
+// WriteHeader writes an envelope with the given header and payload command.
+// Used for forwarding: the caller provides a modified header (e.g.
+// decremented TTL) and the already-parsed payload.
+func (t *Transport) WriteHeader(h Header, cmd any) error {
+	_, payload, err := NewPayloadFromCommand(cmd)
+	if err != nil {
+		return err
+	}
+	header, err := json.Marshal(h)
 	if err != nil {
 		return err
 	}

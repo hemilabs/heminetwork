@@ -1464,8 +1464,8 @@ func TestVerifyDNSIdentityByName(t *testing.T) {
 // TestFiveNodeMesh validates gossip-based discovery at scale beyond
 // trivial 2-3 node setups.  Five nodes are arranged in a chain
 // (0→1→2→3→4) where no node initially knows all others.  Through
-// TestIsDuplicate verifies the message dedup cache: same message bytes
-// return duplicate on second call, different bytes do not collide.
+// TestIsDuplicate verifies the message dedup cache: same PayloadHash
+// returns duplicate on second call, different hashes do not collide.
 func TestIsDuplicate(t *testing.T) {
 	seen, err := ttl.New(64, true)
 	if err != nil {
@@ -1474,21 +1474,111 @@ func TestIsDuplicate(t *testing.T) {
 	s := &Server{seen: seen}
 	ctx := t.Context()
 
-	msg1 := []byte("first message")
-	msg2 := []byte("second message")
+	h1 := &Header{PayloadHash: *NewPayloadHash([]byte("first message"))}
+	h2 := &Header{PayloadHash: *NewPayloadHash([]byte("second message"))}
 
 	// First encounter: not a duplicate.
-	if s.isDuplicate(ctx, msg1) {
-		t.Fatal("msg1 first call: want false, got true")
+	if s.isDuplicate(ctx, h1) {
+		t.Fatal("h1 first call: want false, got true")
 	}
 	// Second encounter: duplicate.
-	if !s.isDuplicate(ctx, msg1) {
-		t.Fatal("msg1 second call: want true, got false")
+	if !s.isDuplicate(ctx, h1) {
+		t.Fatal("h1 second call: want true, got false")
 	}
 	// Different message: not a duplicate.
-	if s.isDuplicate(ctx, msg2) {
-		t.Fatal("msg2 first call: want false, got true")
+	if s.isDuplicate(ctx, h2) {
+		t.Fatal("h2 first call: want false, got true")
 	}
+}
+
+// TestThreeNodeForwarding launches 3 nodes in a chain: A↔B↔C.
+// A sends a routed PingRequest to C through B.  Verifies:
+// - B forwards the message (Forwarded counter > 0)
+// - C receives the routed message (RoutedReceived counter > 0)
+// - A has no direct session to C (message must have been forwarded)
+func TestThreeNodeForwarding(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	servers := make([]*Server, 3)
+	errChs := make([]chan error, 3)
+	addrs := make([]string, 3)
+
+	// Start node A (no outbound connections — chain head).
+	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
+	servers[0].cfg.PeersWanted = 1 // prevent autodial
+	servers[0].cfg.MaintainInterval = 10 * time.Second // slow
+	errChs[0] = make(chan error, 1)
+	go func() { errChs[0] <- servers[0].Run(ctx) }()
+	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+	t.Logf("node A: %v at %s", servers[0].Identity(), addrs[0])
+
+	// Start node B, connecting to A.
+	servers[1] = newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrs[0]})
+	servers[1].cfg.PeersWanted = 2 // B connects to both A and C
+	servers[1].cfg.MaintainInterval = 10 * time.Second
+	errChs[1] = make(chan error, 1)
+	go func() { errChs[1] <- servers[1].Run(ctx) }()
+	addrs[1] = waitForListenAddress(t, servers[1], 2*time.Second)
+	t.Logf("node B: %v at %s", servers[1].Identity(), addrs[1])
+
+	waitForSessions(t, servers[0], 1, 5*time.Second)
+	waitForSessions(t, servers[1], 1, 5*time.Second)
+	t.Log("A <-> B session established")
+
+	// Start node C, connecting to B.
+	servers[2] = newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrs[1]})
+	servers[2].cfg.PeersWanted = 1 // prevent autodial
+	servers[2].cfg.MaintainInterval = 10 * time.Second
+	errChs[2] = make(chan error, 1)
+	go func() { errChs[2] <- servers[2].Run(ctx) }()
+	addrs[2] = waitForListenAddress(t, servers[2], 2*time.Second)
+	t.Logf("node C: %v at %s", servers[2].Identity(), addrs[2])
+
+	waitForSessions(t, servers[1], 2, 5*time.Second)
+	waitForSessions(t, servers[2], 1, 5*time.Second)
+	t.Log("B <-> C session established")
+
+	// Verify A has no direct session to C.
+	aIDs := servers[0].SessionIdentities()
+	for _, sid := range aIDs {
+		if sid == servers[2].Identity() {
+			t.Fatal("A has direct session to C — chain topology broken")
+		}
+	}
+
+	// A sends a routed PingRequest to C.
+	destC := servers[2].Identity()
+	err := servers[0].SendTo(destC, PingRequest{
+		OriginTimestamp: time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatalf("SendTo: %v", err)
+	}
+	t.Log("A sent routed PingRequest to C")
+
+	// Wait for C to receive the routed message.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if servers[2].RoutedReceived() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if servers[2].RoutedReceived() == 0 {
+		t.Fatal("C did not receive routed message")
+	}
+	t.Logf("C received %d routed message(s)", servers[2].RoutedReceived())
+
+	// Verify B forwarded the message.
+	if servers[1].Forwarded() == 0 {
+		t.Fatal("B did not forward any messages")
+	}
+	t.Logf("B forwarded %d message(s)", servers[1].Forwarded())
 }
 
 // TestFiveNodeMesh launches 5 nodes in a chain topology.  Through
