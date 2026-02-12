@@ -112,6 +112,7 @@ func (n *TSSNetwork) GetIdentities() []Identity {
 }
 
 func loadTestPreParams(t *testing.T, store *fileStore, index int) {
+	t.Helper()
 	_, thisFile, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(thisFile)
 	path := filepath.Join(dir, "tss_examples", "preparams.json")
