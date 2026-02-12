@@ -32,6 +32,8 @@ import (
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
+
+	"github.com/hemilabs/heminetwork/v2/ttl"
 )
 
 // XXX all the dns poop may have to be moved to it's own world. Mayve even
@@ -1462,6 +1464,34 @@ func TestVerifyDNSIdentityByName(t *testing.T) {
 // TestFiveNodeMesh validates gossip-based discovery at scale beyond
 // trivial 2-3 node setups.  Five nodes are arranged in a chain
 // (0→1→2→3→4) where no node initially knows all others.  Through
+// TestIsDuplicate verifies the message dedup cache: same message bytes
+// return duplicate on second call, different bytes do not collide.
+func TestIsDuplicate(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{seen: seen}
+	ctx := t.Context()
+
+	msg1 := []byte("first message")
+	msg2 := []byte("second message")
+
+	// First encounter: not a duplicate.
+	if s.isDuplicate(ctx, msg1) {
+		t.Fatal("msg1 first call: want false, got true")
+	}
+	// Second encounter: duplicate.
+	if !s.isDuplicate(ctx, msg1) {
+		t.Fatal("msg1 second call: want true, got false")
+	}
+	// Different message: not a duplicate.
+	if s.isDuplicate(ctx, msg2) {
+		t.Fatal("msg2 first call: want false, got true")
+	}
+}
+
+// TestFiveNodeMesh launches 5 nodes in a chain topology.  Through
 // gossip propagation, every node must discover every other node's
 // identity.  With PeersWanted > initial connections, endpoint nodes
 // (0 and 4) must autonomously dial gossip-learned peers via
