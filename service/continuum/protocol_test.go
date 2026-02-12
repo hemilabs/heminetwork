@@ -26,7 +26,6 @@ import (
 	"codeberg.org/miekg/dns"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -1913,6 +1912,72 @@ func TestNaClKeyDerivation(t *testing.T) {
 	}
 	if !bytes.Equal(plaintext, opened) {
 		t.Fatal("nacl box round-trip plaintext mismatch")
+	}
+}
+
+// BenchmarkSealBox measures nacl box encryption throughput.
+func BenchmarkSealBox(b *testing.B) {
+	secret, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientSecret, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientPub, err := recipientSecret.NaClPublicKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	senderPriv, err := secret.NaClPrivateKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	plaintext := make([]byte, 256) // typical PingRequest size
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = SealBox(plaintext, recipientPub, senderPriv,
+			secret.Identity, PPingRequest)
+	}
+}
+
+// BenchmarkOpenBox measures nacl box decryption throughput.
+func BenchmarkOpenBox(b *testing.B) {
+	sender, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipient, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientPub, err := recipient.NaClPublicKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	senderPub, err := sender.NaClPublicKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	senderPriv, err := sender.NaClPrivateKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientPriv, err := recipient.NaClPrivateKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	plaintext := make([]byte, 256)
+	ep, err := SealBox(plaintext, recipientPub, senderPriv,
+		sender.Identity, PPingRequest)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = OpenBox(ep, senderPub, recipientPriv)
 	}
 }
 
