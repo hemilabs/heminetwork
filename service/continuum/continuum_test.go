@@ -1491,6 +1491,105 @@ func TestIsDuplicate(t *testing.T) {
 	}
 }
 
+// TestThreeNodeE2E launches A↔B↔C and verifies end-to-end nacl box
+// encryption: A encrypts a PingRequest to C, B forwards the opaque
+// EncryptedPayload, C decrypts and receives the inner PingRequest.
+// B's RoutedReceived counter stays zero (it never sees the plaintext).
+func TestThreeNodeE2E(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	servers := make([]*Server, 3)
+	errChs := make([]chan error, 3)
+	addrs := make([]string, 3)
+
+	// Node A (chain head).
+	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
+	servers[0].cfg.PeersWanted = 1
+	servers[0].cfg.MaintainInterval = 10 * time.Second
+	errChs[0] = make(chan error, 1)
+	go func() { errChs[0] <- servers[0].Run(ctx) }()
+	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+
+	// Node B.
+	servers[1] = newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrs[0]})
+	servers[1].cfg.PeersWanted = 2
+	servers[1].cfg.MaintainInterval = 10 * time.Second
+	errChs[1] = make(chan error, 1)
+	go func() { errChs[1] <- servers[1].Run(ctx) }()
+	addrs[1] = waitForListenAddress(t, servers[1], 2*time.Second)
+
+	waitForSessions(t, servers[0], 1, 5*time.Second)
+	waitForSessions(t, servers[1], 1, 5*time.Second)
+
+	// Node C.
+	servers[2] = newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrs[1]})
+	servers[2].cfg.PeersWanted = 1
+	servers[2].cfg.MaintainInterval = 10 * time.Second
+	errChs[2] = make(chan error, 1)
+	go func() { errChs[2] <- servers[2].Run(ctx) }()
+	addrs[2] = waitForListenAddress(t, servers[2], 2*time.Second)
+
+	waitForSessions(t, servers[1], 2, 5*time.Second)
+	waitForSessions(t, servers[2], 1, 5*time.Second)
+
+	// Wait for gossip to propagate NaCl keys.  A needs to know C's
+	// NaCl public key to encrypt.
+	deadline := time.Now().Add(5 * time.Second)
+	destC := servers[2].Identity()
+	for time.Now().Before(deadline) {
+		peers := servers[0].KnownPeers()
+		for _, pr := range peers {
+			if pr.Identity == destC && len(pr.NaClPub) > 0 {
+				goto ready
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("A never learned C's NaCl public key via gossip")
+ready:
+	t.Log("A knows C's NaCl public key")
+
+	// A sends encrypted PingRequest to C.
+	ts := time.Now().Unix()
+	err := servers[0].SendEncrypted(destC, PingRequest{
+		OriginTimestamp: ts,
+	})
+	if err != nil {
+		t.Fatalf("SendEncrypted: %v", err)
+	}
+	t.Log("A sent encrypted PingRequest to C")
+
+	// Wait for C to receive the routed+encrypted message.
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if servers[2].RoutedReceived() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if servers[2].RoutedReceived() == 0 {
+		t.Fatal("C did not receive encrypted message")
+	}
+	t.Logf("C received %d routed message(s)", servers[2].RoutedReceived())
+
+	// B forwarded but did NOT process the inner payload (its
+	// RoutedReceived should be 0 — the message was not for B).
+	if servers[1].RoutedReceived() != 0 {
+		t.Fatalf("B processed a routed message it shouldn't have: %d",
+			servers[1].RoutedReceived())
+	}
+	if servers[1].Forwarded() == 0 {
+		t.Fatal("B did not forward any messages")
+	}
+	t.Logf("B forwarded %d message(s) without decrypting",
+		servers[1].Forwarded())
+}
+
 // TestThreeNodeForwarding launches 3 nodes in a chain: A↔B↔C.
 // A sends a routed PingRequest to C through B.  Verifies:
 // - B forwards the message (Forwarded counter > 0)
@@ -1508,7 +1607,7 @@ func TestThreeNodeForwarding(t *testing.T) {
 
 	// Start node A (no outbound connections — chain head).
 	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
-	servers[0].cfg.PeersWanted = 1 // prevent autodial
+	servers[0].cfg.PeersWanted = 1                     // prevent autodial
 	servers[0].cfg.MaintainInterval = 10 * time.Second // slow
 	errChs[0] = make(chan error, 1)
 	go func() { errChs[0] <- servers[0].Run(ctx) }()
