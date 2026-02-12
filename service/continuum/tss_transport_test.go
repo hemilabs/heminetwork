@@ -876,7 +876,7 @@ func connectTransportPair(t *testing.T, server, client *tssTransportNode) {
 		}
 		kxBarrier.Done()
 		kxBarrier.Wait()
-		id, _, hsErr := serverTr.Handshake(ctx, server.secret, "")
+		id, _, _, hsErr := serverTr.Handshake(ctx, server.secret, "")
 		if hsErr != nil {
 			errCh <- fmt.Errorf("server handshake: %w", hsErr)
 			return
@@ -902,7 +902,7 @@ func connectTransportPair(t *testing.T, server, client *tssTransportNode) {
 		}
 		kxBarrier.Done()
 		kxBarrier.Wait()
-		id, _, hsErr := clientTr.Handshake(ctx, client.secret, "")
+		id, _, _, hsErr := clientTr.Handshake(ctx, client.secret, "")
 		if hsErr != nil {
 			errCh <- fmt.Errorf("client handshake: %w", hsErr)
 			return

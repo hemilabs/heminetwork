@@ -265,6 +265,7 @@ type HelloRequest struct {
 	Options   map[string]string `json:"options,omitempty"` // x=y
 	Identity  Identity          `json:"identity"`          // Advertise our identity
 	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
+	NaClPub   []byte            `json:"nacl_pub"`          // X25519 public key for e2e encryption
 }
 
 // HelloResponse returns the signed challenge. The remote identity is derived
@@ -287,9 +288,10 @@ type PingResponse struct {
 // PeerRecord describes a known peer for gossip exchange.
 type PeerRecord struct {
 	Identity Identity `json:"identity"`
-	Address  string   `json:"address"`   // host:port
-	Version  uint32   `json:"version"`   // ProtocolVersion at time of discovery
-	LastSeen int64    `json:"last_seen"` // unix timestamp
+	Address  string   `json:"address"`              // host:port
+	NaClPub  []byte   `json:"nacl_pub,omitempty"`   // X25519 public key for e2e encryption
+	Version  uint32   `json:"version"`              // ProtocolVersion at time of discovery
+	LastSeen int64    `json:"last_seen"`            // unix timestamp
 }
 
 // PeerNotify announces that the sender has new peer information.
@@ -626,6 +628,26 @@ func (s Secret) PublicKey() *secp256k1.PublicKey {
 // anything but a hash into this function.
 func (s Secret) Sign(hash []byte) []byte {
 	return ecdsa.SignCompact(s.privateKey, hash[:], true)
+}
+
+// NaClPrivateKey returns the X25519 private key derived from the
+// secp256k1 private key using domain-separated SHA256.
+func (s Secret) NaClPrivateKey() (*ecdh.PrivateKey, error) {
+	h := sha256.New()
+	h.Write([]byte("continuum-x25519-v1"))
+	h.Write(s.privateKey.Serialize())
+	seed := h.Sum(nil)
+	return ecdh.X25519().NewPrivateKey(seed)
+}
+
+// NaClPublicKey returns the X25519 public key bytes corresponding to
+// the derived private key.
+func (s Secret) NaClPublicKey() ([]byte, error) {
+	priv, err := s.NaClPrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	return priv.PublicKey().Bytes(), nil
 }
 
 // Verify verifies that hash was signed by the provided identity. It returns
@@ -1024,13 +1046,19 @@ func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
 // transport wishes to use. It is also used to verify that the derived Identity
 // did indeed sign the challenge. If dnsName is non-empty, it is advertised
 // in the hello options so the remote can verify our identity via DNS TXT
-// lookup. Returns the remote identity and their advertised DNS name (empty
-// if they did not advertise one).
-func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName string) (*Identity, string, error) {
+// lookup. Returns the remote identity, their advertised DNS name (empty
+// if they did not advertise one), and their X25519 public key for e2e
+// encryption.
+func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName string) (*Identity, string, []byte, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
+	}
+
+	naclPub, err := secret.NaClPublicKey()
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("nacl public key: %w", err)
 	}
 
 	opts := map[string]string{
@@ -1047,29 +1075,30 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 		Identity:  secret.Identity,
 		Challenge: ourChallenge[:],
 		Options:   opts,
+		NaClPub:   naclPub,
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	// Read Hello
 	_, cmd, err := t.read(readTimeout)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	helloRequest, ok := cmd.(*HelloRequest)
 	if !ok {
-		return nil, "", fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
+		return nil, "", nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
 	}
 	// Validate HelloRequest
 	if helloRequest.Version != ProtocolVersion {
-		return nil, "", ErrUnsupportedVersion
+		return nil, "", nil, ErrUnsupportedVersion
 	}
 	if len(helloRequest.Challenge) != ChallengeSize {
-		return nil, "", ErrInvalidChallenge
+		return nil, "", nil, ErrInvalidChallenge
 	}
 	if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
-		return nil, "", ErrInvalidChallenge
+		return nil, "", nil, ErrInvalidChallenge
 	}
 
 	// Sign combined challenge that is represented by the sha256 hash of
@@ -1078,18 +1107,18 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	// Read HelloResponse
 	header2, cmd2, err := t.read(readTimeout)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	_ = header2
 	helloResponse, ok := cmd2.(*HelloResponse)
 	if !ok {
-		return nil, "", fmt.Errorf("unexpected command: %T", cmd2)
+		return nil, "", nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
 	// Verify signature over sha256(our challenge + our transport public key)
@@ -1097,13 +1126,13 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 
 	themID := NewIdentityFromPub(themPub)
 	theirDNS := helloRequest.Options["dns"]
 
-	return &themID, theirDNS, nil
+	return &themID, theirDNS, helloRequest.NaClPub, nil
 }
 
 // readBlob locks the connection and reads a size and the associated blob into

@@ -192,15 +192,15 @@ func (s *Server) deleteAllSessions() {
 	}
 }
 
-func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, error) {
+func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, error) {
 	transport, err := NewTransportFromCurve(ecdh.X25519()) // XXX config option
 	if err != nil {
-		return nil, nil, fmt.Errorf("new transport: %w", err)
+		return nil, nil, nil, fmt.Errorf("new transport: %w", err)
 	}
 
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
-		return nil, nil, fmt.Errorf("key exchange: %w", err) // XXX too loud?
+		return nil, nil, nil, fmt.Errorf("key exchange: %w", err) // XXX too loud?
 	}
 
 	// After KX, transport owns conn.  Ensure cleanup on failure so
@@ -212,26 +212,26 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 		}
 	}()
 
-	id, theirDNS, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
+	id, theirDNS, naclPub, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("handshake: %w", err) // XXX too loud?
+		return nil, nil, nil, fmt.Errorf("handshake: %w", err) // XXX too loud?
 	}
 
 	if s.cfg.DNSRequired {
 		if theirDNS == "" {
-			return nil, nil, errors.New("remote did not advertise dns name")
+			return nil, nil, nil, errors.New("remote did not advertise dns name")
 		}
 		// XXX no rate limiting on DNS lookups here — an attacker
 		// can open connections with fake DNS names and force
 		// unbounded TXT queries.  Entangled with the accept-loop
 		// blocking issue below.
 		if err := s.verifyDNSIdentity(ctx, theirDNS, *id); err != nil {
-			return nil, nil, fmt.Errorf("dns verify: %w", err)
+			return nil, nil, nil, fmt.Errorf("dns verify: %w", err)
 		}
 	}
 
 	ok = true
-	return id, transport, nil
+	return id, transport, naclPub, nil
 }
 
 func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
@@ -582,7 +582,7 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 		log.Warningf("connectPeer kx %v: %v", addr, err)
 		return
 	}
-	them, theirDNS, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
+	them, theirDNS, naclPub, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
 	if err != nil {
 		log.Warningf("connectPeer handshake %v: %v", addr, err)
 		return
@@ -607,6 +607,7 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 	s.addPeer(ctx, PeerRecord{
 		Identity: *them,
 		Address:  addr,
+		NaClPub:  naclPub,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
@@ -742,6 +743,8 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 
 // addPeer adds or refreshes a peer record.  Returns true if the peer
 // was previously unknown.  Rejects self and version mismatches.
+// When updating an existing peer, preserves non-empty Address and
+// NaClPub from the old record if the new record omits them.
 func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 	log.Tracef("addPeer %v", pr.Identity)
 
@@ -759,7 +762,19 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 		return false
 	}
 
-	_, existed := s.peers[pr.Identity]
+	existing, existed := s.peers[pr.Identity]
+	if existed {
+		// Preserve fields the caller doesn't have.  The listen
+		// path knows NaClPub but not Address; gossip may know
+		// Address but not NaClPub (yet).
+		if pr.Address == "" && existing.Address != "" {
+			pr.Address = existing.Address
+		}
+		if len(pr.NaClPub) == 0 && len(existing.NaClPub) > 0 {
+			pr.NaClPub = existing.NaClPub
+		}
+	}
+
 	s.peers[pr.Identity] = &pr
 	s.peersTTL.Put(ctx, peerTTL, pr.Identity, &pr, s.peerExpired, nil)
 
@@ -838,10 +853,17 @@ func (s *Server) notifyAllPeers(ctx context.Context) {
 func (s *Server) registerSelfAsPeer() {
 	log.Tracef("registerSelfAsPeer")
 
+	naclPub, err := s.secret.NaClPublicKey()
+	if err != nil {
+		log.Errorf("registerSelfAsPeer nacl public key: %v", err)
+		return
+	}
+
 	s.mtx.Lock()
 	s.peers[s.secret.Identity] = &PeerRecord{
 		Identity: s.secret.Identity,
 		Address:  s.listenAddress,
+		NaClPub:  naclPub,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	}
@@ -920,7 +942,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		errC <- err
 		return
 	}
-	them, theirDNS, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
+	them, theirDNS, naclPub, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
 	if err != nil {
 		errC <- err
 		return
@@ -950,6 +972,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	s.addPeer(ctx, PeerRecord{
 		Identity: *them,
 		Address:  c,
+		NaClPub:  naclPub,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
@@ -1020,7 +1043,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 
 		// XXX this can cause rate limitting since it isn't in a go
 		// routine. This is obviously a DDOS and needs fixing.
-		id, transport, err := s.newTransport(ctx, conn)
+		id, transport, naclPub, err := s.newTransport(ctx, conn)
 		if err != nil {
 			log.Errorf("transport: %v", err)
 			continue
@@ -1031,6 +1054,16 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 			log.Errorf("session: %v", err)
 			continue
 		}
+
+		// Register peer with NaCl public key.  Address is empty
+		// because we don't know their listen address — they'll
+		// advertise it via gossip.
+		s.addPeer(ctx, PeerRecord{
+			Identity: *id,
+			NaClPub:  naclPub,
+			Version:  ProtocolVersion,
+			LastSeen: time.Now().Unix(),
+		})
 
 		log.Infof("connected %v: %v", conn.RemoteAddr(), id)
 
