@@ -79,6 +79,7 @@ func partyUpdate(party tss.Party, msg tss.Message, errCh chan<- *tss.Error) {
 
 // doKeygen performs distributed key generation.
 func doKeygen(t *testing.T, curve *tss.Parameters, threshold int, pids tss.SortedPartyIDs, preParams []keygen.LocalPreParams) ([]*keygen.LocalPartySaveData, error) {
+	t.Helper()
 	t.Logf("Keygen: %d-of-%d", threshold+1, len(pids))
 
 	pc := tss.NewPeerContext(pids)
@@ -136,6 +137,7 @@ func doKeygen(t *testing.T, curve *tss.Parameters, threshold int, pids tss.Sorte
 
 // doSign performs threshold signing and returns signature data from all participants.
 func doSign(t *testing.T, curve *tss.Parameters, threshold int, pids tss.SortedPartyIDs, keys []*keygen.LocalPartySaveData, data []byte) ([]*common.SignatureData, error) {
+	t.Helper()
 	t.Logf("Signing: %d-of-%d", threshold+1, len(pids))
 
 	signCtx := tss.NewPeerContext(pids)
@@ -185,6 +187,7 @@ func doSign(t *testing.T, curve *tss.Parameters, threshold int, pids tss.SortedP
 
 // doSignAndVerify performs signing and verifies each signature with ECDSA.
 func doSignAndVerify(t *testing.T, curve *tss.Parameters, threshold int, pids tss.SortedPartyIDs, keys []*keygen.LocalPartySaveData, data []byte) error {
+	t.Helper()
 	sigs, err := doSign(t, curve, threshold, pids, keys, data)
 	if err != nil {
 		return err
@@ -214,6 +217,7 @@ func doSignAndVerify(t *testing.T, curve *tss.Parameters, threshold int, pids ts
 
 // doReshare performs key resharing from old committee to new committee.
 func doReshare(t *testing.T, curve *tss.Parameters, oldThreshold, newThreshold int, oldPids, newPids tss.SortedPartyIDs, oldKeys []*keygen.LocalPartySaveData) ([]*keygen.LocalPartySaveData, error) {
+	t.Helper()
 	t.Logf("Resharing: %d-of-%d -> %d-of-%d", oldThreshold+1, len(oldPids), newThreshold+1, len(newPids))
 
 	// Verify committees are disjoint (by key, not by identity)
@@ -349,6 +353,7 @@ func partyUpdateByKey(party tss.Party, msg tss.Message, errCh chan<- *tss.Error)
 
 // loadOrGeneratePreParams loads preparams from file or generates them.
 func loadOrGeneratePreParams(t *testing.T, count int) []keygen.LocalPreParams {
+	t.Helper()
 	// Find the preparams file relative to this test file
 	_, thisFile, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(thisFile)
@@ -418,6 +423,7 @@ func loadOrGeneratePreParams(t *testing.T, count int) []keygen.LocalPreParams {
 
 // verifyPublicKeyPreserved checks that all key shares have the same public key.
 func verifyPublicKeyPreserved(t *testing.T, keys []*keygen.LocalPartySaveData, expectedX *big.Int) {
+	t.Helper()
 	for i, key := range keys {
 		if key.ECDSAPub.X().Cmp(expectedX) != 0 {
 			t.Fatalf("Key %d has different public key X", i)
@@ -427,6 +433,7 @@ func verifyPublicKeyPreserved(t *testing.T, keys []*keygen.LocalPartySaveData, e
 
 // verifyAllKeysMatch checks that all key shares derive the same public key.
 func verifyAllKeysMatch(t *testing.T, keys []*keygen.LocalPartySaveData) *big.Int {
+	t.Helper()
 	if len(keys) == 0 {
 		t.Fatal("No keys provided")
 	}
