@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -2064,6 +2065,823 @@ func TestHundredNodeMesh(t *testing.T) {
 	for i := 0; i < n; i++ {
 		if err := <-errChs[i]; err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("node %d: %v", i, err)
+		}
+	}
+}
+
+// connectedTransports creates a pair of Transports connected via
+// net.Pipe with a completed KeyExchange.  The caller gets the
+// "server" transport (for inserting into sessions) and the "client"
+// transport (for draining reads if needed).  Both transports are
+// closed via t.Cleanup.
+func connectedTransports(t *testing.T) (*Transport, *Transport) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	sp, cp := net.Pipe()
+	t.Cleanup(func() { sp.Close() })
+	t.Cleanup(func() { cp.Close() })
+
+	srv, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli := new(Transport)
+
+	errCh := make(chan error, 2)
+	go func() { errCh <- srv.KeyExchange(ctx, sp) }()
+	go func() { errCh <- cli.KeyExchange(ctx, cp) }()
+	for i := 0; i < 2; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("KeyExchange: %v", err)
+		}
+	}
+
+	return srv, cli
+}
+
+// drainTransport starts a goroutine that reads from the transport's
+// connection until it is closed.  Prevents WriteHeader from blocking.
+func drainTransport(t *testing.T, tr *Transport) {
+	t.Helper()
+	go func() {
+		buf := make([]byte, 64*1024)
+		for {
+			if _, err := tr.conn.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+}
+
+// --- forward() coverage ---------------------------------------------------
+
+// TestForwardDirect verifies the direct-send path of forward():
+// when the destination identity has a session, WriteHeader is called
+// on that transport and the forwarded counter increments.
+func TestForwardDirect(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srvTr, cliTr := connectedTransports(t)
+	drainTransport(t, cliTr)
+
+	destID := Identity{0xAA}
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		sessions: map[Identity]*Transport{destID: srvTr},
+	}
+
+	header := &Header{
+		PayloadType: PPingRequest,
+		PayloadHash: *NewPayloadHash([]byte("direct-fwd")),
+		Origin:      s.secret.Identity,
+		Destination: &destID,
+		TTL:         5,
+	}
+
+	s.forward(header, &PingRequest{OriginTimestamp: 1}, nil)
+
+	if got := s.Forwarded(); got != 1 {
+		t.Fatalf("forwarded = %d, want 1", got)
+	}
+}
+
+// TestForwardDirectWriteError verifies that a write failure on the
+// direct path is handled gracefully: logged but no forwarded count.
+func TestForwardDirectWriteError(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srvTr, _ := connectedTransports(t)
+	srvTr.conn.Close() // force write error
+
+	destID := Identity{0xBB}
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		sessions: map[Identity]*Transport{destID: srvTr},
+	}
+
+	header := &Header{
+		PayloadType: PPingRequest,
+		PayloadHash: *NewPayloadHash([]byte("direct-err")),
+		Origin:      s.secret.Identity,
+		Destination: &destID,
+		TTL:         5,
+	}
+
+	s.forward(header, &PingRequest{OriginTimestamp: 1}, nil)
+
+	if got := s.Forwarded(); got != 0 {
+		t.Fatalf("forwarded = %d, want 0 (write should have failed)", got)
+	}
+}
+
+// TestForwardFlood verifies the flood path of forward(): when the
+// destination is NOT a directly connected peer, the message is sent
+// to all sessions except the source.
+func TestForwardFlood(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peerIDs := [3]Identity{{0x01}, {0x02}, {0x03}}
+	sessions := make(map[Identity]*Transport, 3)
+	for _, pid := range peerIDs {
+		srv, cli := connectedTransports(t)
+		sessions[pid] = srv
+		drainTransport(t, cli)
+	}
+
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		sessions: sessions,
+	}
+
+	// Destination NOT in sessions — triggers flood.
+	destID := Identity{0xFF}
+	from := peerIDs[0] // source peer — should be skipped
+	header := &Header{
+		PayloadType: PPingRequest,
+		PayloadHash: *NewPayloadHash([]byte("flood")),
+		Origin:      s.secret.Identity,
+		Destination: &destID,
+		TTL:         5,
+	}
+
+	s.forward(header, &PingRequest{OriginTimestamp: 1}, &from)
+
+	if got := s.Forwarded(); got != 2 {
+		t.Fatalf("forwarded = %d, want 2 (3 peers minus source)", got)
+	}
+}
+
+// TestForwardFloodNilFrom verifies that when from is nil (locally
+// originated), the flood sends to ALL connected peers.
+func TestForwardFloodNilFrom(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peerIDs := [2]Identity{{0x10}, {0x20}}
+	sessions := make(map[Identity]*Transport, 2)
+	for _, pid := range peerIDs {
+		srv, cli := connectedTransports(t)
+		sessions[pid] = srv
+		drainTransport(t, cli)
+	}
+
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		sessions: sessions,
+	}
+
+	destID := Identity{0xFF}
+	header := &Header{
+		PayloadType: PPingRequest,
+		PayloadHash: *NewPayloadHash([]byte("flood-nil")),
+		Origin:      s.secret.Identity,
+		Destination: &destID,
+		TTL:         3,
+	}
+
+	s.forward(header, &PingRequest{OriginTimestamp: 1}, nil)
+
+	if got := s.Forwarded(); got != 2 {
+		t.Fatalf("forwarded = %d, want 2 (all peers, nil from)", got)
+	}
+}
+
+// TestForwardFloodWriteError verifies that a write error during flood
+// to one peer does not prevent delivery to other peers.
+func TestForwardFloodWriteError(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	goodID := Identity{0xAA}
+	badID := Identity{0xBB}
+
+	goodSrv, goodCli := connectedTransports(t)
+	drainTransport(t, goodCli)
+
+	badSrv, _ := connectedTransports(t)
+	badSrv.conn.Close() // force write error
+
+	s := &Server{
+		seen:   seen,
+		secret: secret,
+		sessions: map[Identity]*Transport{
+			goodID: goodSrv,
+			badID:  badSrv,
+		},
+	}
+
+	destID := Identity{0xFF}
+	header := &Header{
+		PayloadType: PPingRequest,
+		PayloadHash: *NewPayloadHash([]byte("flood-err")),
+		Origin:      s.secret.Identity,
+		Destination: &destID,
+		TTL:         5,
+	}
+
+	s.forward(header, &PingRequest{OriginTimestamp: 1}, nil)
+
+	// Only the good peer should increment forwarded.
+	if got := s.Forwarded(); got != 1 {
+		t.Fatalf("forwarded = %d, want 1 (one good, one failed)", got)
+	}
+}
+
+// --- decryptPayload() coverage ---------------------------------------------
+
+// TestDecryptPayloadErrors exercises all error paths in decryptPayload.
+func TestDecryptPayloadErrors(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	senderPub, err := senderSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipientPub, err := recipientSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderPriv, err := senderSecret.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	validPayload, err := json.Marshal(PingRequest{OriginTimestamp: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	validEP, err := SealBox(validPayload, recipientPub, senderPriv,
+		senderSecret.Identity, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unknownTypeEP, err := SealBox(validPayload, recipientPub, senderPriv,
+		senderSecret.Identity, "bogus_type")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	garbageEP, err := SealBox([]byte("{not json!!!"), recipientPub,
+		senderPriv, senderSecret.Identity, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		peers   map[Identity]*PeerRecord
+		ep      *EncryptedPayload
+		wantSub string // substring of error message
+	}{
+		{
+			name:    "unknown sender",
+			peers:   map[Identity]*PeerRecord{},
+			ep:      validEP,
+			wantSub: "unknown sender",
+		},
+		{
+			name: "sender has no NaCl key",
+			peers: map[Identity]*PeerRecord{
+				senderSecret.Identity: {
+					Identity: senderSecret.Identity,
+					Version:  ProtocolVersion,
+				},
+			},
+			ep:      validEP,
+			wantSub: "has no NaCl public key",
+		},
+		{
+			name: "OpenBox failure wrong key",
+			peers: map[Identity]*PeerRecord{
+				senderSecret.Identity: {
+					Identity: senderSecret.Identity,
+					Version:  ProtocolVersion,
+					NaClPub:  make([]byte, NaClPubSize),
+				},
+			},
+			ep:      validEP,
+			wantSub: "nacl box open failed",
+		},
+		{
+			name: "unknown inner type",
+			peers: map[Identity]*PeerRecord{
+				senderSecret.Identity: {
+					Identity: senderSecret.Identity,
+					Version:  ProtocolVersion,
+					NaClPub:  senderPub,
+				},
+			},
+			ep:      unknownTypeEP,
+			wantSub: "unknown inner type",
+		},
+		{
+			name: "unmarshal failure",
+			peers: map[Identity]*PeerRecord{
+				senderSecret.Identity: {
+					Identity: senderSecret.Identity,
+					Version:  ProtocolVersion,
+					NaClPub:  senderPub,
+				},
+			},
+			ep:      garbageEP,
+			wantSub: "unmarshal inner",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				seen:   seen,
+				secret: recipientSecret,
+				peers:  tt.peers,
+			}
+			_, err := s.decryptPayload(tt.ep)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			got := err.Error()
+			if !strings.Contains(got, tt.wantSub) {
+				t.Fatalf("error %q does not contain %q",
+					got, tt.wantSub)
+			}
+		})
+	}
+}
+
+// TestDecryptPayloadSuccess verifies the happy path: a properly
+// encrypted PingRequest is decrypted and decoded.
+func TestDecryptPayloadSuccess(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	senderPub, err := senderSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipientPub, err := recipientSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderPriv, err := senderSecret.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(PingRequest{OriginTimestamp: 99})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, err := SealBox(payload, recipientPub, senderPriv,
+		senderSecret.Identity, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{
+		seen:   seen,
+		secret: recipientSecret,
+		peers: map[Identity]*PeerRecord{
+			senderSecret.Identity: {
+				Identity: senderSecret.Identity,
+				Version:  ProtocolVersion,
+				NaClPub:  senderPub,
+			},
+		},
+	}
+
+	result, err := s.decryptPayload(ep)
+	if err != nil {
+		t.Fatalf("decryptPayload: %v", err)
+	}
+	ping, ok := result.(*PingRequest)
+	if !ok {
+		t.Fatalf("got %T, want *PingRequest", result)
+	}
+	if ping.OriginTimestamp != 99 {
+		t.Fatalf("OriginTimestamp = %d, want 99",
+			ping.OriginTimestamp)
+	}
+}
+
+// --- encrypt() coverage ---------------------------------------------------
+
+// TestEncryptMessageTooLarge verifies that encrypt returns
+// ErrMessageTooLarge when the payload exceeds TransportMaxSize.
+func TestEncryptMessageTooLarge(t *testing.T) {
+	srv, _ := connectedTransports(t)
+
+	// TransportMaxSize is 0x00ffffff (16MB).  A payload of that
+	// size plus nonce + secretbox overhead exceeds the limit.
+	huge := make([]byte, TransportMaxSize)
+	_, err := srv.encrypt(huge)
+	if !errors.Is(err, ErrMessageTooLarge) {
+		t.Fatalf("encrypt(huge) = %v, want ErrMessageTooLarge", err)
+	}
+}
+
+// --- intentionally uncovered paths ----------------------------------------
+//
+// The following four branches are unreachable under normal operation and
+// are intentionally left uncovered.  They exist as defensive checks
+// against conditions that cannot occur without replacing stdlib internals.
+//
+//  1. NaClPublicKey (protocol.go:670) — calls NaClPrivateKey which does
+//     SHA256 domain separation then ecdh.X25519().NewPrivateKey(seed).
+//     SHA256 always produces a valid 32-byte X25519 seed, so
+//     NewPrivateKey cannot fail.
+//
+//  2. SealBox (protocol.go:685) — crypto/rand.Read nonce error.  Only
+//     fails if the OS entropy source is broken (e.g. /dev/urandom
+//     unavailable), which is unrecoverable anyway.
+//
+//  3. decryptPayload (continuum.go:933) — same NaClPrivateKey error as
+//     #1, reached through the recipient's own Secret which is always
+//     valid if the server started.
+//
+//  4. encrypt (protocol.go:1088) — diagnostic panic checking that
+//     secretbox.Seal output length equals nonce + plaintext + overhead.
+//     This is a compile-time invariant of the NaCl secretbox
+//     implementation and cannot fire.
+
+// --- fuzz tests -----------------------------------------------------------
+
+// FuzzOpenBox ensures OpenBox never panics on arbitrary inputs.
+func FuzzOpenBox(f *testing.F) {
+	secret, err := NewSecret()
+	if err != nil {
+		f.Fatal(err)
+	}
+	priv, err := secret.NaClPrivateKey()
+	if err != nil {
+		f.Fatal(err)
+	}
+	pub, err := secret.NaClPublicKey()
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	// Seed with a valid sealed box.
+	plain := []byte("hello")
+	ep, err := SealBox(plain, pub, priv, secret.Identity, PPingRequest)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(ep.Nonce[:], ep.Ciphertext, pub)
+
+	// Seed with degenerate inputs.
+	f.Add(make([]byte, 24), []byte{}, make([]byte, 32))
+	f.Add(make([]byte, 24), []byte{0xff}, make([]byte, 32))
+
+	f.Fuzz(func(t *testing.T, nonce, ciphertext, senderPub []byte) {
+		if len(nonce) != 24 {
+			return
+		}
+		var n [24]byte
+		copy(n[:], nonce)
+		ep := &EncryptedPayload{
+			Nonce:      n,
+			Ciphertext: ciphertext,
+			Sender:     Identity{},
+			InnerType:  PPingRequest,
+		}
+		// Must not panic regardless of input.
+		_, _ = OpenBox(ep, senderPub, priv)
+	})
+}
+
+// FuzzDecryptPayload ensures decryptPayload never panics on
+// arbitrary EncryptedPayload fields.
+func FuzzDecryptPayload(f *testing.F) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		f.Fatal(err)
+	}
+	recipientSecret, err := NewSecret()
+	if err != nil {
+		f.Fatal(err)
+	}
+	senderSecret, err := NewSecret()
+	if err != nil {
+		f.Fatal(err)
+	}
+	senderPub, err := senderSecret.NaClPublicKey()
+	if err != nil {
+		f.Fatal(err)
+	}
+	senderPriv, err := senderSecret.NaClPrivateKey()
+	if err != nil {
+		f.Fatal(err)
+	}
+	recipientPub, err := recipientSecret.NaClPublicKey()
+	if err != nil {
+		f.Fatal(err)
+	}
+
+	// Seed with valid encrypted payload.
+	payload, err := json.Marshal(PingRequest{OriginTimestamp: 1})
+	if err != nil {
+		f.Fatal(err)
+	}
+	ep, err := SealBox(payload, recipientPub, senderPriv,
+		senderSecret.Identity, PPingRequest)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(ep.Nonce[:], ep.Ciphertext, ep.Sender[:], string(ep.InnerType))
+
+	// Seed with garbage.
+	f.Add(make([]byte, 24), []byte("garbage"), make([]byte, len(Identity{})), "bogus")
+
+	s := &Server{
+		seen:   seen,
+		secret: recipientSecret,
+		peers: map[Identity]*PeerRecord{
+			senderSecret.Identity: {
+				Identity: senderSecret.Identity,
+				Version:  ProtocolVersion,
+				NaClPub:  senderPub,
+			},
+		},
+	}
+
+	f.Fuzz(func(t *testing.T, nonce, ciphertext, sender []byte, innerType string) {
+		if len(nonce) != 24 || len(sender) != len(Identity{}) {
+			return
+		}
+		var n [24]byte
+		copy(n[:], nonce)
+		var id Identity
+		copy(id[:], sender)
+		ep := &EncryptedPayload{
+			Nonce:      n,
+			Ciphertext: ciphertext,
+			Sender:     id,
+			InnerType:  PayloadType(innerType),
+		}
+		// Must not panic regardless of input.
+		_, _ = s.decryptPayload(ep)
+	})
+}
+
+// --- benchmarks -----------------------------------------------------------
+
+// BenchmarkForwardDirect measures the direct-send path of forward().
+func BenchmarkForwardDirect(b *testing.B) {
+	seen, err := ttl.New(4096, true)
+	if err != nil {
+		b.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	b.Cleanup(cancel)
+
+	sp, cp := net.Pipe()
+	b.Cleanup(func() { sp.Close() })
+	b.Cleanup(func() { cp.Close() })
+
+	srv, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		b.Fatal(err)
+	}
+	cli := new(Transport)
+	errCh := make(chan error, 2)
+	go func() { errCh <- srv.KeyExchange(ctx, sp) }()
+	go func() { errCh <- cli.KeyExchange(ctx, cp) }()
+	for i := 0; i < 2; i++ {
+		if err := <-errCh; err != nil {
+			b.Fatalf("KeyExchange: %v", err)
+		}
+	}
+
+	// Drain reads so WriteHeader doesn't block.
+	go func() {
+		buf := make([]byte, 64*1024)
+		for {
+			if _, err := cli.conn.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	destID := Identity{0xAA}
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		sessions: map[Identity]*Transport{destID: srv},
+	}
+
+	header := &Header{
+		PayloadType: PPingRequest,
+		Origin:      s.secret.Identity,
+		Destination: &destID,
+		TTL:         5,
+	}
+	ping := &PingRequest{OriginTimestamp: 1}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		header.PayloadHash = *NewPayloadHash([]byte(strconv.Itoa(i)))
+		s.forward(header, ping, nil)
+	}
+}
+
+// BenchmarkForwardFlood measures the flood path with 10 peers.
+func BenchmarkForwardFlood(b *testing.B) {
+	seen, err := ttl.New(4096, true)
+	if err != nil {
+		b.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	b.Cleanup(cancel)
+
+	const numPeers = 10
+	sessions := make(map[Identity]*Transport, numPeers)
+	for i := 0; i < numPeers; i++ {
+		sp, cp := net.Pipe()
+		b.Cleanup(func() { sp.Close() })
+		b.Cleanup(func() { cp.Close() })
+
+		srv, err := NewTransportFromCurve(ecdh.X25519())
+		if err != nil {
+			b.Fatal(err)
+		}
+		cli := new(Transport)
+		errCh := make(chan error, 2)
+		go func() { errCh <- srv.KeyExchange(ctx, sp) }()
+		go func() { errCh <- cli.KeyExchange(ctx, cp) }()
+		for j := 0; j < 2; j++ {
+			if err := <-errCh; err != nil {
+				b.Fatalf("KeyExchange: %v", err)
+			}
+		}
+
+		go func() {
+			buf := make([]byte, 64*1024)
+			for {
+				if _, err := cli.conn.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+
+		id := Identity{byte(i)}
+		sessions[id] = srv
+	}
+
+	s := &Server{
+		seen:     seen,
+		secret:   secret,
+		sessions: sessions,
+	}
+
+	destID := Identity{0xFF}
+	header := &Header{
+		PayloadType: PPingRequest,
+		Origin:      s.secret.Identity,
+		Destination: &destID,
+		TTL:         5,
+	}
+	ping := &PingRequest{OriginTimestamp: 1}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		header.PayloadHash = *NewPayloadHash([]byte(strconv.Itoa(i)))
+		s.forward(header, ping, nil)
+	}
+}
+
+// BenchmarkDecryptPayload measures the happy-path decryption.
+func BenchmarkDecryptPayload(b *testing.B) {
+	seen, err := ttl.New(4096, true)
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientSecret, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	senderSecret, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	senderPub, err := senderSecret.NaClPublicKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientPub, err := recipientSecret.NaClPublicKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	senderPriv, err := senderSecret.NaClPrivateKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	payload, err := json.Marshal(PingRequest{OriginTimestamp: 42})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	s := &Server{
+		seen:   seen,
+		secret: recipientSecret,
+		peers: map[Identity]*PeerRecord{
+			senderSecret.Identity: {
+				Identity: senderSecret.Identity,
+				Version:  ProtocolVersion,
+				NaClPub:  senderPub,
+			},
+		},
+	}
+
+	// Pre-generate encrypted payloads (each has unique nonce).
+	eps := make([]*EncryptedPayload, b.N)
+	for i := range eps {
+		ep, err := SealBox(payload, recipientPub, senderPriv,
+			senderSecret.Identity, PPingRequest)
+		if err != nil {
+			b.Fatal(err)
+		}
+		eps[i] = ep
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := s.decryptPayload(eps[i])
+		if err != nil {
+			b.Fatal(err)
 		}
 	}
 }
