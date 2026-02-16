@@ -14,6 +14,7 @@ import (
 	"maps"
 	"math"
 	"math/big"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -24,7 +25,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/larry/larry"
-	"github.com/hemilabs/larry/larry/multi"
+	"github.com/hemilabs/larry/larry/leveldb"
 	"github.com/hemilabs/larry/larry/rawdb"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
@@ -269,29 +270,31 @@ func setup(ctx context.Context, cfg *Config) (*ldb, error) {
 		return nil, fmt.Errorf("home dir: %w", err)
 	}
 
-	poolMap := map[string]string{
-		tbcd.BlockHeadersDB:             "leveldb",
-		tbcd.BlocksMissingDB:            "leveldb",
-		tbcd.MetadataDB:                 "leveldb",
-		tbcd.KeystonesDB:                "leveldb",
-		tbcd.HeightHashDB:               "leveldb",
-		tbcd.OutputsDB:                  "leveldb",
-		tbcd.TransactionsDB:             "leveldb",
-		"zkdb/" + tbcd.ZKOutpointsDB:    "leveldb",
-		"zkdb/" + tbcd.ZKSpendableOutDB: "leveldb",
-		"zkdb/" + tbcd.ZKSpentOutDB:     "leveldb",
-		"zkdb/" + tbcd.ZKSpentTxDB:      "leveldb",
-		"zkdb/" + tbcd.ZKDB:             "leveldb",
+	err = os.MkdirAll(h, 0o0700)
+	if err != nil {
+		return nil, fmt.Errorf("mkdir: %w", err)
 	}
 
-	tables := make([]string, 0, len(poolMap))
-	for table := range poolMap {
-		tables = append(tables, filepath.Base(table))
+	cfg.Home = h
+
+	tables := []string{
+		tbcd.BlockHeadersDB,
+		tbcd.BlocksMissingDB,
+		tbcd.MetadataDB,
+		tbcd.KeystonesDB,
+		tbcd.HeightHashDB,
+		tbcd.OutputsDB,
+		tbcd.TransactionsDB,
+		tbcd.ZKOutpointsDB,
+		tbcd.ZKSpendableOutDB,
+		tbcd.ZKSpentOutDB,
+		tbcd.ZKSpentTxDB,
+		tbcd.ZKDB,
 	}
 
 	// MultiDB makes the directory path for home
-	mcfg := multi.DefaultMultiConfig(cfg.Home, poolMap)
-	pool, err := multi.NewMultiDB(mcfg)
+	mcfg := leveldb.DefaultLevelDBConfig(cfg.Home, tables)
+	pool, err := leveldb.NewLevelDB(mcfg)
 	if err != nil {
 		return nil, fmt.Errorf("create pool: %w", err)
 	}
