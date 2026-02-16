@@ -123,14 +123,14 @@ func TestMD(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = db.MetadataGet(ctx, key)
-	if !errors.Is(err, database.ErrNotFound) {
-		t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+	if !errors.Is(err, tbcd.ErrNotFound) {
+		t.Fatalf("expected '%v', got '%v'", tbcd.ErrNotFound, err)
 	}
 
 	// Invalid Delete
 	err = db.MetadataDel(ctx, key)
-	if !errors.Is(err, database.ErrNotFound) {
-		t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+	if !errors.Is(err, tbcd.ErrNotFound) {
+		t.Fatalf("expected '%v', got '%v'", tbcd.ErrNotFound, err)
 	}
 
 	// fail one
@@ -952,7 +952,7 @@ func createNewDB(t *testing.T, ctx context.Context) (*ldb, func()) {
 		t.Fatal(err)
 	}
 	discardFunc := func() {
-		if err := db.Close(); err != nil {
+		if err := db.Close(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -998,8 +998,8 @@ func TestBlockInsert(t *testing.T) {
 
 	// Insert duplicates
 	_, _, err := insertBlockHeader(ctx, db, &chainhash.Hash{}, 0, 0)
-	if !errors.Is(err, database.ErrDuplicate) {
-		t.Fatalf("expected err %v, got %v", database.ErrDuplicate, err)
+	if !errors.Is(err, tbcd.ErrDuplicate) {
+		t.Fatalf("expected err %v, got %v", tbcd.ErrDuplicate, err)
 	}
 
 	bh, err := db.BlockHeaderBest(ctx)
@@ -1008,8 +1008,8 @@ func TestBlockInsert(t *testing.T) {
 	}
 
 	_, _, err = insertBlockHeader(ctx, db, bh.ParentHash(), bh.Height, bh.Height)
-	if !errors.Is(err, database.ErrDuplicate) {
-		t.Fatalf("expected err %v, got %v", database.ErrDuplicate, err)
+	if !errors.Is(err, tbcd.ErrDuplicate) {
+		t.Fatalf("expected err %v, got %v", tbcd.ErrDuplicate, err)
 	}
 }
 
@@ -1024,19 +1024,19 @@ func TestBlockNegative(t *testing.T) {
 
 	// Blockheader tests
 	_, err := db.BlockHeaderByHash(ctx, fakeHash)
-	if !errors.Is(err, database.ErrNotFound) {
-		t.Fatalf("expected error %v, got %v", database.ErrNotFound, err)
+	if !errors.Is(err, tbcd.ErrNotFound) {
+		t.Fatalf("expected error %v, got %v", tbcd.ErrNotFound, err)
 	}
 
 	_, err = db.BlockHeaderBest(ctx)
-	if !errors.Is(err, database.ErrNotFound) {
-		t.Fatalf("expected error %v, got %v", database.ErrNotFound, err)
+	if !errors.Is(err, tbcd.ErrNotFound) {
+		t.Fatalf("expected error %v, got %v", tbcd.ErrNotFound, err)
 	}
 
 	// Block tests
 	_, err = db.BlockByHash(ctx, fakeHash)
-	if !errors.Is(err, database.ErrBlockNotFound) {
-		t.Fatalf("expected error %v, got %v", database.ErrBlockNotFound, err)
+	if !errors.Is(err, tbcd.ErrBlockNotFound) {
+		t.Fatalf("expected error %v, got %v", tbcd.ErrBlockNotFound, err)
 	}
 
 	exists, err := db.BlockExistsByHash(ctx, fakeHash)
