@@ -20,7 +20,7 @@ The following environment variables are used:
 ```
 # the endpoint for the healthy op-geth you are testing against, 
 # ex. hemi public rpc 
-SYNCTESTER_CONTROL_OP_GETH_ENDPOINT"
+SYNCTESTER_CONTROL_OP_GETH_ENDPOINT
 
 # the endpoint for the op-geth you are testing
 SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT

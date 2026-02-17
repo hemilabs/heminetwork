@@ -6,6 +6,7 @@ package synctest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +28,46 @@ var (
 	lastRequestMtx    sync.Mutex
 	lastSlackRequests [][]byte
 )
+
+func TestWaitForSyncInvalidParameters(t *testing.T) {
+	type testTableItem struct {
+		name          string
+		syncmode      string
+		network       string
+		expectedError error
+	}
+
+	testTable := []testTableItem{
+		testTableItem{
+			name:          "invalid network",
+			syncmode:      "snap",
+			network:       "badnetwork",
+			expectedError: errInvalidNetwork,
+		},
+		testTableItem{
+			name:          "invalid network",
+			syncmode:      "forkmetimbers",
+			network:       "testnet",
+			expectedError: errInvalidSyncmode,
+		},
+	}
+
+	for _, testCase := range testTable {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("SYNCTESTER_NETWORK", testCase.network)
+			t.Setenv("SYNCTESTER_SYNCMODE", testCase.syncmode)
+
+			err := WaitForSync(t.Context())
+			if err == nil {
+				t.Fatal("expected error")
+			}
+
+			if !errors.Is(err, testCase.expectedError) {
+				t.Fatalf("unexpcted error: %s", err)
+			}
+		})
+	}
+}
 
 func TestWaitForSyncSuccessNoSlackNotification(t *testing.T) {
 	type testTableItem struct {

@@ -7,11 +7,13 @@ package synctest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -42,12 +44,21 @@ const (
 	notifyByEnv                            = "SYNCTESTER_NOTIFY_BY_SECONDS"
 	skipDockerLogsEnv                      = "SYNCTESTER_SKIP_DOCKER_LOGS"
 	logLevelEnv                            = "SYNCTESTER_LOG_LEVEL"
+	networkMainnet                         = "mainnet"
+	networkTestnet                         = "testnet"
+	networkLocalnet                        = "localnet"
+	syncmodeSnap                           = "snap"
+	syncmodeFull                           = "full"
 )
 
 var (
 	tbcFetchHealthRetryCount = 10
 	loopDelay                = 5 * time.Second
 	log                      loggo.Logger
+	validNetworks            = []string{networkMainnet, networkTestnet, networkLocalnet}
+	validSyncmodes           = []string{syncmodeSnap, syncmodeFull}
+	errInvalidNetwork        = errors.New("invalid network")
+	errInvalidSyncmode       = errors.New("invalid syncmode")
 )
 
 func init() {
@@ -64,6 +75,12 @@ func init() {
 }
 
 func WaitForSync(ctx context.Context) error {
+	if !slices.Contains(validNetworks, networkFromEnv()) {
+		return fmt.Errorf("%w: %s", errInvalidNetwork, networkFromEnv())
+	}
+	if !slices.Contains(validSyncmodes, syncmodeFromEnv()) {
+		return fmt.Errorf("%w: %s", errInvalidSyncmode, syncmodeFromEnv())
+	}
 	return waitForSync(ctx)
 }
 
