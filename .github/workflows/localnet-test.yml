@@ -109,6 +109,9 @@ jobs:
       - name: "remove more dangling"
         run: docker system prune -f
 
+      - name: "add chainguard user to docker socket"
+        run: chown 65532:65532 /var/run/docker.sock
+
       - name: "build synctest"
         working-directory: ./synctest
         run: docker build -t synctest:latest .
