@@ -38,13 +38,13 @@ func TestWaitForSyncInvalidParameters(t *testing.T) {
 	}
 
 	testTable := []testTableItem{
-		testTableItem{
+		{
 			name:          "invalid network",
 			syncmode:      "snap",
 			network:       "badnetwork",
 			expectedError: errInvalidNetwork,
 		},
-		testTableItem{
+		{
 			name:          "invalid network",
 			syncmode:      "forkmetimbers",
 			network:       "testnet",
