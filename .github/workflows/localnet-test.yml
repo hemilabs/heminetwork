@@ -109,9 +109,6 @@ jobs:
       - name: "remove more dangling"
         run: docker system prune -f
 
-      - name: "add chainguard user to docker socket"
-        run: chown 65532:65532 /var/run/docker.sock
-
       - name: "build synctest"
         working-directory: ./synctest
         run: docker build -t synctest:latest .
@@ -126,12 +123,12 @@ jobs:
           SYNCTESTER_SYNCMODE: snap
         run: |
           docker run \
-            -v /var/run/docker.sock:/var/run/docker.sock \
             -e SYNCTESTER_CONTROL_OP_GETH_ENDPOINT=$SYNCTESTER_CONTROL_OP_GETH_ENDPOINT \
             -e SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT=$SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT \
             -e SYNCTESTER_EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT=$SYNCTESTER_EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT \
             -e SYNCTESTER_NETWORK=$SYNCTESTER_NETWORK \
             -e SYNCTESTER_SYNCMODE=$SYNCTESTER_SYNCMODE \
+            -e SYNCTESTER_SKIP_DOCKER_LOGS=true \
             --network host \
             --entrypoint /bin/synctest \
             synctest:latest
