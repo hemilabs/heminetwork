@@ -172,7 +172,6 @@ func reportProgress(ctx context.Context, lastSyncInfo *tbc.SyncInfo, notify bool
 		experimentalBlock, err = l2Experiment.HeaderByNumber(ctx, big.NewInt(int64(rpc.LatestBlockNumber)))
 		if err != nil {
 			log.Warningf("error getting latest experiment block: %s\n", err)
-			return nil
 		}
 	}
 
