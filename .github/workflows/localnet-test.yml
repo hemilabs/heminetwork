@@ -126,6 +126,7 @@ jobs:
             -e SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT=$SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT \
             -e SYNCTESTER_EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT=$SYNCTESTER_EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT \
             --network host \
+            --entrypoint /bin/synctest \
             synctest:latest
 
 
