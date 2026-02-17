@@ -253,6 +253,31 @@ func setupServers(t *testing.T, useSlack bool, delaySeconds uint, useValidOtherB
 	}))
 
 	experimentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		type responseBody struct {
+			Method string `json:"method"`
+		}
+
+		rb := responseBody{}
+		if err := json.Unmarshal(b, &rb); err != nil {
+			t.Fatal(err)
+		}
+
+		if rb.Method == "eth_syncing" {
+			fmt.Fprintln(w, `
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": null
+      }
+      `)
+			return
+		}
+
 		if time.Now().Before(experimentHealthyAt) {
 			if useValidOtherBlock {
 				fmt.Fprintln(w, otherBlock)
