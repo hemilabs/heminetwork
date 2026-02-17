@@ -6,13 +6,11 @@ package main
 
 import (
 	"context"
-	"log"
-
-	"synctest"
+	"fmt"
 )
 
 func main() {
-	if err := synctest.WaitForSync(context.Background()); err != nil {
-		log.Fatalf("error syncing: %s", err)
+	if err := waitForSync(context.Background()); err != nil {
+		panic(fmt.Sprintf("error syncing: %s", err))
 	}
 }
