@@ -37,11 +37,11 @@ SYNCTESTER_SLACK_CHANNEL
 # (optional) the slack url used for testing (i.e. mocking slack)
 SYNCTESTER_SLACK_URL
 
-# the network you're testing (ex. testnet), you may set this to any value,
+# the network you're testing, must be "mainnet", "testnet", or "localnet"
 # it's for notification clarity
 SYNCTESTER_NETWORK
 
-# the syncmode you're testing (ex. snap), you may set this to any value,
+# the syncmode you're testing, must be "snap" or "full"
 # it's for notification clarity
 SYNCTESTER_SYNCMODE
 
