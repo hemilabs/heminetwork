@@ -1247,6 +1247,20 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 			errC <- errors.New("remote did not advertise dns name")
 			return
 		}
+
+		// XXX potential bug; DNS is not an authentication system, and layers
+		// below will prevent impersonating a node, but regardless:
+		// The DNS name to check the records for here is passed as an option
+		// during the handshake message exchange. As such, client verifies
+		// against theirDNS (what the server claims), not the original hostname
+		// the client connected to. This could allow for:
+		// Client connects to "server.example.com:1234"
+		//     ↓ MITM intercepts
+		// MITM presents identity_m with theirDNS = "attacker.com"
+		//     ↓ Client verifies
+		// Client looks up attacker.com TXT → matches identity_m ✓
+		//     ↓
+		// Client believes it is connected to the legitimate server node.
 		if err := s.verifyDNSIdentity(ctx, theirDNS, *them); err != nil {
 			errC <- fmt.Errorf("dns verify: %w", err)
 			return
