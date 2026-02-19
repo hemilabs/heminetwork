@@ -495,6 +495,29 @@ type CeremonyAbort struct {
 	Reason     string     `json:"reason"`
 }
 
+// BroadcastDestination is the all-zeros Identity sentinel used as
+// Header.Destination to indicate a broadcast message.  Every node
+// processes the message locally AND forwards to all connected peers.
+var BroadcastDestination = Identity{}
+
+// broadcastWhitelist is the set of payload types allowed to use the
+// broadcast primitive.  Non-whitelisted types with BroadcastDestination
+// are silently dropped.
+var broadcastWhitelist = map[reflect.Type]bool{
+	reflect.TypeOf(CeremonyResult{}): true,
+	reflect.TypeOf(CeremonyAbort{}):  true,
+}
+
+// IsBroadcastable reports whether cmd is a broadcast-type payload.
+// Handles both value and pointer types.
+func IsBroadcastable(cmd any) bool {
+	t := reflect.TypeOf(cmd)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return broadcastWhitelist[t]
+}
+
 // Protocol and transport wire constants.
 const (
 	TransportVersion = 1 // Transport protocol version
@@ -790,6 +813,7 @@ var (
 	ErrUnsupportedVersion     = errors.New("unsupported version")
 	ErrMessageTooLarge        = errors.New("message too large")
 	ErrInvalidNaClPub         = errors.New("invalid nacl public key")
+	ErrUseBroadcast           = errors.New("broadcast-type payload: use Broadcast(), not SendEncrypted()")
 
 	// placeholders until we decide on timeout handling
 	readTimeout  time.Duration = 4 * time.Second
