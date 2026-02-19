@@ -94,6 +94,14 @@ type Config struct {
 	Seeds                   []string // DNS seed hostnames, format host:port
 }
 
+// CeremonyInfo tracks the state of an active TSS ceremony.
+type CeremonyInfo struct {
+	Type      CeremonyType `json:"type"`
+	StartTime int64        `json:"start_time"` // unix timestamp
+	Status    string       `json:"status"`     // "running", "complete", "failed"
+	Error     string       `json:"error,omitempty"`
+}
+
 // Server is a continuum protocol node that manages encrypted peer
 // connections, gossip-based peer discovery, and TSS ceremonies.
 type Server struct {
@@ -115,6 +123,9 @@ type Server struct {
 	tssStore  TSSStore
 	stt       *serverTSSTransport
 	tssCtx    context.Context
+
+	// Ceremony tracking — admin RPCs report status from this map.
+	ceremonies map[CeremonyID]*CeremonyInfo
 
 	// Listener
 	listenConfig  *net.ListenConfig
@@ -169,6 +180,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		listenConfig: &net.ListenConfig{},
 		sessions:     make(map[Identity]*Transport, cfg.PeersWanted),
 		peers:        make(map[Identity]*PeerRecord),
+		ceremonies:   make(map[CeremonyID]*CeremonyInfo),
 	}, nil
 }
 
@@ -598,6 +610,37 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			default:
 				log.Debugf("handle %v: unhandled encrypted inner %T",
 					id, inner)
+			}
+
+		// Admin RPCs — localhost only.
+		case *PeerListAdminRequest:
+			if !isLocalhost(t.RemoteAddr()) {
+				log.Warningf("handle %v: admin request from non-localhost, rejected", id)
+				continue
+			}
+			resp := s.handlePeerListAdmin()
+			if err := t.Write(s.secret.Identity, resp); err != nil {
+				log.Warningf("admin peer list %v: %v", id, err)
+			}
+
+		case *CeremonyStatusRequest:
+			if !isLocalhost(t.RemoteAddr()) {
+				log.Warningf("handle %v: admin request from non-localhost, rejected", id)
+				continue
+			}
+			resp := s.handleCeremonyStatus(v.CeremonyID)
+			if err := t.Write(s.secret.Identity, resp); err != nil {
+				log.Warningf("admin ceremony status %v: %v", id, err)
+			}
+
+		case *CeremonyListRequest:
+			if !isLocalhost(t.RemoteAddr()) {
+				log.Warningf("handle %v: admin request from non-localhost, rejected", id)
+				continue
+			}
+			resp := s.handleCeremonyList()
+			if err := t.Write(s.secret.Identity, resp); err != nil {
+				log.Warningf("admin ceremony list %v: %v", id, err)
 			}
 
 		default:
@@ -1077,6 +1120,114 @@ func (s *Server) RoutedReceived() int64 {
 // to other peers.
 func (s *Server) Forwarded() int64 {
 	return s.forwarded.Load()
+}
+
+// isLocalhost reports whether the given net.Addr is a loopback address.
+func isLocalhost(addr net.Addr) bool {
+	if addr == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}
+
+// registerCeremony records a new ceremony in the tracking map.
+func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType) {
+	s.mtx.Lock()
+	s.ceremonies[cid] = &CeremonyInfo{
+		Type:      ct,
+		StartTime: time.Now().Unix(),
+		Status:    "running",
+	}
+	s.mtx.Unlock()
+}
+
+// completeCeremony marks a tracked ceremony as complete.
+func (s *Server) completeCeremony(cid CeremonyID) {
+	s.mtx.Lock()
+	if ci, ok := s.ceremonies[cid]; ok {
+		ci.Status = "complete"
+	}
+	s.mtx.Unlock()
+}
+
+// failCeremony marks a tracked ceremony as failed with an error.
+func (s *Server) failCeremony(cid CeremonyID, reason string) {
+	s.mtx.Lock()
+	if ci, ok := s.ceremonies[cid]; ok {
+		ci.Status = "failed"
+		ci.Error = reason
+	}
+	s.mtx.Unlock()
+}
+
+// handlePeerListAdmin builds a PeerListAdminResponse from the peer
+// and session maps.
+func (s *Server) handlePeerListAdmin() PeerListAdminResponse {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	resp := PeerListAdminResponse{
+		Peers: make([]PeerAdminRecord, 0, len(s.peers)),
+	}
+	for id, pr := range s.peers {
+		_, connected := s.sessions[id]
+		resp.Peers = append(resp.Peers, PeerAdminRecord{
+			PeerRecord: *pr,
+			Connected:  connected,
+		})
+	}
+	return resp
+}
+
+// handleCeremonyStatus returns the status of a specific ceremony.
+func (s *Server) handleCeremonyStatus(cid CeremonyID) CeremonyStatusResponse {
+	s.mtx.RLock()
+	ci, ok := s.ceremonies[cid]
+	s.mtx.RUnlock()
+
+	if !ok {
+		return CeremonyStatusResponse{
+			CeremonyID: cid,
+			Found:      false,
+		}
+	}
+	return CeremonyStatusResponse{
+		CeremonyID: cid,
+		Found:      true,
+		Type:       ci.Type.String(),
+		Status:     ci.Status,
+		StartTime:  ci.StartTime,
+		Error:      ci.Error,
+	}
+}
+
+// handleCeremonyList returns the status of all known ceremonies.
+func (s *Server) handleCeremonyList() CeremonyListResponse {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	resp := CeremonyListResponse{
+		Ceremonies: make([]CeremonyStatusResponse, 0, len(s.ceremonies)),
+	}
+	for cid, ci := range s.ceremonies {
+		resp.Ceremonies = append(resp.Ceremonies, CeremonyStatusResponse{
+			CeremonyID: cid,
+			Found:      true,
+			Type:       ci.Type.String(),
+			Status:     ci.Status,
+			StartTime:  ci.StartTime,
+			Error:      ci.Error,
+		})
+	}
+	return resp
 }
 
 // KnownPeers returns all known peer records.
