@@ -96,10 +96,11 @@ type Config struct {
 
 // CeremonyInfo tracks the state of an active TSS ceremony.
 type CeremonyInfo struct {
-	Type      CeremonyType `json:"type"`
-	StartTime int64        `json:"start_time"` // unix timestamp
-	Status    string       `json:"status"`     // "running", "complete", "failed"
-	Error     string       `json:"error,omitempty"`
+	Type        CeremonyType `json:"type"`
+	StartTime   int64        `json:"start_time"` // unix timestamp
+	Status      string       `json:"status"`     // "running", "complete", "failed"
+	Error       string       `json:"error,omitempty"`
+	Coordinator Identity     `json:"coordinator"` // node responsible for broadcasting result
 }
 
 // Server is a continuum protocol node that manages encrypted peer
@@ -607,6 +608,12 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 				}
 			case *TSSMessage:
 				s.dispatchTSSMessage(*iv)
+			case *KeygenRequest:
+				s.dispatchKeygen(*iv)
+			case *SignRequest:
+				s.dispatchSign(*iv)
+			case *ReshareRequest:
+				s.dispatchReshare(*iv)
 			default:
 				log.Debugf("handle %v: unhandled encrypted inner %T",
 					id, inner)
@@ -1139,12 +1146,13 @@ func isLocalhost(addr net.Addr) bool {
 }
 
 // registerCeremony records a new ceremony in the tracking map.
-func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType) {
+func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity) {
 	s.mtx.Lock()
 	s.ceremonies[cid] = &CeremonyInfo{
-		Type:      ct,
-		StartTime: time.Now().Unix(),
-		Status:    "running",
+		Type:        ct,
+		StartTime:   time.Now().Unix(),
+		Status:      "running",
+		Coordinator: coordinator,
 	}
 	s.mtx.Unlock()
 }
@@ -1182,6 +1190,7 @@ func (s *Server) handlePeerListAdmin() PeerListAdminResponse {
 		resp.Peers = append(resp.Peers, PeerAdminRecord{
 			PeerRecord: *pr,
 			Connected:  connected,
+			Self:       id == s.secret.Identity,
 		})
 	}
 	return resp

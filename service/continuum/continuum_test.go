@@ -8633,7 +8633,7 @@ func TestCeremonyTracking(t *testing.T) {
 	copy(cid[:], []byte("test-ceremony-tracking-00"))
 
 	// Register.
-	s.registerCeremony(cid, CeremonyKeygen)
+	s.registerCeremony(cid, CeremonyKeygen, Identity{})
 
 	s.mtx.RLock()
 	ci, ok := s.ceremonies[cid]
@@ -8661,7 +8661,7 @@ func TestCeremonyTracking(t *testing.T) {
 	// Fail a different ceremony.
 	var cid2 CeremonyID
 	copy(cid2[:], []byte("test-ceremony-fail-00000"))
-	s.registerCeremony(cid2, CeremonySign)
+	s.registerCeremony(cid2, CeremonySign, Identity{})
 	s.failCeremony(cid2, "test error")
 
 	s.mtx.RLock()
@@ -8862,8 +8862,8 @@ func TestAdminCeremonyList(t *testing.T) {
 	var cid1, cid2 CeremonyID
 	copy(cid1[:], []byte("ceremony-list-test-0001"))
 	copy(cid2[:], []byte("ceremony-list-test-0002"))
-	s.registerCeremony(cid1, CeremonyKeygen)
-	s.registerCeremony(cid2, CeremonySign)
+	s.registerCeremony(cid1, CeremonyKeygen, Identity{})
+	s.registerCeremony(cid2, CeremonySign, Identity{})
 	s.completeCeremony(cid1)
 
 	clientSecret, err := NewSecret()
@@ -8941,7 +8941,7 @@ func TestAdminCeremonyStatusFound(t *testing.T) {
 	// Register and complete a ceremony.
 	var cid CeremonyID
 	copy(cid[:], []byte("ceremony-status-found-01"))
-	s.registerCeremony(cid, CeremonyReshare)
+	s.registerCeremony(cid, CeremonyReshare, Identity{})
 	s.failCeremony(cid, "threshold mismatch")
 
 	clientSecret, err := NewSecret()
@@ -8988,5 +8988,414 @@ func TestAdminCeremonyStatusFound(t *testing.T) {
 	cancel()
 	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("server: %v", err)
+	}
+}
+
+// =============================================================================
+// Election tests
+// =============================================================================
+
+// TestElectDeterminism verifies that the same seed and peer set
+// always produce the same committee.
+func TestElectDeterminism(t *testing.T) {
+	seed := []byte("deterministic-seed-for-test")
+	peers := make([]Identity, 10)
+	for i := range peers {
+		s, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		peers[i] = s.Identity
+	}
+
+	result1, err := Elect(seed, peers, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result2, err := Elect(seed, peers, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result1) != 3 || len(result2) != 3 {
+		t.Fatalf("expected 3 members, got %d and %d",
+			len(result1), len(result2))
+	}
+	for i := range result1 {
+		if result1[i] != result2[i] {
+			t.Fatalf("mismatch at index %d: %v != %v",
+				i, result1[i], result2[i])
+		}
+	}
+}
+
+// TestElectDifferentSeed verifies that different seeds produce
+// different committees (with overwhelming probability).
+func TestElectDifferentSeed(t *testing.T) {
+	peers := make([]Identity, 20)
+	for i := range peers {
+		s, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		peers[i] = s.Identity
+	}
+
+	result1, err := Elect([]byte("seed-alpha"), peers, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result2, err := Elect([]byte("seed-beta"), peers, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	same := true
+	for i := range result1 {
+		if result1[i] != result2[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		t.Fatal("different seeds produced identical committees")
+	}
+}
+
+// TestElectValidation verifies edge-case rejections.
+func TestElectValidation(t *testing.T) {
+	seed := []byte("validation-test")
+	peers := make([]Identity, 3)
+	for i := range peers {
+		s, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		peers[i] = s.Identity
+	}
+
+	// committee > peers
+	_, err := Elect(seed, peers, 5)
+	if err == nil {
+		t.Fatal("expected error for committee > peers")
+	}
+
+	// committee < 1
+	_, err = Elect(seed, peers, 0)
+	if err == nil {
+		t.Fatal("expected error for committee < 1")
+	}
+
+	// committee == -1 (still < 1)
+	_, err = Elect(seed, peers, -1)
+	if err == nil {
+		t.Fatal("expected error for negative committee")
+	}
+}
+
+// TestElectSinglePeer verifies that electing 1 from 1 works.
+func TestElectSinglePeer(t *testing.T) {
+	seed := []byte("single")
+	s, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peers := []Identity{s.Identity}
+
+	result, err := Elect(seed, peers, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 member, got %d", len(result))
+	}
+	if result[0] != s.Identity {
+		t.Fatalf("expected %v, got %v", s.Identity, result[0])
+	}
+}
+
+// TestElectDoesNotMutateInput verifies Elect does not modify the
+// input peer slice.
+func TestElectDoesNotMutateInput(t *testing.T) {
+	seed := []byte("immutability")
+	peers := make([]Identity, 5)
+	for i := range peers {
+		s, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		peers[i] = s.Identity
+	}
+	original := make([]Identity, len(peers))
+	copy(original, peers)
+
+	_, err := Elect(seed, peers, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range peers {
+		if peers[i] != original[i] {
+			t.Fatalf("input mutated at index %d", i)
+		}
+	}
+}
+
+// TestIdentitiesToPartyIDs verifies the conversion helper.
+func TestIdentitiesToPartyIDs(t *testing.T) {
+	ids := make([]Identity, 3)
+	for i := range ids {
+		s, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = s.Identity
+	}
+
+	pids := IdentitiesToPartyIDs(ids)
+	if len(pids) != 3 {
+		t.Fatalf("expected 3 party IDs, got %d", len(pids))
+	}
+	for i, pid := range pids {
+		if pid.Id != ids[i].String() {
+			t.Fatalf("index %d: Id=%q, want %q",
+				i, pid.Id, ids[i].String())
+		}
+	}
+}
+
+// =============================================================================
+// 3-node keygen integration test via admin dispatch
+// =============================================================================
+
+// TestThreeNodeKeygenDispatch starts a 3-node chain (A↔B↔C), connects
+// an admin client to node A, queries peers, elects a committee of 3,
+// sends encrypted KeygenRequests, and verifies all 3 nodes receive
+// the CeremonyResult broadcast.
+func TestThreeNodeKeygenDispatch(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	servers := make([]*Server, 3)
+	addrs := make([]string, 3)
+
+	// Node A — PeersWanted=4 to accept admin + 2 peers + headroom.
+	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
+	servers[0].cfg.PeersWanted = 4
+	servers[0].cfg.MaintainInterval = 500 * time.Millisecond
+	g.Go(func() error { return servers[0].Run(gctx) })
+	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+
+	// Node B.
+	servers[1] = newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrs[0]})
+	servers[1].cfg.PeersWanted = 4
+	servers[1].cfg.MaintainInterval = 500 * time.Millisecond
+	g.Go(func() error { return servers[1].Run(gctx) })
+	addrs[1] = waitForListenAddress(t, servers[1], 2*time.Second)
+
+	// Node C.
+	servers[2] = newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrs[1]})
+	servers[2].cfg.PeersWanted = 4
+	servers[2].cfg.MaintainInterval = 500 * time.Millisecond
+	g.Go(func() error { return servers[2].Run(gctx) })
+	addrs[2] = waitForListenAddress(t, servers[2], 2*time.Second)
+
+	// Wait for gossip convergence: all 3 know all 3 peers AND all
+	// have NaClPub populated AND all have sessions to each other.
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		ready := true
+		for i := 0; i < 3; i++ {
+			if servers[i].PeerCount() < 2 {
+				ready = false
+				break
+			}
+			servers[i].mtx.RLock()
+			sessions := len(servers[i].sessions)
+			allHaveNaCl := true
+			for _, pr := range servers[i].peers {
+				if len(pr.NaClPub) != NaClPubSize {
+					allHaveNaCl = false
+					break
+				}
+			}
+			servers[i].mtx.RUnlock()
+			if sessions < 2 || !allHaveNaCl {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	for i := 0; i < 3; i++ {
+		if servers[i].PeerCount() < 2 {
+			t.Fatalf("node %d: only %d peers, want 2",
+				i, servers[i].PeerCount())
+		}
+	}
+
+	// Admin client: connect to node A.
+	adminSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", addrs[0])
+	if err != nil {
+		t.Fatalf("admin dial: %v", err)
+	}
+	adminTr := new(Transport)
+	defer adminTr.Close()
+	if err := adminTr.KeyExchange(ctx, conn); err != nil {
+		t.Fatalf("admin KX: %v", err)
+	}
+	if _, _, _, err := adminTr.Handshake(ctx, adminSecret, ""); err != nil {
+		t.Fatalf("admin handshake: %v", err)
+	}
+
+	// Query peers.
+	if err := adminTr.Write(adminSecret.Identity,
+		PeerListAdminRequest{}); err != nil {
+		t.Fatalf("write peer list: %v", err)
+	}
+	peerResp := readAdminResponse[*PeerListAdminResponse](t, adminTr)
+	eligiblePeers := 0
+	for _, pr := range peerResp.Peers {
+		if (pr.Connected || pr.Self) && len(pr.NaClPub) == NaClPubSize {
+			eligiblePeers++
+		}
+	}
+	if eligiblePeers < 3 {
+		t.Fatalf("only %d eligible peers with NaClPub, need 3",
+			eligiblePeers)
+	}
+
+	// Collect eligible identities — exclude admin's ephemeral identity.
+	type candidate struct {
+		id      Identity
+		naclPub []byte
+	}
+	candidates := make([]candidate, 0, len(peerResp.Peers))
+	for _, pr := range peerResp.Peers {
+		if pr.Identity == adminSecret.Identity {
+			continue
+		}
+		if (pr.Connected || pr.Self) && len(pr.NaClPub) == NaClPubSize {
+			candidates = append(candidates, candidate{
+				id:      pr.Identity,
+				naclPub: pr.NaClPub,
+			})
+		}
+	}
+
+	peerIDs := make([]Identity, len(candidates))
+	for i, c := range candidates {
+		peerIDs[i] = c.id
+	}
+
+	// Elect committee of 3.
+	seed := []byte("test-keygen-seed")
+	committee, err := Elect(seed, peerIDs, 3)
+	if err != nil {
+		t.Fatalf("elect: %v", err)
+	}
+
+	coordinator := committee[0]
+	t.Logf("coordinator: %v", coordinator)
+	for i, id := range committee {
+		t.Logf("committee[%d]: %v", i, id)
+	}
+
+	// Build KeygenRequest.
+	ceremonyID := NewCeremonyID()
+	partyIDs := IdentitiesToPartyIDs(committee)
+	req := KeygenRequest{
+		CeremonyID:  ceremonyID,
+		Curve:       "secp256k1",
+		Committee:   partyIDs,
+		Threshold:   1, // t=1, need t+1=2 to sign
+		Coordinator: coordinator,
+	}
+
+	// Send plain routed KeygenRequest to each committee member.
+	// Hop-by-hop transport encryption is sufficient for ceremony
+	// parameters.  The local node forwards based on routing header.
+	for _, dest := range committee {
+		if err := adminTr.WriteTo(adminSecret.Identity, dest,
+			8, req); err != nil {
+			t.Fatalf("send to %v: %v", dest, err)
+		}
+		t.Logf("sent keygen to %v", dest)
+	}
+
+	// Wait for ceremony completion: poll ceremony status on
+	// coordinator's server.
+	var coordServer *Server
+	for _, s := range servers {
+		if s.secret.Identity == coordinator {
+			coordServer = s
+			break
+		}
+	}
+	if coordServer == nil {
+		t.Fatal("coordinator server not found")
+	}
+
+	success := false
+	deadline = time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		coordServer.mtx.RLock()
+		ci, ok := coordServer.ceremonies[ceremonyID]
+		if ok && ci.Status == "complete" {
+			success = true
+		}
+		coordServer.mtx.RUnlock()
+		if success {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !success {
+		// Log ceremony status for debugging.
+		for i, s := range servers {
+			s.mtx.RLock()
+			ci, ok := s.ceremonies[ceremonyID]
+			s.mtx.RUnlock()
+			if ok {
+				t.Logf("node %d: ceremony status=%s error=%q",
+					i, ci.Status, ci.Error)
+			} else {
+				t.Logf("node %d: ceremony not found", i)
+			}
+		}
+		t.Fatal("keygen ceremony did not complete within 60s")
+	}
+	t.Logf("keygen ceremony %s complete", ceremonyID)
+
+	// Verify all 3 committee members completed.
+	for i, s := range servers {
+		s.mtx.RLock()
+		ci, ok := s.ceremonies[ceremonyID]
+		s.mtx.RUnlock()
+		if !ok {
+			t.Fatalf("node %d: ceremony not found", i)
+		}
+		if ci.Status != "complete" {
+			t.Fatalf("node %d: status=%s error=%q",
+				i, ci.Status, ci.Error)
+		}
+	}
+
+	cancel()
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server error: %v", err)
 	}
 }
