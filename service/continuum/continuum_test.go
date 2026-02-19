@@ -35,6 +35,7 @@ import (
 	"github.com/hemilabs/x/tss-lib/v2/tss"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/hemilabs/heminetwork/v2/ttl"
 )
@@ -600,10 +601,15 @@ func TestAddPeerSelf(t *testing.T) {
 	waitForListenAddress(t, s, 2*time.Second)
 
 	// addPeer with self identity must return false.
+	selfNaClPub, err := s.secret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := s.addPeer(ctx, PeerRecord{
 		Identity: s.Identity(),
 		Address:  "10.0.0.1:9999",
 		Version:  ProtocolVersion,
+		NaClPub:  selfNaClPub,
 	})
 	if got {
 		t.Fatal("addPeer accepted self identity")
@@ -632,6 +638,10 @@ func TestAddPeerBadVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otherNaClPub, err := other.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		name    string
@@ -648,6 +658,7 @@ func TestAddPeerBadVersion(t *testing.T) {
 				Identity: other.Identity,
 				Address:  "10.0.0.1:9999",
 				Version:  tc.version,
+				NaClPub:  otherNaClPub,
 			})
 			if got != tc.want {
 				t.Fatalf("addPeer(Version=%d) = %v, want %v",
@@ -1703,14 +1714,24 @@ func TestAddPeerBadNaClPub(t *testing.T) {
 	}
 	ctx := t.Context()
 
+	validSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	validNaClPub, err := validSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	tests := []struct {
 		name    string
 		naclPub []byte
 		want    bool // expected addPeer return
 	}{
-		{"nil key (no e2e)", nil, true},
-		{"empty key (no e2e)", []byte{}, true},
-		{"valid 32-byte key", make([]byte, 32), true},
+		{"nil key (no e2e)", nil, false},
+		{"empty key (no e2e)", []byte{}, false},
+		{"all-zeros key", make([]byte, 32), false},
+		{"valid 32-byte key", validNaClPub, true},
 		{"short 16-byte key", make([]byte, 16), false},
 		{"long 64-byte key", make([]byte, 64), false},
 	}
@@ -3162,13 +3183,22 @@ func TestHandlePeerListResponseLearnsPeers(t *testing.T) {
 	t.Cleanup(cancel)
 	s, cliTr, _ := handleTestServer(t, ctx)
 
+	peerSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerNaClPub, err := peerSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
 	newPeer := PeerRecord{
 		Identity: Identity{0x42},
 		Address:  "10.0.0.1:8080",
 		Version:  ProtocolVersion,
+		NaClPub:  peerNaClPub,
 		LastSeen: time.Now().Unix(),
 	}
-	err := cliTr.Write(Identity{0xEE}, PeerListResponse{
+	err = cliTr.Write(Identity{0xEE}, PeerListResponse{
 		Peers: []PeerRecord{newPeer},
 	})
 	if err != nil {
@@ -3203,17 +3233,26 @@ func TestHandlePeerListResponseTruncation(t *testing.T) {
 	t.Cleanup(cancel)
 	s, cliTr, _ := handleTestServer(t, ctx)
 
-	// Build maxGossipPeers+10 peers.
+	// Build maxGossipPeers+10 peers with real NaCl keys.
 	peers := make([]PeerRecord, maxGossipPeers+10)
 	for i := range peers {
 		var id Identity
 		id[0] = byte(i >> 8)
 		id[1] = byte(i)
 		id[2] = 0xFF // avoid collision with server identity
+		peerSecret, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		naclPub, err := peerSecret.NaClPublicKey()
+		if err != nil {
+			t.Fatal(err)
+		}
 		peers[i] = PeerRecord{
 			Identity: id,
 			Address:  fmt.Sprintf("10.0.%d.%d:8080", i>>8, i&0xFF),
 			Version:  ProtocolVersion,
+			NaClPub:  naclPub,
 			LastSeen: time.Now().Unix(),
 		}
 	}
@@ -3922,9 +3961,10 @@ func TestHandlePingResponseRefresh(t *testing.T) {
 	cliTr.conn.Close()
 }
 
-// TestAddPeerPreserveNaClPub covers L1066 — when an existing peer has
-// NaClPub and the incoming update has empty NaClPub, preserve existing.
-func TestAddPeerPreserveNaClPub(t *testing.T) {
+// TestAddPeerRejectEmptyNaClPub covers addPeer rejecting updates
+// that lack NaClPub.  E2e encryption is mandatory — every peer
+// record MUST carry a valid NaClPub.
+func TestAddPeerRejectEmptyNaClPub(t *testing.T) {
 	ctx := t.Context()
 	peersTTL, err := ttl.New(64, true)
 	if err != nil {
@@ -3945,30 +3985,34 @@ func TestAddPeerPreserveNaClPub(t *testing.T) {
 		cfg:      &Config{PeersWanted: 8},
 	}
 
-	// First add with NaClPub and no address.
-	s.addPeer(ctx, PeerRecord{
+	// First add with NaClPub and no address — should succeed.
+	if !s.addPeer(ctx, PeerRecord{
 		Identity: peerID,
 		Version:  ProtocolVersion,
 		NaClPub:  naclPub,
-	})
+	}) {
+		t.Fatal("first addPeer should return true")
+	}
 
-	// Second add with address but no NaClPub — should preserve existing
-	// NaClPub.
-	s.addPeer(ctx, PeerRecord{
+	// Second add with address but no NaClPub — rejected.
+	if s.addPeer(ctx, PeerRecord{
 		Identity: peerID,
 		Address:  "127.0.0.1:9999",
 		Version:  ProtocolVersion,
-	})
+	}) {
+		t.Fatal("addPeer without NaClPub should return false")
+	}
 
+	// Existing record should be unchanged.
 	s.mtx.RLock()
 	pr := s.peers[peerID]
 	s.mtx.RUnlock()
 
-	if pr.Address != "127.0.0.1:9999" {
-		t.Fatalf("address not updated: %v", pr.Address)
+	if pr.Address != "" {
+		t.Fatalf("address should not be updated: got %q", pr.Address)
 	}
 	if !bytes.Equal(pr.NaClPub, naclPub) {
-		t.Fatalf("NaClPub not preserved: got %x", pr.NaClPub)
+		t.Fatalf("NaClPub should be preserved: got %x", pr.NaClPub)
 	}
 }
 
@@ -8184,4 +8228,369 @@ func TestListenNewTransportError(t *testing.T) {
 	// Shut down cleanly.
 	cancel()
 	s.wg.Wait()
+}
+
+// TestSendEncryptedRejectsBroadcastType verifies that SendEncrypted
+// returns ErrUseBroadcast for broadcast-whitelisted types.
+func TestSendEncryptedRejectsBroadcastType(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret: secret,
+		peers:  make(map[Identity]*PeerRecord),
+	}
+
+	dest := Identity{0x01}
+	err = s.SendEncrypted(dest, CeremonyResult{})
+	if !errors.Is(err, ErrUseBroadcast) {
+		t.Fatalf("SendEncrypted(CeremonyResult) = %v, want ErrUseBroadcast", err)
+	}
+
+	err = s.SendEncrypted(dest, CeremonyAbort{})
+	if !errors.Is(err, ErrUseBroadcast) {
+		t.Fatalf("SendEncrypted(CeremonyAbort) = %v, want ErrUseBroadcast", err)
+	}
+
+	// Non-broadcast type should NOT trigger the guard (will fail
+	// later for other reasons like unknown peer, but not ErrUseBroadcast).
+	err = s.SendEncrypted(dest, PingRequest{})
+	if errors.Is(err, ErrUseBroadcast) {
+		t.Fatal("SendEncrypted(PingRequest) should not return ErrUseBroadcast")
+	}
+}
+
+// TestBroadcastWhitelist verifies that Broadcast rejects non-whitelisted
+// payload types and accepts whitelisted ones.
+func TestBroadcastWhitelist(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret:   secret,
+		peers:    make(map[Identity]*PeerRecord),
+		sessions: make(map[Identity]*Transport),
+	}
+
+	// Non-whitelisted: rejected.
+	if err := s.Broadcast(PingRequest{}); err == nil {
+		t.Fatal("Broadcast(PingRequest) should fail")
+	}
+	if err := s.Broadcast(TSSMessage{}); err == nil {
+		t.Fatal("Broadcast(TSSMessage) should fail")
+	}
+
+	// Whitelisted: accepted (no peers connected, so nothing sent,
+	// but no error).
+	if err := s.Broadcast(CeremonyResult{Success: true}); err != nil {
+		t.Fatalf("Broadcast(CeremonyResult) = %v", err)
+	}
+	if err := s.Broadcast(CeremonyAbort{Reason: "test"}); err != nil {
+		t.Fatalf("Broadcast(CeremonyAbort) = %v", err)
+	}
+}
+
+// TestThreeNodeBroadcast launches A↔B↔C and verifies the broadcast
+// primitive: A broadcasts a CeremonyResult, both B and C receive it.
+// Dedup prevents B from re-forwarding to A.
+func TestThreeNodeBroadcast(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	servers := make([]*Server, 3)
+	addrs := make([]string, 3)
+
+	// Node A (chain head).
+	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
+	servers[0].cfg.PeersWanted = 1
+	servers[0].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[0].Run(gctx) })
+	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+
+	// Node B.
+	servers[1] = newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrs[0]})
+	servers[1].cfg.PeersWanted = 2
+	servers[1].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[1].Run(gctx) })
+	addrs[1] = waitForListenAddress(t, servers[1], 2*time.Second)
+
+	waitForSessions(t, servers[0], 1, 5*time.Second)
+	waitForSessions(t, servers[1], 1, 5*time.Second)
+
+	// Node C.
+	servers[2] = newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrs[1]})
+	servers[2].cfg.PeersWanted = 2
+	servers[2].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[2].Run(gctx) })
+	addrs[2] = waitForListenAddress(t, servers[2], 2*time.Second)
+
+	waitForSessions(t, servers[1], 2, 5*time.Second)
+	waitForSessions(t, servers[2], 1, 5*time.Second)
+
+	// Wait for gossip convergence: all 3 know all 3 peers.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		allKnown := true
+		for i := 0; i < 3; i++ {
+			if servers[i].PeerCount() < 2 {
+				allKnown = false
+				break
+			}
+		}
+		if allKnown {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	for i := 0; i < 3; i++ {
+		if servers[i].PeerCount() < 2 {
+			t.Fatalf("node %d: only %d peers, want 2",
+				i, servers[i].PeerCount())
+		}
+	}
+
+	// Node A broadcasts a CeremonyResult.
+	cid := NewCeremonyID()
+	result := CeremonyResult{
+		CeremonyID: cid,
+		Success:    true,
+	}
+	if err := servers[0].Broadcast(result); err != nil {
+		t.Fatalf("Broadcast: %v", err)
+	}
+
+	// Give time for propagation.
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify: the broadcast should have been forwarded by B to C.
+	if servers[1].forwarded.Load() == 0 {
+		t.Fatal("node B should have forwarded the broadcast")
+	}
+
+	// Dedup: A should NOT have received the broadcast back from B.
+	// The isDuplicate check in A's handle() should drop it.
+
+	cancel()
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server error: %v", err)
+	}
+}
+
+// TestBroadcastDedup verifies that the same broadcast message received
+// twice is only processed once.  Uses a 3-node chain A↔B↔C.  A sends
+// the same CeremonyResult twice; B should forward only once.
+func TestBroadcastDedup(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	servers := make([]*Server, 3)
+	addrs := make([]string, 3)
+
+	// Node A.
+	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
+	servers[0].cfg.PeersWanted = 1
+	servers[0].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[0].Run(gctx) })
+	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+
+	// Node B.
+	servers[1] = newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrs[0]})
+	servers[1].cfg.PeersWanted = 2
+	servers[1].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[1].Run(gctx) })
+	addrs[1] = waitForListenAddress(t, servers[1], 2*time.Second)
+
+	waitForSessions(t, servers[0], 1, 5*time.Second)
+	waitForSessions(t, servers[1], 1, 5*time.Second)
+
+	// Node C.
+	servers[2] = newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrs[1]})
+	servers[2].cfg.PeersWanted = 2
+	servers[2].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[2].Run(gctx) })
+	addrs[2] = waitForListenAddress(t, servers[2], 2*time.Second)
+
+	waitForSessions(t, servers[1], 2, 5*time.Second)
+	waitForSessions(t, servers[2], 1, 5*time.Second)
+
+	// Wait for gossip convergence.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		allKnown := true
+		for i := 0; i < 3; i++ {
+			if servers[i].PeerCount() < 2 {
+				allKnown = false
+				break
+			}
+		}
+		if allKnown {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	for i := 0; i < 3; i++ {
+		if servers[i].PeerCount() < 2 {
+			t.Fatalf("node %d: only %d peers, want 2",
+				i, servers[i].PeerCount())
+		}
+	}
+
+	// Record B's forwarded counter before the broadcast.
+	fwdBefore := servers[1].forwarded.Load()
+
+	// A broadcasts a CeremonyResult.
+	cid := NewCeremonyID()
+	result := CeremonyResult{
+		CeremonyID: cid,
+		Success:    true,
+	}
+	if err := servers[0].Broadcast(result); err != nil {
+		t.Fatalf("Broadcast 1: %v", err)
+	}
+
+	// Wait for propagation.
+	time.Sleep(500 * time.Millisecond)
+
+	fwdAfterFirst := servers[1].forwarded.Load()
+	firstForwards := fwdAfterFirst - fwdBefore
+	if firstForwards == 0 {
+		t.Fatal("B should have forwarded the first broadcast")
+	}
+
+	// A broadcasts the SAME CeremonyResult again (same payload hash).
+	if err := servers[0].Broadcast(result); err != nil {
+		t.Fatalf("Broadcast 2: %v", err)
+	}
+
+	// Wait for potential propagation.
+	time.Sleep(500 * time.Millisecond)
+
+	fwdAfterSecond := servers[1].forwarded.Load()
+	secondForwards := fwdAfterSecond - fwdAfterFirst
+
+	// Dedup: B should NOT have forwarded the duplicate.
+	if secondForwards != 0 {
+		t.Fatalf("B forwarded %d times after duplicate broadcast, "+
+			"want 0 (dedup should drop)", secondForwards)
+	}
+
+	cancel()
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server error: %v", err)
+	}
+}
+
+// TestBroadcastTTLExpiry verifies that a broadcast with TTL=0 is
+// dropped.  Uses a 3-node chain A↔B↔C.  A sends a broadcast with
+// TTL=1: B receives (TTL=1 > 0), processes locally, and forwards
+// with TTL=0.  C receives with TTL=0 and drops it without forwarding.
+func TestBroadcastTTLExpiry(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	servers := make([]*Server, 3)
+	addrs := make([]string, 3)
+
+	// Node A.
+	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
+	servers[0].cfg.PeersWanted = 1
+	servers[0].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[0].Run(gctx) })
+	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+
+	// Node B.
+	servers[1] = newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrs[0]})
+	servers[1].cfg.PeersWanted = 2
+	servers[1].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[1].Run(gctx) })
+	addrs[1] = waitForListenAddress(t, servers[1], 2*time.Second)
+
+	waitForSessions(t, servers[0], 1, 5*time.Second)
+	waitForSessions(t, servers[1], 1, 5*time.Second)
+
+	// Node C.
+	servers[2] = newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrs[1]})
+	servers[2].cfg.PeersWanted = 2
+	servers[2].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[2].Run(gctx) })
+	addrs[2] = waitForListenAddress(t, servers[2], 2*time.Second)
+
+	waitForSessions(t, servers[1], 2, 5*time.Second)
+	waitForSessions(t, servers[2], 1, 5*time.Second)
+
+	// Wait for gossip convergence.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		allKnown := true
+		for i := 0; i < 3; i++ {
+			if servers[i].PeerCount() < 2 {
+				allKnown = false
+				break
+			}
+		}
+		if allKnown {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	for i := 0; i < 3; i++ {
+		if servers[i].PeerCount() < 2 {
+			t.Fatalf("node %d: only %d peers, want 2",
+				i, servers[i].PeerCount())
+		}
+	}
+
+	// Record C's forwarded counter before the broadcast.
+	cFwdBefore := servers[2].forwarded.Load()
+
+	// A broadcasts with TTL=1.  B will receive at TTL=1 (processes
+	// and forwards with TTL=0).  C receives at TTL=0 (drops).
+	cid := NewCeremonyID()
+	result := CeremonyResult{
+		CeremonyID: cid,
+		Success:    true,
+	}
+	if err := servers[0].broadcastWithTTL(result, 1); err != nil {
+		t.Fatalf("broadcastWithTTL: %v", err)
+	}
+
+	// Wait for propagation.
+	time.Sleep(500 * time.Millisecond)
+
+	// B should have forwarded (it received at TTL=1).
+	if servers[1].forwarded.Load() == 0 {
+		t.Fatal("B should have forwarded the broadcast")
+	}
+
+	// C should NOT have forwarded (it received at TTL=0, dropped).
+	cFwdAfter := servers[2].forwarded.Load()
+	if cFwdAfter != cFwdBefore {
+		t.Fatalf("C forwarded %d times after TTL=0 broadcast, "+
+			"want 0", cFwdAfter-cFwdBefore)
+	}
+
+	cancel()
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server error: %v", err)
+	}
 }
