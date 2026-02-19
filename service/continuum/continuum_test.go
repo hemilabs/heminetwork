@@ -9399,3 +9399,332 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 		t.Fatalf("server error: %v", err)
 	}
 }
+
+// =============================================================================
+// 5-node keygen integration test
+// =============================================================================
+
+// TestFiveNodeKeygen starts 5 nodes in a chain topology, waits for
+// gossip convergence, elects a committee of 3, triggers keygen via
+// admin dispatch, and verifies:
+//   - Keygen succeeds on all 3 committee members.
+//   - All 3 committee members hold valid key shares with consistent
+//     public key.
+//   - ALL 5 nodes received the CeremonyResult broadcast (including
+//     the 2 non-committee members).
+//
+// Skipped with -short.
+func TestFiveNodeKeygen(t *testing.T) {
+	if testing.Short() {
+		t.Skip("5-node keygen test is slow")
+	}
+
+	preParams := loadPreParams(t, 5)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	const n = 5
+	servers := make([]*Server, n)
+	addrs := make([]string, n)
+
+	// Chain topology: 0→1→2→3→4.  PeersWanted=2 per SOW.
+	for i := 0; i < n; i++ {
+		var connect []string
+		if i > 0 {
+			connect = []string{addrs[i-1]}
+		}
+		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
+		servers[i].cfg.PeersWanted = 6 // n-1 peer sessions + admin headroom
+		servers[i].cfg.MaintainInterval = 500 * time.Millisecond
+		idx := i
+		g.Go(func() error { return servers[idx].Run(gctx) })
+		addrs[i] = waitForListenAddress(t, servers[i], 2*time.Second)
+	}
+
+	// Wait for gossip convergence: every node knows all n peers,
+	// all have NaClPub, and every node has sessions to all n-1 others.
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		ready := true
+		for i := 0; i < n; i++ {
+			if servers[i].PeerCount() < n-1 {
+				ready = false
+				break
+			}
+			servers[i].mtx.RLock()
+			sessions := len(servers[i].sessions)
+			allHaveNaCl := true
+			for _, pr := range servers[i].peers {
+				if len(pr.NaClPub) != NaClPubSize {
+					allHaveNaCl = false
+					break
+				}
+			}
+			servers[i].mtx.RUnlock()
+			if sessions < n-1 || !allHaveNaCl {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	for i := 0; i < n; i++ {
+		servers[i].mtx.RLock()
+		sessions := len(servers[i].sessions)
+		servers[i].mtx.RUnlock()
+		if sessions < n-1 {
+			t.Fatalf("node %d: only %d sessions, want %d",
+				i, sessions, n-1)
+		}
+	}
+	t.Log("gossip converged")
+
+	// Admin client: connect to node 0.
+	adminSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", addrs[0])
+	if err != nil {
+		t.Fatalf("admin dial: %v", err)
+	}
+	adminTr := new(Transport)
+	defer adminTr.Close()
+	if err := adminTr.KeyExchange(ctx, conn); err != nil {
+		t.Fatalf("admin KX: %v", err)
+	}
+	if _, _, _, err := adminTr.Handshake(ctx, adminSecret, ""); err != nil {
+		t.Fatalf("admin handshake: %v", err)
+	}
+
+	// Query peers.
+	if err := adminTr.Write(adminSecret.Identity,
+		PeerListAdminRequest{}); err != nil {
+		t.Fatalf("write peer list: %v", err)
+	}
+	peerResp := readAdminResponse[*PeerListAdminResponse](t, adminTr)
+
+	// Collect eligible identities — exclude admin's ephemeral identity.
+	type candidate struct {
+		id      Identity
+		naclPub []byte
+	}
+	candidates := make([]candidate, 0, len(peerResp.Peers))
+	for _, pr := range peerResp.Peers {
+		if pr.Identity == adminSecret.Identity {
+			continue
+		}
+		if (pr.Connected || pr.Self) && len(pr.NaClPub) == NaClPubSize {
+			candidates = append(candidates, candidate{
+				id:      pr.Identity,
+				naclPub: pr.NaClPub,
+			})
+		}
+	}
+	if len(candidates) < n {
+		t.Fatalf("only %d eligible peers, need %d", len(candidates), n)
+	}
+	t.Logf("%d eligible peers", len(candidates))
+
+	peerIDs := make([]Identity, len(candidates))
+	for i, c := range candidates {
+		peerIDs[i] = c.id
+	}
+
+	// Elect committee of 3.
+	const committeeSize = 3
+	seed := []byte("five-node-keygen-seed")
+	committee, err := Elect(seed, peerIDs, committeeSize)
+	if err != nil {
+		t.Fatalf("elect: %v", err)
+	}
+
+	coordinator := committee[0]
+	t.Logf("coordinator: %v", coordinator)
+	for i, id := range committee {
+		t.Logf("committee[%d]: %v", i, id)
+	}
+
+	// Build KeygenRequest.
+	ceremonyID := NewCeremonyID()
+	partyIDs := IdentitiesToPartyIDs(committee)
+	req := KeygenRequest{
+		CeremonyID:  ceremonyID,
+		Curve:       "secp256k1",
+		Committee:   partyIDs,
+		Threshold:   1, // t=1, need t+1=2 to sign
+		Coordinator: coordinator,
+	}
+
+	// Send plain routed KeygenRequest to each committee member.
+	for _, dest := range committee {
+		if err := adminTr.WriteTo(adminSecret.Identity, dest,
+			8, req); err != nil {
+			t.Fatalf("send to %v: %v", dest, err)
+		}
+		t.Logf("sent keygen to %v", dest)
+	}
+
+	// Wait for ceremony completion on the coordinator.
+	var coordServer *Server
+	for _, s := range servers {
+		if s.secret.Identity == coordinator {
+			coordServer = s
+			break
+		}
+	}
+	if coordServer == nil {
+		t.Fatal("coordinator server not found")
+	}
+
+	success := false
+	deadline = time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		coordServer.mtx.RLock()
+		ci, ok := coordServer.ceremonies[ceremonyID]
+		if ok && (ci.Status == "complete" || ci.Status == "failed") {
+			if ci.Status == "complete" {
+				success = true
+			}
+		}
+		coordServer.mtx.RUnlock()
+		if success {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !success {
+		for i, s := range servers {
+			s.mtx.RLock()
+			ci, ok := s.ceremonies[ceremonyID]
+			s.mtx.RUnlock()
+			if ok {
+				t.Logf("node %d: ceremony status=%s error=%q",
+					i, ci.Status, ci.Error)
+			} else {
+				t.Logf("node %d: ceremony not found", i)
+			}
+		}
+		t.Fatal("keygen ceremony did not complete within 60s")
+	}
+	t.Logf("keygen ceremony %s complete", ceremonyID)
+
+	// Assert 1: all 3 committee members completed.
+	for _, id := range committee {
+		for i, s := range servers {
+			if s.secret.Identity != id {
+				continue
+			}
+			s.mtx.RLock()
+			ci, ok := s.ceremonies[ceremonyID]
+			s.mtx.RUnlock()
+			if !ok {
+				t.Fatalf("committee member node %d: ceremony not found", i)
+			}
+			if ci.Status != "complete" {
+				t.Fatalf("committee member node %d: status=%s error=%q",
+					i, ci.Status, ci.Error)
+			}
+		}
+	}
+
+	// Assert 2: all 3 committee members hold valid key shares with
+	// consistent public key.
+	var refPubX, refPubY []byte
+	for _, id := range committee {
+		for _, s := range servers {
+			if s.secret.Identity != id {
+				continue
+			}
+			tssDir := filepath.Join(s.data, "tss")
+			matches, err := filepath.Glob(filepath.Join(tssDir, "*.key"))
+			if err != nil {
+				t.Fatalf("glob: %v", err)
+			}
+			if len(matches) == 0 {
+				t.Fatalf("node %v: no key files in %s", id, tssDir)
+			}
+
+			// Load the first key share (there should be exactly one
+			// from this ceremony).
+			keyFileName := filepath.Base(matches[0])
+			keyIDHex := strings.TrimSuffix(keyFileName, ".key")
+			keyID, err := hex.DecodeString(keyIDHex)
+			if err != nil {
+				t.Fatalf("bad key file name %q: %v", keyFileName, err)
+			}
+
+			shareData, err := s.tssStore.LoadKeyShare(keyID)
+			if err != nil {
+				t.Fatalf("node %v: load key share: %v", id, err)
+			}
+
+			var save keygen.LocalPartySaveData
+			if err := json.Unmarshal(shareData, &save); err != nil {
+				t.Fatalf("node %v: unmarshal share: %v", id, err)
+			}
+
+			pubX := save.ECDSAPub.X().Bytes()
+			pubY := save.ECDSAPub.Y().Bytes()
+
+			if refPubX == nil {
+				refPubX = pubX
+				refPubY = pubY
+				t.Logf("reference pub: X=%x.. Y=%x..",
+					pubX[:8], pubY[:8])
+			} else {
+				if !bytes.Equal(pubX, refPubX) || !bytes.Equal(pubY, refPubY) {
+					t.Fatalf("node %v: public key mismatch: X=%x.. Y=%x.. (ref X=%x.. Y=%x..)",
+						id, pubX[:8], pubY[:8],
+						refPubX[:8], refPubY[:8])
+				}
+			}
+		}
+	}
+	t.Log("all committee members have consistent public key")
+
+	// Assert 3: ALL 5 nodes received the CeremonyResult broadcast.
+	// Give non-committee nodes a moment to receive the broadcast.
+	broadcastDeadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(broadcastDeadline) {
+		allSeen := true
+		for _, s := range servers {
+			s.mtx.RLock()
+			_, ok := s.ceremonies[ceremonyID]
+			s.mtx.RUnlock()
+			if !ok {
+				allSeen = false
+				break
+			}
+		}
+		if allSeen {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	for i, s := range servers {
+		s.mtx.RLock()
+		ci, ok := s.ceremonies[ceremonyID]
+		s.mtx.RUnlock()
+		if !ok {
+			t.Fatalf("node %d: did not receive CeremonyResult broadcast", i)
+		}
+		if ci.Status != "complete" {
+			t.Fatalf("node %d: broadcast status=%s error=%q",
+				i, ci.Status, ci.Error)
+		}
+		t.Logf("node %d: ceremony status=%s ✓", i, ci.Status)
+	}
+	t.Log("all 5 nodes received CeremonyResult broadcast")
+
+	cancel()
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server error: %v", err)
+	}
+}
