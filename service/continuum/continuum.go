@@ -272,6 +272,12 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 // which is invariant across forwarding hops (unlike cleartext which
 // changes as TTL is decremented and transport re-encrypts).
 //
+// For routed (non-broadcast) messages, the destination is included
+// in the dedup key so that identical payloads sent to different
+// destinations are not falsely deduplicated.  Broadcast messages
+// use PayloadHash alone since they share BroadcastDestination and
+// require global dedup.
+//
 // NOTE: after seenTTL expires (~67s), a replayed message will be
 // accepted again.  This is acceptable for idempotent commands
 // (PingRequest) but should be reconsidered if non-idempotent
@@ -280,6 +286,9 @@ func (s *Server) isDuplicate(ctx context.Context, h *Header) bool {
 	log.Tracef("isDuplicate %v", h.PayloadHash)
 
 	key := h.PayloadHash.String()
+	if h.Destination != nil && *h.Destination != BroadcastDestination {
+		key += ":" + h.Destination.String()
+	}
 	if _, _, err := s.seen.Get(key); err == nil {
 		return true
 	}
@@ -618,6 +627,11 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 				log.Debugf("handle %v: unhandled encrypted inner %T",
 					id, inner)
 			}
+
+		// Broadcast results — any node in the mesh may receive these
+		// via the broadcast primitive.
+		case *CeremonyResult:
+			s.handleCeremonyResult(*v)
 
 		// Admin RPCs — localhost only.
 		case *PeerListAdminRequest:
@@ -1174,6 +1188,32 @@ func (s *Server) failCeremony(cid CeremonyID, reason string) {
 		ci.Error = reason
 	}
 	s.mtx.Unlock()
+}
+
+// handleCeremonyResult processes a broadcast CeremonyResult.  If this
+// node is already tracking the ceremony (as a committee member), the
+// status was set by dispatchKeygen; the broadcast is a no-op.  For
+// non-committee nodes this is the only notification — register the
+// ceremony as complete or failed.
+func (s *Server) handleCeremonyResult(r CeremonyResult) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	ci, ok := s.ceremonies[r.CeremonyID]
+	if !ok {
+		// Non-committee node: first time seeing this ceremony.
+		ci = &CeremonyInfo{
+			Type:      CeremonyKeygen, // broadcast only comes from keygen for now
+			StartTime: time.Now().Unix(),
+		}
+		s.ceremonies[r.CeremonyID] = ci
+	}
+	if r.Success {
+		ci.Status = "complete"
+	} else {
+		ci.Status = "failed"
+		ci.Error = r.Error
+	}
 }
 
 // handlePeerListAdmin builds a PeerListAdminResponse from the peer
@@ -1779,6 +1819,10 @@ func (s *Server) Run(pctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("tss store: %w", err)
 	}
+	// Seed the store with the server's pre-loaded Paillier primes
+	// so that GetPreParams() returns immediately instead of
+	// generating fresh ones (~30s).
+	s.tssStore.SetPreParams(&s.preParams)
 	s.tss = NewTSS(s.secret.Identity, s.tssStore, s.stt)
 
 	// pprof
