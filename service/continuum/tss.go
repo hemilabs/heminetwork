@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/resharing"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/signing"
 	"github.com/hemilabs/x/tss-lib/v2/tss"
+	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -53,9 +55,16 @@ type TSSStore interface {
 // TSSStore Implementation
 // =============================================================================
 
+// Store encryption errors.  Use errors.Is to distinguish decryption
+// failures (wrong key, tampered data) from I/O errors.
+var (
+	errInvalidCiphertext = errors.New("invalid ciphertext")
+	errDecryptionFailed  = errors.New("decryption failed")
+)
+
 type fileStore struct {
 	dir       string
-	encKey    [32]byte
+	encKey    [32]byte // TODO: zero encKey on Close() to limit swap/coredump exposure
 	preParams *keygen.LocalPreParams
 	mu        sync.Mutex
 }
@@ -64,69 +73,87 @@ func NewTSSStore(dir string, secret *Secret) (TSSStore, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	h := sha256.Sum256(secret.privateKey.Serialize())
-	return &fileStore{dir: dir, encKey: h}, nil
+	// Derive encryption key from the signing key using HKDF with
+	// domain separation.  The salt matches the transport layer
+	// constant; the info string is unique to the store.
+	var encKey [32]byte
+	r := hkdf.New(sha256.New, secret.privateKey.Serialize(),
+		[]byte("continuum-hkdf-salt-v1"), []byte("continuum-store-v1"))
+	if _, err := io.ReadFull(r, encKey[:]); err != nil {
+		return nil, fmt.Errorf("derive store key: %w", err)
+	}
+	return &fileStore{dir: dir, encKey: encKey}, nil
 }
 
 func (s *fileStore) keyPath(keyID []byte) string {
 	return filepath.Join(s.dir, fmt.Sprintf("%x.key", keyID))
 }
 
-func (s *fileStore) SaveKeyShare(keyID []byte, share []byte) error {
+func (s *fileStore) encrypt(plaintext []byte) ([]byte, error) {
 	var nonce [24]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
+		return nil, fmt.Errorf("generate nonce: %w", err)
 	}
-	encrypted := secretbox.Seal(nonce[:], share, &nonce, &s.encKey)
-	return os.WriteFile(s.keyPath(keyID), encrypted, 0o600)
+	// Seal appends ciphertext to nonce[:].  The slice has len=24,
+	// cap=24, so Go allocates a fresh backing array for the output.
+	// The &nonce pointer still references the stack array for the
+	// actual encryption.  No aliasing — but do not pre-grow nonce's
+	// capacity or the output overwrites the nonce in-place.
+	return secretbox.Seal(nonce[:], plaintext, &nonce, &s.encKey), nil
 }
 
-func (s *fileStore) LoadKeyShare(keyID []byte) ([]byte, error) {
-	encrypted, err := os.ReadFile(s.keyPath(keyID))
-	if err != nil {
-		return nil, err
-	}
-	if len(encrypted) < 24 {
-		return nil, errors.New("invalid encrypted data")
+func (s *fileStore) decrypt(ciphertext []byte) ([]byte, error) {
+	// Minimum: 24-byte nonce + secretbox.Overhead (16-byte Poly1305 tag).
+	if len(ciphertext) < 24+secretbox.Overhead {
+		return nil, errInvalidCiphertext
 	}
 	var nonce [24]byte
-	copy(nonce[:], encrypted[:24])
-	decrypted, ok := secretbox.Open(nil, encrypted[24:], &nonce, &s.encKey)
+	copy(nonce[:], ciphertext[:24])
+	decrypted, ok := secretbox.Open(nil, ciphertext[24:], &nonce, &s.encKey)
 	if !ok {
-		return nil, errors.New("decryption failed")
+		return nil, errDecryptionFailed
 	}
 	return decrypted, nil
 }
 
+func (s *fileStore) SaveKeyShare(keyID []byte, share []byte) error {
+	log.Tracef("SaveKeyShare %x", keyID)
+	encrypted, err := s.encrypt(share)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.keyPath(keyID), encrypted, 0o600)
+}
+
+func (s *fileStore) LoadKeyShare(keyID []byte) ([]byte, error) {
+	log.Tracef("LoadKeyShare %x", keyID)
+	encrypted, err := os.ReadFile(s.keyPath(keyID))
+	if err != nil {
+		return nil, err
+	}
+	return s.decrypt(encrypted)
+}
+
 func (s *fileStore) DeleteKeyShare(keyID []byte) error {
+	log.Tracef("DeleteKeyShare %x", keyID)
 	return os.Remove(s.keyPath(keyID))
 }
 
+// GetPreParams returns cached Paillier preparams or generates fresh
+// ones.  Generation takes ~30s and holds the mutex for the duration;
+// concurrent callers block until the first generation completes.
 func (s *fileStore) GetPreParams(ctx context.Context) (*keygen.LocalPreParams, error) {
+	log.Tracef("GetPreParams")
+	defer log.Tracef("GetPreParams exit")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.preParams != nil {
 		return s.preParams, nil
 	}
-	path := filepath.Join(s.dir, "preparams.json")
-	data, err := os.ReadFile(path)
-	if err == nil {
-		var pp keygen.LocalPreParams
-		if err := json.Unmarshal(data, &pp); err != nil {
-			return nil, fmt.Errorf("corrupt preparams %s: %w", path, err)
-		}
-		s.preParams = &pp
-		return s.preParams, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read preparams %s: %w", path, err)
-	}
+	log.Infof("generating Paillier preparams (this takes ~30s)")
 	pp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
 	if err != nil {
-		return nil, err
-	}
-	if jdata, err := json.Marshal(pp); err == nil {
-		_ = os.WriteFile(path, jdata, 0o600) // best-effort persist
+		return nil, fmt.Errorf("generate preparams: %w", err)
 	}
 	s.preParams = pp
 	return s.preParams, nil
