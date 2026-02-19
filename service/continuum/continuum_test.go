@@ -3490,8 +3490,16 @@ func TestListenFull(t *testing.T) {
 		t.Logf("handshake 1: %v (may be expected)", err)
 	}
 
-	// Wait a moment for the session to be registered.
-	time.Sleep(200 * time.Millisecond)
+	// Wait for the session to be registered.
+	deadline := time.Now().Add(2 * time.Second)
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for len(s.SessionIdentities()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("timeout waiting for session registration")
+		}
+		<-tick.C
+	}
 
 	// Second connection: server is "full".  The listen loop
 	// closes the connection before doing KX.
@@ -3845,21 +3853,17 @@ func TestHandlePeerNotifyWriteError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	s, cliTr, _ := handleTestServer(t, ctx)
+	_, cliTr, _ := handleTestServer(t, ctx)
 
 	// Send PeerNotify with count > server's PeerCount() so handle()
-	// tries to write PeerListRequest back.  Then close conn so the
-	// write fails.
+	// tries to write PeerListRequest back.  On net.Pipe, Write
+	// returns only after handle() has read the payload.  Close is
+	// permanent — handle()'s subsequent Write fails immediately.
 	err := cliTr.Write(Identity{0xDD}, PeerNotify{Count: 999})
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	// Small delay to let handle() read the PeerNotify and attempt the write.
-	time.Sleep(20 * time.Millisecond)
 	cliTr.conn.Close()
-
-	_ = s
-	time.Sleep(50 * time.Millisecond)
 }
 
 // TestHandlePeerListRequestWriteError covers L432 — write error when
@@ -3868,55 +3872,56 @@ func TestHandlePeerListRequestWriteError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	s, cliTr, _ := handleTestServer(t, ctx)
+	_, cliTr, _ := handleTestServer(t, ctx)
 
-	// Send PeerListRequest, then close conn so the server can't write
-	// PeerListResponse back.
+	// Send PeerListRequest, then close conn.  On net.Pipe, Write
+	// returns after handle() reads.  Close is permanent — handle()'s
+	// PeerListResponse write fails immediately.
 	err := cliTr.Write(Identity{0xDD}, PeerListRequest{})
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
 	cliTr.conn.Close()
-
-	_ = s
-	time.Sleep(50 * time.Millisecond)
 }
 
-// TestHandleUnknownPayload covers L507 — the default case in handle()'s
-// dispatch switch (unhandled payload type).
-func TestHandleUnknownPayload(t *testing.T) {
+// TestHandlePingResponseRefresh covers the PingResponse case (L413) in
+// handle()'s dispatch switch — verifies handle() processes PingResponse
+// without crashing and continues.
+func TestHandlePingResponseRefresh(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	s, cliTr, _ := handleTestServer(t, ctx)
+	_, cliTr, _ := handleTestServer(t, ctx)
 
-	// PingResponse is a valid payload that handle() receives but
-	// only processes for heartbeat refresh.  It's already handled.
-	// Send a PingResponse — this hits the PingResponse case (L415),
-	// not default.
-	//
-	// To hit default we need a type handle doesn't switch on.
-	// PeerRecord isn't a wire message type.  But we can send
-	// something handle does handle and verify no crash.  Actually,
-	// the "default" case just logs — to hit it we'd need to send
-	// a payload type that's registered in the wire format but not
-	// in handle's switch.  Looking at str2pt, all registered types
-	// ARE in the switch.  So default is genuinely unreachable via
-	// normal paths.  Mark as unreachable.
-	//
-	// Instead, verify PingResponse path works (refreshes peer).
-	err := cliTr.Write(Identity{0xDD}, PingResponse{
-		OriginTimestamp: time.Now().Unix(),
-		PeerTimestamp:   time.Now().Unix(),
+	// Send PingResponse.  On net.Pipe, Write returns after handle()
+	// reads.  No side effect verification needed — if handle()
+	// panicked on PingResponse, the pipe would break.
+	errCh := pipeWrite(func() error {
+		return cliTr.Write(Identity{0xDD}, PingResponse{
+			OriginTimestamp: time.Now().Unix(),
+			PeerTimestamp:   time.Now().Unix(),
+		})
 	})
-	if err != nil {
+	if err := <-errCh; err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	time.Sleep(50 * time.Millisecond)
+
+	// Prove handle() survived: send PingRequest and expect PingResponse.
+	errCh = pipeWrite(func() error {
+		return cliTr.Write(Identity{0xDD}, PingRequest{OriginTimestamp: 42})
+	})
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	_, payload, _, err := cliTr.ReadEnvelope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := payload.(*PingResponse); !ok {
+		t.Fatalf("expected PingResponse, got %T", payload)
+	}
 
 	cliTr.conn.Close()
-	_ = s
 }
 
 // TestAddPeerPreserveNaClPub covers L1066 — when an existing peer has
@@ -4099,18 +4104,16 @@ func TestConnectKXError(t *testing.T) {
 	s.wg.Add(1)
 	go s.connect(ctx, ln.Addr().String(), errC)
 
-	// Cancel context to break connect's retry loop.
-	time.Sleep(200 * time.Millisecond)
-	cancel()
-
+	// connect() dials, KX fails (server closes immediately), sends
+	// error to errC.  No retry loop — just read the result.
 	select {
 	case err := <-errC:
 		if err != nil && !errors.Is(err, context.Canceled) &&
 			!errors.Is(err, io.EOF) {
 			t.Fatalf("connect: %v", err)
 		}
-	case <-time.After(2 * time.Second):
-		// connect may not send to errC on context cancel — that's fine.
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for connect to return")
 	}
 }
 
@@ -8160,23 +8163,7 @@ func TestListenNewTransportError(t *testing.T) {
 	go s.listen(ctx, errC)
 
 	// Wait for listen to be ready.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		s.mtx.RLock()
-		addr := s.listenAddress
-		s.mtx.RUnlock()
-		if addr != "" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("timeout waiting for listen address")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	s.mtx.RLock()
-	addr := s.listenAddress
-	s.mtx.RUnlock()
+	addr := waitForListenAddress(t, s, 2*time.Second)
 
 	// Connect and send garbage — triggers newTransport error.
 	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
@@ -8188,8 +8175,13 @@ func TestListenNewTransportError(t *testing.T) {
 	}
 	conn.Close()
 
-	// Give listen loop time to process the error.
-	time.Sleep(100 * time.Millisecond)
+	// Prove listen() survived: a second dial succeeds only if the
+	// accept loop is still running.
+	conn2, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatalf("dial after garbage: %v (listen loop died)", err)
+	}
+	conn2.Close()
 
 	// Shut down cleanly.
 	cancel()
