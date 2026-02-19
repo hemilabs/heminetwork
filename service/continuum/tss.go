@@ -150,7 +150,6 @@ type ceremony struct {
 	pids      tss.SortedPartyIDs
 	pidToID   map[string]Identity
 	outCh     chan tss.Message
-	endCh     chan any
 	errCh     chan error
 	done      chan struct{}
 	threshold int
@@ -199,7 +198,6 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 		pids:      pids,
 		pidToID:   pidToID,
 		outCh:     outCh,
-		endCh:     make(chan any, 1),
 		errCh:     make(chan error, 1),
 		done:      make(chan struct{}),
 		threshold: threshold,
@@ -215,14 +213,7 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 		t.ceremoniesMu.Unlock()
 	}()
 
-	go t.pumpMessages(ceremonyID, c)
-	go func() {
-		select {
-		case save := <-endCh:
-			c.endCh <- save
-		case <-c.done:
-		}
-	}()
+	go t.pumpMessages(ctx, ceremonyID, c)
 
 	if err := party.Start(); err != nil {
 		return nil, fmt.Errorf("start keygen: %w", err.Cause())
@@ -235,9 +226,8 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 	case err := <-c.errCh:
 		close(c.done)
 		return nil, err
-	case result := <-c.endCh:
+	case save := <-endCh:
 		close(c.done)
-		save := result.(*keygen.LocalPartySaveData)
 		keyID := sha256.Sum256(save.ECDSAPub.X().Bytes())
 		shareData, err := json.Marshal(save)
 		if err != nil {
@@ -280,7 +270,6 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 		pids:      pids,
 		pidToID:   pidToID,
 		outCh:     outCh,
-		endCh:     make(chan any, 1),
 		errCh:     make(chan error, 1),
 		done:      make(chan struct{}),
 		threshold: threshold,
@@ -297,14 +286,7 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 		t.ceremoniesMu.Unlock()
 	}()
 
-	go t.pumpMessages(ceremonyID, c)
-	go func() {
-		select {
-		case sig := <-endCh:
-			c.endCh <- sig
-		case <-c.done:
-		}
-	}()
+	go t.pumpMessages(ctx, ceremonyID, c)
 
 	if err := party.Start(); err != nil {
 		return nil, nil, fmt.Errorf("start signing: %w", err.Cause())
@@ -317,9 +299,8 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 	case err := <-c.errCh:
 		close(c.done)
 		return nil, nil, err
-	case result := <-c.endCh:
+	case sig := <-endCh:
 		close(c.done)
-		sig := result.(*common.SignatureData)
 		return sig.R, sig.S, nil
 	}
 }
@@ -414,7 +395,6 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 		oldKeyToID: oldKeyToID,
 		newKeyToID: newKeyToID,
 		outCh:      outCh,
-		endCh:      make(chan any, 2),
 		errCh:      make(chan error, 2),
 		done:       make(chan struct{}),
 		threshold:  newThreshold,
@@ -444,34 +424,28 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 		expectedEnds++
 	}
 
-	// Forward endCh results from tss-lib to ceremony.
-	go func() {
-		for i := 0; i < expectedEnds; i++ {
-			select {
-			case save := <-endCh:
-				c.endCh <- save
-			case <-c.done:
-				return
-			}
-		}
-	}()
-
 	if oldParty != nil {
 		go func() {
 			if err := oldParty.Start(); err != nil {
-				c.errCh <- fmt.Errorf("start old resharing: %w", err.Cause())
+				select {
+				case <-ctx.Done():
+				case c.errCh <- fmt.Errorf("start old resharing: %w", err.Cause()):
+				}
 			}
 		}()
 	}
 	if newParty != nil {
 		go func() {
 			if err := newParty.Start(); err != nil {
-				c.errCh <- fmt.Errorf("start new resharing: %w", err.Cause())
+				select {
+				case <-ctx.Done():
+				case c.errCh <- fmt.Errorf("start new resharing: %w", err.Cause()):
+				}
 			}
 		}()
 	}
 
-	go t.pumpReshareMessages(ceremonyID, c)
+	go t.pumpReshareMessages(ctx, ceremonyID, c)
 
 	// Collect results. New committee party produces Xi != nil.
 	var newSave *keygen.LocalPartySaveData
@@ -484,9 +458,8 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 		case err := <-c.errCh:
 			close(c.done)
 			return err
-		case result := <-c.endCh:
+		case save := <-endCh:
 			received++
-			save := result.(*keygen.LocalPartySaveData)
 			if save.Xi != nil && save.Xi.Sign() != 0 {
 				newSave = save
 			}
@@ -734,9 +707,13 @@ func (t *tssImpl) buildResharePartyContext(
 	return sorted, ourPid, pidToID, keyToID, nil
 }
 
-func (t *tssImpl) pumpMessages(ceremonyID CeremonyID, c *ceremony) {
+func (t *tssImpl) pumpMessages(ctx context.Context, ceremonyID CeremonyID, c *ceremony) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
 		case msg := <-c.outCh:
 			wireData, _, err := msg.WireBytes()
 			if err != nil {
@@ -761,9 +738,6 @@ func (t *tssImpl) pumpMessages(ceremonyID CeremonyID, c *ceremony) {
 					_ = t.transport.Send(to, ceremonyID, data)
 				}
 			}
-
-		case <-c.done:
-			return
 		}
 	}
 }
@@ -784,7 +758,7 @@ func (t *tssImpl) pumpMessages(ceremonyID CeremonyID, c *ceremony) {
 // For overlapping nodes (in both old and new committees), messages
 // between the two local party instances are delivered directly via
 // handleReshareMessage rather than through the transport.
-func (t *tssImpl) pumpReshareMessages(ceremonyID CeremonyID, c *ceremony) {
+func (t *tssImpl) pumpReshareMessages(ctx context.Context, ceremonyID CeremonyID, c *ceremony) {
 	// Build lookup of new committee keys for fromNew detection.
 	// Old and new key spaces are disjoint (XOR 1), so a key
 	// appearing in newKeySet means the message is from the
@@ -796,6 +770,10 @@ func (t *tssImpl) pumpReshareMessages(ceremonyID CeremonyID, c *ceremony) {
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
+		case <-c.done:
+			return
 		case msg := <-c.outCh:
 			wireData, routing, err := msg.WireBytes()
 			if err != nil {
@@ -889,9 +867,6 @@ func (t *tssImpl) pumpReshareMessages(ceremonyID CeremonyID, c *ceremony) {
 					_ = t.transport.Send(id, ceremonyID, data)
 				}
 			}
-
-		case <-c.done:
-			return
 		}
 	}
 }
