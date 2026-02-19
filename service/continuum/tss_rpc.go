@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/hemilabs/x/tss-lib/v2/tss"
 )
@@ -297,10 +298,51 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 		copy(data[1:], msg.Data)
 	}
 
-	if err := s.tss.HandleMessage(msg.From, msg.CeremonyID, data); err != nil {
+	// HandleMessage may fail transiently if the TSSMessage arrives
+	// before the KeygenRequest that registers the ceremony.  This
+	// is a normal race in a distributed mesh — the coordinator
+	// starts producing messages immediately while the request is
+	// still being routed to other committee members.  Retry with
+	// backoff up to ~5 seconds before giving up.  The retry runs
+	// in a goroutine to avoid blocking the connection handler
+	// (which might be delivering the KeygenRequest itself).
+	err := s.tss.HandleMessage(msg.From, msg.CeremonyID, data)
+	if err == nil {
+		return
+	}
+	if err.Error() != "unknown ceremony" {
 		log.Errorf("tss msg from %s ceremony %s: %v",
 			msg.From, msg.CeremonyID, err)
+		return
 	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for _, delay := range []time.Duration{
+			50 * time.Millisecond,
+			100 * time.Millisecond,
+			250 * time.Millisecond,
+			500 * time.Millisecond,
+			1 * time.Second,
+			2 * time.Second,
+		} {
+			select {
+			case <-s.tssCtx.Done():
+				return
+			case <-time.After(delay):
+			}
+			err = s.tss.HandleMessage(msg.From, msg.CeremonyID, data)
+			if err == nil {
+				return
+			}
+			if err.Error() != "unknown ceremony" {
+				break
+			}
+		}
+		log.Errorf("tss msg from %s ceremony %s: %v (after retries)",
+			msg.From, msg.CeremonyID, err)
+	}()
 }
 
 // =============================================================================
