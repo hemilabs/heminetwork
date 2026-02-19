@@ -49,6 +49,7 @@ type TSSStore interface {
 	LoadKeyShare(keyID []byte) ([]byte, error)
 	DeleteKeyShare(keyID []byte) error
 	GetPreParams(ctx context.Context) (*keygen.LocalPreParams, error)
+	SetPreParams(pp *keygen.LocalPreParams)
 }
 
 // =============================================================================
@@ -157,6 +158,14 @@ func (s *fileStore) GetPreParams(ctx context.Context) (*keygen.LocalPreParams, e
 	}
 	s.preParams = pp
 	return s.preParams, nil
+}
+
+// SetPreParams seeds the store with pre-loaded preparams so that
+// GetPreParams returns immediately without generating fresh ones.
+func (s *fileStore) SetPreParams(pp *keygen.LocalPreParams) {
+	s.mu.Lock()
+	s.preParams = pp
+	s.mu.Unlock()
 }
 
 // =============================================================================
