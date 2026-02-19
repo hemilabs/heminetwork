@@ -1433,7 +1433,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tp2p\t\tp2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "\tlevel\t\tdb manipulation\n\n")
-	fmt.Fprintf(os.Stderr, "\thproxy\t\tcontroller\n\n")
+	fmt.Fprintf(os.Stderr, "\thproxy\t\tcontroller\n")
+	fmt.Fprintf(os.Stderr, "\tcontinuum\ttransfunctionerd admin RPCs\n\n")
 	fmt.Fprintf(os.Stderr, "ENVIRONMENT:\n")
 	config.Help(os.Stderr, cm)
 	fmt.Fprintf(os.Stderr, "\nuse 'hemictl <command> -h' or 'hemictl <command> -help' to"+
@@ -1650,6 +1651,8 @@ func _main(args []string) error {
 		return p2p(args[1:])
 	case "hproxy":
 		return hproxyctl(ctx, args[1:])
+	case "continuum":
+		return continuumctl(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown action: %v", cmd)
 	}
