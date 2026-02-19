@@ -6,11 +6,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/hemilabs/heminetwork/v2/config"
@@ -89,7 +92,7 @@ func continuumctl(pctx context.Context, flags []string) error {
 		fmt.Println("\tpeers\t\tList all known peers with session status")
 		fmt.Println("\tstatus\t\tQuery ceremony status (ceremony_id=<hex>)")
 		fmt.Println("\tlist\t\tList all known ceremonies")
-		fmt.Println("\tkeygen\t\tTrigger keygen ceremony (stub)")
+		fmt.Println("\tkeygen\t\tTrigger keygen ceremony (seed=<hex> threshold=<n> committee=<n>)")
 		fmt.Println("")
 		fmt.Println("ENVIRONMENT:")
 		config.Help(os.Stderr, continuumCM)
@@ -128,10 +131,33 @@ func continuumctl(pctx context.Context, flags []string) error {
 	case "list":
 		return continuumList(ctx)
 	case "keygen":
-		return fmt.Errorf("keygen not implemented yet (commit 3)")
+		return continuumKeygen(ctx, args)
 	default:
 		return fmt.Errorf("unknown continuum action: %v", action)
 	}
+}
+
+// continuumReadResponse reads from the transport, discarding gossip
+// messages (PeerNotify, PeerListRequest, PingRequest) until we get a
+// message of a type other than gossip.  Returns an error after 20
+// reads without a match.
+func continuumReadResponse(t *continuum.Transport) (any, error) {
+	for i := 0; i < 20; i++ {
+		_, cmd, err := t.Read()
+		if err != nil {
+			return nil, fmt.Errorf("read: %w", err)
+		}
+		switch cmd.(type) {
+		case *continuum.PeerNotify,
+			*continuum.PeerListRequest,
+			*continuum.PeerListResponse,
+			*continuum.PingRequest,
+			*continuum.PingResponse:
+			continue // gossip — discard
+		}
+		return cmd, nil
+	}
+	return nil, fmt.Errorf("no admin response after 20 reads")
 }
 
 // continuumPeers queries the peer list from a running transfunctionerd.
@@ -146,9 +172,9 @@ func continuumPeers(ctx context.Context) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	_, cmd, err := t.Read()
+	cmd, err := continuumReadResponse(t)
 	if err != nil {
-		return fmt.Errorf("read: %w", err)
+		return err
 	}
 
 	resp, ok := cmd.(*continuum.PeerListAdminResponse)
@@ -180,9 +206,9 @@ func continuumStatus(ctx context.Context, cidHex string) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	_, cmd, err := t.Read()
+	cmd, err := continuumReadResponse(t)
 	if err != nil {
-		return fmt.Errorf("read: %w", err)
+		return err
 	}
 
 	resp, ok := cmd.(*continuum.CeremonyStatusResponse)
@@ -207,9 +233,9 @@ func continuumList(ctx context.Context) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	_, cmd, err := t.Read()
+	cmd, err := continuumReadResponse(t)
 	if err != nil {
-		return fmt.Errorf("read: %w", err)
+		return err
 	}
 
 	resp, ok := cmd.(*continuum.CeremonyListResponse)
@@ -220,4 +246,142 @@ func continuumList(ctx context.Context) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(resp)
+}
+
+// continuumKeygen triggers a keygen ceremony.  Connects to the local
+// transfunctionerd, queries peers, elects a committee, and sends
+// encrypted KeygenRequest to each committee member.  Fire-and-forget:
+// use `hemictl continuum status` to poll the result.
+//
+// Args: seed=<hex> threshold=<n> committee=<n>
+// If seed is omitted, SHA256(unix_timestamp) is used.
+func continuumKeygen(ctx context.Context, args map[string]string) error {
+	// Parse threshold.
+	thresholdStr := args["threshold"]
+	if thresholdStr == "" {
+		return fmt.Errorf("threshold required")
+	}
+	threshold, err := strconv.Atoi(thresholdStr)
+	if err != nil {
+		return fmt.Errorf("invalid threshold: %w", err)
+	}
+
+	// Parse committee size.
+	committeeSizeStr := args["committee"]
+	if committeeSizeStr == "" {
+		return fmt.Errorf("committee required")
+	}
+	committeeSize, err := strconv.Atoi(committeeSizeStr)
+	if err != nil {
+		return fmt.Errorf("invalid committee: %w", err)
+	}
+
+	// Parse seed (optional — default to SHA256 of current unix timestamp).
+	var seed []byte
+	if seedHex := args["seed"]; seedHex != "" {
+		seed, err = hex.DecodeString(seedHex)
+		if err != nil {
+			return fmt.Errorf("invalid seed hex: %w", err)
+		}
+	} else {
+		h := sha256.Sum256([]byte(strconv.FormatInt(time.Now().Unix(), 10)))
+		seed = h[:]
+	}
+
+	// Connect.
+	t, secret, err := continuumDial(ctx, continuumAddress)
+	if err != nil {
+		return err
+	}
+	defer t.Close()
+
+	// Query peers.
+	if err := t.Write(secret.Identity, continuum.PeerListAdminRequest{}); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+
+	cmd, err := continuumReadResponse(t)
+	if err != nil {
+		return err
+	}
+	resp, ok := cmd.(*continuum.PeerListAdminResponse)
+	if !ok {
+		return fmt.Errorf("unexpected response: %T", cmd)
+	}
+
+	// Filter to connected peers with valid NaClPub.  Exclude our
+	// own ephemeral identity — hemictl is not a ceremony participant.
+	type candidate struct {
+		id      continuum.Identity
+		naclPub []byte
+	}
+	candidates := make([]candidate, 0, len(resp.Peers))
+	for _, pr := range resp.Peers {
+		if pr.Identity == secret.Identity {
+			continue // exclude ourselves
+		}
+		if !pr.Connected && !pr.Self {
+			continue
+		}
+		if len(pr.NaClPub) != continuum.NaClPubSize {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			id:      pr.Identity,
+			naclPub: pr.NaClPub,
+		})
+	}
+
+	if len(candidates) < committeeSize {
+		return fmt.Errorf("only %d eligible peers, need %d",
+			len(candidates), committeeSize)
+	}
+
+	// Extract identities for election.
+	peerIDs := make([]continuum.Identity, len(candidates))
+	for i, c := range candidates {
+		peerIDs[i] = c.id
+	}
+
+	// Elect committee.
+	committee, err := continuum.Elect(seed, peerIDs, committeeSize)
+	if err != nil {
+		return fmt.Errorf("election: %w", err)
+	}
+
+	coordinator := committee[0]
+	fmt.Printf("elected committee (%d members, threshold %d):\n", committeeSize, threshold)
+	for i, id := range committee {
+		role := "  member"
+		if i == 0 {
+			role = "  coordinator"
+		}
+		fmt.Printf("%s: %v\n", role, id)
+	}
+
+	// Build KeygenRequest.
+	ceremonyID := continuum.NewCeremonyID()
+	partyIDs := continuum.IdentitiesToPartyIDs(committee)
+	req := continuum.KeygenRequest{
+		CeremonyID:  ceremonyID,
+		Curve:       "secp256k1",
+		Committee:   partyIDs,
+		Threshold:   threshold,
+		Coordinator: coordinator,
+	}
+
+	// Send KeygenRequest to each committee member.  Plain routed
+	// payload — hop-by-hop transport encryption is sufficient for
+	// ceremony parameters (no secrets in a KeygenRequest).  The
+	// local transfunctionerd forwards to the destination via the
+	// routing header.
+	for _, dest := range committee {
+		if err := t.WriteTo(secret.Identity, dest, 8, req); err != nil {
+			return fmt.Errorf("send to %v: %w", dest, err)
+		}
+		fmt.Printf("sent keygen to %v\n", dest)
+	}
+
+	fmt.Printf("ceremony initiated: %s\n", ceremonyID)
+	return nil
 }
