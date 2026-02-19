@@ -893,18 +893,21 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 
 	// Serialize the inner command.
 	plaintext, err := json.Marshal(cmd)
+	// untested: json.Marshal of wire command types cannot fail (no channels, funcs, or cycles)
 	if err != nil {
 		return fmt.Errorf("marshal inner: %w", err)
 	}
 
 	// Derive our NaCl private key.
 	senderPriv, err := s.secret.NaClPrivateKey()
+	// untested: NaClPrivateKey derives curve25519 from valid secp256k1; cannot fail with valid secret
 	if err != nil {
 		return fmt.Errorf("nacl private key: %w", err)
 	}
 
 	// Encrypt.
 	ep, err := SealBox(plaintext, pr.NaClPub, senderPriv, s.secret.Identity, innerType)
+	// untested: SealBox wraps rand.Read + secretbox.Seal; fails only on OS entropy exhaustion
 	if err != nil {
 		return fmt.Errorf("seal: %w", err)
 	}
@@ -930,6 +933,7 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 	}
 
 	recipientPriv, err := s.secret.NaClPrivateKey()
+	// untested: NaClPrivateKey derives curve25519 from valid secp256k1; cannot fail with valid secret
 	if err != nil {
 		return nil, fmt.Errorf("nacl private key: %w", err)
 	}
@@ -1320,6 +1324,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 	s.registerSelfAsPeer()
 	go func() {
 		<-ctx.Done()
+		// untested: listener.Close error is logged not returned; cosmetic
 		if err := listener.Close(); err != nil {
 			log.Errorf("listener close: %v", err)
 		}
@@ -1331,6 +1336,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return
 		}
+		// untested: Accept error after ctx cancel; requires mock net.Listener
 		if err != nil {
 			log.Errorf("accept: %v", err)
 			continue
@@ -1343,6 +1349,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 			// XXX send a "busy" message?
 			log.Debugf("server full, connection rejected: %s",
 				conn.RemoteAddr())
+			// untested: conn.Close error is logged not returned; cosmetic
 			if err := conn.Close(); err != nil {
 				log.Errorf("close connection %s: %v",
 					conn.RemoteAddr(), err)
@@ -1359,6 +1366,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 		}
 
 		// Insert into sessions
+		// untested: newSession duplicate; requires full handshake with same identity
 		if err := s.newSession(id, transport); err != nil {
 			log.Errorf("session: %v", err)
 			continue
