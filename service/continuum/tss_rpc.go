@@ -139,6 +139,7 @@ func (s *Server) dispatchKeygen(req KeygenRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonyKeygen)
+	s.registerCeremony(req.CeremonyID, CeremonyKeygen)
 
 	s.wg.Add(1)
 	go func() {
@@ -149,10 +150,12 @@ func (s *Server) dispatchKeygen(req KeygenRequest) {
 			parties, req.Threshold)
 		if err != nil {
 			log.Errorf("keygen %s: %v", req.CeremonyID, err)
+			s.failCeremony(req.CeremonyID, err.Error())
 			return
 		}
 		log.Infof("keygen %s complete: key=%x",
 			req.CeremonyID, keyID)
+		s.completeCeremony(req.CeremonyID)
 	}()
 }
 
@@ -170,6 +173,7 @@ func (s *Server) dispatchSign(req SignRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonySign)
+	s.registerCeremony(req.CeremonyID, CeremonySign)
 
 	var data [32]byte
 	copy(data[:], req.Data)
@@ -183,10 +187,12 @@ func (s *Server) dispatchSign(req SignRequest) {
 			req.KeyID, parties, req.Threshold, data)
 		if err != nil {
 			log.Errorf("sign %s: %v", req.CeremonyID, err)
+			s.failCeremony(req.CeremonyID, err.Error())
 			return
 		}
 		log.Infof("sign %s complete: r=%x.. s=%x..",
 			req.CeremonyID, r[:8], sigS[:8])
+		s.completeCeremony(req.CeremonyID)
 	}()
 }
 
@@ -201,6 +207,7 @@ func (s *Server) dispatchReshare(req ReshareRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonyReshare)
+	s.registerCeremony(req.CeremonyID, CeremonyReshare)
 
 	// Determine keyID from existing key shares. For reshare, the
 	// router doesn't send a keyID — the node discovers it from
@@ -220,9 +227,11 @@ func (s *Server) dispatchReshare(req ReshareRequest) {
 		if err != nil {
 			log.Errorf("reshare %s: %v",
 				req.CeremonyID, err)
+			s.failCeremony(req.CeremonyID, err.Error())
 			return
 		}
 		log.Infof("reshare %s complete", req.CeremonyID)
+		s.completeCeremony(req.CeremonyID)
 	}()
 }
 

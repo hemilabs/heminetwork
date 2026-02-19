@@ -169,6 +169,14 @@ const (
 
 	// End-to-end encryption
 	PEncryptedPayload PayloadType = "encrypted"
+
+	// Admin (localhost only)
+	PPeerListAdminRequest   PayloadType = "peer-list-admin"
+	PPeerListAdminResponse  PayloadType = "peer-list-admin-response"
+	PCeremonyStatusRequest  PayloadType = "ceremony-status"
+	PCeremonyStatusResponse PayloadType = "ceremony-status-response"
+	PCeremonyListRequest    PayloadType = "ceremony-list"
+	PCeremonyListResponse   PayloadType = "ceremony-list-response"
 )
 
 var (
@@ -190,6 +198,14 @@ var (
 		reflect.TypeOf(PeerListRequest{}):  PPeerListRequest,
 		reflect.TypeOf(PeerListResponse{}): PPeerListResponse,
 		reflect.TypeOf(EncryptedPayload{}): PEncryptedPayload,
+
+		// Admin
+		reflect.TypeOf(PeerListAdminRequest{}):   PPeerListAdminRequest,
+		reflect.TypeOf(PeerListAdminResponse{}):  PPeerListAdminResponse,
+		reflect.TypeOf(CeremonyStatusRequest{}):  PCeremonyStatusRequest,
+		reflect.TypeOf(CeremonyStatusResponse{}): PCeremonyStatusResponse,
+		reflect.TypeOf(CeremonyListRequest{}):    PCeremonyListRequest,
+		reflect.TypeOf(CeremonyListResponse{}):   PCeremonyListResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -494,6 +510,51 @@ type CeremonyAbort struct {
 	CeremonyID CeremonyID `json:"ceremonyid"`
 	Reason     string     `json:"reason"`
 }
+
+// =============================================================================
+// Admin RPC types (localhost only)
+// =============================================================================
+
+// PeerListAdminRequest requests the full peer map with session status.
+type PeerListAdminRequest struct{}
+
+// PeerListAdminResponse contains all known peers with connection status.
+type PeerListAdminResponse struct {
+	Peers []PeerAdminRecord `json:"peers"`
+}
+
+// PeerAdminRecord extends PeerRecord with session status.
+type PeerAdminRecord struct {
+	PeerRecord
+	Connected bool `json:"connected"` // has active session
+}
+
+// CeremonyStatusRequest queries the status of a specific ceremony.
+type CeremonyStatusRequest struct {
+	CeremonyID CeremonyID `json:"ceremony_id"`
+}
+
+// CeremonyStatusResponse reports the status of a ceremony.
+type CeremonyStatusResponse struct {
+	CeremonyID CeremonyID `json:"ceremony_id"`
+	Found      bool       `json:"found"`
+	Type       string     `json:"type,omitempty"`       // "keygen", "reshare", "sign"
+	Status     string     `json:"status,omitempty"`     // "running", "complete", "failed"
+	StartTime  int64      `json:"start_time,omitempty"` // unix timestamp
+	Error      string     `json:"error,omitempty"`
+}
+
+// CeremonyListRequest requests all known ceremonies.
+type CeremonyListRequest struct{}
+
+// CeremonyListResponse returns all known ceremonies with their status.
+type CeremonyListResponse struct {
+	Ceremonies []CeremonyStatusResponse `json:"ceremonies"`
+}
+
+// ErrAdminNotLocal is returned when an admin request arrives from a
+// non-localhost connection.
+var ErrAdminNotLocal = errors.New("admin request rejected: not localhost")
 
 // BroadcastDestination is the all-zeros Identity sentinel used as
 // Header.Destination to indicate a broadcast message.  Every node
@@ -935,6 +996,17 @@ func (t *Transport) Close() error {
 		return ErrNoConn
 	}
 	return t.conn.Close()
+}
+
+// RemoteAddr returns the remote network address of the underlying
+// connection.  Used for localhost-only admin RPC gating.
+func (t *Transport) RemoteAddr() net.Addr {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+	if t.conn == nil {
+		return nil
+	}
+	return t.conn.RemoteAddr()
 }
 
 // KeyExchange returns directional encryption keys for the provided private and
