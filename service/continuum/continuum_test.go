@@ -3410,19 +3410,17 @@ func TestConnectDialError(t *testing.T) {
 		cfg:      &Config{PeersWanted: 8},
 	}
 
-	// Use a cancelled context so dial fails immediately.
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
+	// Dial an unreachable address with a live context so sendErr
+	// delivers the error rather than racing with ctx.Done().
 	errC := make(chan error, 1)
 	s.wg.Add(1)
-	go s.connect(ctx, "127.0.0.1:1", errC)
+	go s.connect(t.Context(), "127.0.0.1:1", errC)
 	select {
 	case err := <-errC:
 		if err == nil {
 			t.Fatal("expected dial error, got nil")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("connect did not return error")
 	}
 }
