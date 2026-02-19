@@ -2953,11 +2953,12 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 
 	peerID := Identity{0xDD}
 	s := &Server{
-		seen:     seen,
-		peersTTL: peersTTL,
-		secret:   secret,
-		sessions: map[Identity]*Transport{peerID: srvTr},
-		peers:    make(map[Identity]*PeerRecord),
+		seen:       seen,
+		peersTTL:   peersTTL,
+		secret:     secret,
+		sessions:   map[Identity]*Transport{peerID: srvTr},
+		peers:      make(map[Identity]*PeerRecord),
+		ceremonies: make(map[CeremonyID]*CeremonyInfo),
 		cfg: &Config{
 			PingInterval: time.Hour, // never fires during test
 			PeersWanted:  8,
@@ -6624,11 +6625,12 @@ func dispatchTestServer(t *testing.T, mock *mockTSS) *Server {
 		t.Fatal(err)
 	}
 	s := &Server{
-		secret:   secret,
-		tss:      mock,
-		tssCtx:   context.Background(),
-		sessions: make(map[Identity]*Transport),
-		peers:    make(map[Identity]*PeerRecord),
+		secret:     secret,
+		tss:        mock,
+		tssCtx:     context.Background(),
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
+		ceremonies: make(map[CeremonyID]*CeremonyInfo),
 	}
 	s.stt = newServerTSSTransport(s)
 	return s
@@ -8592,5 +8594,399 @@ func TestBroadcastTTLExpiry(t *testing.T) {
 	cancel()
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("server error: %v", err)
+	}
+}
+
+// =============================================================================
+// Admin RPC tests (Commit 2)
+// =============================================================================
+
+func TestIsLocalhost(t *testing.T) {
+	tests := []struct {
+		name string
+		addr net.Addr
+		want bool
+	}{
+		{"nil", nil, false},
+		{"ipv4 loopback", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1234}, true},
+		{"ipv6 loopback", &net.TCPAddr{IP: net.IPv6loopback, Port: 1234}, true},
+		{"ipv4 remote", &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 1234}, false},
+		{"ipv6 remote", &net.TCPAddr{IP: net.ParseIP("2001:db8::1"), Port: 1234}, false},
+		{"unspecified", &net.TCPAddr{IP: net.IPv4zero, Port: 1234}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isLocalhost(tc.addr)
+			if got != tc.want {
+				t.Fatalf("isLocalhost(%v) = %v, want %v",
+					tc.addr, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCeremonyTracking(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	var cid CeremonyID
+	copy(cid[:], []byte("test-ceremony-tracking-00"))
+
+	// Register.
+	s.registerCeremony(cid, CeremonyKeygen)
+
+	s.mtx.RLock()
+	ci, ok := s.ceremonies[cid]
+	s.mtx.RUnlock()
+	if !ok {
+		t.Fatal("ceremony not registered")
+	}
+	if ci.Status != "running" {
+		t.Fatalf("status = %q, want running", ci.Status)
+	}
+	if ci.Type != CeremonyKeygen {
+		t.Fatalf("type = %v, want CeremonyKeygen", ci.Type)
+	}
+
+	// Complete.
+	s.completeCeremony(cid)
+
+	s.mtx.RLock()
+	ci = s.ceremonies[cid]
+	s.mtx.RUnlock()
+	if ci.Status != "complete" {
+		t.Fatalf("status = %q, want complete", ci.Status)
+	}
+
+	// Fail a different ceremony.
+	var cid2 CeremonyID
+	copy(cid2[:], []byte("test-ceremony-fail-00000"))
+	s.registerCeremony(cid2, CeremonySign)
+	s.failCeremony(cid2, "test error")
+
+	s.mtx.RLock()
+	ci2 := s.ceremonies[cid2]
+	s.mtx.RUnlock()
+	if ci2.Status != "failed" {
+		t.Fatalf("status = %q, want failed", ci2.Status)
+	}
+	if ci2.Error != "test error" {
+		t.Fatalf("error = %q, want 'test error'", ci2.Error)
+	}
+
+	// Complete/fail on unknown ID is a no-op (no panic).
+	var bogus CeremonyID
+	copy(bogus[:], []byte("nonexistent-ceremony-000"))
+	s.completeCeremony(bogus)
+	s.failCeremony(bogus, "nope")
+}
+
+// readAdminResponse reads from the transport, discarding gossip messages
+// (PeerNotify, PingRequest, etc.) until the expected admin response type
+// arrives.  Fails the test after 20 reads without a match.
+func readAdminResponse[T any](t *testing.T, tr *Transport) T {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		_, cmd, err := tr.Read()
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if resp, ok := cmd.(T); ok {
+			return resp
+		}
+		// Gossip message — discard and retry.
+	}
+	var zero T
+	t.Fatalf("did not receive expected response type after 20 reads")
+	return zero
+}
+
+// TestAdminNonLocalhost verifies that admin requests sent from a
+// non-localhost connection are silently dropped.  handleTestServer uses
+// net.Pipe whose RemoteAddr is "pipe" — not localhost.
+func TestAdminNonLocalhost(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	_, cliTr, _ := handleTestServer(t, ctx)
+
+	// Send admin request over non-localhost pipe — should be dropped.
+	errCh := pipeWrite(func() error {
+		return cliTr.Write(Identity{0xEE}, PeerListAdminRequest{})
+	})
+	if err := <-errCh; err != nil {
+		t.Fatalf("write admin: %v", err)
+	}
+
+	// Send a PingRequest to prove handle() is still alive and to
+	// get a response we can read.  If the admin request had been
+	// processed, we'd see PeerListAdminResponse before PingResponse.
+	errCh = pipeWrite(func() error {
+		return cliTr.Write(Identity{0xEE}, PingRequest{OriginTimestamp: 77})
+	})
+	_, cmd, err := cliTr.Read()
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("write ping: %v", err)
+	}
+
+	// Expect PingResponse, not PeerListAdminResponse.
+	if _, ok := cmd.(*PingResponse); !ok {
+		t.Fatalf("expected *PingResponse, got %T (admin leak)", cmd)
+	}
+
+	cancel()
+}
+
+func TestAdminPeerList(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+	addr := waitForListenAddress(t, s, 2*time.Second)
+
+	// Dial from localhost — admin RPC should be accepted.
+	clientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	tr := new(Transport)
+	kxCtx, kxCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer kxCancel()
+	if err := tr.KeyExchange(kxCtx, conn); err != nil {
+		t.Fatalf("kx: %v", err)
+	}
+	if _, _, _, err := tr.Handshake(kxCtx, clientSecret, ""); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	// Send PeerListAdminRequest.
+	if err := tr.Write(clientSecret.Identity, PeerListAdminRequest{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Read response, skipping gossip messages the server sends
+	// after handshake (PeerNotify, etc.).
+	resp := readAdminResponse[*PeerListAdminResponse](t, tr)
+
+	// Server registers the connecting client as a peer during
+	// gossip exchange, so the peer list may be non-empty.
+	// The important thing is the admin RPC returned a valid response.
+	t.Logf("admin peer list returned %d peers", len(resp.Peers))
+
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server: %v", err)
+	}
+}
+
+func TestAdminCeremonyStatusNotFound(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+	addr := waitForListenAddress(t, s, 2*time.Second)
+
+	clientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	tr := new(Transport)
+	kxCtx, kxCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer kxCancel()
+	if err := tr.KeyExchange(kxCtx, conn); err != nil {
+		t.Fatalf("kx: %v", err)
+	}
+	if _, _, _, err := tr.Handshake(kxCtx, clientSecret, ""); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	// Query a ceremony ID that doesn't exist.
+	var cid CeremonyID
+	copy(cid[:], []byte("does-not-exist-00000000"))
+	if err := tr.Write(clientSecret.Identity, CeremonyStatusRequest{
+		CeremonyID: cid,
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	resp := readAdminResponse[*CeremonyStatusResponse](t, tr)
+	if resp.Found {
+		t.Fatal("expected Found=false for unknown ceremony")
+	}
+	if resp.CeremonyID != cid {
+		t.Fatalf("ceremony ID mismatch: %x != %x", resp.CeremonyID, cid)
+	}
+
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server: %v", err)
+	}
+}
+
+func TestAdminCeremonyList(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+	addr := waitForListenAddress(t, s, 2*time.Second)
+
+	// Register a couple of ceremonies directly on the server.
+	var cid1, cid2 CeremonyID
+	copy(cid1[:], []byte("ceremony-list-test-0001"))
+	copy(cid2[:], []byte("ceremony-list-test-0002"))
+	s.registerCeremony(cid1, CeremonyKeygen)
+	s.registerCeremony(cid2, CeremonySign)
+	s.completeCeremony(cid1)
+
+	clientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	tr := new(Transport)
+	kxCtx, kxCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer kxCancel()
+	if err := tr.KeyExchange(kxCtx, conn); err != nil {
+		t.Fatalf("kx: %v", err)
+	}
+	if _, _, _, err := tr.Handshake(kxCtx, clientSecret, ""); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	if err := tr.Write(clientSecret.Identity, CeremonyListRequest{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	resp := readAdminResponse[*CeremonyListResponse](t, tr)
+	if len(resp.Ceremonies) != 2 {
+		t.Fatalf("expected 2 ceremonies, got %d", len(resp.Ceremonies))
+	}
+
+	// Build a lookup for verification.
+	found := make(map[CeremonyID]CeremonyStatusResponse)
+	for _, c := range resp.Ceremonies {
+		found[c.CeremonyID] = c
+	}
+
+	c1, ok := found[cid1]
+	if !ok {
+		t.Fatal("cid1 not in list")
+	}
+	if c1.Status != "complete" {
+		t.Fatalf("cid1 status = %q, want complete", c1.Status)
+	}
+	if c1.Type != CeremonyKeygen.String() {
+		t.Fatalf("cid1 type = %q, want %q", c1.Type, CeremonyKeygen.String())
+	}
+
+	c2, ok := found[cid2]
+	if !ok {
+		t.Fatal("cid2 not in list")
+	}
+	if c2.Status != "running" {
+		t.Fatalf("cid2 status = %q, want running", c2.Status)
+	}
+
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server: %v", err)
+	}
+}
+
+func TestAdminCeremonyStatusFound(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+	addr := waitForListenAddress(t, s, 2*time.Second)
+
+	// Register and complete a ceremony.
+	var cid CeremonyID
+	copy(cid[:], []byte("ceremony-status-found-01"))
+	s.registerCeremony(cid, CeremonyReshare)
+	s.failCeremony(cid, "threshold mismatch")
+
+	clientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	tr := new(Transport)
+	kxCtx, kxCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer kxCancel()
+	if err := tr.KeyExchange(kxCtx, conn); err != nil {
+		t.Fatalf("kx: %v", err)
+	}
+	if _, _, _, err := tr.Handshake(kxCtx, clientSecret, ""); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	if err := tr.Write(clientSecret.Identity, CeremonyStatusRequest{
+		CeremonyID: cid,
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	resp := readAdminResponse[*CeremonyStatusResponse](t, tr)
+	if !resp.Found {
+		t.Fatal("expected Found=true")
+	}
+	if resp.Status != "failed" {
+		t.Fatalf("status = %q, want failed", resp.Status)
+	}
+	if resp.Error != "threshold mismatch" {
+		t.Fatalf("error = %q, want 'threshold mismatch'", resp.Error)
+	}
+	if resp.Type != CeremonyReshare.String() {
+		t.Fatalf("type = %q, want %q", resp.Type, CeremonyReshare.String())
+	}
+
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server: %v", err)
 	}
 }
