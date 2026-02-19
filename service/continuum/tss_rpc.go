@@ -131,6 +131,8 @@ func (st *serverTSSTransport) Send(to Identity, ceremonyID CeremonyID, data []by
 
 // dispatchKeygen handles an incoming KeygenRequest. The ceremony
 // runs asynchronously; the result is logged on completion.
+// If this node is the coordinator, it broadcasts CeremonyResult
+// to all peers on success or failure.
 func (s *Server) dispatchKeygen(req KeygenRequest) {
 	parties := partiesToIdentities(req.Committee)
 	if parties == nil {
@@ -139,7 +141,9 @@ func (s *Server) dispatchKeygen(req KeygenRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonyKeygen)
-	s.registerCeremony(req.CeremonyID, CeremonyKeygen)
+	s.registerCeremony(req.CeremonyID, CeremonyKeygen, req.Coordinator)
+
+	isCoordinator := req.Coordinator == s.secret.Identity
 
 	s.wg.Add(1)
 	go func() {
@@ -151,11 +155,30 @@ func (s *Server) dispatchKeygen(req KeygenRequest) {
 		if err != nil {
 			log.Errorf("keygen %s: %v", req.CeremonyID, err)
 			s.failCeremony(req.CeremonyID, err.Error())
+			if isCoordinator {
+				if berr := s.Broadcast(CeremonyResult{
+					CeremonyID: req.CeremonyID,
+					Success:    false,
+					Error:      err.Error(),
+				}); berr != nil {
+					log.Errorf("keygen %s: broadcast failure: %v",
+						req.CeremonyID, berr)
+				}
+			}
 			return
 		}
 		log.Infof("keygen %s complete: key=%x",
 			req.CeremonyID, keyID)
 		s.completeCeremony(req.CeremonyID)
+		if isCoordinator {
+			if berr := s.Broadcast(CeremonyResult{
+				CeremonyID: req.CeremonyID,
+				Success:    true,
+			}); berr != nil {
+				log.Errorf("keygen %s: broadcast result: %v",
+					req.CeremonyID, berr)
+			}
+		}
 	}()
 }
 
@@ -173,7 +196,7 @@ func (s *Server) dispatchSign(req SignRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonySign)
-	s.registerCeremony(req.CeremonyID, CeremonySign)
+	s.registerCeremony(req.CeremonyID, CeremonySign, Identity{})
 
 	var data [32]byte
 	copy(data[:], req.Data)
@@ -207,7 +230,7 @@ func (s *Server) dispatchReshare(req ReshareRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonyReshare)
-	s.registerCeremony(req.CeremonyID, CeremonyReshare)
+	s.registerCeremony(req.CeremonyID, CeremonyReshare, Identity{})
 
 	// Determine keyID from existing key shares. For reshare, the
 	// router doesn't send a keyID — the node discovers it from
