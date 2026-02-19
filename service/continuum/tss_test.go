@@ -6,8 +6,10 @@ package continuum
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -169,9 +171,6 @@ func TestTSSStoreEncryption(t *testing.T) {
 	// Verify file is encrypted (not plaintext)
 	files, _ := os.ReadDir(dir)
 	for _, f := range files {
-		if f.Name() == "preparams.json" {
-			continue
-		}
 		data, _ := os.ReadFile(filepath.Join(dir, f.Name()))
 		if string(data) == string(shareData) {
 			t.Fatal("Data stored in plaintext!")
@@ -182,25 +181,113 @@ func TestTSSStoreEncryption(t *testing.T) {
 }
 
 func TestTSSStoreWrongKey(t *testing.T) {
-	secret1, _ := NewSecret()
-	secret2, _ := NewSecret()
+	secret1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret2, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	dir := t.TempDir()
 
-	store1, _ := NewTSSStore(dir, secret1)
+	store1, err := NewTSSStore(dir, secret1)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	keyID := []byte("test-key")
 	shareData := []byte("secret data")
-	_ = store1.SaveKeyShare(keyID, shareData)
-
-	// Try to read with different secret
-	store2, _ := NewTSSStore(dir, secret2)
-	_, err := store2.LoadKeyShare(keyID)
-	if err == nil {
-		t.Fatal("Should fail to decrypt with wrong key")
+	if err := store1.SaveKeyShare(keyID, shareData); err != nil {
+		t.Fatalf("SaveKeyShare: %v", err)
 	}
 
-	t.Log("Wrong key rejected ✓")
+	// Try to read with different secret — must fail with decryption
+	// error, not file-not-found.
+	store2, err := NewTSSStore(dir, secret2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store2.LoadKeyShare(keyID)
+	if err == nil {
+		t.Fatal("expected error decrypting with wrong key")
+	}
+	if !errors.Is(err, errDecryptionFailed) {
+		t.Fatalf("expected errDecryptionFailed, got: %v", err)
+	}
+}
+
+func TestDecryptEdgeCases(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := store.(*fileStore)
+
+	tests := []struct {
+		name       string
+		ciphertext []byte
+		wantErr    error
+	}{
+		{"nil input", nil, errInvalidCiphertext},
+		{"empty input", []byte{}, errInvalidCiphertext},
+		{"too short for nonce", make([]byte, 23), errInvalidCiphertext},
+		{"nonce only no tag", make([]byte, 24), errInvalidCiphertext},
+		{"nonce plus partial tag", make([]byte, 39), errInvalidCiphertext},
+		{"minimum length random bytes", func() []byte {
+			b := make([]byte, 40)
+			_, _ = rand.Read(b)
+			return b
+		}(), errDecryptionFailed},
+		{"oversized random bytes", func() []byte {
+			b := make([]byte, 1024)
+			_, _ = rand.Read(b)
+			return b
+		}(), errDecryptionFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := fs.decrypt(tt.ciphertext)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("decrypt(%d bytes): got %v, want %v",
+					len(tt.ciphertext), err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestEncryptDecryptEmpty(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := store.(*fileStore)
+
+	// Empty plaintext must round-trip.
+	ciphertext, err := fs.encrypt([]byte{})
+	if err != nil {
+		t.Fatalf("encrypt empty: %v", err)
+	}
+	// 24-byte nonce + 16-byte Poly1305 tag + 0-byte payload.
+	if len(ciphertext) != 40 {
+		t.Fatalf("encrypt empty: got %d bytes, want 40", len(ciphertext))
+	}
+	plaintext, err := fs.decrypt(ciphertext)
+	if err != nil {
+		t.Fatalf("decrypt empty: %v", err)
+	}
+	if len(plaintext) != 0 {
+		t.Fatalf("decrypt empty: got %d bytes, want 0", len(plaintext))
+	}
 }
 
 func TestTSSKeygen(t *testing.T) {
