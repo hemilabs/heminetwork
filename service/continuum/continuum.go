@@ -330,6 +330,88 @@ func (s *Server) forward(header *Header, payload any, from *Identity) {
 		header.Origin, dest, sent, fwd.TTL)
 }
 
+// forwardBroadcast relays a broadcast message to all connected peers
+// except the source.  TTL is decremented.  Called from handle() after
+// isDuplicate and whitelist checks pass.
+func (s *Server) forwardBroadcast(header *Header, payload any, from *Identity) {
+	log.Tracef("forwardBroadcast %v TTL %d", header.Origin, header.TTL)
+
+	fwd := *header
+	fwd.TTL--
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	var sent int
+	for id, t := range s.sessions {
+		if from != nil && id == *from {
+			continue
+		}
+		if err := t.WriteHeader(fwd, payload); err != nil {
+			log.Debugf("broadcast forward to %v: %v", id, err)
+		} else {
+			s.forwarded.Add(1)
+			sent++
+		}
+	}
+	log.Debugf("broadcast %v: forwarded to %d peer(s) TTL %d",
+		header.Origin, sent, fwd.TTL)
+}
+
+// Broadcast sends a command to all connected peers using the broadcast
+// primitive.  The payload type must be in broadcastWhitelist.  The
+// message is sent with BroadcastDestination and defaultTTL.  Each
+// receiver processes locally and forwards to its peers (flood + dedup).
+func (s *Server) Broadcast(cmd any) error {
+	return s.broadcastWithTTL(cmd, defaultTTL)
+}
+
+// broadcastWithTTL is the inner implementation of Broadcast.  It
+// accepts a custom TTL for testing (e.g., verifying TTL expiry).
+func (s *Server) broadcastWithTTL(cmd any, ttl uint8) error {
+	if !IsBroadcastable(cmd) {
+		return fmt.Errorf("payload type %T is not broadcastable", cmd)
+	}
+
+	pt, ok := pt2str[reflect.TypeOf(cmd)]
+	if !ok {
+		return fmt.Errorf("unknown command type: %T", cmd)
+	}
+	hash, payload, err := NewPayloadFromCommand(cmd)
+	// untested: NewPayloadFromCommand uses json.Marshal on wire types; cannot fail with valid cmd
+	if err != nil {
+		return err
+	}
+
+	dest := BroadcastDestination
+	header, err := json.Marshal(Header{
+		PayloadType: pt,
+		PayloadHash: *hash,
+		Origin:      s.secret.Identity,
+		Destination: &dest,
+		TTL:         ttl,
+	})
+	// untested: json.Marshal of Header (strings + []byte) cannot fail
+	if err != nil {
+		return err
+	}
+	msg := append(header, payload...)
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	var sent int
+	for id, t := range s.sessions {
+		if err := t.write(writeTimeout, msg); err != nil {
+			log.Debugf("broadcast to %v: %v", id, err)
+		} else {
+			sent++
+		}
+	}
+	log.Debugf("Broadcast %T: sent to %d peer(s)", cmd, sent)
+	return nil
+}
+
 func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 	// Per-session context: cancelled when handle() exits (read
 	// error, shutdown, etc.), which also stops the pingLoop.
@@ -384,7 +466,21 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 
 		// Forward: if destination is set and is not us,
 		// decrement TTL and relay to the next hop.
-		if header.Destination != nil && *header.Destination != s.secret.Identity {
+		// Broadcast: if destination is BroadcastDestination,
+		// forward to all peers except source, then fall
+		// through to local dispatch.
+		if header.Destination != nil && *header.Destination == BroadcastDestination {
+			if header.TTL == 0 {
+				log.Debugf("handle %v: broadcast TTL expired", id)
+				continue
+			}
+			if !IsBroadcastable(payload) {
+				log.Warningf("handle %v: non-broadcastable type %T dropped", id, payload)
+				continue
+			}
+			s.forwardBroadcast(header, payload, id)
+			// Fall through to dispatch for local processing.
+		} else if header.Destination != nil && *header.Destination != s.secret.Identity {
 			s.forward(header, payload, id)
 			continue
 		}
@@ -874,6 +970,12 @@ func (s *Server) SendTo(dest Identity, cmd any) error {
 func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 	log.Tracef("SendEncrypted %v %T", dest, cmd)
 
+	// Broadcast-type payloads must use Broadcast(), not point-to-point
+	// e2e encryption.  This guard prevents accidental misuse.
+	if IsBroadcastable(cmd) {
+		return ErrUseBroadcast
+	}
+
 	// Look up the inner command's PayloadType.
 	innerType, ok := pt2str[reflect.TypeOf(cmd)]
 	if !ok {
@@ -1031,9 +1133,10 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 }
 
 // addPeer adds or refreshes a peer record.  Returns true if the peer
-// was previously unknown.  Rejects self and version mismatches.
-// When updating an existing peer, preserves non-empty Address and
-// NaClPub from the old record if the new record omits them.
+// was previously unknown.  Rejects self, version mismatches, and
+// missing or malformed NaClPub (e2e encryption is mandatory).
+// When updating an existing peer, preserves non-empty Address from
+// the old record if the new record omits it.
 func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 	log.Tracef("addPeer %v", pr.Identity)
 
@@ -1042,12 +1145,19 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 			pr.Identity, pr.Version, ProtocolVersion)
 		return false
 	}
-	// Reject malformed NaCl public keys.  Zero-length is fine (peer
-	// may not support e2e yet) but any other length must be exactly
-	// NaClPubSize.
-	if len(pr.NaClPub) > 0 && len(pr.NaClPub) != NaClPubSize {
-		log.Warningf("addPeer %v: bad NaClPub length %d, rejected",
-			pr.Identity, len(pr.NaClPub))
+	// Reject peers without NaCl public keys.  E2e encryption is
+	// mandatory — every peer MUST have a valid NaClPub.
+	if len(pr.NaClPub) != NaClPubSize {
+		log.Warningf("addPeer %v: bad NaClPub length %d (want %d), rejected",
+			pr.Identity, len(pr.NaClPub), NaClPubSize)
+		return false
+	}
+	// Reject all-zeros NaClPub — cryptographically useless and
+	// collides with the BroadcastDestination sentinel.
+	var zeroKey [NaClPubSize]byte
+	if bytes.Equal(pr.NaClPub, zeroKey[:]) {
+		log.Warningf("addPeer %v: all-zeros NaClPub, rejected",
+			pr.Identity)
 		return false
 	}
 
@@ -1061,14 +1171,11 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 
 	existing, existed := s.peers[pr.Identity]
 	if existed {
-		// Preserve fields the caller doesn't have.  The listen
-		// path knows NaClPub but not Address; gossip may know
-		// Address but not NaClPub (yet).
+		// Preserve Address if the caller doesn't have it.
+		// The listen path learns NaClPub (from handshake) but
+		// not Address; gossip may later provide Address.
 		if pr.Address == "" && existing.Address != "" {
 			pr.Address = existing.Address
-		}
-		if len(pr.NaClPub) == 0 && len(existing.NaClPub) > 0 {
-			pr.NaClPub = existing.NaClPub
 		}
 	}
 
