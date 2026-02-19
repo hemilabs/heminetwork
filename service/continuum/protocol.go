@@ -546,6 +546,7 @@ func (n *Nonce) Next() *[TransportNonceSize]byte {
 func NewNonce() (*Nonce, error) {
 	n := &Nonce{}
 	_, err := rand.Read(n.key[:])
+	// untested: rand.Read fails only on OS entropy exhaustion (unrecoverable)
 	if err != nil {
 		return nil, err
 	}
@@ -667,6 +668,7 @@ func (s Secret) NaClPrivateKey() (*ecdh.PrivateKey, error) {
 // the derived private key.
 func (s Secret) NaClPublicKey() ([]byte, error) {
 	priv, err := s.NaClPrivateKey()
+	// untested: NaClPrivateKey derives curve25519 from valid secp256k1; cannot fail with valid secret
 	if err != nil {
 		return nil, err
 	}
@@ -682,6 +684,7 @@ func SealBox(plaintext []byte, recipientPub []byte, senderPriv *ecdh.PrivateKey,
 	}
 
 	var nonce [24]byte
+	// untested: rand.Read fails only on OS entropy exhaustion
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, err
 	}
@@ -759,6 +762,7 @@ func NewSecretFromString(secret string) (*Secret, error) {
 // NewSecret returns a secret type with a randomly generated private key.
 func NewSecret() (*Secret, error) {
 	s, err := secp256k1.GeneratePrivateKey()
+	// untested: secp256k1.GeneratePrivateKey wraps crypto/rand, fails only on OS entropy exhaustion
 	if err != nil {
 		return nil, err
 	}
@@ -850,6 +854,7 @@ func (t *Transport) Curve() string {
 // This is the listening side.
 func NewTransportFromCurve(curve ecdh.Curve) (*Transport, error) {
 	privateKey, err := curve.GenerateKey(rand.Reader)
+	// untested: ecdh.GenerateKey wraps rand.Reader, fails only on OS entropy exhaustion
 	if err != nil {
 		return nil, err
 	}
@@ -882,6 +887,7 @@ func (t *Transport) setTransportFromPublicKey(publicKey []byte) error {
 		}
 
 		privateKey, err := curve.GenerateKey(rand.Reader)
+		// untested: ecdh.GenerateKey wraps rand.Reader, fails only on OS entropy exhaustion
 		if err != nil {
 			return err
 		}
@@ -914,6 +920,7 @@ func (t *Transport) Close() error {
 func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, *[32]byte, error) {
 	// Shared secret seed.
 	shared, err := us.ECDH(them)
+	// untested: ECDH cannot fail with two valid keys from the same curve
 	if err != nil {
 		return nil, nil, err
 	}
@@ -923,6 +930,7 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, *[32]byt
 	// Derive server-to-client key.
 	var s2cKey [32]byte
 	s2c := hkdf.New(sha256.New, shared, hkdfSalt, []byte("continuum-s2c-v1"))
+	// untested: HKDF is a PRF with no I/O; io.ReadFull on it cannot fail
 	if _, err := io.ReadFull(s2c, s2cKey[:]); err != nil {
 		return nil, nil, err
 	}
@@ -930,6 +938,7 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, *[32]byt
 	// Derive client-to-server key.
 	var c2sKey [32]byte
 	c2s := hkdf.New(sha256.New, shared, hkdfSalt, []byte("continuum-c2s-v1"))
+	// untested: HKDF is a PRF with no I/O; io.ReadFull on it cannot fail
 	if _, err := io.ReadFull(c2s, c2sKey[:]); err != nil {
 		return nil, nil, err
 	}
@@ -976,6 +985,7 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	// If KeyExchange is aborted the connection is killed.
 	defer func() {
 		if !greatSuccess {
+			// untested: Close() error is logged not returned; cosmetic on real connections
 			if err := conn.Close(); err != nil {
 				log.Errorf("KeyExchange: %v", err)
 			}
@@ -985,11 +995,13 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	// The key exchange should finish in less than 5 seconds.
 	// XXX we should get rid of context here or use it instead of the deadline
 	timeout := 5 * time.Second
+	// untested: SetDeadline cannot fail on real net.TCPConn; requires mock net.Conn
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return err
 	}
 	if t.isServer {
 		// Send TransportRequest
+		// untested: json.Encode of TransportRequest (only []byte + uint32) cannot fail
 		if err := json.NewEncoder(conn).Encode(TransportRequest{
 			Version:   TransportVersion,
 			PublicKey: t.us.PublicKey().Bytes(),
@@ -1035,16 +1047,19 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		return err
 	}
 	s2cKey, c2sKey, err := KeyExchange(t.us, them)
+	// untested: KeyExchange wraps ECDH; cannot fail with valid curve keys
 	if err != nil {
 		return err
 	}
 
 	nonce, err := NewNonce()
+	// untested: NewNonce wraps rand.Read; fails only on OS entropy exhaustion
 	if err != nil {
 		return err
 	}
 
 	// Reset deadline for connection
+	// untested: SetDeadline cannot fail on real net.TCPConn; requires mock net.Conn
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
@@ -1085,6 +1100,7 @@ func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
 		t.encryptKey)
 
 	// diagnostic
+	// untested: diagnostic assertion; unreachable unless secretbox implementation is broken
 	if ts != len(blob)-3 {
 		panic(fmt.Errorf("encryption diagnostic: wanted %v got %v",
 			ts, len(blob)))
@@ -1120,11 +1136,13 @@ func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
 func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName string) (*Identity, string, []byte, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
+	// untested: rand.Read fails only on OS entropy exhaustion
 	if err != nil {
 		return nil, "", nil, err
 	}
 
 	naclPub, err := secret.NaClPublicKey()
+	// untested: NaClPublicKey wraps NaClPrivateKey; cannot fail with valid secret
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("nacl public key: %w", err)
 	}
@@ -1237,6 +1255,7 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 			return nil, err
 		}
 		at += n
+		// untested: partial 3-byte size read; net.Pipe and TCP deliver small reads atomically
 		if at < 3 {
 			continue
 		}
@@ -1244,6 +1263,7 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		break
 	}
 
+	// untested: 3-byte size field max (16MB) equals TransportMaxSize; unreachable with valid framing
 	if sizeR > TransportMaxSize {
 		return nil, ErrMessageTooLarge
 	}
@@ -1332,6 +1352,7 @@ func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 			return err
 		}
 	} else {
+		// untested: SetWriteDeadline cannot fail on real net.TCPConn; requires mock net.Conn
 		if err := t.conn.SetWriteDeadline(time.Time{}); err != nil {
 			return err
 		}
@@ -1344,6 +1365,7 @@ func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 			return err
 		}
 		at += n
+		// untested: partial write loop; net.Pipe writes atomically, TCP buffers make this near-impossible
 		if at < len(request) {
 			continue
 		}
@@ -1361,6 +1383,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		return fmt.Errorf("invalid command type: %T", cmd)
 	}
 	hash, payload, err := NewPayloadFromCommand(cmd)
+	// untested: NewPayloadFromCommand uses json.Marshal on wire types; cannot fail with valid cmd
 	if err != nil {
 		return err
 	}
@@ -1371,6 +1394,7 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		Destination: nil,
 		TTL:         1, // expires at the receiver
 	})
+	// untested: json.Marshal of Header (strings + []byte) cannot fail
 	if err != nil {
 		return err
 	}
@@ -1386,6 +1410,7 @@ func (t *Transport) WriteTo(origin, destination Identity, ttlHops uint8, cmd any
 		return fmt.Errorf("invalid command type: %T", cmd)
 	}
 	hash, payload, err := NewPayloadFromCommand(cmd)
+	// untested: NewPayloadFromCommand uses json.Marshal on wire types; cannot fail with valid cmd
 	if err != nil {
 		return err
 	}
@@ -1396,6 +1421,7 @@ func (t *Transport) WriteTo(origin, destination Identity, ttlHops uint8, cmd any
 		Destination: &destination,
 		TTL:         ttlHops,
 	})
+	// untested: json.Marshal of Header (strings + []byte) cannot fail
 	if err != nil {
 		return err
 	}
@@ -1411,6 +1437,7 @@ func (t *Transport) WriteHeader(h Header, cmd any) error {
 		return err
 	}
 	header, err := json.Marshal(h)
+	// untested: json.Marshal of Header (strings + []byte) cannot fail
 	if err != nil {
 		return err
 	}
