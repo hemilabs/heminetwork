@@ -348,10 +348,11 @@ type EncryptedPayload struct {
 // KeygenRequest initiates a key generation ceremony.
 // Sent by the router to all participating parties.
 type KeygenRequest struct {
-	CeremonyID CeremonyID           `json:"ceremonyid"` // Unique ceremony identifier
-	Curve      string               `json:"curve"`      // Curve for TSS
-	Committee  tss.UnSortedPartyIDs `json:"committee"`  // Signing committee
-	Threshold  int                  `json:"threshold"`  // Threshold (t, need t+1 to sign)
+	CeremonyID  CeremonyID           `json:"ceremonyid"`  // Unique ceremony identifier
+	Curve       string               `json:"curve"`       // Curve for TSS
+	Committee   tss.UnSortedPartyIDs `json:"committee"`   // Signing committee
+	Threshold   int                  `json:"threshold"`   // Threshold (t, need t+1 to sign)
+	Coordinator Identity             `json:"coordinator"` // First elected member; broadcasts result
 }
 
 // KeygenResponse acknowledges a keygen request.
@@ -527,6 +528,7 @@ type PeerListAdminResponse struct {
 type PeerAdminRecord struct {
 	PeerRecord
 	Connected bool `json:"connected"` // has active session
+	Self      bool `json:"self"`      // true if this is the server's own record
 }
 
 // CeremonyStatusRequest queries the status of a specific ceremony.
