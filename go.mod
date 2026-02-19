@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork/v2
 
 go 1.26
 
-toolchain go1.26.4
+toolchain go1.26.2
 
 require (
 	codeberg.org/miekg/dns v0.5.26
@@ -29,7 +29,8 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/tyler-smith/go-bip39 v1.1.0
-	golang.org/x/crypto v0.52.0
+	golang.org/x/crypto v0.50.0
+	golang.org/x/sync v0.18.0
 )
 
 require (
@@ -115,9 +116,8 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/exp v0.0.0-20250711185948-6ae5c78190dc // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sync v0.18.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
