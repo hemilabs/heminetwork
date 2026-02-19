@@ -1213,6 +1213,17 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	return s.isHealthy(ctx), Info{Online: true}, nil
 }
 
+// sendErr sends err to errC unless ctx is already cancelled.
+// Multiple goroutines may race to report errors on the same
+// unbuffered channel; without this guard the losers block
+// forever and leak their defer wg.Done().
+func sendErr(ctx context.Context, errC chan<- error, err error) {
+	select {
+	case <-ctx.Done():
+	case errC <- err:
+	}
+}
+
 func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	defer s.wg.Done()
 
@@ -1222,7 +1233,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	d := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := d.DialContext(ctx, "tcp", c)
 	if err != nil {
-		errC <- err
+		sendErr(ctx, errC, err)
 		return
 	}
 
@@ -1237,36 +1248,41 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	}()
 
 	if err := transport.KeyExchange(ctx, conn); err != nil {
-		errC <- err
+		sendErr(ctx, errC, err)
 		return
 	}
 	them, theirDNS, naclPub, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
 	if err != nil {
-		errC <- err
+		sendErr(ctx, errC, err)
 		return
 	}
 
 	if s.cfg.DNSRequired {
 		if theirDNS == "" {
-			errC <- errors.New("remote did not advertise dns name")
+			sendErr(ctx, errC, errors.New("remote did not advertise dns name"))
 			return
 		}
 
-		// XXX potential bug; DNS is not an authentication system, and layers
-		// below will prevent impersonating a node, but regardless:
-		// The DNS name to check the records for here is passed as an option
-		// during the handshake message exchange. As such, client verifies
-		// against theirDNS (what the server claims), not the original hostname
-		// the client connected to. This could allow for:
-		// Client connects to "server.example.com:1234"
-		//     ↓ MITM intercepts
-		// MITM presents identity_m with theirDNS = "attacker.com"
-		//     ↓ Client verifies
-		// Client looks up attacker.com TXT → matches identity_m ✓
-		//     ↓
-		// Client believes it is connected to the legitimate server node.
-		if err := s.verifyDNSIdentity(ctx, theirDNS, *them); err != nil {
-			errC <- fmt.Errorf("dns verify: %w", err)
+		// Pin DNS verification to the hostname we dialed, not
+		// what the remote claims.  Without this, a MITM who
+		// intercepts the TCP connection can present their own
+		// identity with theirDNS pointing to attacker-controlled
+		// DNS, and the tautological check passes.  By verifying
+		// against the dial target we ensure the TXT record for
+		// the hostname the operator configured matches the
+		// identity that completed the handshake.
+		//
+		// When the dial target is an IP (no hostname to pin),
+		// fall back to theirDNS — the operator explicitly chose
+		// to connect by IP so there is no hostname expectation.
+		verifyHost := theirDNS
+		if host, _, err := net.SplitHostPort(c); err == nil {
+			if net.ParseIP(host) == nil {
+				verifyHost = host
+			}
+		}
+		if err := s.verifyDNSIdentity(ctx, verifyHost, *them); err != nil {
+			sendErr(ctx, errC, fmt.Errorf("dns verify: %w", err))
 			return
 		}
 	}
@@ -1315,7 +1331,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 
 	listener, err := s.listenConfig.Listen(ctx, "tcp", s.cfg.ListenAddress)
 	if err != nil {
-		errC <- err
+		sendErr(ctx, errC, err)
 		return
 	}
 	s.mtx.Lock()
