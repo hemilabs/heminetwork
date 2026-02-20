@@ -1439,8 +1439,15 @@ func TestDNSIdentityMismatch(t *testing.T) {
 	// B's connect() gets the error from handshake read timeout or
 	// connection reset.
 
-	// Give B time to attempt and fail.
-	time.Sleep(500 * time.Millisecond)
+	// Negative assertion: A should reject B's connection due to DNS
+	// mismatch.  Bounded wait for the connect+reject cycle to complete.
+	// B dials A, KX+handshake completes, A does DNS verify, rejects,
+	// closes conn.  Context-cancellable so the test won't hang.
+	select {
+	case <-ctx.Done():
+		t.Fatal("context cancelled during DNS mismatch check")
+	case <-time.After(500 * time.Millisecond):
+	}
 
 	// A should have no sessions (rejected B).
 	serverA.mtx.RLock()
@@ -8339,26 +8346,14 @@ func TestThreeNodeBroadcast(t *testing.T) {
 	waitForSessions(t, servers[2], 1, 5*time.Second)
 
 	// Wait for gossip convergence: all 3 know all 3 peers.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		allKnown := true
+	waitForCondition(t, "gossip convergence", 10*time.Second, func() bool {
 		for i := 0; i < 3; i++ {
 			if servers[i].PeerCount() < 2 {
-				allKnown = false
-				break
+				return false
 			}
 		}
-		if allKnown {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	for i := 0; i < 3; i++ {
-		if servers[i].PeerCount() < 2 {
-			t.Fatalf("node %d: only %d peers, want 2",
-				i, servers[i].PeerCount())
-		}
-	}
+		return true
+	})
 
 	// Node A broadcasts a CeremonyResult.
 	cid := NewCeremonyID()
@@ -8370,13 +8365,10 @@ func TestThreeNodeBroadcast(t *testing.T) {
 		t.Fatalf("Broadcast: %v", err)
 	}
 
-	// Give time for propagation.
-	time.Sleep(500 * time.Millisecond)
-
-	// Verify: the broadcast should have been forwarded by B to C.
-	if servers[1].forwarded.Load() == 0 {
-		t.Fatal("node B should have forwarded the broadcast")
-	}
+	// Wait for B to forward the broadcast.
+	waitForCondition(t, "B forwarded broadcast", 5*time.Second, func() bool {
+		return servers[1].forwarded.Load() > 0
+	})
 
 	// Dedup: A should NOT have received the broadcast back from B.
 	// The isDuplicate check in A's handle() should drop it.
@@ -8431,26 +8423,14 @@ func TestBroadcastDedup(t *testing.T) {
 	waitForSessions(t, servers[2], 1, 5*time.Second)
 
 	// Wait for gossip convergence.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		allKnown := true
+	waitForCondition(t, "gossip convergence", 10*time.Second, func() bool {
 		for i := 0; i < 3; i++ {
 			if servers[i].PeerCount() < 2 {
-				allKnown = false
-				break
+				return false
 			}
 		}
-		if allKnown {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	for i := 0; i < 3; i++ {
-		if servers[i].PeerCount() < 2 {
-			t.Fatalf("node %d: only %d peers, want 2",
-				i, servers[i].PeerCount())
-		}
-	}
+		return true
+	})
 
 	// Record B's forwarded counter before the broadcast.
 	fwdBefore := servers[1].forwarded.Load()
@@ -8465,22 +8445,28 @@ func TestBroadcastDedup(t *testing.T) {
 		t.Fatalf("Broadcast 1: %v", err)
 	}
 
-	// Wait for propagation.
-	time.Sleep(500 * time.Millisecond)
+	// Wait for B to forward the first broadcast.
+	waitForCondition(t, "B forwarded first broadcast", 5*time.Second, func() bool {
+		return servers[1].forwarded.Load() > fwdBefore
+	})
 
 	fwdAfterFirst := servers[1].forwarded.Load()
-	firstForwards := fwdAfterFirst - fwdBefore
-	if firstForwards == 0 {
-		t.Fatal("B should have forwarded the first broadcast")
-	}
 
 	// A broadcasts the SAME CeremonyResult again (same payload hash).
 	if err := servers[0].Broadcast(result); err != nil {
 		t.Fatalf("Broadcast 2: %v", err)
 	}
 
-	// Wait for potential propagation.
-	time.Sleep(500 * time.Millisecond)
+	// Negative assertion: wait long enough for the duplicate to be
+	// processed (if it were going to be forwarded), then verify it
+	// was dropped.  Bounded wait for a non-event — the standard
+	// pattern for proving something did NOT happen in a distributed
+	// system.  Context-cancellable so the test won't hang on failure.
+	select {
+	case <-ctx.Done():
+		t.Fatal("context cancelled during dedup check")
+	case <-time.After(500 * time.Millisecond):
+	}
 
 	fwdAfterSecond := servers[1].forwarded.Load()
 	secondForwards := fwdAfterSecond - fwdAfterFirst
@@ -8542,26 +8528,14 @@ func TestBroadcastTTLExpiry(t *testing.T) {
 	waitForSessions(t, servers[2], 1, 5*time.Second)
 
 	// Wait for gossip convergence.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		allKnown := true
+	waitForCondition(t, "gossip convergence", 10*time.Second, func() bool {
 		for i := 0; i < 3; i++ {
 			if servers[i].PeerCount() < 2 {
-				allKnown = false
-				break
+				return false
 			}
 		}
-		if allKnown {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	for i := 0; i < 3; i++ {
-		if servers[i].PeerCount() < 2 {
-			t.Fatalf("node %d: only %d peers, want 2",
-				i, servers[i].PeerCount())
-		}
-	}
+		return true
+	})
 
 	// Record C's forwarded counter before the broadcast.
 	cFwdBefore := servers[2].forwarded.Load()
@@ -8577,12 +8551,17 @@ func TestBroadcastTTLExpiry(t *testing.T) {
 		t.Fatalf("broadcastWithTTL: %v", err)
 	}
 
-	// Wait for propagation.
-	time.Sleep(500 * time.Millisecond)
+	// Wait for B to forward (positive assertion).
+	waitForCondition(t, "B forwarded broadcast", 5*time.Second, func() bool {
+		return servers[1].forwarded.Load() > 0
+	})
 
-	// B should have forwarded (it received at TTL=1).
-	if servers[1].forwarded.Load() == 0 {
-		t.Fatal("B should have forwarded the broadcast")
+	// Negative assertion: C received at TTL=0 and should not forward.
+	// Bounded wait for C to process the message after B forwarded it.
+	select {
+	case <-ctx.Done():
+		t.Fatal("context cancelled during TTL check")
+	case <-time.After(200 * time.Millisecond):
 	}
 
 	// C should NOT have forwarded (it received at TTL=0, dropped).
@@ -9209,40 +9188,7 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 
 	// Wait for gossip convergence: all 3 know all 3 peers AND all
 	// have NaClPub populated AND all have sessions to each other.
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		ready := true
-		for i := 0; i < 3; i++ {
-			if servers[i].PeerCount() < 2 {
-				ready = false
-				break
-			}
-			servers[i].mtx.RLock()
-			sessions := len(servers[i].sessions)
-			allHaveNaCl := true
-			for _, pr := range servers[i].peers {
-				if len(pr.NaClPub) != NaClPubSize {
-					allHaveNaCl = false
-					break
-				}
-			}
-			servers[i].mtx.RUnlock()
-			if sessions < 2 || !allHaveNaCl {
-				ready = false
-				break
-			}
-		}
-		if ready {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	for i := 0; i < 3; i++ {
-		if servers[i].PeerCount() < 2 {
-			t.Fatalf("node %d: only %d peers, want 2",
-				i, servers[i].PeerCount())
-		}
-	}
+	waitForFullMesh(t, servers, 3, 30*time.Second)
 
 	// Admin client: connect to node A.
 	adminSecret, err := NewSecret()
@@ -9337,48 +9283,8 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 		t.Logf("sent keygen to %v", dest)
 	}
 
-	// Wait for ceremony completion: poll ceremony status on
-	// coordinator's server.
-	var coordServer *Server
-	for _, s := range servers {
-		if s.secret.Identity == coordinator {
-			coordServer = s
-			break
-		}
-	}
-	if coordServer == nil {
-		t.Fatal("coordinator server not found")
-	}
-
-	success := false
-	deadline = time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		coordServer.mtx.RLock()
-		ci, ok := coordServer.ceremonies[ceremonyID]
-		if ok && ci.Status == "complete" {
-			success = true
-		}
-		coordServer.mtx.RUnlock()
-		if success {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if !success {
-		// Log ceremony status for debugging.
-		for i, s := range servers {
-			s.mtx.RLock()
-			ci, ok := s.ceremonies[ceremonyID]
-			s.mtx.RUnlock()
-			if ok {
-				t.Logf("node %d: ceremony status=%s error=%q",
-					i, ci.Status, ci.Error)
-			} else {
-				t.Logf("node %d: ceremony not found", i)
-			}
-		}
-		t.Fatal("keygen ceremony did not complete within 60s")
-	}
+	// Wait for ceremony completion.
+	waitForCeremony(t, servers, ceremonyID, coordinator, 60*time.Second)
 	t.Logf("keygen ceremony %s complete", ceremonyID)
 
 	// Verify all 3 committee members completed.
@@ -9447,43 +9353,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 
 	// Wait for gossip convergence: every node knows all n peers,
 	// all have NaClPub, and every node has sessions to all n-1 others.
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		ready := true
-		for i := 0; i < n; i++ {
-			if servers[i].PeerCount() < n-1 {
-				ready = false
-				break
-			}
-			servers[i].mtx.RLock()
-			sessions := len(servers[i].sessions)
-			allHaveNaCl := true
-			for _, pr := range servers[i].peers {
-				if len(pr.NaClPub) != NaClPubSize {
-					allHaveNaCl = false
-					break
-				}
-			}
-			servers[i].mtx.RUnlock()
-			if sessions < n-1 || !allHaveNaCl {
-				ready = false
-				break
-			}
-		}
-		if ready {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	for i := 0; i < n; i++ {
-		servers[i].mtx.RLock()
-		sessions := len(servers[i].sessions)
-		servers[i].mtx.RUnlock()
-		if sessions < n-1 {
-			t.Fatalf("node %d: only %d sessions, want %d",
-				i, sessions, n-1)
-		}
-	}
+	waitForFullMesh(t, servers, n, 30*time.Second)
 	t.Log("gossip converged")
 
 	// Admin client: connect to node 0.
@@ -9573,47 +9443,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 	}
 
 	// Wait for ceremony completion on the coordinator.
-	var coordServer *Server
-	for _, s := range servers {
-		if s.secret.Identity == coordinator {
-			coordServer = s
-			break
-		}
-	}
-	if coordServer == nil {
-		t.Fatal("coordinator server not found")
-	}
-
-	success := false
-	deadline = time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		coordServer.mtx.RLock()
-		ci, ok := coordServer.ceremonies[ceremonyID]
-		if ok && (ci.Status == "complete" || ci.Status == "failed") {
-			if ci.Status == "complete" {
-				success = true
-			}
-		}
-		coordServer.mtx.RUnlock()
-		if success {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if !success {
-		for i, s := range servers {
-			s.mtx.RLock()
-			ci, ok := s.ceremonies[ceremonyID]
-			s.mtx.RUnlock()
-			if ok {
-				t.Logf("node %d: ceremony status=%s error=%q",
-					i, ci.Status, ci.Error)
-			} else {
-				t.Logf("node %d: ceremony not found", i)
-			}
-		}
-		t.Fatal("keygen ceremony did not complete within 60s")
-	}
+	waitForCeremony(t, servers, ceremonyID, coordinator, 60*time.Second)
 	t.Logf("keygen ceremony %s complete", ceremonyID)
 
 	// Assert 1: all 3 committee members completed.
@@ -9691,24 +9521,17 @@ func TestFiveNodeKeygen(t *testing.T) {
 	t.Log("all committee members have consistent public key")
 
 	// Assert 3: ALL 5 nodes received the CeremonyResult broadcast.
-	// Give non-committee nodes a moment to receive the broadcast.
-	broadcastDeadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(broadcastDeadline) {
-		allSeen := true
+	waitForCondition(t, "CeremonyResult broadcast", 10*time.Second, func() bool {
 		for _, s := range servers {
 			s.mtx.RLock()
 			_, ok := s.ceremonies[ceremonyID]
 			s.mtx.RUnlock()
 			if !ok {
-				allSeen = false
-				break
+				return false
 			}
 		}
-		if allSeen {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
+		return true
+	})
 	for i, s := range servers {
 		s.mtx.RLock()
 		ci, ok := s.ceremonies[ceremonyID]
@@ -9936,7 +9759,12 @@ func TestSeedDNSResolution(t *testing.T) {
 	errC := make(chan error, 1)
 	go func() { errC <- s.Run(ctx) }()
 	waitForListenAddress(t, s, 2*time.Second)
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the seed resolution codepath to execute and add the
+	// seed as a known peer.  The connect to port 45067 will fail
+	// (nothing listening), but the DNS lookup should succeed.
+	waitForCondition(t, "seed peer discovered", 5*time.Second, func() bool {
+		return s.PeerCount() > 0
+	})
 	cancel()
 	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
@@ -10048,7 +9876,10 @@ func TestConnectRandomPicksPeer(t *testing.T) {
 		NaClPub: naclPub, Version: ProtocolVersion, LastSeen: time.Now().Unix(),
 	})
 	s.connectRandom(ctx)
-	time.Sleep(200 * time.Millisecond)
+	// connectPeer goroutine dials 127.0.0.1:1 (ECONNREFUSED
+	// immediately).  No synchronization needed — the goroutine
+	// is tracked by s.wg and collected on shutdown.
+
 	// No candidates — no-op.
 	s.mtx.Lock()
 	for id := range s.peers {
@@ -10369,7 +10200,6 @@ func TestDispatchTSSMessageRetryThenSuccess(t *testing.T) {
 		Data:       data,
 	})
 
-	time.Sleep(400 * time.Millisecond)
 	s.wg.Wait()
 
 	mock.mu.Lock()
@@ -10403,7 +10233,6 @@ func TestDispatchTSSMessageRetryContextCancel(t *testing.T) {
 		Signature: sig, Data: data,
 	})
 
-	time.Sleep(30 * time.Millisecond)
 	cancel()
 	s.wg.Wait()
 }
@@ -10439,7 +10268,6 @@ func TestDispatchTSSMessageRetryNonCeremonyError(t *testing.T) {
 		Signature: sig, Data: data,
 	})
 
-	time.Sleep(200 * time.Millisecond)
 	s.wg.Wait()
 }
 
@@ -10699,13 +10527,10 @@ func TestFiveNodeKeygenAndSign(t *testing.T) {
 
 func waitForFullMesh(t *testing.T, servers []*Server, n int, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		ready := true
+	waitForCondition(t, "mesh did not converge", timeout, func() bool {
 		for i := 0; i < n; i++ {
 			if servers[i].PeerCount() < n-1 {
-				ready = false
-				break
+				return false
 			}
 			servers[i].mtx.RLock()
 			sess := len(servers[i].sessions)
@@ -10718,16 +10543,11 @@ func waitForFullMesh(t *testing.T, servers []*Server, n int, timeout time.Durati
 			}
 			servers[i].mtx.RUnlock()
 			if sess < n-1 || !allNaCl {
-				ready = false
-				break
+				return false
 			}
 		}
-		if ready {
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	t.Fatal("mesh did not converge")
+		return true
+	})
 }
 
 func adminConnect(t *testing.T, ctx context.Context, addr string) (*Secret, *Transport) {
@@ -10777,8 +10597,11 @@ func waitForCeremony(t *testing.T, servers []*Server, cid CeremonyID, coord Iden
 	if cs == nil {
 		t.Fatal("coordinator not found")
 	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
 		cs.mtx.RLock()
 		ci, ok := cs.ceremonies[cid]
 		cs.mtx.RUnlock()
@@ -10788,17 +10611,20 @@ func waitForCeremony(t *testing.T, servers []*Server, cid CeremonyID, coord Iden
 		if ok && ci.Status == "failed" {
 			t.Fatalf("ceremony failed: %s", ci.Error)
 		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	for i, s := range servers {
-		s.mtx.RLock()
-		ci, ok := s.ceremonies[cid]
-		s.mtx.RUnlock()
-		if ok {
-			t.Logf("node %d: status=%s error=%q", i, ci.Status, ci.Error)
-		} else {
-			t.Logf("node %d: not found", i)
+		select {
+		case <-ctx.Done():
+			for i, s := range servers {
+				s.mtx.RLock()
+				ci, ok := s.ceremonies[cid]
+				s.mtx.RUnlock()
+				if ok {
+					t.Logf("node %d: status=%s error=%q", i, ci.Status, ci.Error)
+				} else {
+					t.Logf("node %d: not found", i)
+				}
+			}
+			t.Fatal("ceremony timed out")
+		case <-tick.C:
 		}
 	}
-	t.Fatal("ceremony timed out")
 }
