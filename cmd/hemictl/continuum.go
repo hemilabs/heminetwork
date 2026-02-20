@@ -140,9 +140,14 @@ func continuumctl(pctx context.Context, flags []string) error {
 // continuumReadResponse reads from the transport, discarding gossip
 // messages (PeerNotify, PeerListRequest, PingRequest) until we get a
 // message of a type other than gossip.  Returns an error after 20
-// reads without a match.
-func continuumReadResponse(t *continuum.Transport) (any, error) {
+// reads without a match or if ctx is cancelled.
+func continuumReadResponse(ctx context.Context, t *continuum.Transport) (any, error) {
 	for i := 0; i < 20; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 		_, cmd, err := t.Read()
 		if err != nil {
 			return nil, fmt.Errorf("read: %w", err)
@@ -172,7 +177,7 @@ func continuumPeers(ctx context.Context) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	cmd, err := continuumReadResponse(t)
+	cmd, err := continuumReadResponse(ctx, t)
 	if err != nil {
 		return err
 	}
@@ -206,7 +211,7 @@ func continuumStatus(ctx context.Context, cidHex string) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	cmd, err := continuumReadResponse(t)
+	cmd, err := continuumReadResponse(ctx, t)
 	if err != nil {
 		return err
 	}
@@ -233,7 +238,7 @@ func continuumList(ctx context.Context) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	cmd, err := continuumReadResponse(t)
+	cmd, err := continuumReadResponse(ctx, t)
 	if err != nil {
 		return err
 	}
@@ -300,7 +305,7 @@ func continuumKeygen(ctx context.Context, args map[string]string) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	cmd, err := continuumReadResponse(t)
+	cmd, err := continuumReadResponse(ctx, t)
 	if err != nil {
 		return err
 	}
