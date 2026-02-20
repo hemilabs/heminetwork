@@ -526,7 +526,7 @@ func (t *tssImpl) HandleMessage(from Identity, ceremonyID CeremonyID, data []byt
 	t.ceremoniesMu.Unlock()
 
 	if !ok {
-		return errors.New("unknown ceremony")
+		return ErrUnknownCeremony
 	}
 
 	if c.ctype == CeremonyReshare {
