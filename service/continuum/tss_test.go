@@ -51,7 +51,17 @@ func (tr *tssNetworkTransport) Send(to Identity, ceremonyID CeremonyID, data []b
 
 	if ok {
 		go func() {
-			_ = node.tss.HandleMessage(from, ceremonyID, data)
+			// Retry until the remote ceremony is registered or
+			// we exceed a reasonable limit.  Concurrent Reshare
+			// calls may register their ceremonies after the first
+			// outbound messages are produced.
+			for i := 0; i < 50; i++ {
+				err := node.tss.HandleMessage(from, ceremonyID, data)
+				if err == nil || err.Error() != "unknown ceremony" {
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
 		}()
 	}
 	return nil
@@ -496,4 +506,581 @@ func TestTSSNetworkRouting(t *testing.T) {
 	msgCount.Add(1)
 
 	t.Logf("Messages sent to node 1: %d", msgCount.Load())
+}
+
+// =============================================================================
+// Reshare integration tests
+// =============================================================================
+
+// TestTSSKeygenReshareSign exercises the complete lifecycle:
+//
+//	keygen(3 nodes) → reshare(old={0,1,2} → new={1,2,3}) → sign(new)
+//
+// Nodes 1 and 2 overlap both committees, which exercises the XOR key
+// rotation in buildResharePartyContext and the dual-party message
+// routing in pumpReshareMessages / handleReshareMessage.
+func TestTSSKeygenReshareSign(t *testing.T) {
+	network := NewTSSNetwork(t)
+
+	// Create 4 nodes; keygen uses first 3, reshare adds 4th.
+	nodes := make([]*tssNode, 4)
+	for i := range nodes {
+		nodes[i] = network.AddNode()
+	}
+	t.Logf("nodes: %s %s %s %s",
+		nodes[0].id, nodes[1].id, nodes[2].id, nodes[3].id)
+
+	oldParties := []Identity{nodes[0].id, nodes[1].id, nodes[2].id}
+	threshold := 1 // 2-of-3
+
+	// === Keygen with old committee ===
+	t.Log("=== Keygen ===")
+	keygenCID := NewCeremonyID()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	keyIDs := make([][]byte, 3)
+	keygenErrors := make([]error, 3)
+
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			keyIDs[idx], keygenErrors[idx] = nodes[idx].tss.Keygen(
+				ctx, keygenCID, oldParties, threshold)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range keygenErrors {
+		if err != nil {
+			t.Fatalf("keygen node %d: %v", i, err)
+		}
+	}
+	keyID := keyIDs[0]
+	t.Logf("keygen complete: keyID=%x", keyID)
+
+	// === Reshare: {0,1,2} → {1,2,3} ===
+	t.Log("=== Reshare ===")
+	reshareCID := NewCeremonyID()
+	newParties := []Identity{nodes[1].id, nodes[2].id, nodes[3].id}
+
+	reshareCtx, reshareCancel := context.WithTimeout(
+		context.Background(), 3*time.Minute)
+	defer reshareCancel()
+
+	// All 4 nodes participate: node0 is old-only, node3 is new-only,
+	// nodes 1,2 are in both committees.
+	reshareErrors := make([]error, 4)
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			reshareErrors[idx] = nodes[idx].tss.Reshare(
+				reshareCtx, reshareCID, keyID,
+				oldParties, newParties, threshold, threshold)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range reshareErrors {
+		if err != nil {
+			t.Fatalf("reshare node %d: %v", i, err)
+		}
+	}
+	t.Log("reshare complete ✓")
+
+	// === Sign with new committee ===
+	t.Log("=== Sign with new committee ===")
+	signCID := NewCeremonyID()
+	data := sha256.Sum256([]byte("post-reshare signing test"))
+
+	signCtx, signCancel := context.WithTimeout(
+		context.Background(), 2*time.Minute)
+	defer signCancel()
+
+	rs := make([][2][]byte, 3)
+	signErrors := make([]error, 3)
+
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			rs[idx][0], rs[idx][1], signErrors[idx] = nodes[idx+1].tss.Sign(
+				signCtx, signCID, keyID, newParties, threshold, data)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range signErrors {
+		if err != nil {
+			t.Fatalf("sign node %d: %v", i, err)
+		}
+		t.Logf("node %d: r=%x.. s=%x..", i+1, rs[i][0][:8], rs[i][1][:8])
+	}
+	t.Log("sign after reshare ✓")
+}
+
+// TestTSSReshareDisjoint exercises resharing to a completely new committee
+// where no nodes overlap, testing the inOld/inNew-only branches.
+func TestTSSReshareDisjoint(t *testing.T) {
+	network := NewTSSNetwork(t)
+
+	nodes := make([]*tssNode, 6)
+	for i := range nodes {
+		nodes[i] = network.AddNode()
+	}
+
+	oldParties := []Identity{nodes[0].id, nodes[1].id, nodes[2].id}
+	newParties := []Identity{nodes[3].id, nodes[4].id, nodes[5].id}
+	threshold := 1
+
+	// Keygen with old committee.
+	keygenCID := NewCeremonyID()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	keyIDs := make([][]byte, 3)
+	keygenErrors := make([]error, 3)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			keyIDs[idx], keygenErrors[idx] = nodes[idx].tss.Keygen(
+				ctx, keygenCID, oldParties, threshold)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range keygenErrors {
+		if err != nil {
+			t.Fatalf("keygen node %d: %v", i, err)
+		}
+	}
+	keyID := keyIDs[0]
+
+	// Reshare: old={0,1,2} → new={3,4,5} — no overlap.
+	reshareCID := NewCeremonyID()
+	reshareCtx, reshareCancel := context.WithTimeout(
+		context.Background(), 3*time.Minute)
+	defer reshareCancel()
+
+	reshareErrors := make([]error, 6)
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			reshareErrors[idx] = nodes[idx].tss.Reshare(
+				reshareCtx, reshareCID, keyID,
+				oldParties, newParties, threshold, threshold)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range reshareErrors {
+		if err != nil {
+			t.Fatalf("reshare node %d: %v", i, err)
+		}
+	}
+
+	// Sign with new committee {3,4,5}.
+	signCID := NewCeremonyID()
+	data := sha256.Sum256([]byte("disjoint reshare test"))
+
+	signCtx, signCancel := context.WithTimeout(
+		context.Background(), 2*time.Minute)
+	defer signCancel()
+
+	signErrors := make([]error, 3)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, _, signErrors[idx] = nodes[idx+3].tss.Sign(
+				signCtx, signCID, keyID, newParties, threshold, data)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range signErrors {
+		if err != nil {
+			t.Fatalf("sign node %d: %v", i, err)
+		}
+	}
+	t.Log("disjoint reshare + sign ✓")
+}
+
+// TestTSSReshareNotInCommittee verifies the error when self is in neither.
+func TestTSSReshareNotInCommittee(t *testing.T) {
+	network := NewTSSNetwork(t)
+	node := network.AddNode()
+
+	other1, _ := NewSecret()
+	other2, _ := NewSecret()
+	other3, _ := NewSecret()
+
+	err := node.tss.Reshare(
+		context.Background(),
+		NewCeremonyID(),
+		[]byte("fake-key"),
+		[]Identity{other1.Identity, other2.Identity},
+		[]Identity{other2.Identity, other3.Identity},
+		1, 1,
+	)
+	if err == nil || err.Error() != "self not in old or new committee" {
+		t.Fatalf("expected 'self not in old or new committee', got: %v", err)
+	}
+}
+
+// TestTSSReshareCancellation verifies ctx cancellation mid-reshare.
+func TestTSSReshareCancellation(t *testing.T) {
+	network := NewTSSNetwork(t)
+
+	nodes := make([]*tssNode, 3)
+	for i := range nodes {
+		nodes[i] = network.AddNode()
+	}
+	parties := []Identity{nodes[0].id, nodes[1].id, nodes[2].id}
+	threshold := 1
+
+	// Keygen first.
+	keygenCID := NewCeremonyID()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	keyIDs := make([][]byte, 3)
+	keygenErrors := make([]error, 3)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			keyIDs[idx], keygenErrors[idx] = nodes[idx].tss.Keygen(
+				ctx, keygenCID, parties, threshold)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range keygenErrors {
+		if err != nil {
+			t.Fatalf("keygen %d: %v", i, err)
+		}
+	}
+
+	// Start reshare with a context we cancel immediately.
+	reshareCID := NewCeremonyID()
+	newNode := network.AddNode()
+	newParties := []Identity{nodes[1].id, nodes[2].id, newNode.id}
+
+	cancelCtx, cancelFunc := context.WithCancel(context.Background())
+	cancelFunc() // cancel immediately
+
+	// Only run on one node — it should fail fast.
+	err := nodes[1].tss.Reshare(
+		cancelCtx, reshareCID, keyIDs[0],
+		parties, newParties, threshold, threshold)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+}
+
+// =============================================================================
+// Error path tests — cover early-return branches in Keygen, Sign,
+// HandleMessage, and store operations.
+// =============================================================================
+
+// mockTSSStore implements TSSStore with configurable errors.
+type mockTSSStore struct {
+	preParams    *keygen.LocalPreParams
+	keyShares    map[string][]byte
+	saveErr      error
+	loadErr      error
+	deleteErr    error
+	preParamsErr error
+}
+
+func newMockTSSStore() *mockTSSStore {
+	return &mockTSSStore{keyShares: make(map[string][]byte)}
+}
+
+func (m *mockTSSStore) SaveKeyShare(keyID, share []byte) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.keyShares[string(keyID)] = share
+	return nil
+}
+
+func (m *mockTSSStore) LoadKeyShare(keyID []byte) ([]byte, error) {
+	if m.loadErr != nil {
+		return nil, m.loadErr
+	}
+	d, ok := m.keyShares[string(keyID)]
+	if !ok {
+		return nil, errors.New("key not found")
+	}
+	return d, nil
+}
+
+func (m *mockTSSStore) DeleteKeyShare(keyID []byte) error {
+	return m.deleteErr
+}
+
+func (m *mockTSSStore) GetPreParams(ctx context.Context) (*keygen.LocalPreParams, error) {
+	if m.preParamsErr != nil {
+		return nil, m.preParamsErr
+	}
+	if m.preParams != nil {
+		return m.preParams, nil
+	}
+	return nil, errors.New("no preparams")
+}
+
+func (m *mockTSSStore) SetPreParams(pp *keygen.LocalPreParams) {
+	m.preParams = pp
+}
+
+// noopTransport discards all sends.
+type noopTransport struct{}
+
+func (noopTransport) Send(Identity, CeremonyID, []byte) error { return nil }
+
+// --- Keygen error paths ---
+
+func TestKeygenGetPreParamsError(t *testing.T) {
+	secret, _ := NewSecret()
+	store := newMockTSSStore()
+	store.preParamsErr = errors.New("boom")
+	impl := NewTSS(secret.Identity, store, noopTransport{})
+
+	_, err := impl.Keygen(context.Background(), NewCeremonyID(),
+		[]Identity{secret.Identity}, 0)
+	if err == nil || !errors.Is(err, store.preParamsErr) {
+		t.Fatalf("expected preparams error, got: %v", err)
+	}
+}
+
+func TestKeygenSelfNotInParties(t *testing.T) {
+	secret, _ := NewSecret()
+	other, _ := NewSecret()
+	store := newMockTSSStore()
+	store.preParams = &keygen.LocalPreParams{} // non-nil to pass GetPreParams
+	impl := NewTSS(secret.Identity, store, noopTransport{})
+
+	_, err := impl.Keygen(context.Background(), NewCeremonyID(),
+		[]Identity{other.Identity}, 0)
+	if err == nil {
+		t.Fatal("expected error for self not in parties")
+	}
+	if err.Error() != "self not in party list" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- Sign error paths ---
+
+func TestSignLoadKeyShareError(t *testing.T) {
+	secret, _ := NewSecret()
+	store := newMockTSSStore()
+	store.loadErr = errors.New("disk read error")
+	impl := NewTSS(secret.Identity, store, noopTransport{})
+
+	_, _, err := impl.Sign(context.Background(), NewCeremonyID(),
+		[]byte("nonexistent"), []Identity{secret.Identity}, 0, [32]byte{})
+	if err == nil {
+		t.Fatal("expected load error")
+	}
+}
+
+func TestSignUnmarshalError(t *testing.T) {
+	secret, _ := NewSecret()
+	store := newMockTSSStore()
+	store.keyShares["badkey"] = []byte("not json")
+	impl := NewTSS(secret.Identity, store, noopTransport{})
+
+	_, _, err := impl.Sign(context.Background(), NewCeremonyID(),
+		[]byte("badkey"), []Identity{secret.Identity}, 0, [32]byte{})
+	if err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+}
+
+func TestSignSelfNotInParties(t *testing.T) {
+	secret, _ := NewSecret()
+	other, _ := NewSecret()
+	store := newMockTSSStore()
+
+	// Store a minimal valid key share with Ks.
+	rawKey := new(big.Int).SetBytes(other.Identity[:])
+	save := keygen.NewLocalPartySaveData(1)
+	save.Ks = []*big.Int{rawKey}
+	data, _ := json.Marshal(save)
+	store.keyShares["testkey"] = data
+	impl := NewTSS(secret.Identity, store, noopTransport{})
+
+	_, _, err := impl.Sign(context.Background(), NewCeremonyID(),
+		[]byte("testkey"), []Identity{other.Identity}, 0, [32]byte{})
+	if err == nil {
+		t.Fatal("expected self not in party list error")
+	}
+}
+
+// --- Reshare error paths ---
+
+func TestReshareLoadKeyShareError(t *testing.T) {
+	secret, _ := NewSecret()
+	store := newMockTSSStore()
+	store.loadErr = errors.New("corrupt disk")
+	impl := NewTSS(secret.Identity, store, noopTransport{})
+
+	other, _ := NewSecret()
+	err := impl.Reshare(context.Background(), NewCeremonyID(),
+		[]byte("key"),
+		[]Identity{secret.Identity}, // old (self in old → tries to load)
+		[]Identity{other.Identity},  // new
+		1, 1)
+	if err == nil {
+		t.Fatal("expected load key share error")
+	}
+}
+
+func TestReshareUnmarshalKeyShareError(t *testing.T) {
+	secret, _ := NewSecret()
+	store := newMockTSSStore()
+	store.keyShares["key"] = []byte("garbage")
+	impl := NewTSS(secret.Identity, store, noopTransport{})
+
+	other, _ := NewSecret()
+	err := impl.Reshare(context.Background(), NewCeremonyID(),
+		[]byte("key"),
+		[]Identity{secret.Identity},
+		[]Identity{other.Identity},
+		1, 1)
+	if err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+}
+
+// --- HandleMessage error paths ---
+
+func TestHandleMessageUnknownCeremony(t *testing.T) {
+	secret, _ := NewSecret()
+	impl := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{})
+
+	err := impl.HandleMessage(secret.Identity, NewCeremonyID(), []byte{0x01, 0x00})
+	if err == nil || err.Error() != "unknown ceremony" {
+		t.Fatalf("expected unknown ceremony, got: %v", err)
+	}
+}
+
+func TestHandleMessageTooShort(t *testing.T) {
+	secret, _ := NewSecret()
+	ti := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{}).(*tssImpl)
+
+	cid := NewCeremonyID()
+	ti.ceremoniesMu.Lock()
+	ti.ceremonies[cid] = &ceremony{ctype: CeremonyKeygen}
+	ti.ceremoniesMu.Unlock()
+
+	err := ti.HandleMessage(secret.Identity, cid, []byte{0x01})
+	if err == nil || err.Error() != "message too short" {
+		t.Fatalf("expected 'message too short', got: %v", err)
+	}
+}
+
+func TestHandleMessageReshareTooShort(t *testing.T) {
+	secret, _ := NewSecret()
+	ti := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{}).(*tssImpl)
+
+	cid := NewCeremonyID()
+	ti.ceremoniesMu.Lock()
+	ti.ceremonies[cid] = &ceremony{ctype: CeremonyReshare}
+	ti.ceremoniesMu.Unlock()
+
+	err := ti.HandleMessage(secret.Identity, cid, []byte{0x01, 0x02})
+	if err == nil || err.Error() != "reshare message too short" {
+		t.Fatalf("expected 'reshare message too short', got: %v", err)
+	}
+}
+
+func TestHandleMessageSenderNotInCeremony(t *testing.T) {
+	secret, _ := NewSecret()
+	other, _ := NewSecret()
+	ti := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{}).(*tssImpl)
+
+	cid := NewCeremonyID()
+	ti.ceremoniesMu.Lock()
+	ti.ceremonies[cid] = &ceremony{
+		ctype: CeremonyKeygen,
+		pids: tss.SortPartyIDs([]*tss.PartyID{
+			tss.NewPartyID(secret.String(), "s",
+				new(big.Int).SetBytes(secret.Identity[:])),
+		}),
+	}
+	ti.ceremoniesMu.Unlock()
+
+	// 'other' is not in the ceremony's pids.
+	err := ti.HandleMessage(other.Identity, cid, []byte{0x01, 0x00})
+	if err == nil || err.Error() != "sender not in ceremony" {
+		t.Fatalf("expected 'sender not in ceremony', got: %v", err)
+	}
+}
+
+// --- Store edge cases ---
+
+func TestNewTSSStoreBadDir(t *testing.T) {
+	secret, _ := NewSecret()
+	// /dev/null is not a directory — MkdirAll should fail.
+	_, err := NewTSSStore("/dev/null/impossible", secret)
+	if err == nil {
+		t.Fatal("expected error creating store in bad dir")
+	}
+}
+
+func TestSaveKeyShareWriteError(t *testing.T) {
+	secret, _ := NewSecret()
+	// Create store in a read-only directory.
+	dir := t.TempDir()
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Make directory read-only.
+	if err := os.Chmod(dir, 0o444); err != nil {
+		t.Skip("cannot set read-only permissions")
+	}
+	defer func() { _ = os.Chmod(dir, 0o755) }()
+
+	err = store.SaveKeyShare([]byte("key"), []byte("data"))
+	if err == nil {
+		t.Fatal("expected write error")
+	}
+}
+
+func TestDeleteKeyShareNonexistent(t *testing.T) {
+	secret, _ := NewSecret()
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deleting nonexistent key should not error (os.Remove returns
+	// ErrNotExist which is acceptable).
+	err = store.DeleteKeyShare([]byte("nonexistent"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetPreParamsContextCancel(t *testing.T) {
+	secret, _ := NewSecret()
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err = store.GetPreParams(ctx)
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
 }
