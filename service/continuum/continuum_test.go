@@ -9288,6 +9288,7 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 	t.Logf("keygen ceremony %s complete", ceremonyID)
 
 	// Verify all 3 committee members completed.
+	waitForCeremonyMembers(t, servers, ceremonyID, 60*time.Second)
 	for i, s := range servers {
 		s.mtx.RLock()
 		ci, ok := s.ceremonies[ceremonyID]
@@ -9446,7 +9447,9 @@ func TestFiveNodeKeygen(t *testing.T) {
 	waitForCeremony(t, servers, ceremonyID, coordinator, 60*time.Second)
 	t.Logf("keygen ceremony %s complete", ceremonyID)
 
-	// Assert 1: all 3 committee members completed.
+	// Assert 1: all 3 committee members completed — select on Done
+	// channels (local goroutine sets status after SaveKeyShare).
+	waitForCeremonyMembers(t, servers, ceremonyID, 60*time.Second)
 	for _, id := range committee {
 		for i, s := range servers {
 			if s.secret.Identity != id {
@@ -9680,12 +9683,15 @@ func TestHandleCeremonyResultExistingComplete(t *testing.T) {
 	var cid CeremonyID
 	copy(cid[:], []byte("test-existing-complete-0"))
 	s.registerCeremony(cid, CeremonyKeygen, Identity{})
+
+	// Broadcast should be a no-op for already-tracked ceremonies;
+	// the local goroutine owns the status transition.
 	s.handleCeremonyResult(CeremonyResult{CeremonyID: cid, Success: true})
 	s.mtx.RLock()
 	ci := s.ceremonies[cid]
 	s.mtx.RUnlock()
-	if ci.Status != "complete" {
-		t.Fatalf("status=%q", ci.Status)
+	if ci.Status != "running" {
+		t.Fatalf("status=%q, want running (broadcast should be no-op)", ci.Status)
 	}
 }
 
@@ -10477,6 +10483,10 @@ func TestFiveNodeKeygenAndSign(t *testing.T) {
 		}
 	}
 	waitForCeremony(t, servers, ceremonyID, committee[0], 60*time.Second)
+
+	// Wait for ALL committee members to finish keygen (including
+	// SaveKeyShare) before proceeding to sign.
+	waitForCeremonyMembers(t, servers, ceremonyID, 60*time.Second)
 	t.Log("keygen complete")
 
 	// Find keyID.
@@ -10599,32 +10609,77 @@ func waitForCeremony(t *testing.T, servers []*Server, cid CeremonyID, coord Iden
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	defer cancel()
+
+	// Phase 1: wait for ceremony to be registered (message in flight).
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
-	for {
+	var ci *CeremonyInfo
+	for ci == nil {
 		cs.mtx.RLock()
-		ci, ok := cs.ceremonies[cid]
+		ci = cs.ceremonies[cid]
 		cs.mtx.RUnlock()
-		if ok && ci.Status == "complete" {
-			return
-		}
-		if ok && ci.Status == "failed" {
-			t.Fatalf("ceremony failed: %s", ci.Error)
+		if ci != nil {
+			break
 		}
 		select {
 		case <-ctx.Done():
-			for i, s := range servers {
-				s.mtx.RLock()
-				ci, ok := s.ceremonies[cid]
-				s.mtx.RUnlock()
-				if ok {
-					t.Logf("node %d: status=%s error=%q", i, ci.Status, ci.Error)
-				} else {
-					t.Logf("node %d: not found", i)
-				}
-			}
-			t.Fatal("ceremony timed out")
+			t.Fatal("ceremony not registered")
 		case <-tick.C:
+		}
+	}
+
+	// Phase 2: wait for terminal state — no polling.
+	select {
+	case <-ctx.Done():
+		cs.mtx.RLock()
+		status := ci.Status
+		errStr := ci.Error
+		cs.mtx.RUnlock()
+		for i, s := range servers {
+			s.mtx.RLock()
+			sci, ok := s.ceremonies[cid]
+			s.mtx.RUnlock()
+			if ok {
+				t.Logf("node %d: status=%s error=%q", i, sci.Status, sci.Error)
+			} else {
+				t.Logf("node %d: not found", i)
+			}
+		}
+		t.Fatalf("ceremony timed out: status=%s error=%q", status, errStr)
+	case <-ci.ctx.Done():
+	}
+
+	// Check for failure.
+	cs.mtx.RLock()
+	if ci.Status == "failed" {
+		cs.mtx.RUnlock()
+		t.Fatalf("ceremony failed: %s", ci.Error)
+	}
+	cs.mtx.RUnlock()
+}
+
+// waitForCeremonyMembers waits for the ceremony to reach terminal
+// state on every server that has it registered.  Call after
+// waitForCeremony to ensure all committee members have finished
+// SaveKeyShare before asserting on key files or starting sign.
+func waitForCeremonyMembers(t *testing.T, servers []*Server, cid CeremonyID, timeout time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+	for i, s := range servers {
+		s.mtx.RLock()
+		ci, ok := s.ceremonies[cid]
+		s.mtx.RUnlock()
+		if !ok {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			s.mtx.RLock()
+			t.Fatalf("node %d: ceremony timed out: status=%s error=%q",
+				i, ci.Status, ci.Error)
+			s.mtx.RUnlock()
+		case <-ci.ctx.Done():
 		}
 	}
 }
