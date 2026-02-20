@@ -10024,6 +10024,65 @@ func TestElectCommitteeEqualsN(t *testing.T) {
 	}
 }
 
+func TestElectBoundary256And257(t *testing.T) {
+	// Build 257 peers.
+	peers := make([]Identity, 257)
+	for i := range peers {
+		s, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		peers[i] = s.Identity
+	}
+
+	// committee=256 is the maximum allowed.
+	result, err := Elect([]byte("boundary"), peers, 256)
+	if err != nil {
+		t.Fatalf("committee=256 should succeed: %v", err)
+	}
+	if len(result) != 256 {
+		t.Fatalf("expected 256 members, got %d", len(result))
+	}
+
+	// committee=257 must be rejected.
+	_, err = Elect([]byte("boundary"), peers, 257)
+	if err == nil {
+		t.Fatal("expected error for committee=257")
+	}
+}
+
+func FuzzElect(f *testing.F) {
+	f.Add([]byte("seed"), 3, 2)
+	f.Add([]byte{}, 1, 1)
+	f.Add([]byte("x"), 0, 1)
+	f.Add([]byte("y"), 5, 300)
+
+	// Pre-generate a pool of identities.
+	const poolSize = 300
+	pool := make([]Identity, poolSize)
+	for i := range pool {
+		s, err := NewSecret()
+		if err != nil {
+			f.Fatal(err)
+		}
+		pool[i] = s.Identity
+	}
+
+	f.Fuzz(func(t *testing.T, seed []byte, nPeers, committee int) {
+		// Clamp peer count to pool.
+		if nPeers < 0 {
+			nPeers = 0
+		}
+		if nPeers > poolSize {
+			nPeers = poolSize
+		}
+		peers := pool[:nPeers]
+
+		// Must not panic regardless of inputs.
+		_, _ = Elect(seed, peers, committee)
+	})
+}
+
 func TestIdentityBytesIsACopy(t *testing.T) {
 	s, _ := NewSecret()
 	b := s.Bytes()
