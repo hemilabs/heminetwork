@@ -60,7 +60,7 @@ func (tr *tssNetworkTransport) Send(to Identity, ceremonyID CeremonyID, data []b
 			defer tick.Stop()
 			for range 50 {
 				err := node.tss.HandleMessage(from, ceremonyID, data)
-				if err == nil || err.Error() != "unknown ceremony" {
+				if err == nil || !errors.Is(err, ErrUnknownCeremony) {
 					return
 				}
 				select {
@@ -973,8 +973,8 @@ func TestHandleMessageUnknownCeremony(t *testing.T) {
 	impl := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{})
 
 	err := impl.HandleMessage(secret.Identity, NewCeremonyID(), []byte{0x01, 0x00})
-	if err == nil || err.Error() != "unknown ceremony" {
-		t.Fatalf("expected unknown ceremony, got: %v", err)
+	if !errors.Is(err, ErrUnknownCeremony) {
+		t.Fatalf("expected ErrUnknownCeremony, got: %v", err)
 	}
 }
 
