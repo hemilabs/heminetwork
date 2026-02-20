@@ -416,6 +416,13 @@ func (c CeremonyType) String() string {
 	}
 }
 
+// Ceremony status values.
+const (
+	CeremonyRunning  = "running"
+	CeremonyComplete = "complete"
+	CeremonyFailed   = "failed"
+)
+
 // ReshareRequest initiates a reshare ceremony.
 // Sent by the router to all participating parties.
 type ReshareRequest struct {
@@ -877,6 +884,7 @@ var (
 	ErrMessageTooLarge        = errors.New("message too large")
 	ErrInvalidNaClPub         = errors.New("invalid nacl public key")
 	ErrUseBroadcast           = errors.New("broadcast-type payload: use Broadcast(), not SendEncrypted()")
+	ErrUnknownCeremony        = errors.New("unknown ceremony")
 
 	// placeholders until we decide on timeout handling
 	readTimeout  time.Duration = 4 * time.Second
