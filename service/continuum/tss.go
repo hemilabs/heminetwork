@@ -403,12 +403,15 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 	}
 
 	if inNew {
+		preParams, err := t.store.GetPreParams(ctx)
+		if err != nil {
+			return fmt.Errorf("get preparams for reshare: %w", err)
+		}
 		params := tss.NewReSharingParameters(tss.S256(), oldCtx, newCtx,
 			ourNewPid, len(oldPids), oldThreshold,
 			len(newPids), newThreshold)
-		params.SetNoProofMod()
-		params.SetNoProofFac()
 		save := keygen.NewLocalPartySaveData(len(newPids))
+		save.LocalPreParams = *preParams
 		newParty = resharing.NewLocalParty(params, save, outCh, endCh)
 	}
 
