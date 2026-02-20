@@ -55,12 +55,19 @@ func (tr *tssNetworkTransport) Send(to Identity, ceremonyID CeremonyID, data []b
 			// we exceed a reasonable limit.  Concurrent Reshare
 			// calls may register their ceremonies after the first
 			// outbound messages are produced.
-			for i := 0; i < 50; i++ {
+			ctx := tr.network.t.Context()
+			tick := time.NewTicker(100 * time.Millisecond)
+			defer tick.Stop()
+			for range 50 {
 				err := node.tss.HandleMessage(from, ceremonyID, data)
 				if err == nil || err.Error() != "unknown ceremony" {
 					return
 				}
-				time.Sleep(100 * time.Millisecond)
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
 			}
 		}()
 	}
