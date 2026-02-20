@@ -364,16 +364,26 @@ func (s *Server) forwardBroadcast(header *Header, payload any, from *Identity) {
 	fwd := *header
 	fwd.TTL--
 
+	// Collect transports under lock, write outside to avoid
+	// blocking all broadcast forwarding on a slow peer.
+	type target struct {
+		id Identity
+		t  *Transport
+	}
 	s.mtx.RLock()
-	defer s.mtx.RUnlock()
-
-	var sent int
+	targets := make([]target, 0, len(s.sessions))
 	for id, t := range s.sessions {
 		if from != nil && id == *from {
 			continue
 		}
-		if err := t.WriteHeader(fwd, payload); err != nil {
-			log.Debugf("broadcast forward to %v: %v", id, err)
+		targets = append(targets, target{id, t})
+	}
+	s.mtx.RUnlock()
+
+	var sent int
+	for _, tgt := range targets {
+		if err := tgt.t.WriteHeader(fwd, payload); err != nil {
+			log.Debugf("broadcast forward to %v: %v", tgt.id, err)
 		} else {
 			s.forwarded.Add(1)
 			sent++
@@ -422,13 +432,23 @@ func (s *Server) broadcastWithTTL(cmd any, ttl uint8) error {
 	}
 	msg := append(header, payload...)
 
+	// Collect transports under lock, write outside to avoid
+	// blocking all broadcast sends on a slow peer.
+	type target struct {
+		id Identity
+		t  *Transport
+	}
 	s.mtx.RLock()
-	defer s.mtx.RUnlock()
+	targets := make([]target, 0, len(s.sessions))
+	for id, t := range s.sessions {
+		targets = append(targets, target{id, t})
+	}
+	s.mtx.RUnlock()
 
 	var sent int
-	for id, t := range s.sessions {
-		if err := t.write(writeTimeout, msg); err != nil {
-			log.Debugf("broadcast to %v: %v", id, err)
+	for _, tgt := range targets {
+		if err := tgt.t.write(writeTimeout, msg); err != nil {
+			log.Debugf("broadcast to %v: %v", tgt.id, err)
 		} else {
 			sent++
 		}
@@ -1180,24 +1200,32 @@ func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator I
 }
 
 // completeCeremony marks a tracked ceremony as complete.
+// Cancel is called outside the lock to avoid potential deadlock
+// if a ci.ctx.Done() waiter touches s.mtx.
 func (s *Server) completeCeremony(cid CeremonyID) {
 	s.mtx.Lock()
-	if ci, ok := s.ceremonies[cid]; ok {
+	ci, ok := s.ceremonies[cid]
+	if ok {
 		ci.Status = CeremonyComplete
-		ci.cancel()
 	}
 	s.mtx.Unlock()
+	if ok {
+		ci.cancel()
+	}
 }
 
 // failCeremony marks a tracked ceremony as failed with an error.
 func (s *Server) failCeremony(cid CeremonyID, reason string) {
 	s.mtx.Lock()
-	if ci, ok := s.ceremonies[cid]; ok {
+	ci, ok := s.ceremonies[cid]
+	if ok {
 		ci.Status = CeremonyFailed
 		ci.Error = reason
-		ci.cancel()
 	}
 	s.mtx.Unlock()
+	if ok {
+		ci.cancel()
+	}
 }
 
 // handleCeremonyResult processes a broadcast CeremonyResult.  If this
