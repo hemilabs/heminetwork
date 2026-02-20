@@ -250,14 +250,16 @@ func doReshare(t *testing.T, curve *tss.Parameters, oldThreshold, newThreshold i
 	}
 
 	// Initialize new committee parties
-	for _, pid := range newPids {
+	newPreParams := loadOrGeneratePreParams(t, len(newPids))
+	for i, pid := range newPids {
 		key := string(pid.GetKey())
 		params := tss.NewReSharingParameters(curve.EC(), oldCtx, newCtx, pid,
 			len(oldPids), oldThreshold, len(newPids), newThreshold)
-		params.SetNoProofMod()
-		params.SetNoProofFac()
 
 		save := keygen.NewLocalPartySaveData(len(newPids))
+		if i < len(newPreParams) {
+			save.LocalPreParams = newPreParams[i]
+		}
 		p := resharing.NewLocalParty(params, save, outCh, endCh).(*resharing.LocalParty)
 		newPartyByKey[key] = p
 	}
