@@ -4760,8 +4760,8 @@ func TestServerTSSTransportSendErrors(t *testing.T) {
 
 	t.Run("unknown ceremony", func(t *testing.T) {
 		err := stt.Send(target, cid, []byte{0x00, 0x01})
-		if err == nil || !strings.Contains(err.Error(), "unknown ceremony") {
-			t.Fatalf("expected 'unknown ceremony', got: %v", err)
+		if !errors.Is(err, ErrUnknownCeremony) {
+			t.Fatalf("expected ErrUnknownCeremony, got: %v", err)
 		}
 	})
 
@@ -8621,7 +8621,7 @@ func TestCeremonyTracking(t *testing.T) {
 	if !ok {
 		t.Fatal("ceremony not registered")
 	}
-	if ci.Status != "running" {
+	if ci.Status != CeremonyRunning {
 		t.Fatalf("status = %q, want running", ci.Status)
 	}
 	if ci.Type != CeremonyKeygen {
@@ -8634,7 +8634,7 @@ func TestCeremonyTracking(t *testing.T) {
 	s.mtx.RLock()
 	ci = s.ceremonies[cid]
 	s.mtx.RUnlock()
-	if ci.Status != "complete" {
+	if ci.Status != CeremonyComplete {
 		t.Fatalf("status = %q, want complete", ci.Status)
 	}
 
@@ -8647,7 +8647,7 @@ func TestCeremonyTracking(t *testing.T) {
 	s.mtx.RLock()
 	ci2 := s.ceremonies[cid2]
 	s.mtx.RUnlock()
-	if ci2.Status != "failed" {
+	if ci2.Status != CeremonyFailed {
 		t.Fatalf("status = %q, want failed", ci2.Status)
 	}
 	if ci2.Error != "test error" {
@@ -8886,7 +8886,7 @@ func TestAdminCeremonyList(t *testing.T) {
 	if !ok {
 		t.Fatal("cid1 not in list")
 	}
-	if c1.Status != "complete" {
+	if c1.Status != CeremonyComplete {
 		t.Fatalf("cid1 status = %q, want complete", c1.Status)
 	}
 	if c1.Type != CeremonyKeygen.String() {
@@ -8897,7 +8897,7 @@ func TestAdminCeremonyList(t *testing.T) {
 	if !ok {
 		t.Fatal("cid2 not in list")
 	}
-	if c2.Status != "running" {
+	if c2.Status != CeremonyRunning {
 		t.Fatalf("cid2 status = %q, want running", c2.Status)
 	}
 
@@ -8955,7 +8955,7 @@ func TestAdminCeremonyStatusFound(t *testing.T) {
 	if !resp.Found {
 		t.Fatal("expected Found=true")
 	}
-	if resp.Status != "failed" {
+	if resp.Status != CeremonyFailed {
 		t.Fatalf("status = %q, want failed", resp.Status)
 	}
 	if resp.Error != "threshold mismatch" {
@@ -9296,7 +9296,7 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 		if !ok {
 			t.Fatalf("node %d: ceremony not found", i)
 		}
-		if ci.Status != "complete" {
+		if ci.Status != CeremonyComplete {
 			t.Fatalf("node %d: status=%s error=%q",
 				i, ci.Status, ci.Error)
 		}
@@ -9461,7 +9461,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 			if !ok {
 				t.Fatalf("committee member node %d: ceremony not found", i)
 			}
-			if ci.Status != "complete" {
+			if ci.Status != CeremonyComplete {
 				t.Fatalf("committee member node %d: status=%s error=%q",
 					i, ci.Status, ci.Error)
 			}
@@ -9542,7 +9542,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 		if !ok {
 			t.Fatalf("node %d: did not receive CeremonyResult broadcast", i)
 		}
-		if ci.Status != "complete" {
+		if ci.Status != CeremonyComplete {
 			t.Fatalf("node %d: broadcast status=%s error=%q",
 				i, ci.Status, ci.Error)
 		}
@@ -9673,7 +9673,7 @@ func TestHandleCeremonyResultFailurePath(t *testing.T) {
 	s.mtx.RLock()
 	ci := s.ceremonies[cid]
 	s.mtx.RUnlock()
-	if ci.Status != "failed" || ci.Error != "quorum" {
+	if ci.Status != CeremonyFailed || ci.Error != "quorum" {
 		t.Fatalf("status=%q error=%q", ci.Status, ci.Error)
 	}
 }
@@ -9690,7 +9690,7 @@ func TestHandleCeremonyResultExistingComplete(t *testing.T) {
 	s.mtx.RLock()
 	ci := s.ceremonies[cid]
 	s.mtx.RUnlock()
-	if ci.Status != "running" {
+	if ci.Status != CeremonyRunning {
 		t.Fatalf("status=%q, want running (broadcast should be no-op)", ci.Status)
 	}
 }
@@ -10179,7 +10179,7 @@ func TestDispatchTSSMessageRetryThenSuccess(t *testing.T) {
 	mock := &retryMockTSS{
 		handleFn: func(n int) error {
 			if n <= 2 {
-				return errors.New("unknown ceremony")
+				return ErrUnknownCeremony
 			}
 			return nil // succeed on 3rd call
 		},
@@ -10222,7 +10222,7 @@ func TestDispatchTSSMessageRetryContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		secret:     secret,
-		tss:        &retryMockTSS{handleFn: func(int) error { return errors.New("unknown ceremony") }},
+		tss:        &retryMockTSS{handleFn: func(int) error { return ErrUnknownCeremony }},
 		tssCtx:     ctx,
 		sessions:   make(map[Identity]*Transport),
 		peers:      make(map[Identity]*PeerRecord),
@@ -10250,7 +10250,7 @@ func TestDispatchTSSMessageRetryNonCeremonyError(t *testing.T) {
 	mock := &retryMockTSS{
 		handleFn: func(n int) error {
 			if n == 1 {
-				return errors.New("unknown ceremony")
+				return ErrUnknownCeremony
 			}
 			return errors.New("some other error") // retry gives up
 		},
@@ -10651,7 +10651,7 @@ func waitForCeremony(t *testing.T, servers []*Server, cid CeremonyID, coord Iden
 
 	// Check for failure.
 	cs.mtx.RLock()
-	if ci.Status == "failed" {
+	if ci.Status == CeremonyFailed {
 		cs.mtx.RUnlock()
 		t.Fatalf("ceremony failed: %s", ci.Error)
 	}

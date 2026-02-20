@@ -760,7 +760,7 @@ func (n *tssTransportNode) WaitCeremony(cid CeremonyID, timeout time.Duration) (
 		}
 		select {
 		case <-ctx.Done():
-			return nil, errors.New("unknown ceremony")
+			return nil, ErrUnknownCeremony
 		case <-tick.C:
 		}
 	}
@@ -793,7 +793,7 @@ func (n *tssTransportNode) WaitReshare(cid CeremonyID, timeout time.Duration) er
 		}
 		select {
 		case <-ctx.Done():
-			return errors.New("unknown ceremony")
+			return ErrUnknownCeremony
 		case <-tick.C:
 		}
 	}
