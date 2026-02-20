@@ -435,7 +435,7 @@ func (n *TSSNode) WaitCeremony(cid CeremonyID, timeout time.Duration) (any, erro
 		}
 		select {
 		case <-ctx.Done():
-			return nil, errors.New("unknown ceremony")
+			return nil, ErrUnknownCeremony
 		case <-tick.C:
 		}
 	}

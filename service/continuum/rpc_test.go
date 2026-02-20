@@ -160,7 +160,7 @@ func (r *MockRouter) RouteTSSMessage(msg TSSMessage) error {
 
 	ceremony, ok := r.ceremonies[msg.CeremonyID]
 	if !ok {
-		return errors.New("unknown ceremony")
+		return ErrUnknownCeremony
 	}
 
 	// Verify sender is part of ceremony
@@ -208,7 +208,7 @@ func (r *MockRouter) HandleResponse(from Identity, resp any) error {
 	case KeygenResponse:
 		c, ok := r.ceremonies[v.CeremonyID]
 		if !ok {
-			return errors.New("unknown ceremony")
+			return ErrUnknownCeremony
 		}
 		c.responses[from] = v.Success
 		if !v.Success {
@@ -218,7 +218,7 @@ func (r *MockRouter) HandleResponse(from Identity, resp any) error {
 	case SignResponse:
 		c, ok := r.ceremonies[v.CeremonyID]
 		if !ok {
-			return errors.New("unknown ceremony")
+			return ErrUnknownCeremony
 		}
 		c.responses[from] = v.Success
 		if !v.Success {
@@ -228,7 +228,7 @@ func (r *MockRouter) HandleResponse(from Identity, resp any) error {
 	case CeremonyResult:
 		c, ok := r.ceremonies[v.CeremonyID]
 		if !ok {
-			return errors.New("unknown ceremony")
+			return ErrUnknownCeremony
 		}
 		c.responses[from] = v.Success
 		if !v.Success && v.Error != "" {
@@ -241,7 +241,7 @@ func (r *MockRouter) HandleResponse(from Identity, resp any) error {
 	case CeremonyAbort:
 		c, ok := r.ceremonies[v.CeremonyID]
 		if !ok {
-			return errors.New("unknown ceremony")
+			return ErrUnknownCeremony
 		}
 		c.done = true
 		c.err = errors.New(v.Reason)

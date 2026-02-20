@@ -96,11 +96,11 @@ type Config struct {
 
 // CeremonyInfo tracks the state of an active TSS ceremony.
 type CeremonyInfo struct {
-	Type        CeremonyType   `json:"type"`
-	StartTime   int64          `json:"start_time"` // unix timestamp
-	Status      string         `json:"status"`     // "running", "complete", "failed"
-	Error       string         `json:"error,omitempty"`
-	Coordinator Identity       `json:"coordinator"` // node responsible for broadcasting result
+	Type        CeremonyType    `json:"type"`
+	StartTime   int64           `json:"start_time"` // unix timestamp
+	Status      string          `json:"status"`     // CeremonyRunning, CeremonyComplete, CeremonyFailed
+	Error       string          `json:"error,omitempty"`
+	Coordinator Identity        `json:"coordinator"` // node responsible for broadcasting result
 	ctx         context.Context // canceled on terminal state
 	cancel      context.CancelFunc
 }
@@ -184,6 +184,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		sessions:     make(map[Identity]*Transport, cfg.PeersWanted),
 		peers:        make(map[Identity]*PeerRecord),
 		ceremonies:   make(map[CeremonyID]*CeremonyInfo),
+		tssCtx:       context.Background(), // replaced by Run() with lifecycle context
 	}, nil
 }
 
@@ -1162,13 +1163,15 @@ func isLocalhost(addr net.Addr) bool {
 }
 
 // registerCeremony records a new ceremony in the tracking map.
+// The ceremony context derives from s.tssCtx so server shutdown
+// propagates cancellation to all waiting callers.
 func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(s.tssCtx)
 	s.mtx.Lock()
 	s.ceremonies[cid] = &CeremonyInfo{
 		Type:        ct,
 		StartTime:   time.Now().Unix(),
-		Status:      "running",
+		Status:      CeremonyRunning,
 		Coordinator: coordinator,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -1180,7 +1183,7 @@ func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator I
 func (s *Server) completeCeremony(cid CeremonyID) {
 	s.mtx.Lock()
 	if ci, ok := s.ceremonies[cid]; ok {
-		ci.Status = "complete"
+		ci.Status = CeremonyComplete
 		ci.cancel()
 	}
 	s.mtx.Unlock()
@@ -1190,7 +1193,7 @@ func (s *Server) completeCeremony(cid CeremonyID) {
 func (s *Server) failCeremony(cid CeremonyID, reason string) {
 	s.mtx.Lock()
 	if ci, ok := s.ceremonies[cid]; ok {
-		ci.Status = "failed"
+		ci.Status = CeremonyFailed
 		ci.Error = reason
 		ci.cancel()
 	}
@@ -1224,9 +1227,9 @@ func (s *Server) handleCeremonyResult(r CeremonyResult) {
 		cancel:    cancel,
 	}
 	if r.Success {
-		ci.Status = "complete"
+		ci.Status = CeremonyComplete
 	} else {
-		ci.Status = "failed"
+		ci.Status = CeremonyFailed
 		ci.Error = r.Error
 	}
 	s.ceremonies[r.CeremonyID] = ci
