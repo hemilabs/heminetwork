@@ -96,11 +96,13 @@ type Config struct {
 
 // CeremonyInfo tracks the state of an active TSS ceremony.
 type CeremonyInfo struct {
-	Type        CeremonyType `json:"type"`
-	StartTime   int64        `json:"start_time"` // unix timestamp
-	Status      string       `json:"status"`     // "running", "complete", "failed"
-	Error       string       `json:"error,omitempty"`
-	Coordinator Identity     `json:"coordinator"` // node responsible for broadcasting result
+	Type        CeremonyType   `json:"type"`
+	StartTime   int64          `json:"start_time"` // unix timestamp
+	Status      string         `json:"status"`     // "running", "complete", "failed"
+	Error       string         `json:"error,omitempty"`
+	Coordinator Identity       `json:"coordinator"` // node responsible for broadcasting result
+	ctx         context.Context // canceled on terminal state
+	cancel      context.CancelFunc
 }
 
 // Server is a continuum protocol node that manages encrypted peer
@@ -1161,12 +1163,15 @@ func isLocalhost(addr net.Addr) bool {
 
 // registerCeremony records a new ceremony in the tracking map.
 func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity) {
+	ctx, cancel := context.WithCancel(context.Background())
 	s.mtx.Lock()
 	s.ceremonies[cid] = &CeremonyInfo{
 		Type:        ct,
 		StartTime:   time.Now().Unix(),
 		Status:      "running",
 		Coordinator: coordinator,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 	s.mtx.Unlock()
 }
@@ -1176,6 +1181,7 @@ func (s *Server) completeCeremony(cid CeremonyID) {
 	s.mtx.Lock()
 	if ci, ok := s.ceremonies[cid]; ok {
 		ci.Status = "complete"
+		ci.cancel()
 	}
 	s.mtx.Unlock()
 }
@@ -1186,27 +1192,36 @@ func (s *Server) failCeremony(cid CeremonyID, reason string) {
 	if ci, ok := s.ceremonies[cid]; ok {
 		ci.Status = "failed"
 		ci.Error = reason
+		ci.cancel()
 	}
 	s.mtx.Unlock()
 }
 
 // handleCeremonyResult processes a broadcast CeremonyResult.  If this
 // node is already tracking the ceremony (as a committee member), the
-// status was set by dispatchKeygen; the broadcast is a no-op.  For
-// non-committee nodes this is the only notification — register the
-// ceremony as complete or failed.
+// local dispatchKeygen/dispatchSign goroutine owns the status
+// transition — the broadcast is a no-op.  For non-committee nodes
+// this is the only notification — register the ceremony as complete
+// or failed.
 func (s *Server) handleCeremonyResult(r CeremonyResult) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	ci, ok := s.ceremonies[r.CeremonyID]
-	if !ok {
-		// Non-committee node: first time seeing this ceremony.
-		ci = &CeremonyInfo{
-			Type:      CeremonyKeygen, // broadcast only comes from keygen for now
-			StartTime: time.Now().Unix(),
-		}
-		s.ceremonies[r.CeremonyID] = ci
+	_, ok := s.ceremonies[r.CeremonyID]
+	if ok {
+		// Committee member: local goroutine owns status; ignore
+		// the broadcast to avoid racing ahead of SaveKeyShare.
+		return
+	}
+
+	// Non-committee node: first time seeing this ceremony.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ci := &CeremonyInfo{
+		Type:      CeremonyKeygen, // broadcast only comes from keygen for now
+		StartTime: time.Now().Unix(),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 	if r.Success {
 		ci.Status = "complete"
@@ -1214,6 +1229,7 @@ func (s *Server) handleCeremonyResult(r CeremonyResult) {
 		ci.Status = "failed"
 		ci.Error = r.Error
 	}
+	s.ceremonies[r.CeremonyID] = ci
 }
 
 // handlePeerListAdmin builds a PeerListAdminResponse from the peer
