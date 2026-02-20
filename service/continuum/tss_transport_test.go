@@ -353,9 +353,10 @@ func (n *tssTransportNode) handleReshareRequest(req ReshareRequest) {
 			oldCtx, newCtx, ourNewPid,
 			len(oldPids), req.OldThreshold,
 			len(newPids), req.NewThreshold)
-		params.SetNoProofMod()
-		params.SetNoProofFac()
 		save := keygen.NewLocalPartySaveData(len(newPids))
+		if n.preParams != nil {
+			save.LocalPreParams = *n.preParams
+		}
 		newParty = resharing.NewLocalParty(params,
 			save, outCh, endCh)
 	}
