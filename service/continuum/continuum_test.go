@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -9727,4 +9728,1077 @@ func TestFiveNodeKeygen(t *testing.T) {
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("server error: %v", err)
 	}
+}
+
+// =============================================================================
+// Coverage gap tests
+// =============================================================================
+
+func TestRunningAccessor(t *testing.T) {
+	s, _ := NewServer(nil)
+	if s.Running() {
+		t.Fatal("should not be running")
+	}
+	s.testAndSetRunning(true)
+	if !s.Running() {
+		t.Fatal("should be running")
+	}
+}
+
+func TestPromRunningGauge(t *testing.T) {
+	s, _ := NewServer(nil)
+	if v := s.promRunning(); v != 0 {
+		t.Fatalf("want 0, got %f", v)
+	}
+	s.testAndSetRunning(true)
+	if v := s.promRunning(); v != 1 {
+		t.Fatalf("want 1, got %f", v)
+	}
+}
+
+func TestCollectorsCreated(t *testing.T) {
+	s, _ := NewServer(nil)
+	c := s.Collectors()
+	if len(c) == 0 {
+		t.Fatal("no collectors")
+	}
+	if len(s.Collectors()) != len(c) {
+		t.Fatal("collectors changed on second call")
+	}
+}
+
+func TestIsHealthyAndHealthEndpoint(t *testing.T) {
+	s, _ := NewServer(nil)
+	ctx := context.Background()
+	if !s.isHealthy(ctx) {
+		t.Fatal("not healthy")
+	}
+	ok, info, err := s.health(ctx)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if !info.(Info).Online {
+		t.Fatal("not online")
+	}
+}
+
+func TestSendErrHelper(t *testing.T) {
+	errC := make(chan error, 1)
+	sendErr(context.Background(), errC, errors.New("boom"))
+	if err := <-errC; err.Error() != "boom" {
+		t.Fatal(err)
+	}
+	// Cancelled ctx — must not block on unbuffered channel.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	sendErr(ctx, make(chan error), errors.New("ignored"))
+}
+
+func TestPromPollCancelledContext(t *testing.T) {
+	s, _ := NewServer(nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.promPoll(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+}
+
+func TestDeleteKeyShareCycle(t *testing.T) {
+	secret, _ := NewSecret()
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID := []byte{0xde, 0xad}
+	if err := store.SaveKeyShare(keyID, []byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteKeyShare(keyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadKeyShare(keyID); err == nil {
+		t.Fatal("expected error after delete")
+	}
+}
+
+func TestGetPreParamsSeeded(t *testing.T) {
+	secret, _ := NewSecret()
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pp := loadPreParams(t, 1)
+	store.SetPreParams(&pp[0])
+	got, err := store.GetPreParams(context.Background())
+	if err != nil || got != &pp[0] {
+		t.Fatal("unexpected result")
+	}
+}
+
+func TestHandleCeremonyResultFailurePath(t *testing.T) {
+	s, _ := NewServer(nil)
+	var cid CeremonyID
+	copy(cid[:], []byte("test-failure-result-0000"))
+	s.handleCeremonyResult(CeremonyResult{
+		CeremonyID: cid,
+		Success:    false,
+		Error:      "quorum",
+	})
+	s.mtx.RLock()
+	ci := s.ceremonies[cid]
+	s.mtx.RUnlock()
+	if ci.Status != "failed" || ci.Error != "quorum" {
+		t.Fatalf("status=%q error=%q", ci.Status, ci.Error)
+	}
+}
+
+func TestHandleCeremonyResultExistingComplete(t *testing.T) {
+	s, _ := NewServer(nil)
+	var cid CeremonyID
+	copy(cid[:], []byte("test-existing-complete-0"))
+	s.registerCeremony(cid, CeremonyKeygen, Identity{})
+	s.handleCeremonyResult(CeremonyResult{CeremonyID: cid, Success: true})
+	s.mtx.RLock()
+	ci := s.ceremonies[cid]
+	s.mtx.RUnlock()
+	if ci.Status != "complete" {
+		t.Fatalf("status=%q", ci.Status)
+	}
+}
+
+func TestPeerExpiredCallback(t *testing.T) {
+	s, _ := NewServer(nil)
+	secret1, _ := NewSecret()
+	naclPub, _ := secret1.NaClPublicKey()
+	s.mtx.Lock()
+	s.peers[secret1.Identity] = &PeerRecord{
+		Identity: secret1.Identity, Address: "127.0.0.1:9999",
+		NaClPub: naclPub, Version: ProtocolVersion, LastSeen: time.Now().Unix(),
+	}
+	s.mtx.Unlock()
+	s.peerExpired(context.Background(), secret1.Identity, nil)
+	s.mtx.RLock()
+	_, ok := s.peers[secret1.Identity]
+	s.mtx.RUnlock()
+	if ok {
+		t.Fatal("peer should be removed")
+	}
+	// Bad key type — no panic.
+	s.peerExpired(context.Background(), "bad", nil)
+}
+
+func TestRefreshPeerLastSeenUpdates(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+	waitForListenAddress(t, s, 2*time.Second)
+
+	secret1, _ := NewSecret()
+	naclPub, _ := secret1.NaClPublicKey()
+	s.addPeer(ctx, PeerRecord{
+		Identity: secret1.Identity, Address: "127.0.0.1:9999",
+		NaClPub: naclPub, Version: ProtocolVersion, LastSeen: 1000,
+	})
+	s.refreshPeerLastSeen(ctx, secret1.Identity)
+	s.mtx.RLock()
+	ls := s.peers[secret1.Identity].LastSeen
+	s.mtx.RUnlock()
+	if ls <= 1000 {
+		t.Fatalf("LastSeen not updated: %d", ls)
+	}
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestSeedDNSResolution(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	handler := createDNSNodes("seed.local", 1)
+	dnsSrv := newDNSServer(ctx, handler)
+	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
+
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	var seedName string
+	for name := range handler.lookup {
+		if strings.HasSuffix(name, "seed.local.") {
+			seedName = name
+			break
+		}
+	}
+	s.cfg.Seeds = []string{net.JoinHostPort(strings.TrimSuffix(seedName, "."), "45067")}
+	s.resolver = newResolver(dnsSrv.Listener.Addr().String())
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+	waitForListenAddress(t, s, 2*time.Second)
+	time.Sleep(500 * time.Millisecond)
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestSeedBadHostPortHandling(t *testing.T) {
+	s, _ := NewServer(nil)
+	s.cfg.Seeds = []string{"no-port-here"}
+	secret, _ := NewSecret()
+	s.secret = secret
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	s.seed(ctx)
+}
+
+func TestVerifyDNSIdentityMatchAndMismatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	handler := createDNSNodes("vdns.local", 1)
+	dnsSrv := newDNSServer(ctx, handler)
+	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
+
+	s, _ := NewServer(nil)
+	s.resolver = newResolver(dnsSrv.Listener.Addr().String())
+	var nodeName string
+	var nodeSecret *Secret
+	for name, n := range handler.nodes {
+		nodeName = name
+		nodeSecret = n.Secret
+		break
+	}
+	if err := s.verifyDNSIdentity(ctx, nodeName, nodeSecret.Identity); err != nil {
+		t.Fatalf("should succeed: %v", err)
+	}
+	wrong, _ := NewSecret()
+	if err := s.verifyDNSIdentity(ctx, nodeName, wrong.Identity); err == nil {
+		t.Fatal("should fail for wrong identity")
+	}
+	if err := s.verifyDNSIdentity(ctx, "nonexistent.local.", nodeSecret.Identity); err == nil {
+		t.Fatal("should fail for nonexistent host")
+	}
+}
+
+func TestTXTRecordFromAddressReverseLookup(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	handler := createDNSNodes("txt.local", 1)
+	dnsSrv := newDNSServer(ctx, handler)
+	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
+	resolver := newResolver(dnsSrv.Listener.Addr().String())
+	var nodeIP net.IP
+	for _, n := range handler.nodes {
+		nodeIP = n.IP
+		break
+	}
+	addr := &net.TCPAddr{IP: nodeIP, Port: 45067}
+	m, err := TXTRecordFromAddress(ctx, resolver, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["v"] != dnsAppName {
+		t.Fatalf("v=%q", m["v"])
+	}
+}
+
+func TestVerifyRemoteDNSIdentityFlow(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	handler := createDNSNodes("vr.local", 1)
+	dnsSrv := newDNSServer(ctx, handler)
+	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
+	resolver := newResolver(dnsSrv.Listener.Addr().String())
+	var nodeIP net.IP
+	var nodeSecret *Secret
+	for _, n := range handler.nodes {
+		nodeIP = n.IP
+		nodeSecret = n.Secret
+		break
+	}
+	addr := &net.TCPAddr{IP: nodeIP, Port: 45067}
+	ok, err := VerifyRemoteDNSIdentity(ctx, resolver, addr, nodeSecret.Identity)
+	if err != nil || !ok {
+		t.Fatalf("should match: ok=%v err=%v", ok, err)
+	}
+	wrong, _ := NewSecret()
+	ok, err = VerifyRemoteDNSIdentity(ctx, resolver, addr, wrong.Identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("should not match wrong identity")
+	}
+}
+
+func TestConnectRandomPicksPeer(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+	waitForListenAddress(t, s, 2*time.Second)
+
+	secret1, _ := NewSecret()
+	naclPub, _ := secret1.NaClPublicKey()
+	s.addPeer(ctx, PeerRecord{
+		Identity: secret1.Identity, Address: "127.0.0.1:1",
+		NaClPub: naclPub, Version: ProtocolVersion, LastSeen: time.Now().Unix(),
+	})
+	s.connectRandom(ctx)
+	time.Sleep(200 * time.Millisecond)
+	// No candidates — no-op.
+	s.mtx.Lock()
+	for id := range s.peers {
+		if id != s.secret.Identity {
+			delete(s.peers, id)
+		}
+	}
+	s.mtx.Unlock()
+	s.connectRandom(ctx)
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+func TestPartiesToIdentitiesBadPartyID(t *testing.T) {
+	bad := tss.NewPartyID("not-hex", "not-hex", big.NewInt(1))
+	if partiesToIdentities(tss.UnSortedPartyIDs{bad}) != nil {
+		t.Fatal("expected nil")
+	}
+	if partiesToIdentities(nil) != nil {
+		t.Fatal("expected nil for empty")
+	}
+}
+
+func TestDecryptPayloadUnknownSenderPath(t *testing.T) {
+	s, _ := NewServer(nil)
+	secret, _ := NewSecret()
+	s.secret = secret
+	_, err := s.decryptPayload(&EncryptedPayload{Sender: Identity{}})
+	if err == nil || !strings.Contains(err.Error(), "unknown sender") {
+		t.Fatalf("want unknown sender, got %v", err)
+	}
+}
+
+func TestDecryptPayloadEmptyNaClPubPath(t *testing.T) {
+	s, _ := NewServer(nil)
+	secret, _ := NewSecret()
+	s.secret = secret
+	sender, _ := NewSecret()
+	s.mtx.Lock()
+	s.peers[sender.Identity] = &PeerRecord{Identity: sender.Identity}
+	s.mtx.Unlock()
+	_, err := s.decryptPayload(&EncryptedPayload{Sender: sender.Identity})
+	if err == nil || !strings.Contains(err.Error(), "no NaCl public key") {
+		t.Fatalf("want NaCl pub error, got %v", err)
+	}
+}
+
+func TestDecryptPayloadBadInnerTypePath(t *testing.T) {
+	sender, _ := NewSecret()
+	recipient, _ := NewSecret()
+	recipientNaClPub, _ := recipient.NaClPublicKey()
+	senderNaClPriv, _ := sender.NaClPrivateKey()
+	senderNaClPub, _ := sender.NaClPublicKey()
+
+	ep, err := SealBox([]byte(`{}`), recipientNaClPub, senderNaClPriv,
+		sender.Identity, PPingRequest) // valid type for sealing
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep.InnerType = "bogus-type" // override to invalid
+
+	s, _ := NewServer(nil)
+	s.secret = recipient
+	s.mtx.Lock()
+	s.peers[sender.Identity] = &PeerRecord{
+		Identity: sender.Identity,
+		NaClPub:  senderNaClPub,
+	}
+	s.mtx.Unlock()
+	_, err = s.decryptPayload(ep)
+	if err == nil || !strings.Contains(err.Error(), "unknown inner type") {
+		t.Fatalf("want unknown inner type, got %v", err)
+	}
+}
+
+func TestOpenBoxCorruptedCiphertext(t *testing.T) {
+	sender, _ := NewSecret()
+	recipient, _ := NewSecret()
+	recipientNaClPub, _ := recipient.NaClPublicKey()
+	senderNaClPriv, _ := sender.NaClPrivateKey()
+
+	ep, err := SealBox([]byte("test"), recipientNaClPub, senderNaClPriv,
+		sender.Identity, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep.Ciphertext[len(ep.Ciphertext)-1] ^= 0xff
+
+	senderNaClPub, _ := sender.NaClPublicKey()
+	recipientNaClPriv, _ := recipient.NaClPrivateKey()
+	_, err = OpenBox(ep, senderNaClPub, recipientNaClPriv)
+	if err == nil {
+		t.Fatal("expected error for corrupted ciphertext")
+	}
+}
+
+func TestIsLocalhostEdgeCasesNilAndPipe(t *testing.T) {
+	if isLocalhost(nil) {
+		t.Fatal("nil should not be localhost")
+	}
+	p, _ := net.Pipe()
+	defer p.Close()
+	if isLocalhost(p.RemoteAddr()) {
+		t.Fatal("pipe should not be localhost")
+	}
+}
+
+func TestValidatePeerAddressEdgeCasesAll(t *testing.T) {
+	for _, tt := range []struct {
+		addr    string
+		wantErr bool
+	}{
+		{"", true},
+		{"host-no-port", true},
+		{":8080", true},
+		{"host:0", true},
+		{"host:", true},
+		{strings.Repeat("x", 300) + ":80", true},
+		{"host\x01:80", true},
+		{"good.host:8080", false},
+	} {
+		if err := validatePeerAddress(tt.addr); (err != nil) != tt.wantErr {
+			t.Errorf("validatePeerAddress(%q)=%v wantErr=%v", tt.addr, err, tt.wantErr)
+		}
+	}
+}
+
+func TestElectCommitteeEqualsN(t *testing.T) {
+	s1, _ := NewSecret()
+	s2, _ := NewSecret()
+	c, err := Elect([]byte("seed"), []Identity{s1.Identity, s2.Identity}, 2)
+	if err != nil || len(c) != 2 {
+		t.Fatalf("err=%v len=%d", err, len(c))
+	}
+}
+
+func TestIdentityBytesIsACopy(t *testing.T) {
+	s, _ := NewSecret()
+	b := s.Bytes()
+	b[0] ^= 0xff
+	if bytes.Equal(b, s.Identity[:]) {
+		t.Fatal("Bytes() should return a copy")
+	}
+}
+
+func TestSecretPublicKeyNotNil(t *testing.T) {
+	s, _ := NewSecret()
+	if s.PublicKey() == nil {
+		t.Fatal("nil")
+	}
+}
+
+func TestTransportStringAndCurveAccessors(t *testing.T) {
+	tr, _ := NewTransportFromCurve(ecdh.X25519())
+	if tr.String() != "server" {
+		t.Fatalf("got %q", tr.String())
+	}
+	if tr.Curve() == "" {
+		t.Fatal("empty curve")
+	}
+}
+
+func TestTSSMessageIsBroadcastFlag(t *testing.T) {
+	m := TSSMessage{Flags: TSSFlagBroadcast}
+	if !m.IsBroadcast() {
+		t.Fatal("should be broadcast")
+	}
+	m.Flags = 0
+	if m.IsBroadcast() {
+		t.Fatal("should not be broadcast")
+	}
+}
+
+func TestKvFromTxtParsing(t *testing.T) {
+	m, err := kvFromTxt("v=transfunctioner; identity=abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["v"] != "transfunctioner" {
+		t.Fatalf("v=%q", m["v"])
+	}
+	if _, err := kvFromTxt("garbage-no-equals"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDnsResolverDefaultAndCustom(t *testing.T) {
+	s, _ := NewServer(nil)
+	if s.dnsResolver() != net.DefaultResolver {
+		t.Fatal("expected default")
+	}
+	custom := &net.Resolver{}
+	s.resolver = custom
+	if s.dnsResolver() != custom {
+		t.Fatal("expected custom")
+	}
+}
+
+func TestRemoteAddrNilConn(t *testing.T) {
+	tr := &Transport{}
+	if tr.RemoteAddr() != nil {
+		t.Fatal("expected nil")
+	}
+}
+
+func TestNewServerNilUsesDefaults(t *testing.T) {
+	s, err := NewServer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.cfg.PeersWanted != 8 {
+		t.Fatalf("peers=%d", s.cfg.PeersWanted)
+	}
+}
+
+func TestKnownPeersAccessor(t *testing.T) {
+	s, _ := NewServer(nil)
+	secret1, _ := NewSecret()
+	naclPub, _ := secret1.NaClPublicKey()
+	s.mtx.Lock()
+	s.peers[secret1.Identity] = &PeerRecord{
+		Identity: secret1.Identity, Address: "127.0.0.1:9999",
+		NaClPub: naclPub, Version: ProtocolVersion, LastSeen: time.Now().Unix(),
+	}
+	s.mtx.Unlock()
+	found := false
+	for _, pr := range s.KnownPeers() {
+		if pr.Identity == secret1.Identity {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("peer missing")
+	}
+}
+
+func TestRoutedReceivedAndForwardedCounters(t *testing.T) {
+	s, _ := NewServer(nil)
+	s.routedReceived.Add(5)
+	s.forwarded.Add(3)
+	if s.RoutedReceived() != 5 || s.Forwarded() != 3 {
+		t.Fatal("wrong counters")
+	}
+}
+
+func TestNewIdentityFromStringErrors(t *testing.T) {
+	if _, err := NewIdentityFromString("not-hex"); err == nil {
+		t.Fatal("expected error")
+	}
+	if _, err := NewIdentityFromString("aabb"); err == nil {
+		t.Fatal("expected error for wrong length")
+	}
+}
+
+// =============================================================================
+// Additional coverage: TSS internals + retry paths + sign integration
+// =============================================================================
+
+// retryMockTSS is a mock TSS whose HandleMessage behavior changes per call.
+type retryMockTSS struct {
+	mu       sync.Mutex
+	calls    int
+	handleFn func(n int) error
+}
+
+func (m *retryMockTSS) Keygen(_ context.Context, _ CeremonyID, _ []Identity, _ int) ([]byte, error) {
+	return nil, errors.New("mock")
+}
+
+func (m *retryMockTSS) Sign(_ context.Context, _ CeremonyID, _ []byte, _ []Identity, _ int, _ [32]byte) ([]byte, []byte, error) {
+	return nil, nil, errors.New("mock")
+}
+
+func (m *retryMockTSS) Reshare(_ context.Context, _ CeremonyID, _ []byte, _, _ []Identity, _, _ int) error {
+	return errors.New("mock")
+}
+
+func (m *retryMockTSS) HandleMessage(_ Identity, _ CeremonyID, _ []byte) error {
+	m.mu.Lock()
+	m.calls++
+	n := m.calls
+	m.mu.Unlock()
+	return m.handleFn(n)
+}
+
+// TestDispatchTSSMessageRetryThenSuccess covers the retry loop succeeding.
+func TestDispatchTSSMessageRetryThenSuccess(t *testing.T) {
+	secret, _ := NewSecret()
+	mock := &retryMockTSS{
+		handleFn: func(n int) error {
+			if n <= 2 {
+				return errors.New("unknown ceremony")
+			}
+			return nil // succeed on 3rd call
+		},
+	}
+	s := &Server{
+		secret:     secret,
+		tss:        mock,
+		tssCtx:     context.Background(),
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
+		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+	}
+	s.stt = newServerTSSTransport(s)
+
+	cid := NewCeremonyID()
+	data := []byte("test-data")
+	hash := HashTSSMessage(cid, data)
+	sig := secret.Sign(hash)
+
+	s.dispatchTSSMessage(TSSMessage{
+		CeremonyID: cid,
+		From:       secret.Identity,
+		Signature:  sig,
+		Data:       data,
+	})
+
+	time.Sleep(400 * time.Millisecond)
+	s.wg.Wait()
+
+	mock.mu.Lock()
+	calls := mock.calls
+	mock.mu.Unlock()
+	if calls < 3 {
+		t.Fatalf("expected at least 3 calls, got %d", calls)
+	}
+}
+
+// TestDispatchTSSMessageRetryContextCancel covers retry cancelled.
+func TestDispatchTSSMessageRetryContextCancel(t *testing.T) {
+	secret, _ := NewSecret()
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{
+		secret:     secret,
+		tss:        &retryMockTSS{handleFn: func(int) error { return errors.New("unknown ceremony") }},
+		tssCtx:     ctx,
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
+		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+	}
+	s.stt = newServerTSSTransport(s)
+
+	cid := NewCeremonyID()
+	data := []byte("test-data")
+	sig := secret.Sign(HashTSSMessage(cid, data))
+
+	s.dispatchTSSMessage(TSSMessage{
+		CeremonyID: cid, From: secret.Identity,
+		Signature: sig, Data: data,
+	})
+
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	s.wg.Wait()
+}
+
+// TestDispatchTSSMessageRetryNonCeremonyError covers retry giving up
+// on a non-"unknown ceremony" error.
+func TestDispatchTSSMessageRetryNonCeremonyError(t *testing.T) {
+	secret, _ := NewSecret()
+	mock := &retryMockTSS{
+		handleFn: func(n int) error {
+			if n == 1 {
+				return errors.New("unknown ceremony")
+			}
+			return errors.New("some other error") // retry gives up
+		},
+	}
+	s := &Server{
+		secret:     secret,
+		tss:        mock,
+		tssCtx:     context.Background(),
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
+		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+	}
+	s.stt = newServerTSSTransport(s)
+
+	cid := NewCeremonyID()
+	data := []byte("test-data")
+	sig := secret.Sign(HashTSSMessage(cid, data))
+
+	s.dispatchTSSMessage(TSSMessage{
+		CeremonyID: cid, From: secret.Identity,
+		Signature: sig, Data: data,
+	})
+
+	time.Sleep(200 * time.Millisecond)
+	s.wg.Wait()
+}
+
+// TestBuildResharePartyContext covers old/new context building.
+func TestBuildResharePartyContext(t *testing.T) {
+	s1, _ := NewSecret()
+	s2, _ := NewSecret()
+	s3, _ := NewSecret()
+	parties := []Identity{s1.Identity, s2.Identity, s3.Identity}
+
+	store, _ := NewTSSStore(t.TempDir(), s1)
+	pp := loadPreParams(t, 1)
+	store.SetPreParams(&pp[0])
+	impl := NewTSS(s1.Identity, store, nil).(*tssImpl)
+
+	pids, ourPid, pidToID, keyToID, err := impl.buildResharePartyContext(parties, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pids) != 3 || ourPid == nil || len(pidToID) != 3 || len(keyToID) != 3 {
+		t.Fatal("wrong result")
+	}
+
+	pidsNew, ourPidNew, _, _, err := impl.buildResharePartyContext(parties, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pidsNew) != 3 || ourPidNew == nil {
+		t.Fatal("wrong new result")
+	}
+
+	// Keys should differ.
+	if pids[0].KeyInt().Cmp(pidsNew[0].KeyInt()) == 0 {
+		t.Fatal("old and new keys should differ")
+	}
+}
+
+// TestBuildResharePartyContextSelfNotInList covers ourPid=nil.
+func TestBuildResharePartyContextSelfNotInList(t *testing.T) {
+	self, _ := NewSecret()
+	other, _ := NewSecret()
+
+	store, _ := NewTSSStore(t.TempDir(), self)
+	pp := loadPreParams(t, 1)
+	store.SetPreParams(&pp[0])
+	impl := NewTSS(self.Identity, store, nil).(*tssImpl)
+
+	_, ourPid, _, _, err := impl.buildResharePartyContext([]Identity{other.Identity}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ourPid != nil {
+		t.Fatal("expected nil ourPid")
+	}
+}
+
+// TestBuildSigningPartyContextXORKey covers the XOR key matching path.
+func TestBuildSigningPartyContextXORKey(t *testing.T) {
+	s1, _ := NewSecret()
+	s2, _ := NewSecret()
+	parties := []Identity{s1.Identity, s2.Identity}
+
+	store, _ := NewTSSStore(t.TempDir(), s1)
+	pp := loadPreParams(t, 1)
+	store.SetPreParams(&pp[0])
+	impl := NewTSS(s1.Identity, store, nil).(*tssImpl)
+
+	// Post-reshare Ks: keys XORed with 1.
+	ks := make([]*big.Int, len(parties))
+	for i, id := range parties {
+		ks[i] = new(big.Int).Xor(new(big.Int).SetBytes(id[:]), big.NewInt(1))
+	}
+
+	pids, ourPid, _, err := impl.buildSigningPartyContext(parties, ks)
+	if err != nil || len(pids) != 2 || ourPid == nil {
+		t.Fatalf("err=%v len=%d ourPid=%v", err, len(pids), ourPid)
+	}
+}
+
+// TestBuildSigningPartyContextKeyNotFound covers the error path.
+func TestBuildSigningPartyContextKeyNotFound(t *testing.T) {
+	s1, _ := NewSecret()
+	s2, _ := NewSecret()
+
+	store, _ := NewTSSStore(t.TempDir(), s1)
+	pp := loadPreParams(t, 1)
+	store.SetPreParams(&pp[0])
+	impl := NewTSS(s1.Identity, store, nil).(*tssImpl)
+
+	_, _, _, err := impl.buildSigningPartyContext(
+		[]Identity{s1.Identity, s2.Identity}, nil)
+	if err == nil || !strings.Contains(err.Error(), "not found in key share Ks") {
+		t.Fatalf("want key not found, got: %v", err)
+	}
+}
+
+// TestHandleReshareMessageRouting covers handleReshareMessage paths.
+func TestHandleReshareMessageRouting(t *testing.T) {
+	s1, _ := NewSecret()
+	s2, _ := NewSecret()
+	s3, _ := NewSecret()
+	parties := []Identity{s1.Identity, s2.Identity, s3.Identity}
+
+	store, _ := NewTSSStore(t.TempDir(), s1)
+	pp := loadPreParams(t, 1)
+	store.SetPreParams(&pp[0])
+	impl := NewTSS(s1.Identity, store, nil).(*tssImpl)
+
+	oldPids, _, _, _, _ := impl.buildResharePartyContext(parties, false)
+	newPids, _, _, _, _ := impl.buildResharePartyContext(parties, true)
+	pidToID := make(map[string]Identity)
+	for _, id := range parties {
+		pidToID[id.String()] = id
+	}
+
+	c := &ceremony{
+		oldPids: oldPids,
+		newPids: newPids,
+		pidToID: pidToID,
+	}
+
+	// toOld with nil oldParty — safe.
+	if err := impl.handleReshareMessage(s2.Identity, c, 0x01, false, []byte("w")); err != nil {
+		t.Fatal(err)
+	}
+	// toNew with nil party — safe.
+	if err := impl.handleReshareMessage(s2.Identity, c, 0x02, false, []byte("w")); err != nil {
+		t.Fatal(err)
+	}
+	// Both + fromNew.
+	if err := impl.handleReshareMessage(s2.Identity, c, 0x07, true, []byte("w")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestReshareNotInCommittee covers the early error path.
+func TestReshareNotInCommittee(t *testing.T) {
+	self, _ := NewSecret()
+	o1, _ := NewSecret()
+	o2, _ := NewSecret()
+
+	store, _ := NewTSSStore(t.TempDir(), self)
+	pp := loadPreParams(t, 1)
+	store.SetPreParams(&pp[0])
+	impl := NewTSS(self.Identity, store, nil)
+
+	err := impl.Reshare(context.Background(), NewCeremonyID(), nil,
+		[]Identity{o1.Identity}, []Identity{o2.Identity}, 0, 0)
+	if err == nil || !strings.Contains(err.Error(), "self not in old or new committee") {
+		t.Fatalf("got: %v", err)
+	}
+}
+
+// TestFiveNodeKeygenAndSign runs keygen on 5 nodes, then signs.
+func TestFiveNodeKeygenAndSign(t *testing.T) {
+	if testing.Short() {
+		t.Skip("5-node keygen+sign test is slow")
+	}
+
+	preParams := loadPreParams(t, 5)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	g, gctx := errgroup.WithContext(ctx)
+
+	const n = 5
+	servers := make([]*Server, n)
+	addrs := make([]string, n)
+
+	for i := 0; i < n; i++ {
+		var connect []string
+		if i > 0 {
+			connect = []string{addrs[i-1]}
+		}
+		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
+		servers[i].cfg.PeersWanted = 6
+		servers[i].cfg.MaintainInterval = 500 * time.Millisecond
+		idx := i
+		g.Go(func() error { return servers[idx].Run(gctx) })
+		addrs[i] = waitForListenAddress(t, servers[i], 2*time.Second)
+	}
+
+	waitForFullMesh(t, servers, n, 30*time.Second)
+	t.Log("gossip converged")
+
+	adminSecret, adminTr := adminConnect(t, ctx, addrs[0])
+
+	if err := adminTr.Write(adminSecret.Identity, PeerListAdminRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	peerResp := readAdminResponse[*PeerListAdminResponse](t, adminTr)
+	peerIDs := collectEligible(t, peerResp, adminSecret.Identity, n)
+
+	// Keygen: committee of 3.
+	committee, _ := Elect([]byte("keygen-sign"), peerIDs, 3)
+	ceremonyID := NewCeremonyID()
+	partyIDs := IdentitiesToPartyIDs(committee)
+	for _, dest := range committee {
+		if err := adminTr.WriteTo(adminSecret.Identity, dest, 8,
+			KeygenRequest{
+				CeremonyID:  ceremonyID,
+				Curve:       "secp256k1",
+				Committee:   partyIDs,
+				Threshold:   1,
+				Coordinator: committee[0],
+			}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitForCeremony(t, servers, ceremonyID, committee[0], 60*time.Second)
+	t.Log("keygen complete")
+
+	// Find keyID.
+	var coordServer *Server
+	for _, s := range servers {
+		if s.secret.Identity == committee[0] {
+			coordServer = s
+			break
+		}
+	}
+	tssDir := filepath.Join(coordServer.data, "tss")
+	matches, _ := filepath.Glob(filepath.Join(tssDir, "*.key"))
+	if len(matches) == 0 {
+		t.Fatal("no key files")
+	}
+	keyIDHex := strings.TrimSuffix(filepath.Base(matches[0]), ".key")
+	keyID, _ := hex.DecodeString(keyIDHex)
+
+	// Sign: committee of 2 (threshold+1).
+	signCommittee := committee[:2]
+	signPartyIDs := IdentitiesToPartyIDs(signCommittee)
+	signCID := NewCeremonyID()
+	var signData [32]byte
+	copy(signData[:], []byte("deadbeefdeadbeefdeadbeefdeadbeef"))
+
+	for _, dest := range signCommittee {
+		if err := adminTr.WriteTo(adminSecret.Identity, dest, 8,
+			SignRequest{
+				CeremonyID: signCID,
+				KeyID:      keyID,
+				Committee:  signPartyIDs,
+				Threshold:  1,
+				Data:       signData[:],
+			}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitForCeremony(t, servers, signCID, signCommittee[0], 60*time.Second)
+	t.Log("sign complete")
+
+	cancel()
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+
+// --- Helpers for multi-node tests ---
+
+func waitForFullMesh(t *testing.T, servers []*Server, n int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		ready := true
+		for i := 0; i < n; i++ {
+			if servers[i].PeerCount() < n-1 {
+				ready = false
+				break
+			}
+			servers[i].mtx.RLock()
+			sess := len(servers[i].sessions)
+			allNaCl := true
+			for _, pr := range servers[i].peers {
+				if len(pr.NaClPub) != NaClPubSize {
+					allNaCl = false
+					break
+				}
+			}
+			servers[i].mtx.RUnlock()
+			if sess < n-1 || !allNaCl {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal("mesh did not converge")
+}
+
+func adminConnect(t *testing.T, ctx context.Context, addr string) (*Secret, *Transport) {
+	t.Helper()
+	secret, _ := NewSecret()
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := new(Transport)
+	if err := tr.KeyExchange(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := tr.Handshake(ctx, secret, ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tr.Close() })
+	return secret, tr
+}
+
+func collectEligible(t *testing.T, resp *PeerListAdminResponse, adminID Identity, need int) []Identity {
+	t.Helper()
+	var ids []Identity
+	for _, pr := range resp.Peers {
+		if pr.Identity == adminID {
+			continue
+		}
+		if (pr.Connected || pr.Self) && len(pr.NaClPub) == NaClPubSize {
+			ids = append(ids, pr.Identity)
+		}
+	}
+	if len(ids) < need {
+		t.Fatalf("only %d eligible, need %d", len(ids), need)
+	}
+	return ids
+}
+
+func waitForCeremony(t *testing.T, servers []*Server, cid CeremonyID, coord Identity, timeout time.Duration) {
+	t.Helper()
+	var cs *Server
+	for _, s := range servers {
+		if s.secret.Identity == coord {
+			cs = s
+			break
+		}
+	}
+	if cs == nil {
+		t.Fatal("coordinator not found")
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		cs.mtx.RLock()
+		ci, ok := cs.ceremonies[cid]
+		cs.mtx.RUnlock()
+		if ok && ci.Status == "complete" {
+			return
+		}
+		if ok && ci.Status == "failed" {
+			t.Fatalf("ceremony failed: %s", ci.Error)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	for i, s := range servers {
+		s.mtx.RLock()
+		ci, ok := s.ceremonies[cid]
+		s.mtx.RUnlock()
+		if ok {
+			t.Logf("node %d: status=%s error=%q", i, ci.Status, ci.Error)
+		} else {
+			t.Logf("node %d: not found", i)
+		}
+	}
+	t.Fatal("ceremony timed out")
 }
