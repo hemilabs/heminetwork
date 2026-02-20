@@ -75,7 +75,7 @@ func (st *serverTSSTransport) Send(to Identity, ceremonyID CeremonyID, data []by
 
 	ctype, ok := st.ceremonyType(ceremonyID)
 	if !ok {
-		return fmt.Errorf("unknown ceremony %s", ceremonyID)
+		return fmt.Errorf("ceremony %s: %w", ceremonyID, ErrUnknownCeremony)
 	}
 
 	var flags TSSMsgFlags
@@ -310,7 +310,7 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 	if err == nil {
 		return
 	}
-	if err.Error() != "unknown ceremony" {
+	if !errors.Is(err, ErrUnknownCeremony) {
 		log.Errorf("tss msg from %s ceremony %s: %v",
 			msg.From, msg.CeremonyID, err)
 		return
@@ -336,7 +336,7 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 			if err == nil {
 				return
 			}
-			if err.Error() != "unknown ceremony" {
+			if !errors.Is(err, ErrUnknownCeremony) {
 				break
 			}
 		}
