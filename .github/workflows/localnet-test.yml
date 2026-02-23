@@ -133,7 +133,6 @@ jobs:
             --entrypoint /bin/synctest \
             synctest:latest
 
-
       - name: "get localnet stats"
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
