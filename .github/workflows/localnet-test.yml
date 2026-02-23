@@ -130,7 +130,6 @@ jobs:
             -e SYNCTESTER_SYNCMODE=$SYNCTESTER_SYNCMODE \
             -e SYNCTESTER_SKIP_DOCKER_LOGS=true \
             --network host \
-            --entrypoint /bin/synctest \
             synctest:latest
 
       - name: "get localnet stats"
