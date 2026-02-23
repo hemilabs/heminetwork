@@ -45,7 +45,7 @@ func TestWaitForSyncInvalidParameters(t *testing.T) {
 			expectedError: errInvalidNetwork,
 		},
 		{
-			name:          "invalid network",
+			name:          "invalid syncmode",
 			syncmode:      "forkmetimbers",
 			network:       "testnet",
 			expectedError: errInvalidSyncmode,
@@ -56,6 +56,9 @@ func TestWaitForSyncInvalidParameters(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Setenv("SYNCTESTER_NETWORK", testCase.network)
 			t.Setenv("SYNCTESTER_SYNCMODE", testCase.syncmode)
+			t.Setenv("SYNCTESTER_CONTROL_OP_GETH_ENDPOINT", "blah")
+			t.Setenv("SYNCTESTER_EXPERIMENTAL_OP_GETH_ENDPOINT", "blah")
+			t.Setenv("SYNCTESTER_EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT", "blah")
 
 			err := waitForSync(t.Context())
 			if err == nil {

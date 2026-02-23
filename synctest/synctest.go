@@ -61,6 +61,68 @@ var (
 	errInvalidSyncmode       = errors.New("invalid syncmode")
 )
 
+type config struct {
+	controlOpGethEndpoint               string
+	experimentalOpGethEndpoint          string
+	experimentalOpGethTbcHealthEndpoint string
+	slackOauthToken                     string
+	slackChannel                        string
+	slackURL                            string
+	network                             string
+	syncmode                            string
+	notifyBy                            time.Duration
+	skipDockerLogs                      bool
+}
+
+func configFromEnv() (*config, error) {
+	controlOpGethEndpointEnv, err := fromEnvOrError(controlOpGethEndpointEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	experimentalOpGethEndpoint, err := fromEnvOrError(experimentalOpGethEndpointEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	experimentalOpGethTbcHealthEndpoint, err := fromEnvOrError(experimentalOpGethTbcHealthEndpointEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	network, err := fromEnvOrError(networkEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	syncmode, err := fromEnvOrError(syncmodeEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	c := &config{
+		controlOpGethEndpoint:               controlOpGethEndpointEnv,
+		experimentalOpGethEndpoint:          experimentalOpGethEndpoint,
+		experimentalOpGethTbcHealthEndpoint: experimentalOpGethTbcHealthEndpoint,
+		network:                             network,
+		syncmode:                            syncmode,
+		slackURL:                            os.Getenv(slackURLEnv),
+		slackChannel:                        os.Getenv(slackChannelenv),
+		slackOauthToken:                     os.Getenv(slackOauthTokenEnv),
+		notifyBy:                            notifyByFromEnv(),
+		skipDockerLogs:                      os.Getenv(skipDockerLogsEnv) == "true",
+	}
+
+	if !slices.Contains(validNetworks, c.network) {
+		return nil, fmt.Errorf("%w: %s", errInvalidNetwork, c.network)
+	}
+	if !slices.Contains(validSyncmodes, c.syncmode) {
+		return nil, fmt.Errorf("%w: %s", errInvalidSyncmode, c.syncmode)
+	}
+
+	return c, nil
+}
+
 func init() {
 	log = loggo.GetLogger("synctest")
 
@@ -75,24 +137,20 @@ func init() {
 }
 
 func waitForSync(ctx context.Context) error {
-	if !slices.Contains(validNetworks, networkFromEnv()) {
-		return fmt.Errorf("%w: %s", errInvalidNetwork, networkFromEnv())
+	c, err := configFromEnv()
+	if err != nil {
+		return err
 	}
-	if !slices.Contains(validSyncmodes, syncmodeFromEnv()) {
-		return fmt.Errorf("%w: %s", errInvalidSyncmode, syncmodeFromEnv())
-	}
-	controlOpGethEndpoint := controlOpGethEndpointFromEnv()
-	experimentalOpGethEndpoint := experimentalOpGethEndpointFromEnv()
 
-	log.Infof("starting sync testing with configured endpoints: control (%s), experimental(%s)", controlOpGethEndpoint, experimentalOpGethEndpoint)
+	log.Infof("starting sync testing with configured endpoints: control (%s), experimental(%s)", c.controlOpGethEndpoint, c.experimentalOpGethEndpoint)
 
-	lastNotifiedAt := time.Now().Add(-notifyByFromEnv())
+	lastNotifiedAt := time.Now().Add(-c.notifyBy)
 	lastSyncInfo := tbc.SyncInfo{}
 	lastl2BlockNumber := uint64(0)
 
 	for {
-		shouldNotify := time.Since(lastNotifiedAt) >= notifyByFromEnv()
-		if err := reportProgress(ctx, &lastSyncInfo, shouldNotify); err != nil {
+		shouldNotify := time.Since(lastNotifiedAt) >= c.notifyBy
+		if err := reportProgress(ctx, c, &lastSyncInfo, shouldNotify); err != nil {
 			return err
 		}
 
@@ -101,7 +159,7 @@ func waitForSync(ctx context.Context) error {
 		}
 
 		// only check if l2 tips match
-		matching, err := l2TipsMatch(ctx, &lastl2BlockNumber)
+		matching, err := l2TipsMatch(ctx, c, &lastl2BlockNumber)
 		if err != nil {
 			log.Errorf("error checking if l2 tips match: %s", err)
 		} else if matching {
@@ -118,10 +176,10 @@ func waitForSync(ctx context.Context) error {
 	return nil
 }
 
-func reportProgress(ctx context.Context, lastSyncInfo *tbc.SyncInfo, notify bool) error {
+func reportProgress(ctx context.Context, c *config, lastSyncInfo *tbc.SyncInfo, notify bool) error {
 	var syncInfo tbc.SyncInfo
 	for i := range tbcFetchHealthRetryCount {
-		resp, err := http.Get(fmt.Sprintf("%s", experimentalOpGethTbcHealthEndpointFromEnv()))
+		resp, err := http.Get(fmt.Sprintf("%s", c.experimentalOpGethTbcHealthEndpoint))
 		if err != nil {
 			log.Warningf("error getting tbc health: %s", err)
 			return nil
@@ -154,9 +212,7 @@ func reportProgress(ctx context.Context, lastSyncInfo *tbc.SyncInfo, notify bool
 		}
 	}
 
-	experimentalOpGethEndpoint := experimentalOpGethEndpointFromEnv()
-
-	l2Experiment, err := ethclient.Dial(experimentalOpGethEndpoint)
+	l2Experiment, err := ethclient.Dial(c.experimentalOpGethEndpoint)
 	if err != nil {
 		log.Warningf("could not dial eth l2 experiment: %s\n", err)
 		return nil
@@ -198,7 +254,7 @@ func reportProgress(ctx context.Context, lastSyncInfo *tbc.SyncInfo, notify bool
 	*lastSyncInfo = syncInfo
 
 	if notify {
-		notifyHooks(ctx, &syncInfo)
+		notifyHooks(ctx, c, &syncInfo)
 	}
 
 	return nil
@@ -218,32 +274,28 @@ func notifyByFromEnv() time.Duration {
 	return time.Duration(i) * time.Second
 }
 
-func notifySlackSuccess(ctx context.Context, controlHash *common.Hash, experimentHash *common.Hash) {
-	slackToken := os.Getenv(slackOauthTokenEnv)
-	slackChannel := os.Getenv(slackChannelenv)
-
-	if slackToken == "" || slackChannel == "" {
+func notifySlackSuccess(ctx context.Context, c *config, controlHash *common.Hash, experimentHash *common.Hash) {
+	if c.slackOauthToken == "" || c.slackChannel == "" {
 		return
 	}
 
 	var api *slack.Client
-	slackUrl := os.Getenv(slackURLEnv)
-	if slackUrl == "" {
-		api = slack.New(slackToken)
+	if c.slackURL == "" {
+		api = slack.New(c.slackOauthToken)
 	} else {
-		api = slack.New(slackToken, slack.OptionAPIURL(slackUrl))
+		api = slack.New(c.slackOauthToken, slack.OptionAPIURL(c.slackURL))
 	}
 
 	msgOptions := []slack.MsgOption{
 		slack.MsgOptionText(
-			fmt.Sprintf("hashes match: network %s, syncmode %s, control %s == experiment %s", networkFromEnv(), syncmodeFromEnv(), controlHash.Hex(), experimentHash.Hex()),
+			fmt.Sprintf("hashes match: network %s, syncmode %s, control %s == experiment %s", c.network, c.syncmode, controlHash.Hex(), experimentHash.Hex()),
 			false,
 		),
 		slack.MsgOptionAsUser(true),
 	}
 
 	_, _, err := api.PostMessage(
-		slackChannel,
+		c.slackChannel,
 		msgOptions...,
 	)
 	if err != nil {
@@ -320,25 +372,19 @@ func generateMsgOptions(ctx context.Context, network string, syncmode string, l2
 	return msgOptions
 }
 
-func notifySlackHook(ctx context.Context, syncInfo *tbc.SyncInfo, dockerLogs string) {
-	slackToken := os.Getenv(slackOauthTokenEnv)
-	slackChannel := os.Getenv(slackChannelenv)
-
-	if slackToken == "" || slackChannel == "" {
+func notifySlackHook(ctx context.Context, c *config, syncInfo *tbc.SyncInfo, dockerLogs string) {
+	if c.slackOauthToken == "" || c.slackChannel == "" {
 		return
 	}
 
 	var api *slack.Client
-	slackUrl := os.Getenv(slackURLEnv)
-	if slackUrl == "" {
-		api = slack.New(slackToken)
+	if c.slackURL == "" {
+		api = slack.New(c.slackOauthToken)
 	} else {
-		api = slack.New(slackToken, slack.OptionAPIURL(slackUrl))
+		api = slack.New(c.slackOauthToken, slack.OptionAPIURL(c.slackURL))
 	}
 
-	experimentalOpGethEndpoint := experimentalOpGethEndpointFromEnv()
-
-	l2Experiment, err := ethclient.Dial(experimentalOpGethEndpoint)
+	l2Experiment, err := ethclient.Dial(c.experimentalOpGethEndpoint)
 	if err != nil {
 		log.Warningf("could not dial eth l2 experiment: %s\n", err)
 	}
@@ -358,13 +404,10 @@ func notifySlackHook(ctx context.Context, syncInfo *tbc.SyncInfo, dockerLogs str
 		l2BlockMsg = fmt.Sprintf("L2 Block: %s:%d", experimentalBlock.Hash().Hex(), experimentalBlock.Number)
 	}
 
-	network := networkFromEnv()
-	syncmode := syncmodeFromEnv()
-
-	msgOptions := generateMsgOptions(ctx, network, syncmode, l2BlockMsg, syncInfo)
+	msgOptions := generateMsgOptions(ctx, c.network, c.syncmode, l2BlockMsg, syncInfo)
 
 	_, _, err = api.PostMessage(
-		slackChannel,
+		c.slackChannel,
 		msgOptions...,
 	)
 	if err != nil {
@@ -374,13 +417,13 @@ func notifySlackHook(ctx context.Context, syncInfo *tbc.SyncInfo, dockerLogs str
 	if dockerLogs != "" {
 		msgOptions := []slack.MsgOption{slack.MsgOptionBlocks(
 			slack.NewHeaderBlock(
-				slack.NewTextBlockObject("plain_text", fmt.Sprintf("Docker Logs (%s %s)", networkFromEnv(), syncmodeFromEnv()), false, false),
+				slack.NewTextBlockObject("plain_text", fmt.Sprintf("Docker Logs (%s %s)", c.network, c.syncmode), false, false),
 			),
 			slack.NewMarkdownBlock("", fmt.Sprintf("```%s```", dockerLogs)),
 		)}
 
 		_, _, err = api.PostMessage(
-			slackChannel,
+			c.slackChannel,
 			msgOptions...,
 		)
 		if err != nil {
@@ -389,7 +432,7 @@ func notifySlackHook(ctx context.Context, syncInfo *tbc.SyncInfo, dockerLogs str
 	}
 }
 
-func notifyHooks(ctx context.Context, syncInfo *tbc.SyncInfo) {
+func notifyHooks(ctx context.Context, c *config, syncInfo *tbc.SyncInfo) {
 	// add hooks here for reporting progess to places outside of the test
 	// itself (ex. slack)
 	log.Tracef("notifying")
@@ -397,19 +440,16 @@ func notifyHooks(ctx context.Context, syncInfo *tbc.SyncInfo) {
 	if !skipDockerLogs() {
 		dockerLogs = getLogsFromDocker(ctx)
 	}
-	notifySlackHook(ctx, syncInfo, dockerLogs)
+	notifySlackHook(ctx, c, syncInfo, dockerLogs)
 }
 
-func l2TipsMatch(ctx context.Context, lastl2BlockNumber *uint64) (bool, error) {
-	controlOpGethEndpoint := controlOpGethEndpointFromEnv()
-	experimentalOpGethEndpoint := experimentalOpGethEndpointFromEnv()
-
-	l2Control, err := ethclient.Dial(controlOpGethEndpoint)
+func l2TipsMatch(ctx context.Context, c *config, lastl2BlockNumber *uint64) (bool, error) {
+	l2Control, err := ethclient.Dial(c.controlOpGethEndpoint)
 	if err != nil {
 		return false, fmt.Errorf("could not dial eth l2 control: %s", err)
 	}
 
-	l2Experiment, err := ethclient.Dial(experimentalOpGethEndpoint)
+	l2Experiment, err := ethclient.Dial(c.experimentalOpGethEndpoint)
 	if err != nil {
 		return false, fmt.Errorf("could not dial eth l2 experiment: %s", err)
 	}
@@ -447,7 +487,7 @@ func l2TipsMatch(ctx context.Context, lastl2BlockNumber *uint64) (bool, error) {
 		matching := controlHash.Hex() == experimentHash.Hex()
 
 		if matching {
-			notifySlackSuccess(ctx, &controlHash, &experimentHash)
+			notifySlackSuccess(ctx, c, &controlHash, &experimentHash)
 			return true, nil
 		}
 
@@ -460,34 +500,6 @@ func l2TipsMatch(ctx context.Context, lastl2BlockNumber *uint64) (bool, error) {
 	}
 
 	return false, nil
-}
-
-func controlOpGethEndpointFromEnv() string {
-	return fromEnvOrFail(controlOpGethEndpointEnv)
-}
-
-func experimentalOpGethEndpointFromEnv() string {
-	return fromEnvOrFail(experimentalOpGethEndpointEnv)
-}
-
-func experimentalOpGethTbcHealthEndpointFromEnv() string {
-	return fromEnvOrFail(experimentalOpGethTbcHealthEndpointEnv)
-}
-
-func networkFromEnv() string {
-	n := os.Getenv(networkEnv)
-	if n == "" {
-		return "<not specified>"
-	}
-	return n
-}
-
-func syncmodeFromEnv() string {
-	n := os.Getenv(syncmodeEnv)
-	if n == "" {
-		return "<not specified>"
-	}
-	return n
 }
 
 // this portion is untested for now
@@ -542,13 +554,13 @@ func getLogsFromDocker(ctx context.Context) string {
 	return logs
 }
 
-func fromEnvOrFail(varName string) string {
+func fromEnvOrError(varName string) (string, error) {
 	val := os.Getenv(varName)
 	if val == "" {
-		panic(fmt.Sprintf("%s not set", varName))
+		return "", fmt.Errorf("%s not set", varName)
 	}
 
-	return val
+	return val, nil
 }
 
 func skipDockerLogs() bool {
