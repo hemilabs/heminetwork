@@ -20,6 +20,6 @@ func main() {
 	}()
 
 	if err := waitForSync(ctx); err != nil {
-		panic(fmt.Sprintf("error syncing: %s", err))
+		panic(fmt.Errorf("error syncing: %w", err))
 	}
 }
