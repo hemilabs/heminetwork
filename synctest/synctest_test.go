@@ -226,7 +226,7 @@ func TestGetLogsFromDockerContainers(t *testing.T) {
 	for _, testCase := range testTable {
 		t.Run(testCase.name, func(t *testing.T) {
 			redisC, err := testcontainers.Run(
-				t.Context(), "redis:latest",
+				t.Context(), "redis:8.2.4-alpine3.22@sha256:a308ca111032fa8f306a2dc7be7ba5deb8b777ed5d258c733cddba48a1fd7904",
 				testcontainers.WithExposedPorts("6379/tcp"),
 				testcontainers.WithWaitStrategy(
 					wait.ForListeningPort("6379/tcp"),
