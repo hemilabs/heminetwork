@@ -10,7 +10,16 @@ import (
 )
 
 func main() {
-	if err := waitForSync(context.Background()); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		// Stop receiving signals as soon as possible.
+		<-ctx.Done()
+		stop()
+	}()
+
+	if err := waitForSync(ctx); err != nil {
 		panic(fmt.Sprintf("error syncing: %s", err))
 	}
 }
