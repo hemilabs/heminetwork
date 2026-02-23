@@ -100,16 +100,12 @@ func waitForSync(ctx context.Context) error {
 			lastNotifiedAt = time.Now()
 		}
 
-		// only check if l2 tips match after tbc is synced
-		if lastSyncInfo.Synced {
-			matching, err := l2TipsMatch(ctx, &lastl2BlockNumber)
-			if err != nil {
-				return err
-			}
-
-			if matching {
-				break
-			}
+		// only check if l2 tips match
+		matching, err := l2TipsMatch(ctx, &lastl2BlockNumber)
+		if err != nil {
+			log.Errorf("error checking if l2 tips match: %s", err)
+		} else if matching {
+			break
 		}
 
 		select {
@@ -181,7 +177,7 @@ func reportProgress(ctx context.Context, lastSyncInfo *tbc.SyncInfo, notify bool
 		l2BlockMsg = fmt.Sprintf("L2 Block: %s:%d", experimentalBlock.Hash().Hex(), experimentalBlock.Number)
 	}
 
-	dockerLogs := getLogsFromDocker(ctx, lastSyncInfo.Synced)
+	dockerLogs := getLogsFromDocker(ctx)
 
 	log.Tracef(`
 		sync progress:
@@ -399,7 +395,7 @@ func notifyHooks(ctx context.Context, syncInfo *tbc.SyncInfo) {
 	log.Tracef("notifying")
 	var dockerLogs string
 	if !skipDockerLogs() {
-		dockerLogs = getLogsFromDocker(ctx, syncInfo.Synced)
+		dockerLogs = getLogsFromDocker(ctx)
 	}
 	notifySlackHook(ctx, syncInfo, dockerLogs)
 }
@@ -495,7 +491,7 @@ func syncmodeFromEnv() string {
 }
 
 // this portion is untested for now
-func getLogsFromDocker(ctx context.Context, reportNode bool) string {
+func getLogsFromDocker(ctx context.Context) string {
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Warningf("error creating docker client: %s", err)
@@ -512,7 +508,7 @@ func getLogsFromDocker(ctx context.Context, reportNode bool) string {
 	for _, c := range containers {
 		var isValidContainer bool
 		for _, name := range c.Names {
-			if strings.Contains(name, "op-geth") || (reportNode && strings.Contains(name, "op-node")) {
+			if strings.Contains(name, "op-geth") || strings.Contains(name, "op-node") {
 				isValidContainer = true
 				break
 			}
