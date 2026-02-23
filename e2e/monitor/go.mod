@@ -4,8 +4,6 @@ go 1.25.0
 
 toolchain go1.25.5
 
-replace github.com/hemilabs/heminetwork/v2 => ../..
-
 replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250714204256-7bb2a14f63d0
 
 replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20260223115913-7707e02bcf1c
@@ -81,7 +79,7 @@ require (
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
-	github.com/juju/loggo/v2 v2.2.0 // indirect
+	github.com/juju/loggo v1.0.0 // indirect
 	github.com/kkdai/bstream v1.0.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
