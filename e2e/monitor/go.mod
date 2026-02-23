@@ -8,7 +8,7 @@ replace github.com/hemilabs/heminetwork/v2 => ../..
 
 replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250714204256-7bb2a14f63d0
 
-replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20260220174352-7632738ab719
+replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20260223115913-7707e02bcf1c
 
 require (
 	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
@@ -19,7 +19,7 @@ require (
 	github.com/ethereum/go-ethereum v1.16.8
 	github.com/go-test/deep v1.1.1
 	github.com/gosuri/uilive v0.0.4
-	github.com/hemilabs/heminetwork v1.6.4-0.20250716150413-22552f1a5442
+	github.com/hemilabs/heminetwork/v2 v2.0.0
 	github.com/jedib0t/go-pretty/v6 v6.7.8
 )
 
@@ -75,7 +75,7 @@ require (
 	github.com/hashicorp/go-bexpr v0.1.11 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
-	github.com/hemilabs/heminetwork/v2 v2.0.0 // indirect
+	github.com/hemilabs/heminetwork v1.1.1-0.20250529134410-e7f144847b07 // indirect
 	github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect

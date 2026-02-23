@@ -213,10 +213,10 @@ github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+l
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
-github.com/hemilabs/heminetwork v1.6.4-0.20250716150413-22552f1a5442 h1:uja2JQILta+6RDjFQm5uyAoysPpmfyIkY2DgbnbS++g=
-github.com/hemilabs/heminetwork v1.6.4-0.20250716150413-22552f1a5442/go.mod h1:Ls95vJ7caY8NnZz8KtOFC+pGGqrtec9lWgp0qmJ684A=
-github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20260220174352-7632738ab719 h1:Qr7Xu1t5T7gKNdOotJ/wKf1rchCZltxp5pXSC7rxE+w=
-github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20260220174352-7632738ab719/go.mod h1:nL2zXLhJfG5M4/qyPdnxcDFq49qSREa7KvQ32wzv/mE=
+github.com/hemilabs/heminetwork v1.1.1-0.20250529134410-e7f144847b07 h1:rJs7rPV/aF6v2DQv3Ruc+qQGsHAarMVsBR9n1I5Zp64=
+github.com/hemilabs/heminetwork v1.1.1-0.20250529134410-e7f144847b07/go.mod h1:g8LW8Gw876w6NraLqO0EsXSKL/HY26esPy4y+dYnTvM=
+github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20260223115913-7707e02bcf1c h1:Iq+abuBVHGWDub+CJ9sm3lWY74Vxr9B9HEpft7zb2E0=
+github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20260223115913-7707e02bcf1c/go.mod h1:nL2zXLhJfG5M4/qyPdnxcDFq49qSREa7KvQ32wzv/mE=
 github.com/hemilabs/optimism v1.5.1-0.20250714204256-7bb2a14f63d0 h1:8wJM7TwxKr+oSgO9SnH/Iw3kSfFFva6lmScng8aJwcA=
 github.com/hemilabs/optimism v1.5.1-0.20250714204256-7bb2a14f63d0/go.mod h1:uhXlpbsYBl+Umm642ORiAo5DK0mXC+PBV45VlmIhv7E=
 github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db h1:IZUYC/xb3giYwBLMnr8d0TGTzPKFGNTCGgGLoyeX330=
