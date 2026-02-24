@@ -42,37 +42,37 @@ const (
 var (
 	tbcFetchHealthRetryCount = 10
 	loopDelay                = 5 * time.Second
-	log                      loggo.Logger
 	validNetworks            = []string{networkMainnet, networkTestnet, networkLocalnet}
 	validSyncmodes           = []string{syncmodeSnap, syncmodeFull}
 	errInvalidNetwork        = errors.New("invalid network")
 	errInvalidSyncmode       = errors.New("invalid syncmode")
+	log                      = loggo.GetLogger("synctest")
 )
 
 type config struct {
-	ControlOpGethEndpoint               string `env:"CONTROL_OP_GETH_ENDPOINT"`
-	ExperimentalOpGethEndpoint          string `env:"EXPERIMENTAL_OP_GETH_ENDPOINT"`
-	ExperimentalOpGethTbcHealthEndpoint string `env:"EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT"`
-	SlackOauthToken                     string `env:"SLACK_OAUTH_TOKEN"`
-	SlackChannel                        string `env:"SLACK_CHANNEL"`
-	SlackURL                            string `env:"SLACK_URL"`
-	Network                             string `env:"NETWORK"`
-	Syncmode                            string `env:"SYNCMODE"`
-	NotifyBySeconds                     uint   `env:"NOTIFY_BY_SECONDS"`
-	SkipDockerLogs                      bool   `env:"SKIP_DOCKER_LOGS"`
-	LogLevel                            string `env:"LOG_LEVEL"`
+	ControlOpGethEndpoint               string        `env:"CONTROL_OP_GETH_ENDPOINT"`
+	ExperimentalOpGethEndpoint          string        `env:"EXPERIMENTAL_OP_GETH_ENDPOINT"`
+	ExperimentalOpGethTbcHealthEndpoint string        `env:"EXPERIMENTAL_OP_GETH_TBC_HEALTH_ENDPOINT"`
+	SlackOauthToken                     string        `env:"SLACK_OAUTH_TOKEN"`
+	SlackChannel                        string        `env:"SLACK_CHANNEL"`
+	SlackURL                            string        `env:"SLACK_URL"`
+	Network                             string        `env:"NETWORK"`
+	Syncmode                            string        `env:"SYNCMODE"`
+	NotifyBy                            time.Duration `env:"NOTIFY_BY"`
+	SkipDockerLogs                      bool          `env:"SKIP_DOCKER_LOGS"`
+	LogLevel                            string        `env:"LOG_LEVEL"`
 }
 
 func DefaultConfig() *config {
 	return &config{
-		NotifyBySeconds: 60 * 30,
+		NotifyBy: 30 * time.Minute,
 	}
 }
 
 func configFromEnv() (*config, error) {
 	c := DefaultConfig()
 	envOpts := env.Options{Prefix: "SYNCTESTER_"}
-	if err := env.ParseWithOptions(&c, envOpts); err != nil {
+	if err := env.ParseWithOptions(c, envOpts); err != nil {
 		return nil, fmt.Errorf("could not parse env: %w", err)
 	}
 
@@ -103,7 +103,9 @@ func waitForSync(ctx context.Context) error {
 		return err
 	}
 
-	log = loggo.GetLogger("synctest")
+	if err := loggo.ConfigureLoggers(c.LogLevel); err != nil {
+		return err
+	}
 
 	logLevel, _ := loggo.ParseLevel(c.LogLevel)
 	if logLevel == loggo.UNSPECIFIED {
@@ -112,16 +114,14 @@ func waitForSync(ctx context.Context) error {
 
 	log.Infof("logLevel = %d, logLevel from env = %s", logLevel, c.LogLevel)
 
-	log.SetLogLevel(logLevel)
-
 	log.Infof("starting sync testing with configured endpoints: control (%s), experimental(%s)", c.ControlOpGethEndpoint, c.ExperimentalOpGethEndpoint)
 
-	lastNotifiedAt := time.Now().Add(-(time.Duration(c.NotifyBySeconds) * time.Second))
+	lastNotifiedAt := time.Now().Add(-c.NotifyBy)
 	lastSyncInfo := tbc.SyncInfo{}
 	lastl2BlockNumber := uint64(0)
 
 	for {
-		shouldNotify := time.Since(lastNotifiedAt) >= (time.Duration(c.NotifyBySeconds) * time.Second)
+		shouldNotify := time.Since(lastNotifiedAt) >= c.NotifyBy
 		if err := reportProgress(ctx, c, &lastSyncInfo, shouldNotify); err != nil {
 			return err
 		}
@@ -151,7 +151,12 @@ func waitForSync(ctx context.Context) error {
 func reportProgress(ctx context.Context, c *config, lastSyncInfo *tbc.SyncInfo, notify bool) error {
 	var syncInfo tbc.SyncInfo
 	for i := range tbcFetchHealthRetryCount {
-		resp, err := http.Get(fmt.Sprintf("%s", c.ExperimentalOpGethTbcHealthEndpoint))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ExperimentalOpGethTbcHealthEndpoint, nil)
+		if err != nil {
+			return fmt.Errorf("error creating new request: %w", err)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			log.Warningf("error getting tbc health: %s", err)
 			return nil
@@ -159,8 +164,10 @@ func reportProgress(ctx context.Context, c *config, lastSyncInfo *tbc.SyncInfo, 
 
 		defer resp.Body.Close()
 
-		if err := json.NewDecoder(b).Decode(&syncInfo); err != nil {
+		if err := json.NewDecoder(resp.Body).Decode(&syncInfo); err != nil {
 			return fmt.Errorf("decode tbc json: %w", err)
+		} else {
+			break
 		}
 
 		if i >= tbcFetchHealthRetryCount-1 {
