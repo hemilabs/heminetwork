@@ -386,6 +386,7 @@ services:
       e2e:
     ports:
       - "18546:8546"
+      - "5555:5555"
 
   op-batcher:
     image: optimism-stack:latest

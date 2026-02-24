@@ -82,6 +82,9 @@ race:
 test:
 	go test -test.timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out -covermode=atomic ./...
 
+synctest-test:
+	cd ./synctest && go test -v -test.timeout=1m ./...
+
 vulncheck:
 	$(shell go env GOPATH)/bin/govulncheck ./...
 

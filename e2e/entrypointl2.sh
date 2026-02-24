@@ -79,6 +79,7 @@ echo $filecontents > ./config.toml
  --authrpc.port=8551 \
  --authrpc.jwtsecret=/tmp/jwt.hex \
  --tbc.network=localnet \
+ --tbc.prometheusaddress='0.0.0.0:5555' \
  --tbc.seeds='bitcoind:18444' \
  --override.ecotone=1725868497 \
  --override.canyon=1725868497 \
