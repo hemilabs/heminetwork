@@ -3,6 +3,7 @@ module github.com/hemilabs/heminetwork/synctest
 go 1.25.5
 
 require (
+	github.com/caarlos0/env/v11 v11.4.0
 	github.com/docker/docker v28.5.1+incompatible
 	github.com/ethereum/go-ethereum v1.16.8
 	github.com/go-test/deep v1.1.1
