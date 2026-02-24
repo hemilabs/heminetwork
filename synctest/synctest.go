@@ -63,8 +63,14 @@ type config struct {
 	LogLevel                            string `env:"LOG_LEVEL"`
 }
 
+func DefaultConfig() *config {
+	return &config{
+		NotifyBySeconds: 60 * 30,
+	}
+}
+
 func configFromEnv() (*config, error) {
-	c := config{}
+	c := DefaultConfig()
 	envOpts := env.Options{Prefix: "SYNCTESTER_"}
 	if err := env.ParseWithOptions(&c, envOpts); err != nil {
 		return nil, fmt.Errorf("could not parse env: %w", err)
@@ -73,17 +79,12 @@ func configFromEnv() (*config, error) {
 	if c.ControlOpGethEndpoint == "" {
 		return nil, errors.New("control op-geth endpoint not set")
 	}
-
 	if c.ExperimentalOpGethEndpoint == "" {
 		return nil, errors.New("experimental op-geth endpoint not set")
 	}
 
 	if c.ExperimentalOpGethTbcHealthEndpoint == "" {
 		return nil, errors.New("op-geth tbc health endpoint not set")
-	}
-
-	if c.NotifyBySeconds == 0 {
-		c.NotifyBySeconds = 60 * 30 // 30 minutes
 	}
 
 	if !slices.Contains(validNetworks, c.Network) {
@@ -93,7 +94,7 @@ func configFromEnv() (*config, error) {
 		return nil, fmt.Errorf("%w: %s", errInvalidSyncmode, c.Syncmode)
 	}
 
-	return &c, nil
+	return c, nil
 }
 
 func waitForSync(ctx context.Context) error {
