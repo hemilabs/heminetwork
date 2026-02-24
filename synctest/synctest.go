@@ -158,17 +158,8 @@ func reportProgress(ctx context.Context, c *config, lastSyncInfo *tbc.SyncInfo, 
 
 		defer resp.Body.Close()
 
-		b, err := io.ReadAll(resp.Body)
-		if err != nil {
-			panic(err) // should not happen
-		}
-
-		log.Tracef("tbc progress json: %v", string(b))
-
-		if err := json.Unmarshal(b, &syncInfo); err != nil {
-			log.Warningf("error unmarshaling tbc json %s: %s", string(b), err)
-		} else {
-			break
+		if err := json.NewDecoder(b).Decode(&syncInfo); err != nil {
+			return fmt.Errorf("decode tbc json: %w", err)
 		}
 
 		if i >= tbcFetchHealthRetryCount-1 {
