@@ -106,6 +106,8 @@ type CeremonyInfo struct {
 	Status      string          `json:"status"`     // CeremonyRunning, CeremonyComplete, CeremonyFailed
 	Error       string          `json:"error,omitempty"`
 	Coordinator Identity        `json:"coordinator"` // node responsible for broadcasting result
+	KeyID       []byte          `json:"key_id,omitempty"`
+	Committee   []Identity      `json:"committee,omitempty"`
 	ctx         context.Context // canceled on terminal state
 	cancel      context.CancelFunc
 }
@@ -1241,7 +1243,7 @@ func requireAdmin(t *Transport, id *Identity) bool {
 // registerCeremony records a new ceremony in the tracking map.
 // The ceremony context derives from s.tssCtx so server shutdown
 // propagates cancellation to all waiting callers.
-func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity) {
+func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity, committee []Identity) {
 	ctx, cancel := context.WithCancel(s.tssCtx)
 	s.mtx.Lock()
 	s.ceremonies[cid] = &CeremonyInfo{
@@ -1249,6 +1251,7 @@ func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator I
 		StartTime:   time.Now().Unix(),
 		Status:      CeremonyRunning,
 		Coordinator: coordinator,
+		Committee:   committee,
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -1361,6 +1364,8 @@ func (s *Server) handleCeremonyStatus(cid CeremonyID) CeremonyStatusResponse {
 		Type:       ci.Type.String(),
 		Status:     ci.Status,
 		StartTime:  ci.StartTime,
+		KeyID:      ci.KeyID,
+		Committee:  ci.Committee,
 		Error:      ci.Error,
 	}
 }
@@ -1380,6 +1385,8 @@ func (s *Server) handleCeremonyList() CeremonyListResponse {
 			Type:       ci.Type.String(),
 			Status:     ci.Status,
 			StartTime:  ci.StartTime,
+			KeyID:      ci.KeyID,
+			Committee:  ci.Committee,
 			Error:      ci.Error,
 		})
 	}
