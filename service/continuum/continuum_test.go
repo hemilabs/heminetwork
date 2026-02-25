@@ -8646,7 +8646,7 @@ func TestCeremonyTracking(t *testing.T) {
 	copy(cid[:], []byte("test-ceremony-tracking-00"))
 
 	// Register.
-	s.registerCeremony(cid, CeremonyKeygen, Identity{})
+	s.registerCeremony(cid, CeremonyKeygen, Identity{}, nil)
 
 	s.mtx.RLock()
 	ci, ok := s.ceremonies[cid]
@@ -8674,7 +8674,7 @@ func TestCeremonyTracking(t *testing.T) {
 	// Fail a different ceremony.
 	var cid2 CeremonyID
 	copy(cid2[:], []byte("test-ceremony-fail-00000"))
-	s.registerCeremony(cid2, CeremonySign, Identity{})
+	s.registerCeremony(cid2, CeremonySign, Identity{}, nil)
 	s.failCeremony(cid2, "test error")
 
 	s.mtx.RLock()
@@ -8692,6 +8692,71 @@ func TestCeremonyTracking(t *testing.T) {
 	copy(bogus[:], []byte("nonexistent-ceremony-000"))
 	s.completeCeremony(bogus)
 	s.failCeremony(bogus, "nope")
+}
+
+func TestRegisterCeremonyCommittee(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	var cid CeremonyID
+	copy(cid[:], []byte("test-ceremony-committee0"))
+
+	// Build a committee of 3 identities.
+	committee := make([]Identity, 3)
+	for i := range committee {
+		committee[i][0] = byte(i + 1)
+	}
+
+	s.registerCeremony(cid, CeremonyKeygen, committee[0], committee)
+
+	s.mtx.RLock()
+	ci, ok := s.ceremonies[cid]
+	s.mtx.RUnlock()
+	if !ok {
+		t.Fatal("ceremony not registered")
+	}
+	if len(ci.Committee) != 3 {
+		t.Fatalf("committee length = %d, want 3", len(ci.Committee))
+	}
+	for i, id := range ci.Committee {
+		if id != committee[i] {
+			t.Fatalf("committee[%d] = %v, want %v", i, id, committee[i])
+		}
+	}
+	if ci.Coordinator != committee[0] {
+		t.Fatalf("coordinator = %v, want %v", ci.Coordinator, committee[0])
+	}
+}
+
+func TestCeremonyKeyIDField(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+
+	var cid CeremonyID
+	copy(cid[:], []byte("test-ceremony-keyid-0000"))
+
+	s.registerCeremony(cid, CeremonyKeygen, Identity{}, nil)
+
+	// Simulate what dispatchKeygen does after keygen completion:
+	// lock, set KeyID, unlock.
+	keyID := []byte{0xde, 0xad, 0xbe, 0xef}
+	s.mtx.Lock()
+	if ci, ok := s.ceremonies[cid]; ok {
+		ci.KeyID = keyID
+	}
+	s.mtx.Unlock()
+
+	// Verify via handleCeremonyStatus (the API path).
+	resp := s.handleCeremonyStatus(cid)
+	if resp.Status != CeremonyRunning {
+		t.Fatalf("status = %q, want running", resp.Status)
+	}
+	if len(resp.KeyID) != 4 {
+		t.Fatalf("keyID length = %d, want 4", len(resp.KeyID))
+	}
+	if resp.KeyID[0] != 0xde || resp.KeyID[3] != 0xef {
+		t.Fatalf("keyID = %x, want deadbeef", resp.KeyID)
+	}
 }
 
 // readAdminResponse reads from the transport, discarding gossip messages
@@ -8875,8 +8940,8 @@ func TestAdminCeremonyList(t *testing.T) {
 	var cid1, cid2 CeremonyID
 	copy(cid1[:], []byte("ceremony-list-test-0001"))
 	copy(cid2[:], []byte("ceremony-list-test-0002"))
-	s.registerCeremony(cid1, CeremonyKeygen, Identity{})
-	s.registerCeremony(cid2, CeremonySign, Identity{})
+	s.registerCeremony(cid1, CeremonyKeygen, Identity{}, nil)
+	s.registerCeremony(cid2, CeremonySign, Identity{}, nil)
 	s.completeCeremony(cid1)
 
 	clientSecret, err := NewSecret()
@@ -8954,7 +9019,7 @@ func TestAdminCeremonyStatusFound(t *testing.T) {
 	// Register and complete a ceremony.
 	var cid CeremonyID
 	copy(cid[:], []byte("ceremony-status-found-01"))
-	s.registerCeremony(cid, CeremonyReshare, Identity{})
+	s.registerCeremony(cid, CeremonyReshare, Identity{}, nil)
 	s.failCeremony(cid, "threshold mismatch")
 
 	clientSecret, err := NewSecret()
@@ -9715,7 +9780,7 @@ func TestHandleCeremonyResultExistingComplete(t *testing.T) {
 	s, _ := NewServer(nil)
 	var cid CeremonyID
 	copy(cid[:], []byte("test-existing-complete-0"))
-	s.registerCeremony(cid, CeremonyKeygen, Identity{})
+	s.registerCeremony(cid, CeremonyKeygen, Identity{}, nil)
 
 	// Broadcast should be a no-op for already-tracked ceremonies;
 	// the local goroutine owns the status transition.
