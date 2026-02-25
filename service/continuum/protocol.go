@@ -884,6 +884,7 @@ var (
 	ErrMessageTooLarge        = errors.New("message too large")
 	ErrInvalidNaClPub         = errors.New("invalid nacl public key")
 	ErrUseBroadcast           = errors.New("broadcast-type payload: use Broadcast(), not SendEncrypted()")
+	ErrNotInCommittee         = errors.New("self not in old or new committee")
 	ErrUnknownCeremony        = errors.New("unknown ceremony")
 
 	// placeholders until we decide on timeout handling
