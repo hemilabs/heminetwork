@@ -1782,40 +1782,10 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 			continue
 		}
 
-		// XXX this can cause rate limitting since it isn't in a go
-		// routine. This is obviously a DDOS and needs fixing.
-		id, transport, naclPub, err := s.newTransport(ctx, conn)
-		if err != nil {
-			log.Errorf("transport: %v", err)
-			continue
-		}
-
-		// Insert into sessions
-		// untested: newSession duplicate; requires full handshake with same identity
-		if err := s.newSession(id, transport); err != nil {
-			log.Errorf("session: %v", err)
-			continue
-		}
-
-		// Register peer with NaCl public key.  Address is empty
-		// because we don't know their listen address — they'll
-		// advertise it via gossip.
-		s.addPeer(ctx, PeerRecord{
-			Identity: *id,
-			NaClPub:  naclPub,
-			Version:  ProtocolVersion,
-			LastSeen: time.Now().Unix(),
-		})
-
-		// Tell existing peers we learned about someone new so
-		// they can request our updated peer list.
-		s.notifyAllPeers(ctx)
-
-		log.Infof("connected %v: %v", conn.RemoteAddr(), id)
-
-		// handle connection
+		// Handle handshake and session setup in goroutine to prevent
+		// blocking the accept loop.
 		s.wg.Add(1)
-		go s.handle(ctx, id, transport)
+		go s.handleIncomingConnection(ctx, conn)
 	}
 }
 
@@ -2011,4 +1981,53 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Infof("continuum service clean shutdown")
 
 	return err
+}
+
+// handleIncomingConnection processes an incoming connection in a separate
+// goroutine to prevent blocking the accept loop. This protects against
+// DDoS attacks where an attacker opens many slow connections.
+func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
+	var success bool
+	defer func() {
+		if !success {
+			s.wg.Done()
+		}
+	}()
+
+	log.Debugf("handleIncomingConnection: %v", conn.RemoteAddr())
+	defer log.Debugf("handleIncomingConnection: %v exit", conn.RemoteAddr())
+
+	// Perform handshake and setup
+	id, transport, naclPub, err := s.newTransport(ctx, conn)
+	if err != nil {
+		log.Errorf("transport %v: %v", conn.RemoteAddr(), err)
+		return
+	}
+
+	// Insert into sessions
+	if err := s.newSession(id, transport); err != nil {
+		log.Errorf("session %v: %v", conn.RemoteAddr(), err)
+		return
+	}
+
+	// Register peer with NaCl public key.  Address is empty
+	// because we don't know their listen address — they'll
+	// advertise it via gossip.
+	s.addPeer(ctx, PeerRecord{
+		Identity: *id,
+		NaClPub:  naclPub,
+		Version:  ProtocolVersion,
+		LastSeen: time.Now().Unix(),
+	})
+
+	// Tell existing peers we learned about someone new so
+	// they can request our updated peer list.
+	s.notifyAllPeers(ctx)
+
+	// Connection successful
+	success = true
+	log.Infof("connected %v: %v", conn.RemoteAddr(), id)
+
+	// handle connection
+	s.handle(ctx, id, transport)
 }
