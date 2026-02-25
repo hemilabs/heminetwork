@@ -2952,6 +2952,10 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 	if err != nil {
 		t.Fatal(err)
 	}
+	pings, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -2963,6 +2967,7 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 	s := &Server{
 		seen:       seen,
 		peersTTL:   peersTTL,
+		pings:      pings,
 		secret:     secret,
 		sessions:   map[Identity]*Transport{peerID: srvTr},
 		peers:      make(map[Identity]*PeerRecord),
@@ -3053,9 +3058,15 @@ func TestPingLoopWriteError(t *testing.T) {
 	srvTr, _ := connectedTransports(t)
 	srvTr.conn.Close() // force write error
 
+	pings, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	id := Identity{0xAA}
 	s := &Server{
 		secret: secret,
+		pings:  pings,
 		cfg:    &Config{PingInterval: time.Millisecond},
 	}
 
@@ -3083,9 +3094,15 @@ func TestPingLoopContextCancel(t *testing.T) {
 	srvTr, cliTr := connectedTransports(t)
 	drainTransport(t, cliTr)
 
+	pings, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	id := Identity{0xAA}
 	s := &Server{
 		secret: secret,
+		pings:  pings,
 		cfg:    &Config{PingInterval: time.Hour},
 	}
 
@@ -5701,6 +5718,10 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 	if err != nil {
 		t.Fatal(err)
 	}
+	pings, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -5717,6 +5738,7 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 	s := &Server{
 		seen:     seen,
 		peersTTL: peersTTL,
+		pings:    pings,
 		secret:   secret,
 		sessions: map[Identity]*Transport{peerID: srvTr},
 		peers: map[Identity]*PeerRecord{
@@ -6134,6 +6156,10 @@ func TestDecryptPayloadNoNaClPub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pings, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -6145,6 +6171,7 @@ func TestDecryptPayloadNoNaClPub(t *testing.T) {
 	s := &Server{
 		seen:     seen,
 		peersTTL: peersTTL,
+		pings:    pings,
 		secret:   secret,
 		sessions: map[Identity]*Transport{peerID: srvTr},
 		peers: map[Identity]*PeerRecord{
@@ -7410,10 +7437,20 @@ func TestHandleInitialWriteErrors(t *testing.T) {
 
 	srvTr, _ := connectedTransports(t)
 
+	// Close the server transport BEFORE handle starts, so the
+	// initial PeerNotify and PeerListRequest writes fail.
+	srvTr.conn.Close()
+
+	pings, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	peerID := Identity{0xDD}
 	s := &Server{
 		seen:     seen,
 		peersTTL: peersTTL,
+		pings:    pings,
 		secret:   secret,
 		sessions: map[Identity]*Transport{peerID: srvTr},
 		peers:    make(map[Identity]*PeerRecord),
@@ -7422,10 +7459,6 @@ func TestHandleInitialWriteErrors(t *testing.T) {
 			PeersWanted:  8,
 		},
 	}
-
-	// Close the server transport BEFORE handle starts, so the
-	// initial PeerNotify and PeerListRequest writes fail.
-	srvTr.conn.Close()
 
 	s.wg.Add(1)
 	go s.handle(ctx, &peerID, srvTr)

@@ -54,6 +54,10 @@ const (
 	// Prime to avoid resonance with other periodic timers.
 	pingInterval = 61 * time.Second
 
+	// pingTimeout is how long to wait for a pong before closing
+	// the transport.  Prime, well under pingInterval.
+	pingTimeout = 19 * time.Second
+
 	// maintainInterval is how often the server checks whether it
 	// needs to dial additional peers.  Prime, distinct from ping.
 	maintainInterval = 67 * time.Second
@@ -86,6 +90,7 @@ type Config struct {
 	LogLevel                string
 	PeersWanted             int
 	PingInterval            time.Duration // 0 uses default (61s)
+	PingTimeout             time.Duration // 0 uses default (19s)
 	MaintainInterval        time.Duration // 0 uses default (67s)
 	PprofListenAddress      string
 	PrivateKey              string
@@ -141,6 +146,7 @@ type Server struct {
 	// Peer tracking
 	peers    map[Identity]*PeerRecord // all known peers
 	peersTTL *ttl.TTL                 // expiry for known peers
+	pings    *ttl.TTL                 // unanswered ping timeout
 
 	// Message deduplication — prevents forwarding loops in
 	// non-tree topologies.
@@ -470,6 +476,9 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
 	defer sessionCancel()
 	defer func() {
+		// Disarm any pending ping timeout so pingExpired does
+		// not fire on an already-closing transport.
+		_, _ = s.pings.Delete(*id)
 		if err := s.deleteSession(id); err != nil {
 			log.Errorf("delete session %v: %v", id, err)
 		}
@@ -559,8 +568,9 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			}
 
 		case *PingResponse:
-			// Heartbeat received — peer is alive.  Refresh
-			// its TTL and update LastSeen.
+			// Heartbeat received — peer is alive.  Disarm the
+			// ping timeout, refresh peer TTL and update LastSeen.
+			_ = s.pings.Cancel(*id)
 			s.refreshPeerLastSeen(sessionCtx, *id)
 
 		case *PeerNotify:
@@ -699,12 +709,19 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 
 // pingLoop sends periodic PingRequest heartbeats to the peer.  It exits
 // when ctx is cancelled (handle() returned) or a write fails.
+// After each ping, a TTL is armed; if no pong arrives before it
+// expires, pingExpired closes the transport which breaks the blocked
+// read in handle().
 func (s *Server) pingLoop(ctx context.Context, id *Identity, t *Transport) {
 	defer s.wg.Done()
 
 	interval := s.cfg.PingInterval
 	if interval == 0 {
 		interval = pingInterval
+	}
+	timeout := s.cfg.PingTimeout
+	if timeout == 0 {
+		timeout = pingTimeout
 	}
 
 	ticker := time.NewTicker(interval)
@@ -715,6 +732,9 @@ func (s *Server) pingLoop(ctx context.Context, id *Identity, t *Transport) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Cancel any previous unanswered ping.
+			_ = s.pings.Cancel(*id)
+
 			err := t.Write(s.secret.Identity, PingRequest{
 				OriginTimestamp: time.Now().Unix(),
 			})
@@ -722,8 +742,30 @@ func (s *Server) pingLoop(ctx context.Context, id *Identity, t *Transport) {
 				log.Debugf("ping %v failed: %v", id, err)
 				return
 			}
+
+			// Arm timeout — pingExpired closes the transport
+			// if no pong arrives.
+			s.pings.Put(ctx, timeout, *id, t, s.pingExpired, nil)
 		}
 	}
+}
+
+// pingExpired is called when a ping TTL expires without a pong.
+// Closing the transport breaks the blocked ReadEnvelope in handle(),
+// which tears down the session.
+func (s *Server) pingExpired(_ context.Context, key any, value any) {
+	id, ok := key.(Identity)
+	if !ok {
+		log.Errorf("pingExpired: invalid key type: %T", key)
+		return
+	}
+	t, ok := value.(*Transport)
+	if !ok {
+		log.Errorf("pingExpired %v: invalid value type: %T", id, value)
+		return
+	}
+	log.Debugf("pingExpired %v: closing transport", id)
+	t.Close()
 }
 
 // refreshPeerLastSeen updates a peer's LastSeen timestamp and refreshes
@@ -1869,6 +1911,13 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("peer ttl: %w", err)
 	}
 	s.peersTTL = peersTTL
+
+	// Initialize unanswered ping timeout map.
+	pings, err := ttl.New(s.cfg.PeersWanted*2, true)
+	if err != nil {
+		return fmt.Errorf("ping ttl: %w", err)
+	}
+	s.pings = pings
 
 	// Initialize message dedup cache.
 	seen, err := ttl.New(seenCapacity, true)
