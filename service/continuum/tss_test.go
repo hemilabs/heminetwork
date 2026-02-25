@@ -733,8 +733,8 @@ func TestTSSReshareNotInCommittee(t *testing.T) {
 		[]Identity{other2.Identity, other3.Identity},
 		1, 1,
 	)
-	if err == nil || err.Error() != "self not in old or new committee" {
-		t.Fatalf("expected 'self not in old or new committee', got: %v", err)
+	if !errors.Is(err, ErrNotInCommittee) {
+		t.Fatalf("expected ErrNotInCommittee, got: %v", err)
 	}
 }
 
