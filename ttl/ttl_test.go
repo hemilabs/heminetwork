@@ -6,6 +6,7 @@ package ttl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -250,5 +251,107 @@ func TestTTLDeleteByValue(t *testing.T) {
 	n = tm.DeleteByValue(match)
 	if n != count {
 		t.Fatalf("invalid match deleted count got %v want %v", n, count)
+	}
+}
+
+func TestGetNotFound(t *testing.T) {
+	tm, err := New(1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = tm.Get("nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestCancelNotFound(t *testing.T) {
+	tm, err := New(1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tm.Cancel("nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestDeleteNotFound(t *testing.T) {
+	tm, err := New(1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tm.Delete("nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestExpireNilCallback(t *testing.T) {
+	tm, err := New(1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// Put with nil expired callback — must not panic on expiry.
+	tm.Put(ctx, 50*time.Millisecond, "key", "val", nil, nil)
+
+	// Wait for expiry + autoDelete.
+	time.Sleep(200 * time.Millisecond)
+
+	if tm.Len() != 0 {
+		t.Fatalf("expected len 0 after expiry, got %d", tm.Len())
+	}
+}
+
+func TestCancelNilRemoveCallback(t *testing.T) {
+	tm, err := New(1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// Put with nil remove callback — must not panic on cancel.
+	tm.Put(ctx, 10*time.Second, "key", "val", nil, nil)
+
+	if err := tm.Cancel("key"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for autoDelete goroutine to process.
+	time.Sleep(100 * time.Millisecond)
+
+	if tm.Len() != 0 {
+		t.Fatalf("expected len 0 after cancel, got %d", tm.Len())
+	}
+}
+
+func TestTTLGoroutineKeyAlreadyDeleted(t *testing.T) {
+	tm, err := New(1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// Put then immediately Delete — the ttl goroutine will wake up
+	// and find the key already gone (!ok path in ttl()).
+	tm.Put(ctx, 50*time.Millisecond, "key", "val", callbackPanic, callbackPanic)
+
+	if _, err := tm.Delete("key"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the ttl goroutine to fire and confirm no panic.
+	time.Sleep(200 * time.Millisecond)
+
+	if tm.Len() != 0 {
+		t.Fatalf("expected len 0, got %d", tm.Len())
 	}
 }
