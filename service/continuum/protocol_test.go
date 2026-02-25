@@ -1981,6 +1981,206 @@ func BenchmarkOpenBox(b *testing.B) {
 	}
 }
 
+// TestPayloadHashVerification tests the payload hash verification logic
+// in the Transport read method.
+func TestPayloadHashVerification(t *testing.T) {
+	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create transport from server public key
+	clientTransport := new(Transport)
+	clientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+
+	// Server
+	l := net.ListenConfig{}
+	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		t.Logf("Listening: %v", port)
+		conn, err := listener.Accept()
+		if err != nil {
+			panic(err)
+		}
+
+		if err := serverTransport.KeyExchange(ctx, conn); err != nil {
+			panic(err)
+		}
+	}()
+
+	// Client
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		addr, err := net.ResolveTCPAddr("tcp",
+			net.JoinHostPort("127.0.0.1", "0"))
+		if err != nil {
+			panic(err)
+		}
+		d := &net.Dialer{LocalAddr: addr}
+		conn, err := d.DialContext(ctx, "tcp",
+			net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			panic(err)
+		}
+
+		if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+			panic(err)
+		}
+	}()
+
+	wg.Wait()
+
+	if !bytes.Equal(serverTransport.encryptKey[:],
+		clientTransport.decryptKey[:]) {
+		t.Fatal("server encrypt key != client decrypt key")
+	}
+	if bytes.Equal(serverTransport.encryptKey[:],
+		serverTransport.decryptKey[:]) {
+		t.Fatal("directional keys must differ")
+	}
+
+	// Handshake
+	var derivedClient, derivedServer *Identity
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var err error
+		derivedClient, _, _, err = serverTransport.Handshake(ctx, serverSecret, "")
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		derivedServer, _, _, err = clientTransport.Handshake(ctx, clientSecret, "")
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	wg.Wait()
+
+	if derivedServer.String() != serverSecret.String() {
+		t.Fatalf("derived server got %v, want %v",
+			derivedServer, serverSecret.Identity)
+	}
+	if derivedClient.String() != clientSecret.String() {
+		t.Fatalf("derived client got %v, want %v",
+			derivedClient, clientSecret.Identity)
+	}
+
+	type testTableItem struct {
+		name          string
+		cmd           any
+		falsePayload  bool
+		falseHash     bool
+		expectedError bool
+	}
+	tests := []testTableItem{
+		{
+			name: "valid_hello_request",
+			cmd:  HelloRequest{},
+		},
+		{
+			name: "valid_keygen_request",
+			cmd:  KeygenRequest{},
+		},
+		{
+			name:          "invalid_hash",
+			cmd:           HelloRequest{},
+			falseHash:     true,
+			expectedError: true,
+		},
+		{
+			name:          "invalid_payload_size",
+			cmd:           HelloRequest{},
+			falsePayload:  true,
+			expectedError: true,
+		},
+	}
+
+	for _, tti := range tests {
+		t.Run(tti.name, func(t *testing.T) {
+			var msgErr error
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _, msgErr = serverTransport.Read()
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				pt, ok := pt2str[reflect.TypeOf(tti.cmd)]
+				if !ok {
+					panic(fmt.Sprintf("invalid command type: %T", tti.cmd))
+				}
+				hash, payload, err := NewPayloadFromCommand(tti.cmd)
+				if err != nil {
+					panic(err)
+				}
+				if tti.falseHash {
+					hash = NewPayloadHash([]byte{})
+				}
+				if tti.falsePayload {
+					payload = nil
+				}
+				header, err := json.Marshal(Header{
+					PayloadType: pt,
+					PayloadHash: *hash,
+					Origin:      clientSecret.Identity,
+					Destination: &serverSecret.Identity,
+					TTL:         1,
+				})
+				if err != nil {
+					panic(err)
+				}
+				err = clientTransport.write(writeTimeout, append(header, payload...))
+				if err != nil {
+					panic(err)
+				}
+			}()
+
+			wg.Wait()
+
+			if tti.expectedError {
+				if msgErr == nil {
+					t.Fatalf("expected error")
+				}
+				t.Logf("got expected error: %v", msgErr)
+			} else if msgErr != nil {
+				t.Fatal(msgErr)
+			}
+		})
+	}
+}
+
 func TestIdentity(t *testing.T) {
 	pk, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
