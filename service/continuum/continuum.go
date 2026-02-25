@@ -302,6 +302,13 @@ func (s *Server) isDuplicate(ctx context.Context, h *Header) bool {
 // defaultTTL is the hop count for originated routed messages.
 const defaultTTL = 8
 
+// ceremonyMaxAge is how long completed/failed ceremonies remain in the
+// tracking map before eviction.  Running ceremonies are never evicted.
+const ceremonyMaxAge = 30 * time.Minute
+
+// ceremonyEvictInterval is the tick period for the eviction goroutine.
+const ceremonyEvictInterval = 5 * time.Minute
+
 // forward relays a message that is not destined for us.  If TTL is
 // zero, the message is dropped.  Otherwise TTL is decremented and the
 // message is sent to the destination (if directly connected) or
@@ -658,8 +665,7 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 
 		// Admin RPCs — localhost only.
 		case *PeerListAdminRequest:
-			if !isLocalhost(t.RemoteAddr()) {
-				log.Warningf("handle %v: admin request from non-localhost, rejected", id)
+			if !requireAdmin(t, id) {
 				continue
 			}
 			resp := s.handlePeerListAdmin()
@@ -668,8 +674,7 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			}
 
 		case *CeremonyStatusRequest:
-			if !isLocalhost(t.RemoteAddr()) {
-				log.Warningf("handle %v: admin request from non-localhost, rejected", id)
+			if !requireAdmin(t, id) {
 				continue
 			}
 			resp := s.handleCeremonyStatus(v.CeremonyID)
@@ -678,8 +683,7 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			}
 
 		case *CeremonyListRequest:
-			if !isLocalhost(t.RemoteAddr()) {
-				log.Warningf("handle %v: admin request from non-localhost, rejected", id)
+			if !requireAdmin(t, id) {
 				continue
 			}
 			resp := s.handleCeremonyList()
@@ -1182,6 +1186,16 @@ func isLocalhost(addr net.Addr) bool {
 	return ip.IsLoopback()
 }
 
+// requireAdmin checks that the transport originates from localhost.
+// Returns false and logs a warning if rejected.  Used by admin RPCs.
+func requireAdmin(t *Transport, id *Identity) bool {
+	if isLocalhost(t.RemoteAddr()) {
+		return true
+	}
+	log.Warningf("handle %v: admin request from non-localhost, rejected", id)
+	return false
+}
+
 // registerCeremony records a new ceremony in the tracking map.
 // The ceremony context derives from s.tssCtx so server shutdown
 // propagates cancellation to all waiting callers.
@@ -1246,6 +1260,10 @@ func (s *Server) handleCeremonyResult(r CeremonyResult) {
 	}
 
 	// Non-committee node: first time seeing this ceremony.
+	// Pre-cancelled context.Background() — this record is status-only,
+	// no goroutine lifecycle is attached.  The cancel() call is
+	// immediate; the ctx exists solely to satisfy the CeremonyInfo
+	// struct fields so that ci.ctx.Done() is already closed.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	ci := &CeremonyInfo{
@@ -1324,6 +1342,43 @@ func (s *Server) handleCeremonyList() CeremonyListResponse {
 		})
 	}
 	return resp
+}
+
+// evictCeremonies removes completed/failed ceremonies older than
+// ceremonyMaxAge from the tracking map.  Running ceremonies are never
+// evicted.  Called periodically from a goroutine started by Run().
+func (s *Server) evictCeremonies(ctx context.Context) {
+	defer s.wg.Done()
+	log.Tracef("evictCeremonies")
+	defer log.Tracef("evictCeremonies exit")
+
+	ticker := time.NewTicker(ceremonyEvictInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		cutoff := time.Now().Add(-ceremonyMaxAge).Unix()
+		var evicted int
+		s.mtx.Lock()
+		for cid, ci := range s.ceremonies {
+			if ci.Status == CeremonyRunning {
+				continue
+			}
+			if ci.StartTime < cutoff {
+				delete(s.ceremonies, cid)
+				evicted++
+			}
+		}
+		s.mtx.Unlock()
+		if evicted > 0 {
+			log.Debugf("evictCeremonies: removed %d stale entries", evicted)
+		}
+	}
 }
 
 // KnownPeers returns all known peer records.
@@ -1933,6 +1988,10 @@ func (s *Server) Run(pctx context.Context) error {
 	} else if len(s.cfg.Seeds) != 0 {
 		s.seed(ctx)
 	}
+
+	// Evict completed/failed ceremonies older than ceremonyMaxAge.
+	s.wg.Add(1)
+	go s.evictCeremonies(ctx)
 
 	// Periodically dial gossip-learned peers when below PeersWanted.
 	s.wg.Add(1)
