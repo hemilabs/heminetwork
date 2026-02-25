@@ -1443,7 +1443,7 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, []byte, error) {
 // Read reads and decrypts the next command from the connection stream. It
 // returns the header and command.
 func (t *Transport) Read() (*Header, any, error) {
-	h, cmd, _, err := t.read(0 * time.Second) // XXX timeout
+	h, cmd, _, err := t.read(0 * time.Second) // blocks; ping TTL handles idle
 	return h, cmd, err
 }
 
@@ -1451,7 +1451,7 @@ func (t *Transport) Read() (*Header, any, error) {
 // bytes (transport-decrypted but not yet parsed).  Used by handle() for
 // message deduplication and forwarding.
 func (t *Transport) ReadEnvelope() (*Header, any, []byte, error) {
-	return t.read(0 * time.Second) // XXX timeout
+	return t.read(0 * time.Second) // blocks; ping TTL handles idle
 }
 
 // write encrypts the passed in cleartext and writes it to the connection
