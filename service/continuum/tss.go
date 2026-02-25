@@ -358,7 +358,7 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 		}
 	}
 	if !inOld && !inNew {
-		return errors.New("self not in old or new committee")
+		return ErrNotInCommittee
 	}
 
 	// Load existing key share only if self is in the old committee.
