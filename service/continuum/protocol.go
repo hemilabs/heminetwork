@@ -428,6 +428,7 @@ const (
 type ReshareRequest struct {
 	CeremonyID   CeremonyID           `json:"ceremonyid"`   // Unique ceremony identifier
 	Curve        string               `json:"curve"`        // Elliptic curve (e.g., "secp256k1")
+	KeyID        []byte               `json:"keyid"`        // Key to reshare
 	OldCommittee tss.UnSortedPartyIDs `json:"oldcommittee"` // Current key holders
 	NewCommittee tss.UnSortedPartyIDs `json:"newcommittee"` // New key holders
 	OldThreshold int                  `json:"oldthreshold"` // Current threshold (t, need t+1 to sign)
@@ -550,6 +551,8 @@ type CeremonyStatusResponse struct {
 	Type       string     `json:"type,omitempty"`       // "keygen", "reshare", "sign"
 	Status     string     `json:"status,omitempty"`     // "running", "complete", "failed"
 	StartTime  int64      `json:"start_time,omitempty"` // unix timestamp
+	KeyID      []byte     `json:"key_id,omitempty"`     // set after keygen completes
+	Committee  []Identity `json:"committee,omitempty"`  // ceremony participants
 	Error      string     `json:"error,omitempty"`
 }
 
