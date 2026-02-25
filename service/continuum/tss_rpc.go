@@ -142,7 +142,7 @@ func (s *Server) dispatchKeygen(req KeygenRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonyKeygen)
-	s.registerCeremony(req.CeremonyID, CeremonyKeygen, req.Coordinator)
+	s.registerCeremony(req.CeremonyID, CeremonyKeygen, req.Coordinator, parties)
 
 	isCoordinator := req.Coordinator == s.secret.Identity
 
@@ -170,6 +170,11 @@ func (s *Server) dispatchKeygen(req KeygenRequest) {
 		}
 		log.Infof("keygen %s complete: key=%x",
 			req.CeremonyID, keyID)
+		s.mtx.Lock()
+		if ci, ok := s.ceremonies[req.CeremonyID]; ok {
+			ci.KeyID = keyID
+		}
+		s.mtx.Unlock()
 		s.completeCeremony(req.CeremonyID)
 		if isCoordinator {
 			if berr := s.Broadcast(CeremonyResult{
@@ -197,7 +202,7 @@ func (s *Server) dispatchSign(req SignRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonySign)
-	s.registerCeremony(req.CeremonyID, CeremonySign, Identity{})
+	s.registerCeremony(req.CeremonyID, CeremonySign, Identity{}, parties)
 
 	var data [32]byte
 	copy(data[:], req.Data)
@@ -231,14 +236,24 @@ func (s *Server) dispatchReshare(req ReshareRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonyReshare)
-	s.registerCeremony(req.CeremonyID, CeremonyReshare, Identity{})
+	// Track union of old and new committees as participants.
+	allParties := make([]Identity, 0, len(oldParties)+len(newParties))
+	allParties = append(allParties, oldParties...)
+	for _, np := range newParties {
+		found := false
+		for _, op := range oldParties {
+			if np == op {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allParties = append(allParties, np)
+		}
+	}
+	s.registerCeremony(req.CeremonyID, CeremonyReshare, Identity{}, allParties)
 
-	// Determine keyID from existing key shares. For reshare, the
-	// router doesn't send a keyID — the node discovers it from
-	// its local store. We use a zero keyID here; the TSS engine
-	// identifies the key via committee membership.
-	// XXX keyID resolution belongs in a higher-level coordinator.
-	var keyID []byte
+	keyID := req.KeyID
 
 	s.wg.Add(1)
 	go func() {
