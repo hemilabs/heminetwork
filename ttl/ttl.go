@@ -55,6 +55,7 @@ func New(capacity int, autoDelete bool) (*TTL, error) {
 func (tm *TTL) ttl(ctx context.Context, key any) {
 	<-ctx.Done()
 	err := ctx.Err()
+	// unreachable: ctx.Err() is always non-nil after ctx.Done() closes
 	if err == nil {
 		return
 	}
@@ -179,6 +180,7 @@ func (tm *TTL) DeleteByValue(find func(any) bool) int {
 			continue
 		}
 		_, err := tm.delete(k)
+		// unreachable: key came from range over tm.m; delete cannot fail
 		if err != nil {
 			continue
 		}
