@@ -2147,7 +2147,7 @@ func drainTransport(t *testing.T, tr *Transport) {
 	}()
 }
 
-// --- forward() coverage ---------------------------------------------------
+// --- forward() ---
 
 // TestForwardDirect verifies the direct-send path of forward():
 // when the destination identity has a session, WriteHeader is called
@@ -2358,7 +2358,7 @@ func TestForwardFloodWriteError(t *testing.T) {
 	}
 }
 
-// --- decryptPayload() coverage ---------------------------------------------
+// --- decryptPayload() ---
 
 // TestDecryptPayloadErrors exercises all error paths in decryptPayload.
 func TestDecryptPayloadErrors(t *testing.T) {
@@ -2556,7 +2556,7 @@ func TestDecryptPayloadSuccess(t *testing.T) {
 	}
 }
 
-// --- encrypt() coverage ---------------------------------------------------
+// --- encrypt() ---
 
 // TestEncryptMessageTooLarge verifies that encrypt returns
 // ErrMessageTooLarge when the payload exceeds TransportMaxSize.
@@ -2572,7 +2572,7 @@ func TestEncryptMessageTooLarge(t *testing.T) {
 	}
 }
 
-// --- intentionally uncovered paths ----------------------------------------
+// --- intentionally uncovered paths ---
 //
 // The following four branches are unreachable under normal operation and
 // are intentionally left uncovered.  They exist as defensive checks
@@ -2596,7 +2596,7 @@ func TestEncryptMessageTooLarge(t *testing.T) {
 //     This is a compile-time invariant of the NaCl secretbox
 //     implementation and cannot fire.
 
-// --- fuzz tests -----------------------------------------------------------
+// --- fuzz tests ---
 
 // FuzzOpenBox ensures OpenBox never panics on arbitrary inputs.
 func FuzzOpenBox(f *testing.F) {
@@ -2716,7 +2716,7 @@ func FuzzDecryptPayload(f *testing.F) {
 	})
 }
 
-// --- benchmarks -----------------------------------------------------------
+// --- benchmarks ---
 
 // BenchmarkForwardDirect measures the direct-send path of forward().
 func BenchmarkForwardDirect(b *testing.B) {
@@ -2994,7 +2994,7 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 	return s, cliTr, peerID
 }
 
-// --- Tier 1: easy unit tests ----------------------------------------------
+// --- unit tests ---
 
 // TestPeerExpired verifies the TTL expiry callback removes the peer.
 func TestPeerExpired(t *testing.T) {
@@ -3123,7 +3123,7 @@ func TestPingLoopContextCancel(t *testing.T) {
 	}
 }
 
-// --- Tier 2: handle dispatch error paths ----------------------------------
+// --- handle dispatch error paths ---
 
 // TestHandlePingWriteError verifies that a PingRequest write-back
 // failure causes handle() to return (session dies).
@@ -3454,7 +3454,7 @@ func TestHandleRoutedMessageDedup(t *testing.T) {
 	cancel()
 }
 
-// --- Tier 3: connection error paths ---------------------------------------
+// --- connection error paths ---
 
 // TestConnectDialError verifies connect() handles dial failure.
 func TestConnectDialError(t *testing.T) {
@@ -3590,7 +3590,7 @@ func TestListenFull(t *testing.T) {
 	}
 }
 
-// --- Tier 4: DNS error paths ----------------------------------------------
+// --- DNS error paths ---
 
 // TestVerifyDNSIdentityErrors exercises error paths in
 // verifyDNSIdentity using the in-process DNS server infrastructure.
@@ -3826,7 +3826,7 @@ func TestVerifyRemoteDNSIdentityErrors(t *testing.T) {
 	}
 }
 
-// --- Tier 5: remaining gaps -----------------------------------------------
+// --- miscellaneous error paths ---
 
 // TestNewTransportDNSRequired verifies newTransport rejects peers
 // that don't advertise a DNS name when DNSRequired is set.
@@ -3875,7 +3875,7 @@ func TestNewTransportDNSRequired(t *testing.T) {
 	}
 }
 
-// --- Tier 6: remaining coverage gaps ---------------------------------
+// --- additional error paths ---
 
 // TestVerifyDNSIdentityMalformedTXT covers the kvFromTxt parse error
 // path (L657) — a TXT record with no "=" separator.
@@ -4354,7 +4354,7 @@ func TestConnectHandshakeError(t *testing.T) {
 	cancel()
 }
 
-// --- protocol.go: UnmarshalJSON / String / error-path tests -------------------
+// --- protocol.go: UnmarshalJSON / String / error-path tests ---
 
 // TestPayloadHashUnmarshalJSON covers PayloadHash.UnmarshalJSON error paths.
 func TestPayloadHashUnmarshalJSON(t *testing.T) {
@@ -4523,7 +4523,7 @@ func TestHash256ExtraData(t *testing.T) {
 	}
 }
 
-// --- protocol.go: Transport method error paths --------------------------------
+// --- protocol.go: Transport method error paths ---
 
 // TestTransportWriteInvalidType covers Write() with an unregistered command
 // type that triggers the "invalid command type" error.
@@ -4589,7 +4589,7 @@ func TestTransportString(t *testing.T) {
 	}
 }
 
-// --- protocol.go: Verify error paths ------------------------------------------
+// --- protocol.go: Verify error paths ---
 
 // TestVerifyBadSignature covers Verify() with a corrupted signature.
 func TestVerifyBadSignature(t *testing.T) {
@@ -4630,7 +4630,7 @@ func TestVerifyIdentityMismatch(t *testing.T) {
 	}
 }
 
-// --- protocol.go: DNS helper error paths --------------------------------------
+// --- protocol.go: DNS helper error paths ---
 
 // TestTXTRecordFromAddressBadHostPort covers TXTRecordFromAddress when the
 // address cannot be split into host:port.
@@ -4719,7 +4719,7 @@ func TestVerifyRemoteDNSIdentityFullPath(t *testing.T) {
 	})
 }
 
-// --- tss_rpc.go tests ---------------------------------------------------------
+// --- tss_rpc.go tests ---
 
 // TestServerTSSTransportCeremonyLifecycle covers registerCeremony,
 // unregisterCeremony, and ceremonyType.
@@ -5133,7 +5133,7 @@ func TestOpenBoxBadSenderKey(t *testing.T) {
 	}
 }
 
-// --- Transport encrypted I/O coverage (Priority 1) -----------------------
+// --- Transport encrypted I/O ---
 //
 // These tests cover Read, ReadEnvelope, readBlob, read, write, Write,
 // WriteTo, and WriteHeader error paths. They use connectedTransports()
@@ -5464,7 +5464,7 @@ func TestReadConnectionClosed(t *testing.T) {
 	}
 }
 
-// --- read() error path coverage -------------------------------------------
+// --- read() error paths ---
 
 // writeRawEncrypted encrypts cleartext using the given transport's encrypt()
 // and writes the resulting blob (including 3-byte size prefix) directly to
@@ -5572,7 +5572,7 @@ func TestReadBadPayloadJSON(t *testing.T) {
 	}
 }
 
-// --- write() error path coverage ------------------------------------------
+// --- write() error paths ---
 
 // TestWriteEncryptError covers write() returning an encrypt error
 // by attempting to write a payload that exceeds TransportMaxSize.
@@ -5589,7 +5589,7 @@ func TestWriteEncryptError(t *testing.T) {
 	}
 }
 
-// --- handle() dispatch coverage (Priority 2) ------------------------------
+// --- handle() dispatch ---
 
 // TestHandleDefaultUnhandledType covers the default case in handle()'s
 // dispatch switch. HelloResponse is a valid PayloadType that read()
@@ -5934,7 +5934,7 @@ func TestWriteZeroTimeout(t *testing.T) {
 	}
 }
 
-// --- Priority 2: handle() dispatch arms and tss_rpc dispatch functions -----
+// --- handle() dispatch and tss_rpc ---
 
 // verifyHandleSurvived sends a PingRequest and verifies a PingResponse
 // comes back, proving handle() is still alive after dispatching a
@@ -6319,7 +6319,7 @@ func TestDecryptPayloadBadInnerJSON(t *testing.T) {
 	s.wg.Wait()
 }
 
-// --- Priority 5: SendTo / SendEncrypted -----------------------------------
+// --- SendTo / SendEncrypted ---
 
 // TestSendToDirectSession covers SendTo when the destination has a
 // direct session (no routing needed).
@@ -6500,7 +6500,7 @@ func TestSendEncryptedNoNaClPub(t *testing.T) {
 	}
 }
 
-// --- Priority 2: handle() dispatch + decryptPayload gaps ----------------
+// --- handle() dispatch + decryptPayload ---
 
 // TestHandleForwardPath covers the forwarding branch in handle():
 // a message with Destination != server identity gets forwarded (not
@@ -6594,7 +6594,7 @@ func TestHandleEncryptedPingWriteError(t *testing.T) {
 	s.wg.Wait()
 }
 
-// --- Priority 2 continued: dispatch function goroutine paths -------------
+// --- dispatch goroutine paths ---
 
 // mockTSS implements the TSS interface for testing dispatch functions.
 // Each method signals its channel when called, and returns the
@@ -7001,7 +7001,7 @@ func TestHandleRoutedToSelf(t *testing.T) {
 	s.wg.Wait()
 }
 
-// --- Priority 3: Handshake error paths -----------------------------------
+// --- Handshake error paths ---
 
 // handshakeTestPair creates two connected transports (with KX done) and
 // a secret for the caller to use with Handshake. Returns (caller, remote, secret).
@@ -7468,7 +7468,7 @@ func TestHandleInitialWriteErrors(t *testing.T) {
 	s.wg.Wait()
 }
 
-// --- Priority 3 continued: KeyExchange error paths -----------------------
+// --- KeyExchange error paths ---
 
 // TestTransportKeyExchangeServerVersionMismatch covers the server-side
 // Transport.KeyExchange rejecting a client that sends the wrong version.
@@ -7660,9 +7660,9 @@ func TestTransportKeyExchangeBadPublicKey(t *testing.T) {
 	}
 }
 
-// --- Priority 3 batch: server infrastructure + handshake error paths ------
+// --- server infrastructure + handshake error paths ---
 
-// TestNewDefaultConfig covers NewDefaultConfig (was 0%).
+// TestNewDefaultConfig verifies NewDefaultConfig returns sane defaults.
 func TestNewDefaultConfig(t *testing.T) {
 	cfg := NewDefaultConfig()
 	if cfg == nil {
@@ -7893,7 +7893,7 @@ func TestHandshakeUnexpectedHelloResponseType(t *testing.T) {
 	}
 }
 
-// --- Priority 3: KX write errors and connect() error paths ------------------
+// --- KX write errors and connect() error paths ---
 
 // TestTransportKeyExchangeServerWriteError covers Transport.KeyExchange
 // when the server cannot write its TransportRequest because the remote
@@ -10235,7 +10235,7 @@ func TestNewIdentityFromStringErrors(t *testing.T) {
 }
 
 // =============================================================================
-// Additional coverage: TSS internals + retry paths + sign integration
+// TSS internals, retry paths, and sign integration tests.
 // =============================================================================
 
 // retryMockTSS is a mock TSS whose HandleMessage behavior changes per call.
