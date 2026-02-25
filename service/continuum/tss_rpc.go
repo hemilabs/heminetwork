@@ -327,10 +327,12 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 			1 * time.Second,
 			2 * time.Second,
 		} {
+			timer := time.NewTimer(delay)
 			select {
 			case <-s.tssCtx.Done():
+				timer.Stop()
 				return
-			case <-time.After(delay):
+			case <-timer.C:
 			}
 			err = s.tss.HandleMessage(msg.From, msg.CeremonyID, data)
 			if err == nil {
