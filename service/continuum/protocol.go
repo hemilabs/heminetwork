@@ -1411,11 +1411,24 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, []byte, error) {
 		return nil, nil, nil, err
 	}
 	// log.Infof("%v: read %v", t, header.PayloadType)
-	// XXX i was too clever to make the payload hash in the write
-	// but we can't really get to it here. It is a valid unique
-	// hash but it would be cute if we could verify the payload
-	// actual hash
-	//
+
+	// Extract payload portion from cleartext for hash verification
+	headerBytes, err := json.Marshal(header)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("marshal header: %w", err)
+	}
+	if len(cleartext) <= len(headerBytes) {
+		return nil, nil, nil, fmt.Errorf("cleartext too short for payload")
+	}
+	payloadBytes := cleartext[len(headerBytes):]
+
+	// Verify payload hash matches the declared hash in header
+	expectedHash := NewPayloadHash(payloadBytes)
+	if !bytes.Equal(header.PayloadHash[:], expectedHash[:]) {
+		return nil, nil, nil, fmt.Errorf("payload hash mismatch: got %v, want %v",
+			expectedHash, header.PayloadHash)
+	}
+
 	ct, ok := str2pt[header.PayloadType]
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
