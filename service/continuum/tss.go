@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +16,9 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/hemilabs/x/tss-lib/v2/common"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
@@ -50,6 +53,26 @@ type TSSStore interface {
 	DeleteKeyShare(keyID []byte) error
 	GetPreParams(ctx context.Context) (*keygen.LocalPreParams, error)
 	SetPreParams(pp *keygen.LocalPreParams)
+
+	// Key metadata — persists committee and threshold alongside
+	// key shares so reshare can discover the old committee
+	// automatically.
+	SaveKeyMetadata(keyID []byte, meta *KeyMetadata) error
+	LoadKeyMetadata(keyID []byte) (*KeyMetadata, error)
+	ListKeys() ([][]byte, error)
+}
+
+// KeyMetadata records the committee, threshold, and public key
+// associated with a TSS key share.  Populated at keygen completion,
+// updated at reshare completion (new committee, new threshold).
+// Persisted alongside the key share so reshare can discover the
+// old committee automatically without operator input.
+type KeyMetadata struct {
+	Committee []Identity `json:"committee"`
+	Threshold int        `json:"threshold"`
+	KeyID     []byte     `json:"key_id"`
+	PublicKey []byte     `json:"public_key"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // =============================================================================
@@ -138,6 +161,71 @@ func (s *fileStore) LoadKeyShare(keyID []byte) ([]byte, error) {
 func (s *fileStore) DeleteKeyShare(keyID []byte) error {
 	log.Tracef("DeleteKeyShare %x", keyID)
 	return os.Remove(s.keyPath(keyID))
+}
+
+func (s *fileStore) metaPath(keyID []byte) string {
+	return filepath.Join(s.dir, fmt.Sprintf("%x.meta", keyID))
+}
+
+// SaveKeyMetadata encrypts and persists key metadata alongside
+// the key share file.
+func (s *fileStore) SaveKeyMetadata(keyID []byte, meta *KeyMetadata) error {
+	log.Tracef("SaveKeyMetadata %x", keyID)
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+	encrypted, err := s.encrypt(data)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.metaPath(keyID), encrypted, 0o600)
+}
+
+// LoadKeyMetadata decrypts and returns key metadata for the given
+// keyID.  Returns os.ErrNotExist if no metadata file exists.
+func (s *fileStore) LoadKeyMetadata(keyID []byte) (*KeyMetadata, error) {
+	log.Tracef("LoadKeyMetadata %x", keyID)
+	encrypted, err := os.ReadFile(s.metaPath(keyID))
+	if err != nil {
+		return nil, err
+	}
+	data, err := s.decrypt(encrypted)
+	if err != nil {
+		return nil, err
+	}
+	var meta KeyMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("unmarshal metadata: %w", err)
+	}
+	return &meta, nil
+}
+
+// ListKeys scans the store directory for key share files and
+// returns their keyIDs.
+func (s *fileStore) ListKeys() ([][]byte, error) {
+	log.Tracef("ListKeys")
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, err
+	}
+	var keys [][]byte //nolint:prealloc // unknown entry count after filtering
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".key") {
+			continue
+		}
+		hexID := strings.TrimSuffix(name, ".key")
+		keyID, err := hex.DecodeString(hexID)
+		if err != nil {
+			continue // skip malformed filenames
+		}
+		keys = append(keys, keyID)
+	}
+	return keys, nil
 }
 
 // GetPreParams returns cached Paillier preparams or generates fresh
@@ -271,6 +359,20 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 		}
 		if err := t.store.SaveKeyShare(keyID[:16], shareData); err != nil {
 			return nil, fmt.Errorf("save key share: %w", err)
+		}
+		// Persist metadata so reshare can discover the committee
+		// and threshold without operator input.
+		pubKey := append(save.ECDSAPub.X().Bytes(),
+			save.ECDSAPub.Y().Bytes()...)
+		meta := &KeyMetadata{
+			Committee: parties,
+			Threshold: threshold,
+			KeyID:     keyID[:16],
+			PublicKey: pubKey,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := t.store.SaveKeyMetadata(keyID[:16], meta); err != nil {
+			return nil, fmt.Errorf("save key metadata: %w", err)
 		}
 		return keyID[:16], nil
 	}
@@ -514,6 +616,19 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 		}
 		if err := t.store.SaveKeyShare(keyID, newShareData); err != nil {
 			return fmt.Errorf("save new key share: %w", err)
+		}
+		// Update metadata with new committee and threshold.
+		pubKey := append(newSave.ECDSAPub.X().Bytes(),
+			newSave.ECDSAPub.Y().Bytes()...)
+		meta := &KeyMetadata{
+			Committee: newParties,
+			Threshold: newThreshold,
+			KeyID:     keyID,
+			PublicKey: pubKey,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := t.store.SaveKeyMetadata(keyID, meta); err != nil {
+			return fmt.Errorf("save key metadata: %w", err)
 		}
 	}
 
