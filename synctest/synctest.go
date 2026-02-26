@@ -165,7 +165,7 @@ func reportProgress(ctx context.Context, c *config, lastSyncInfo *tbc.SyncInfo, 
 		defer resp.Body.Close()
 
 		if err := json.NewDecoder(resp.Body).Decode(&syncInfo); err != nil {
-			return fmt.Errorf("decode tbc json: %w", err)
+			log.Warningf("decode tbc json: %w", err)
 		} else {
 			break
 		}
