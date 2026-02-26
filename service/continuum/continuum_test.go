@@ -5859,8 +5859,10 @@ func TestHandleEncryptedPingRequest(t *testing.T) {
 }
 
 // TestHandleEncryptedUnknownInner covers the EncryptedPayload → inner
-// type that handle() doesn't have a case for (e.g. PeerNotify).
-// handle() should log it and continue.
+// type that previously had no case in the encrypted inner switch (e.g.
+// PeerNotify).  With the dispatch map refactor, all registered types
+// are handled uniformly regardless of encryption.  This test verifies
+// that encrypted PeerNotify dispatches correctly and handle() continues.
 func TestHandleEncryptedUnknownInner(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -5871,8 +5873,9 @@ func TestHandleEncryptedUnknownInner(t *testing.T) {
 	}
 	s, cliTr, _ := handleTestServerWithNaCl(t, ctx, senderSecret)
 
-	// Build EncryptedPayload with inner PeerNotify — which the
-	// encrypted inner switch has no case for.
+	// Build EncryptedPayload with inner PeerNotify.  With the
+	// dispatch map, this is now handled normally.  Count=0 so
+	// the handler does not write a PeerListRequest (0 > 0 is false).
 	senderPriv, err := senderSecret.NaClPrivateKey()
 	if err != nil {
 		t.Fatal(err)
@@ -5881,7 +5884,7 @@ func TestHandleEncryptedUnknownInner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := json.Marshal(PeerNotify{Count: 42})
+	payload, err := json.Marshal(PeerNotify{Count: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5891,7 +5894,7 @@ func TestHandleEncryptedUnknownInner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Send the encrypted PeerNotify. handle() decrypts, hits default, continues.
+	// Send the encrypted PeerNotify. handle() decrypts, dispatches normally, continues.
 	errCh := pipeWrite(func() error {
 		return cliTr.Write(Identity{0xEE}, *ep)
 	})
