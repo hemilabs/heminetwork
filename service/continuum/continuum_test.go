@@ -2964,6 +2964,7 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 	srvTr, cliTr := connectedTransports(t)
 
 	peerID := Identity{0xDD}
+	di := newDebugInitiator()
 	s := &Server{
 		seen:       seen,
 		peersTTL:   peersTTL,
@@ -2972,6 +2973,8 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 		sessions:   map[Identity]*Transport{peerID: srvTr},
 		peers:      make(map[Identity]*PeerRecord),
 		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+		initiator:  di,
+		debugInit:  di,
 		cfg: &Config{
 			PingInterval: time.Hour, // never fires during test
 			PeersWanted:  8,
@@ -5760,6 +5763,7 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 		t.Fatal(err)
 	}
 
+	di := newDebugInitiator()
 	peerID := Identity{0xDD}
 	s := &Server{
 		seen:     seen,
@@ -5775,6 +5779,9 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 				NaClPub:  senderPub,
 			},
 		},
+		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+		initiator:  di,
+		debugInit:  di,
 		cfg: &Config{
 			PingInterval: time.Hour,
 			PeersWanted:  8,
@@ -6709,14 +6716,26 @@ func validCommittee(t *testing.T) tss.UnSortedPartyIDs {
 	return tss.UnSortedPartyIDs{pid}
 }
 
+// validIdentities returns a single-member []Identity for
+// CeremonyRequest-based tests.
+func validIdentities(t *testing.T) []Identity {
+	t.Helper()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []Identity{secret.Identity}
+}
+
 // TestDispatchKeygenSuccess covers the happy path: non-empty committee,
 // goroutine launches, tss.Keygen is called and succeeds.
 func TestDispatchKeygenSuccess(t *testing.T) {
 	mock := &mockTSS{keygenCalled: make(chan struct{})}
 	s := dispatchTestServer(t, mock)
 
-	s.dispatchKeygen(KeygenRequest{
-		Committee: validCommittee(t),
+	s.dispatchKeygen(CeremonyRequest{
+		Type:      CeremonyKeygen,
+		Committee: validIdentities(t),
 		Threshold: 1,
 	})
 
@@ -6737,8 +6756,9 @@ func TestDispatchKeygenError(t *testing.T) {
 	}
 	s := dispatchTestServer(t, mock)
 
-	s.dispatchKeygen(KeygenRequest{
-		Committee: validCommittee(t),
+	s.dispatchKeygen(CeremonyRequest{
+		Type:      CeremonyKeygen,
+		Committee: validIdentities(t),
 		Threshold: 1,
 	})
 
@@ -6759,8 +6779,9 @@ func TestDispatchSignSuccess(t *testing.T) {
 	var data [32]byte
 	copy(data[:], bytes.Repeat([]byte{0xAB}, 32))
 
-	s.dispatchSign(SignRequest{
-		Committee: validCommittee(t),
+	s.dispatchSign(CeremonyRequest{
+		Type:      CeremonySign,
+		Committee: validIdentities(t),
 		Threshold: 1,
 		Data:      data[:],
 	})
@@ -6782,8 +6803,9 @@ func TestDispatchSignError(t *testing.T) {
 	s := dispatchTestServer(t, mock)
 
 	var data [32]byte
-	s.dispatchSign(SignRequest{
-		Committee: validCommittee(t),
+	s.dispatchSign(CeremonyRequest{
+		Type:      CeremonySign,
+		Committee: validIdentities(t),
 		Threshold: 1,
 		Data:      data[:],
 	})
@@ -6802,9 +6824,10 @@ func TestDispatchReshareSuccess(t *testing.T) {
 	mock := &mockTSS{reshareCalled: make(chan struct{})}
 	s := dispatchTestServer(t, mock)
 
-	s.dispatchReshare(ReshareRequest{
-		OldCommittee: validCommittee(t),
-		NewCommittee: validCommittee(t),
+	s.dispatchReshare(CeremonyRequest{
+		Type:         CeremonyReshare,
+		OldCommittee: validIdentities(t),
+		NewCommittee: validIdentities(t),
 		OldThreshold: 1,
 		NewThreshold: 1,
 	})
@@ -6825,9 +6848,10 @@ func TestDispatchReshareError(t *testing.T) {
 	}
 	s := dispatchTestServer(t, mock)
 
-	s.dispatchReshare(ReshareRequest{
-		OldCommittee: validCommittee(t),
-		NewCommittee: validCommittee(t),
+	s.dispatchReshare(CeremonyRequest{
+		Type:         CeremonyReshare,
+		OldCommittee: validIdentities(t),
+		NewCommittee: validIdentities(t),
 		OldThreshold: 1,
 		NewThreshold: 1,
 	})
@@ -10901,4 +10925,194 @@ func waitForCeremonyMembers(t *testing.T, servers []*Server, cid CeremonyID, tim
 		case <-ci.ctx.Done():
 		}
 	}
+}
+
+// =============================================================================
+// CeremonyInitiator / ceremony.go tests
+// =============================================================================
+
+// TestCeremonyFromKeygen covers ceremonyFromKeygen happy path and nil
+// committee.
+func TestCeremonyFromKeygen(t *testing.T) {
+	committee := validCommittee(t)
+	coordinator := Identity{0x01}
+
+	cr := ceremonyFromKeygen(KeygenRequest{
+		CeremonyID:  CeremonyID{0xAA},
+		Committee:   committee,
+		Threshold:   2,
+		Coordinator: coordinator,
+	})
+	if cr == nil {
+		t.Fatal("expected non-nil CeremonyRequest")
+	}
+	if cr.Type != CeremonyKeygen {
+		t.Fatalf("expected CeremonyKeygen, got %v", cr.Type)
+	}
+	if cr.Threshold != 2 {
+		t.Fatalf("expected threshold 2, got %d", cr.Threshold)
+	}
+	if cr.Coordinator != coordinator {
+		t.Fatalf("coordinator mismatch")
+	}
+	if len(cr.Committee) != len(committee) {
+		t.Fatalf("committee len %d, want %d",
+			len(cr.Committee), len(committee))
+	}
+
+	// Nil committee → nil return.
+	if cr := ceremonyFromKeygen(KeygenRequest{}); cr != nil {
+		t.Fatal("expected nil for empty committee")
+	}
+}
+
+// TestCeremonyFromSign covers ceremonyFromSign happy path and nil
+// committee.
+func TestCeremonyFromSign(t *testing.T) {
+	committee := validCommittee(t)
+	data := make([]byte, 32)
+	data[0] = 0xBB
+	keyID := []byte{0x01, 0x02}
+
+	cr := ceremonyFromSign(SignRequest{
+		CeremonyID: CeremonyID{0xBB},
+		Committee:  committee,
+		Threshold:  1,
+		KeyID:      keyID,
+		Data:       data,
+	})
+	if cr == nil {
+		t.Fatal("expected non-nil CeremonyRequest")
+	}
+	if cr.Type != CeremonySign {
+		t.Fatalf("expected CeremonySign, got %v", cr.Type)
+	}
+	if !bytes.Equal(cr.Data, data) {
+		t.Fatal("data mismatch")
+	}
+	if !bytes.Equal(cr.KeyID, keyID) {
+		t.Fatal("keyID mismatch")
+	}
+
+	if cr := ceremonyFromSign(SignRequest{}); cr != nil {
+		t.Fatal("expected nil for empty committee")
+	}
+}
+
+// TestCeremonyFromReshare covers ceremonyFromReshare happy path
+// and nil committee cases.
+func TestCeremonyFromReshare(t *testing.T) {
+	oldC := validCommittee(t)
+	newC := validCommittee(t)
+	keyID := []byte{0x03}
+
+	cr := ceremonyFromReshare(ReshareRequest{
+		CeremonyID:   CeremonyID{0xCC},
+		OldCommittee: oldC,
+		NewCommittee: newC,
+		OldThreshold: 1,
+		NewThreshold: 2,
+		KeyID:        keyID,
+	})
+	if cr == nil {
+		t.Fatal("expected non-nil CeremonyRequest")
+	}
+	if cr.Type != CeremonyReshare {
+		t.Fatalf("expected CeremonyReshare, got %v", cr.Type)
+	}
+	if cr.OldThreshold != 1 || cr.NewThreshold != 2 {
+		t.Fatal("threshold mismatch")
+	}
+
+	// Nil old committee.
+	if cr := ceremonyFromReshare(ReshareRequest{
+		NewCommittee: newC,
+	}); cr != nil {
+		t.Fatal("expected nil for empty old committee")
+	}
+	// Nil new committee.
+	if cr := ceremonyFromReshare(ReshareRequest{
+		OldCommittee: oldC,
+	}); cr != nil {
+		t.Fatal("expected nil for empty new committee")
+	}
+}
+
+// TestDebugInitiatorSubmit verifies Submit delivers to CeremonyChan.
+func TestDebugInitiatorSubmit(t *testing.T) {
+	di := newDebugInitiator()
+	req := CeremonyRequest{
+		CeremonyID: CeremonyID{0x01},
+		Type:       CeremonyKeygen,
+	}
+	di.Submit(req)
+
+	select {
+	case got := <-di.CeremonyChan():
+		if got.CeremonyID != req.CeremonyID {
+			t.Fatalf("got ceremony %v, want %v",
+				got.CeremonyID, req.CeremonyID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for ceremony request")
+	}
+}
+
+// TestDebugInitiatorDropWhenFull verifies Submit drops when channel
+// is full (buffer size 1).
+func TestDebugInitiatorDropWhenFull(t *testing.T) {
+	di := newDebugInitiator()
+
+	// Fill the buffer.
+	di.Submit(CeremonyRequest{CeremonyID: CeremonyID{0x01}})
+
+	// Second submit should be dropped, not block.
+	done := make(chan struct{})
+	go func() {
+		di.Submit(CeremonyRequest{CeremonyID: CeremonyID{0x02}})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Submit blocked on full channel")
+	}
+
+	// Only first request should be in channel.
+	got := <-di.CeremonyChan()
+	if got.CeremonyID != (CeremonyID{0x01}) {
+		t.Fatalf("expected first request, got %v", got.CeremonyID)
+	}
+}
+
+// TestCeremonyLoopDispatch verifies ceremonyLoop routes requests
+// to the correct TSS dispatch function.
+func TestCeremonyLoopDispatch(t *testing.T) {
+	mock := &mockTSS{keygenCalled: make(chan struct{})}
+	s := dispatchTestServer(t, mock)
+
+	di := newDebugInitiator()
+	s.initiator = di
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	s.wg.Add(1)
+	go s.ceremonyLoop(ctx)
+
+	di.Submit(CeremonyRequest{
+		Type:      CeremonyKeygen,
+		Committee: validIdentities(t),
+		Threshold: 1,
+	})
+
+	select {
+	case <-mock.keygenCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tss.Keygen not called via ceremonyLoop")
+	}
+
+	cancel()
+	s.wg.Wait()
 }
