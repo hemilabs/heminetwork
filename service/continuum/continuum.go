@@ -258,7 +258,7 @@ func (s *Server) deleteAllSessions() {
 }
 
 func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, error) {
-	transport, err := NewTransportFromCurve(ecdh.X25519()) // XXX config option
+	transport, err := NewTransportFromCurve(ecdh.X25519()) // Only supported curve.
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("new transport: %w", err)
 	}
@@ -288,10 +288,11 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 		if theirDNS == "" {
 			return nil, nil, nil, errors.New("remote did not advertise dns name")
 		}
-		// XXX no rate limiting on DNS lookups here — an attacker
+		// NOTE: no rate limiting on DNS lookups here — an attacker
 		// can open connections with fake DNS names and force
-		// unbounded TXT queries.  Entangled with the accept-loop
-		// blocking issue below.
+		// unbounded TXT queries.  Mitigated by the handshake
+		// semaphore (SOW4 §6) but not fully addressed.
+		// Deferred to DNS rework (SOW4 §9).
 		if err := s.verifyDNSIdentity(ctx, theirDNS, *id); err != nil {
 			return nil, nil, nil, fmt.Errorf("dns verify: %w", err)
 		}
@@ -1090,15 +1091,15 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 		return nil, err
 	}
 
-	// XXX Replay protection: the routing-layer dedup cache (67s TTL)
-	// suppresses flood storms but does not prevent replay of encrypted
-	// messages after expiry.  Once e2e encryption is used for real
-	// traffic, add a per-sender nonce registry here — reject if
-	// (Sender, Nonce) was already seen.  The nonce is random and
-	// invariant across replays so collision == replay.  Separate
-	// concern from routing dedup; needs its own TTL (ceremony
-	// lifetime or similar).  TSS ceremony state machines may
-	// reject stale messages anyway but defense in depth is cheap.
+	// TODO(SOW4-§4): Replay protection.  The routing-layer dedup cache
+	// (67s TTL) suppresses flood storms but does not prevent replay
+	// of encrypted messages after expiry.  Add a per-sender nonce
+	// registry here — reject if (Sender, Nonce) was already seen.
+	// The nonce is random and invariant across replays so collision
+	// == replay.  Separate concern from routing dedup; needs its own
+	// TTL (ceremony lifetime or similar).  TSS ceremony state
+	// machines may reject stale messages anyway but defense in depth
+	// is cheap.  MUST SHIP BEFORE PRODUCTION.
 
 	// Decode using the InnerType hint.
 	ct, ok := str2pt[ep.InnerType]
@@ -1475,9 +1476,10 @@ func (s *Server) knownPeerList(exclude Identity) []PeerRecord {
 // orphaned (not tracked by s.wg) — if the write fails, we close
 // the transport to aggressively cull dead sessions.
 //
-// XXX(marco): if a transport is closed here while a TSS keygen,
-// reshare, or sign is in flight on that session, the TSS operation
-// will fail.  The coordinator layer needs to handle this.
+// NOTE: if a transport is closed here while a TSS keygen, reshare,
+// or sign is in flight on that session, the TSS operation will fail.
+// The ceremony coordinator handles this by detecting session loss
+// and allowing the blockchain to re-issue the ceremony.
 func (s *Server) notifyAllPeers(ctx context.Context) {
 	log.Tracef("notifyAllPeers")
 
@@ -1571,7 +1573,7 @@ func (s *Server) promRunning() float64 {
 }
 
 func (s *Server) isHealthy(_ context.Context) bool {
-	return true // XXX
+	return true // TODO(SOW4-§9): implement real health checks (last-item-before-ship).
 }
 
 func (s *Server) health(ctx context.Context) (bool, any, error) {
@@ -1688,7 +1690,8 @@ func (s *Server) connectAll(ctx context.Context, errC chan error) {
 	log.Tracef("connectAll")
 	defer log.Tracef("connectAll exit")
 
-	// XXX should we exit when we can't connect?
+	// Errors are logged per-connection in connectPeer; no global
+	// exit needed since partial mesh connectivity is normal.
 	for k := range s.cfg.Connect {
 		s.wg.Add(1)
 		go s.connect(ctx, s.cfg.Connect[k], errC)
