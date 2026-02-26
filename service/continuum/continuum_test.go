@@ -41,12 +41,12 @@ import (
 	"github.com/hemilabs/heminetwork/v2/ttl"
 )
 
-// XXX all the dns poop may have to be moved to it's own world. Mayve even
-// internal testutils.
+// DNS test helpers.  These may move to a shared testutil package
+// when the DNS rework lands.
 
 var (
 	defaultPort = uint16(45067)
-	// seed1       = "seed.bark.gfy." // XXX implement this
+	// seed1 = "seed.bark.gfy." // Placeholder for DNS seed discovery.
 
 	// wellKnownSeeds = []string{seed1}
 
@@ -197,9 +197,9 @@ func newDNSServer(ctx context.Context, handler dns.Handler) *dns.Server {
 }
 
 func TestID(t *testing.T) {
-	// XXX not sure if we need this test; it's a roadmap of how the code is
-	// written and thus maybe useful for folks to read prior to reading the
-	// rest.
+	// This test serves as a walkthrough of the identity and signing
+	// primitives.  Useful as a reading guide before diving into the
+	// protocol and transport code.
 	//
 	// Create DNS record with identity + ip + port
 	// Client challenges Server with random(32)
@@ -254,9 +254,9 @@ func newNonce(key [32]byte, counter uint64) (nonce [24]byte) {
 }
 
 func TestECDHSecretBox(t *testing.T) {
-	// XXX not sure if we need this test; it's a roadmap of how the code is
-	// written and thus maybe useful for folks to read prior to reading the
-	// rest.
+	// This test serves as a walkthrough of the ECDH + NaCl secretbox
+	// primitives used for end-to-end encryption.  Useful as a reading
+	// guide for the EncryptedPayload path.
 	curve := ecdh.P521()
 	priv1, _ := curve.GenerateKey(rand.Reader)
 	priv2, _ := curve.GenerateKey(rand.Reader)
