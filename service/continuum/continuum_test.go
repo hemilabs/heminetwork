@@ -10250,6 +10250,40 @@ func TestRemoteAddrNilConn(t *testing.T) {
 	}
 }
 
+func TestTCPKeepAlive(t *testing.T) {
+	// TCP connection: keepalive should be set without panic.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		tcpKeepAlive(c, tcpKeepAlivePeriod)
+	}()
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpKeepAlive(conn, tcpKeepAlivePeriod)
+	conn.Close()
+	<-done
+
+	// Non-TCP connection (net.Pipe): no-op, no panic.
+	c1, c2 := net.Pipe()
+	defer c1.Close()
+	defer c2.Close()
+	tcpKeepAlive(c1, tcpKeepAlivePeriod) // type assertion fails silently — that's correct
+}
+
 func TestNewServerNilUsesDefaults(t *testing.T) {
 	s, err := NewServer(nil)
 	if err != nil {
