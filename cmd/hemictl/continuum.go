@@ -137,8 +137,10 @@ func continuumctl(pctx context.Context, flags []string) error {
 	}
 }
 
-// continuumActions is populated by build-tagged init() functions.
-// Debug builds register ceremony commands (keygen, sign, reshare).
+// continuumActions is populated by init() in build-tagged files.
+// The continuum_debug build tag registers ceremony commands (keygen,
+// sign, reshare).  Production builds leave this empty — ceremony
+// initiation comes from the blockchain, not from hemictl.
 var continuumActions = map[string]func(context.Context, map[string]string) error{}
 
 // continuumActionHelp is populated alongside continuumActions.
