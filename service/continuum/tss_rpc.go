@@ -127,22 +127,21 @@ func (st *serverTSSTransport) Send(to Identity, ceremonyID CeremonyID, data []by
 }
 
 // =============================================================================
-// Server RPC Dispatch — incoming protocol messages → TSS engine
+// Server RPC Dispatch — CeremonyRequest → TSS engine
 // =============================================================================
 
-// dispatchKeygen handles an incoming KeygenRequest. The ceremony
+// dispatchKeygen handles a keygen CeremonyRequest.  The ceremony
 // runs asynchronously; the result is logged on completion.
 // If this node is the coordinator, it broadcasts CeremonyResult
 // to all peers on success or failure.
-func (s *Server) dispatchKeygen(req KeygenRequest) {
-	parties := partiesToIdentities(req.Committee)
-	if parties == nil {
+func (s *Server) dispatchKeygen(req CeremonyRequest) {
+	if len(req.Committee) == 0 {
 		log.Errorf("keygen %s: empty committee", req.CeremonyID)
 		return
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonyKeygen)
-	s.registerCeremony(req.CeremonyID, CeremonyKeygen, req.Coordinator, parties)
+	s.registerCeremony(req.CeremonyID, CeremonyKeygen, req.Coordinator, req.Committee)
 
 	isCoordinator := req.Coordinator == s.secret.Identity
 
@@ -152,7 +151,7 @@ func (s *Server) dispatchKeygen(req KeygenRequest) {
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
 		keyID, err := s.tss.Keygen(s.tssCtx, req.CeremonyID,
-			parties, req.Threshold)
+			req.Committee, req.Threshold)
 		if err != nil {
 			log.Errorf("keygen %s: %v", req.CeremonyID, err)
 			s.failCeremony(req.CeremonyID, err.Error())
@@ -188,10 +187,9 @@ func (s *Server) dispatchKeygen(req KeygenRequest) {
 	}()
 }
 
-// dispatchSign handles an incoming SignRequest.
-func (s *Server) dispatchSign(req SignRequest) {
-	parties := partiesToIdentities(req.Committee)
-	if parties == nil {
+// dispatchSign handles a sign CeremonyRequest.
+func (s *Server) dispatchSign(req CeremonyRequest) {
+	if len(req.Committee) == 0 {
 		log.Errorf("sign %s: empty committee", req.CeremonyID)
 		return
 	}
@@ -202,7 +200,7 @@ func (s *Server) dispatchSign(req SignRequest) {
 	}
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonySign)
-	s.registerCeremony(req.CeremonyID, CeremonySign, Identity{}, parties)
+	s.registerCeremony(req.CeremonyID, CeremonySign, Identity{}, req.Committee)
 
 	var data [32]byte
 	copy(data[:], req.Data)
@@ -213,7 +211,7 @@ func (s *Server) dispatchSign(req SignRequest) {
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
 		r, sigS, err := s.tss.Sign(s.tssCtx, req.CeremonyID,
-			req.KeyID, parties, req.Threshold, data)
+			req.KeyID, req.Committee, req.Threshold, data)
 		if err != nil {
 			log.Errorf("sign %s: %v", req.CeremonyID, err)
 			s.failCeremony(req.CeremonyID, err.Error())
@@ -225,11 +223,9 @@ func (s *Server) dispatchSign(req SignRequest) {
 	}()
 }
 
-// dispatchReshare handles an incoming ReshareRequest.
-func (s *Server) dispatchReshare(req ReshareRequest) {
-	oldParties := partiesToIdentities(req.OldCommittee)
-	newParties := partiesToIdentities(req.NewCommittee)
-	if oldParties == nil || newParties == nil {
+// dispatchReshare handles a reshare CeremonyRequest.
+func (s *Server) dispatchReshare(req CeremonyRequest) {
+	if len(req.OldCommittee) == 0 || len(req.NewCommittee) == 0 {
 		log.Errorf("reshare %s: empty committee",
 			req.CeremonyID)
 		return
@@ -237,11 +233,11 @@ func (s *Server) dispatchReshare(req ReshareRequest) {
 
 	s.stt.registerCeremony(req.CeremonyID, CeremonyReshare)
 	// Track union of old and new committees as participants.
-	allParties := make([]Identity, 0, len(oldParties)+len(newParties))
-	allParties = append(allParties, oldParties...)
-	for _, np := range newParties {
+	allParties := make([]Identity, 0, len(req.OldCommittee)+len(req.NewCommittee))
+	allParties = append(allParties, req.OldCommittee...)
+	for _, np := range req.NewCommittee {
 		found := false
-		for _, op := range oldParties {
+		for _, op := range req.OldCommittee {
 			if np == op {
 				found = true
 				break
@@ -253,15 +249,13 @@ func (s *Server) dispatchReshare(req ReshareRequest) {
 	}
 	s.registerCeremony(req.CeremonyID, CeremonyReshare, Identity{}, allParties)
 
-	keyID := req.KeyID
-
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
-		err := s.tss.Reshare(s.tssCtx, req.CeremonyID, keyID,
-			oldParties, newParties,
+		err := s.tss.Reshare(s.tssCtx, req.CeremonyID, req.KeyID,
+			req.OldCommittee, req.NewCommittee,
 			req.OldThreshold, req.NewThreshold)
 		if err != nil {
 			log.Errorf("reshare %s: %v",
