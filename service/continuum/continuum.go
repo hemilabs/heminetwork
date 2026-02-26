@@ -137,6 +137,11 @@ type Server struct {
 	// Ceremony tracking — admin RPCs report status from this map.
 	ceremonies map[CeremonyID]*CeremonyInfo
 
+	// Ceremony initiation — the seam between external triggers
+	// (blockchain or debug) and the TSS engine.
+	initiator CeremonyInitiator
+	debugInit *debugInitiator // nil in production (blockchain initiator)
+
 	// Listener
 	listenConfig  *net.ListenConfig
 	listenAddress string // Actual bound address after Listen()
@@ -193,6 +198,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
+	di := newDebugInitiator()
 	return &Server{
 		cfg:          cfg,
 		listenConfig: &net.ListenConfig{},
@@ -200,6 +206,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		peers:        make(map[Identity]*PeerRecord),
 		ceremonies:   make(map[CeremonyID]*CeremonyInfo),
 		handshakeSem: make(chan struct{}, cfg.PeersWanted),
+		initiator:    di,
+		debugInit:    di,
 		tssCtx:       context.Background(), // replaced by Run() with lifecycle context
 	}, nil
 }
@@ -651,13 +659,19 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			}
 
 		case *KeygenRequest:
-			s.dispatchKeygen(*v)
+			if cr := ceremonyFromKeygen(*v); cr != nil {
+				s.debugInit.Submit(*cr)
+			}
 
 		case *SignRequest:
-			s.dispatchSign(*v)
+			if cr := ceremonyFromSign(*v); cr != nil {
+				s.debugInit.Submit(*cr)
+			}
 
 		case *ReshareRequest:
-			s.dispatchReshare(*v)
+			if cr := ceremonyFromReshare(*v); cr != nil {
+				s.debugInit.Submit(*cr)
+			}
 
 		case *TSSMessage:
 			s.dispatchTSSMessage(*v)
@@ -682,11 +696,17 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			case *TSSMessage:
 				s.dispatchTSSMessage(*iv)
 			case *KeygenRequest:
-				s.dispatchKeygen(*iv)
+				if cr := ceremonyFromKeygen(*iv); cr != nil {
+					s.debugInit.Submit(*cr)
+				}
 			case *SignRequest:
-				s.dispatchSign(*iv)
+				if cr := ceremonyFromSign(*iv); cr != nil {
+					s.debugInit.Submit(*cr)
+				}
 			case *ReshareRequest:
-				s.dispatchReshare(*iv)
+				if cr := ceremonyFromReshare(*iv); cr != nil {
+					s.debugInit.Submit(*cr)
+				}
 			default:
 				log.Debugf("handle %v: unhandled encrypted inner %T",
 					id, inner)
@@ -2062,6 +2082,10 @@ func (s *Server) Run(pctx context.Context) error {
 	// Evict completed/failed ceremonies older than ceremonyMaxAge.
 	s.wg.Add(1)
 	go s.evictCeremonies(ctx)
+
+	// Ceremony dispatcher — reads from CeremonyInitiator channel.
+	s.wg.Add(1)
+	go s.ceremonyLoop(ctx)
 
 	// Periodically dial gossip-learned peers when below PeersWanted.
 	s.wg.Add(1)
