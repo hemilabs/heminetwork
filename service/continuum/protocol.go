@@ -281,7 +281,7 @@ type Header struct {
 	Origin      Identity    `json:"origin"`                // Origin identity
 	Destination *Identity   `json:"destination,omitempty"` // Intended receiver
 	TTL         uint8       `json:"ttl"`                   // Time To Live
-	// Path        []Identity      // Record path when routing XXX ?
+	// Path []Identity // Deferred: requires per-hop signing (see SOW4 §9).
 }
 
 // HelloRequest is the first command that is sent to the other side after the
@@ -1113,7 +1113,9 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	}()
 
 	// The key exchange should finish in less than 5 seconds.
-	// XXX we should get rid of context here or use it instead of the deadline
+	// The deadline is set on the net.Conn directly because the KX
+	// reads/writes are not context-aware (crypto/ecdh).  The parent
+	// context is used for cancellation in the caller.
 	timeout := 5 * time.Second
 	// untested: SetDeadline cannot fail on real net.TCPConn; requires mock net.Conn
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
@@ -1508,8 +1510,8 @@ func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 
 // Write creates a new payload and header and sends that to the peer.
 //
-// XXX think about header construction and if we need like a WriteTo which adds
-// an explicit origin that may need routing.
+// For routed messages that need an explicit destination, use
+// WriteRouted which sets the destination identity and TTL.
 func (t *Transport) Write(origin Identity, cmd any) error {
 	pt, ok := pt2str[reflect.TypeOf(cmd)]
 	if !ok {
@@ -1595,10 +1597,9 @@ func kvFromTxt(txt string) (map[string]string, error) {
 // TXTRecordFromAddress returns one and only one TXT record that is associated
 // with an address.
 //
-// XXX I slept some more on this and we should use provide a hint during
-// handshake (already encrypted) as to where we are initiating the connection
-// from. DNS has been sufficiently broken by you know who and reverse lookups
-// are essentially undoable these days.
+// Note: reverse DNS is unreliable in cloud environments (AWS, Cloudflare).
+// A future DNS rework will switch to forward-lookup with hints provided
+// during the encrypted handshake.  See SOW4 §9 deferred items.
 func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.Addr) (map[string]string, error) {
 	if resolver == nil {
 		resolver = &net.Resolver{}
@@ -1629,15 +1630,16 @@ func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.
 // associated TXT record identity. This can be used to determine if a server or
 // client are indeed who they claim they are.
 //
-// XXX the likes of amazon and cloudflare have completely destroyed the meaning
-// of reverse DNS records. We thus must flip this around and associate it with
-// regular lookups.
+// Note: reverse DNS verification is unreliable in cloud environments.
+// A future DNS rework will switch to forward-lookup verification.
+// See SOW4 §9 deferred items.
 func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr, id Identity) (bool, error) {
 	m, err := TXTRecordFromAddress(ctx, r, addr)
 	if err != nil {
 		return false, err
 	}
-	// XXX are we going to use port?
+	// Port field present in TXT record but unused; kept for
+	// future forward-lookup DNS rework.
 
 	if m["v"] != dnsAppName {
 		return false, fmt.Errorf("dns invalid app name: '%v'", m["v"])
@@ -1649,4 +1651,5 @@ func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr
 	return bytes.Equal(id[:], remoteDNSID[:]), nil
 }
 
-// XXX add VerifyRemoteDNSIdentity by hostname and call VerifyRemoteDNSIdentity
+// TODO(dns-rework): add VerifyRemoteDNSIdentityByHostname for forward-lookup
+// verification to replace reverse-DNS approach.
