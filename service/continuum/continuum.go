@@ -257,7 +257,8 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("key exchange: %w", err) // XXX too loud?
+		// Expected from port scanners, TLS probes, wrong protocol.
+		return nil, nil, nil, fmt.Errorf("key exchange: %w", err)
 	}
 
 	// After KX, transport owns conn.  Ensure cleanup on failure so
@@ -271,7 +272,8 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 
 	id, theirDNS, naclPub, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("handshake: %w", err) // XXX too loud?
+		// Expected from misconfigured peers and version mismatches.
+		return nil, nil, nil, fmt.Errorf("handshake: %w", err)
 	}
 
 	if s.cfg.DNSRequired {
@@ -530,8 +532,9 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 	for {
 		header, payload, _, err := t.ReadEnvelope()
 		if err != nil {
-			// XXX too loud?
-			log.Errorf("read %v: %v", id, err)
+			// Debug not Error — fires on every normal session
+			// teardown (transport close breaks ReadEnvelope).
+			log.Debugf("read %v: %v", id, err)
 			return
 		}
 
@@ -2100,7 +2103,9 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 	id, transport, naclPub, err := s.newTransport(ctx, conn)
 	<-s.handshakeSem // release regardless of success/failure
 	if err != nil {
-		log.Errorf("transport %v: %v", conn.RemoteAddr(), err)
+		// Warning not Error — failed KX/handshake is expected
+		// from port scanners and misconfigured peers.
+		log.Warningf("transport %v: %v", conn.RemoteAddr(), err)
 		return
 	}
 
