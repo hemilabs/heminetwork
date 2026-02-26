@@ -5,6 +5,7 @@
 package continuum
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -798,14 +799,20 @@ func TestTSSReshareCancellation(t *testing.T) {
 type mockTSSStore struct {
 	preParams    *keygen.LocalPreParams
 	keyShares    map[string][]byte
+	keyMeta      map[string]*KeyMetadata
 	saveErr      error
 	loadErr      error
 	deleteErr    error
 	preParamsErr error
+	saveMetaErr  error
+	loadMetaErr  error
 }
 
 func newMockTSSStore() *mockTSSStore {
-	return &mockTSSStore{keyShares: make(map[string][]byte)}
+	return &mockTSSStore{
+		keyShares: make(map[string][]byte),
+		keyMeta:   make(map[string]*KeyMetadata),
+	}
 }
 
 func (m *mockTSSStore) SaveKeyShare(keyID, share []byte) error {
@@ -843,6 +850,33 @@ func (m *mockTSSStore) GetPreParams(ctx context.Context) (*keygen.LocalPreParams
 
 func (m *mockTSSStore) SetPreParams(pp *keygen.LocalPreParams) {
 	m.preParams = pp
+}
+
+func (m *mockTSSStore) SaveKeyMetadata(keyID []byte, meta *KeyMetadata) error {
+	if m.saveMetaErr != nil {
+		return m.saveMetaErr
+	}
+	m.keyMeta[string(keyID)] = meta
+	return nil
+}
+
+func (m *mockTSSStore) LoadKeyMetadata(keyID []byte) (*KeyMetadata, error) {
+	if m.loadMetaErr != nil {
+		return nil, m.loadMetaErr
+	}
+	meta, ok := m.keyMeta[string(keyID)]
+	if !ok {
+		return nil, errors.New("metadata not found")
+	}
+	return meta, nil
+}
+
+func (m *mockTSSStore) ListKeys() ([][]byte, error) {
+	keys := make([][]byte, 0, len(m.keyShares))
+	for k := range m.keyShares {
+		keys = append(keys, []byte(k))
+	}
+	return keys, nil
 }
 
 // noopTransport discards all sends.
@@ -1089,5 +1123,293 @@ func TestGetPreParamsContextCancel(t *testing.T) {
 	_, err = store.GetPreParams(ctx)
 	if err == nil {
 		t.Fatal("expected context cancellation error")
+	}
+}
+
+// =============================================================================
+// Key metadata persistence tests
+// =============================================================================
+
+// TestKeyMetadataSaveLoadRoundTrip verifies that saving and loading
+// key metadata produces the original data.
+func TestKeyMetadataSaveLoadRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyID := []byte{0x01, 0x02, 0x03, 0x04}
+	committee := []Identity{{0xAA}, {0xBB}, {0xCC}}
+	pubKey := []byte("test-public-key-data")
+	now := time.Now().UTC().Truncate(time.Second)
+
+	meta := &KeyMetadata{
+		Committee: committee,
+		Threshold: 2,
+		KeyID:     keyID,
+		PublicKey: pubKey,
+		CreatedAt: now,
+	}
+
+	if err := store.SaveKeyMetadata(keyID, meta); err != nil {
+		t.Fatalf("SaveKeyMetadata: %v", err)
+	}
+
+	loaded, err := store.LoadKeyMetadata(keyID)
+	if err != nil {
+		t.Fatalf("LoadKeyMetadata: %v", err)
+	}
+
+	if loaded.Threshold != 2 {
+		t.Fatalf("threshold: got %d, want 2", loaded.Threshold)
+	}
+	if len(loaded.Committee) != 3 {
+		t.Fatalf("committee len: got %d, want 3", len(loaded.Committee))
+	}
+	for i, id := range loaded.Committee {
+		if id != committee[i] {
+			t.Fatalf("committee[%d]: got %v, want %v", i, id, committee[i])
+		}
+	}
+	if !bytes.Equal(loaded.KeyID, keyID) {
+		t.Fatalf("keyID mismatch")
+	}
+	if !bytes.Equal(loaded.PublicKey, pubKey) {
+		t.Fatalf("publicKey mismatch")
+	}
+	if !loaded.CreatedAt.Equal(now) {
+		t.Fatalf("createdAt: got %v, want %v", loaded.CreatedAt, now)
+	}
+}
+
+// TestKeyMetadataSurvivesReload verifies metadata persists across
+// store instances (simulating node restart).
+func TestKeyMetadataSurvivesReload(t *testing.T) {
+	dir := t.TempDir()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Save with first store instance.
+	store1, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyID := []byte{0xDE, 0xAD}
+	meta := &KeyMetadata{
+		Committee: []Identity{{0x01}},
+		Threshold: 1,
+		KeyID:     keyID,
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
+	}
+	if err := store1.SaveKeyMetadata(keyID, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	// Load with second store instance (same dir, same secret).
+	store2, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store2.LoadKeyMetadata(keyID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if loaded.Threshold != 1 {
+		t.Fatalf("threshold: got %d, want 1", loaded.Threshold)
+	}
+}
+
+// TestKeyMetadataWrongSecret verifies metadata cannot be read with
+// a different secret (different encryption key).
+func TestKeyMetadataWrongSecret(t *testing.T) {
+	dir := t.TempDir()
+	secret1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret2, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store1, err := NewTSSStore(dir, secret1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID := []byte{0x01}
+	if err := store1.SaveKeyMetadata(keyID, &KeyMetadata{
+		Threshold: 1,
+		KeyID:     keyID,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	store2, err := NewTSSStore(dir, secret2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store2.LoadKeyMetadata(keyID)
+	if err == nil {
+		t.Fatal("expected decryption error with wrong secret")
+	}
+}
+
+// TestListKeysReturnsStoredIDs verifies ListKeys returns all keyIDs
+// that have been saved.
+func TestListKeysReturnsStoredIDs(t *testing.T) {
+	dir := t.TempDir()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty store.
+	keys, err := store.ListKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 0 {
+		t.Fatalf("expected 0 keys, got %d", len(keys))
+	}
+
+	// Add two keys.
+	key1 := []byte{0x01, 0x02}
+	key2 := []byte{0x03, 0x04}
+	if err := store.SaveKeyShare(key1, []byte("share1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveKeyShare(key2, []byte("share2")); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err = store.ListKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(keys))
+	}
+
+	// Verify both keyIDs are present (order not guaranteed).
+	found := make(map[string]bool)
+	for _, k := range keys {
+		found[string(k)] = true
+	}
+	if !found[string(key1)] || !found[string(key2)] {
+		t.Fatalf("missing keyIDs: found=%v", found)
+	}
+}
+
+// TestListKeysIgnoresMetaFiles verifies ListKeys only returns
+// .key files, not .meta files.
+func TestListKeysIgnoresMetaFiles(t *testing.T) {
+	dir := t.TempDir()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyID := []byte{0xAA, 0xBB}
+	if err := store.SaveKeyShare(keyID, []byte("share")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveKeyMetadata(keyID, &KeyMetadata{
+		KeyID:     keyID,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := store.ListKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d (meta file counted?)", len(keys))
+	}
+}
+
+// TestLoadKeyMetadataNotExist verifies LoadKeyMetadata returns an
+// error for a non-existent key.
+func TestLoadKeyMetadataNotExist(t *testing.T) {
+	dir := t.TempDir()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.LoadKeyMetadata([]byte{0xFF})
+	if err == nil {
+		t.Fatal("expected error for non-existent metadata")
+	}
+}
+
+// TestKeyMetadataReshareUpdate verifies that reshare overwrites
+// metadata with new committee and threshold.
+func TestKeyMetadataReshareUpdate(t *testing.T) {
+	dir := t.TempDir()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyID := []byte{0x42}
+	oldMeta := &KeyMetadata{
+		Committee: []Identity{{0x01}, {0x02}, {0x03}},
+		Threshold: 1,
+		KeyID:     keyID,
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
+	}
+	if err := store.SaveKeyMetadata(keyID, oldMeta); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate reshare: new committee, new threshold.
+	newMeta := &KeyMetadata{
+		Committee: []Identity{{0x04}, {0x05}},
+		Threshold: 1,
+		KeyID:     keyID,
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
+	}
+	if err := store.SaveKeyMetadata(keyID, newMeta); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.LoadKeyMetadata(keyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Committee) != 2 {
+		t.Fatalf("committee: got %d members, want 2", len(loaded.Committee))
+	}
+	if loaded.Committee[0] != (Identity{0x04}) {
+		t.Fatalf("committee[0]: got %v, want {0x04}", loaded.Committee[0])
 	}
 }
