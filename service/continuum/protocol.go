@@ -177,6 +177,9 @@ const (
 	PCeremonyStatusResponse PayloadType = "ceremony-status-response"
 	PCeremonyListRequest    PayloadType = "ceremony-list"
 	PCeremonyListResponse   PayloadType = "ceremony-list-response"
+
+	// Session management
+	PBusyResponse PayloadType = "busy"
 )
 
 var (
@@ -206,6 +209,9 @@ var (
 		reflect.TypeOf(CeremonyStatusResponse{}): PCeremonyStatusResponse,
 		reflect.TypeOf(CeremonyListRequest{}):    PCeremonyListRequest,
 		reflect.TypeOf(CeremonyListResponse{}):   PCeremonyListResponse,
+
+		// Session management
+		reflect.TypeOf(BusyResponse{}): PBusyResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -563,6 +569,10 @@ type CeremonyListRequest struct{}
 type CeremonyListResponse struct {
 	Ceremonies []CeremonyStatusResponse `json:"ceremonies"`
 }
+
+// BusyResponse is sent post-handshake when the server is at capacity.
+// The connecting peer should close the transport and retry later.
+type BusyResponse struct{}
 
 // ErrAdminNotLocal is returned when an admin request arrives from a
 // non-localhost connection.
