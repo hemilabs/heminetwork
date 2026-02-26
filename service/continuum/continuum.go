@@ -141,6 +141,13 @@ type Server struct {
 	listenConfig  *net.ListenConfig
 	listenAddress string // Actual bound address after Listen()
 
+	// handshakeSem limits concurrent handshake goroutines to
+	// PeersWanted.  Acquired in the accept loop before spawning
+	// a goroutine, released after KX completes (success or
+	// failure).  Prevents goroutine exhaustion from connection
+	// floods.
+	handshakeSem chan struct{}
+
 	// DNS resolver; nil uses net.DefaultResolver.  Tests inject a
 	// mock resolver pointing at an in-process DNS server.
 	resolver *net.Resolver
@@ -192,6 +199,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		sessions:     make(map[Identity]*Transport, cfg.PeersWanted),
 		peers:        make(map[Identity]*PeerRecord),
 		ceremonies:   make(map[CeremonyID]*CeremonyInfo),
+		handshakeSem: make(chan struct{}, cfg.PeersWanted),
 		tssCtx:       context.Background(), // replaced by Run() with lifecycle context
 	}, nil
 }
@@ -221,17 +229,23 @@ func (s *Server) deleteSession(id *Identity) error {
 }
 
 func (s *Server) deleteAllSessions() {
-	// XXX holds mutex for duration of all Close() calls.  If a
-	// transport's Close() blocks (broken TCP, slow FIN), every
-	// goroutine needing s.mtx stalls.  Consider collecting
-	// transports under lock, then closing outside it.
+	type idTransport struct {
+		id Identity
+		t  *Transport
+	}
+
 	s.mtx.Lock()
-	defer s.mtx.Unlock()
+	closing := make([]idTransport, 0, len(s.sessions))
 	for id, t := range s.sessions {
-		if err := t.Close(); err != nil {
-			log.Errorf("close session %s: %v", id, err)
-		}
+		closing = append(closing, idTransport{id, t})
 		delete(s.sessions, id)
+	}
+	s.mtx.Unlock()
+
+	for _, it := range closing {
+		if err := it.t.Close(); err != nil {
+			log.Errorf("close session %v: %v", it.id, err)
+		}
 	}
 }
 
@@ -707,6 +721,10 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			if err := t.Write(s.secret.Identity, resp); err != nil {
 				log.Warningf("admin ceremony list %v: %v", id, err)
 			}
+
+		case *BusyResponse:
+			log.Infof("peer %v at capacity, disconnecting", id)
+			return
 
 		default:
 			log.Debugf("handle %v: unhandled %T", id, payload)
@@ -1832,23 +1850,21 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 			continue
 		}
 
-		s.mtx.RLock()
-		conNum := len(s.sessions)
-		s.mtx.RUnlock()
-		if conNum >= s.cfg.PeersWanted {
-			// XXX send a "busy" message?
-			log.Debugf("server full, connection rejected: %s",
-				conn.RemoteAddr())
-			// untested: conn.Close error is logged not returned; cosmetic
-			if err := conn.Close(); err != nil {
-				log.Errorf("close connection %s: %v",
-					conn.RemoteAddr(), err)
-			}
-			continue
+		// Limit concurrent handshakes to PeersWanted.  If the
+		// semaphore is full, block until a slot opens or ctx
+		// cancels.  This prevents goroutine exhaustion from
+		// connection floods — the attacker must wait for existing
+		// handshakes to complete before new ones start.
+		select {
+		case <-ctx.Done():
+			conn.Close() // best-effort: shutting down
+			return
+		case s.handshakeSem <- struct{}{}:
 		}
 
-		// Handle handshake and session setup in goroutine to prevent
-		// blocking the accept loop.
+		// Handle handshake and session setup in goroutine.
+		// Capacity check happens post-KX inside
+		// handleIncomingConnection (BusyResponse).
 		tcpKeepAlive(conn, tcpKeepAlivePeriod)
 		s.wg.Add(1)
 		go s.handleIncomingConnection(ctx, conn)
@@ -1930,14 +1946,14 @@ func (s *Server) Run(pctx context.Context) error {
 	defer cancel()
 
 	// Initialize peer TTL map.
-	peersTTL, err := ttl.New(s.cfg.PeersWanted*2, true)
+	peersTTL, err := ttl.New(s.cfg.PeersWanted, true)
 	if err != nil {
 		return fmt.Errorf("peer ttl: %w", err)
 	}
 	s.peersTTL = peersTTL
 
 	// Initialize unanswered ping timeout map.
-	pings, err := ttl.New(s.cfg.PeersWanted*2, true)
+	pings, err := ttl.New(s.cfg.PeersWanted, true)
 	if err != nil {
 		return fmt.Errorf("ping ttl: %w", err)
 	}
@@ -2070,10 +2086,29 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 	log.Debugf("handleIncomingConnection: %v", conn.RemoteAddr())
 	defer log.Debugf("handleIncomingConnection: %v exit", conn.RemoteAddr())
 
-	// Perform handshake and setup
+	// Perform KX and handshake, then release the semaphore.
+	// The semaphore only gates the expensive KX phase —
+	// once complete, the slot is free for the next connection.
 	id, transport, naclPub, err := s.newTransport(ctx, conn)
+	<-s.handshakeSem // release regardless of success/failure
 	if err != nil {
 		log.Errorf("transport %v: %v", conn.RemoteAddr(), err)
+		return
+	}
+
+	// Capacity check post-KX.  The peer proved identity via
+	// handshake (proof-of-work against trivial DoS).  If at
+	// capacity, send BusyResponse so the peer backs off
+	// instead of hammering reconnect.
+	s.mtx.RLock()
+	full := len(s.sessions) >= s.cfg.PeersWanted
+	s.mtx.RUnlock()
+	if full {
+		log.Debugf("server full, sending busy to %v", id)
+		// Best-effort: peer is being rejected, write failure is harmless.
+		_ = transport.Write(s.secret.Identity, BusyResponse{})
+		// Best-effort: transport is being discarded.
+		transport.Close()
 		return
 	}
 

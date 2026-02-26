@@ -3520,8 +3520,9 @@ func TestConnectPeerDialError(t *testing.T) {
 	}
 }
 
-// TestListenFull verifies that listen() rejects connections when
-// PeersWanted is reached.
+// TestListenFull verifies that the server sends BusyResponse when
+// PeersWanted is reached.  The capacity check happens post-KX so
+// the connecting peer has proved identity before being rejected.
 func TestListenFull(t *testing.T) {
 	preParams := loadPreParams(t, 1)
 	s := newTestServer(t, preParams, 0, "localhost:0", nil)
@@ -3548,8 +3549,6 @@ func TestListenFull(t *testing.T) {
 		t.Fatalf("kx 1: %v", err)
 	}
 	if _, _, _, err := tr1.Handshake(kxCtx, s.secret, ""); err != nil {
-		// The handshake might succeed or the session might succeed.
-		// What matters is the SECOND connection gets rejected.
 		t.Logf("handshake 1: %v (may be expected)", err)
 	}
 
@@ -3564,24 +3563,51 @@ func TestListenFull(t *testing.T) {
 		<-tick.C
 	}
 
-	// Second connection: server is "full".  The listen loop
-	// closes the connection before doing KX.
+	// Second connection: server is "full".  KX completes
+	// (post-KX capacity check) then we receive BusyResponse.
 	conn2, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
 	if err != nil {
-		// Server might have rejected at TCP level.
 		cancel()
 		<-errC
 		return
 	}
 	t.Cleanup(func() { conn2.Close() })
 
-	// Try to do KX — should fail because server closed conn.
 	tr2 := new(Transport)
-	kx2Ctx, kx2Cancel := context.WithTimeout(ctx, 2*time.Second)
+	kx2Ctx, kx2Cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer kx2Cancel()
-	err = tr2.KeyExchange(kx2Ctx, conn2)
-	if err == nil {
-		t.Log("KX succeeded unexpectedly, server may have reaped session")
+	if err := tr2.KeyExchange(kx2Ctx, conn2); err != nil {
+		// KX might fail if the server closes during handshake
+		// race — either way, the second peer is rejected.
+		t.Logf("kx 2 failed (acceptable): %v", err)
+		cancel()
+		<-errC
+		return
+	}
+
+	// The server sends BusyResponse after handshake.  We need
+	// to complete the handshake on our side first.
+	secret2, err := NewSecret()
+	if err != nil {
+		t.Fatalf("secret: %v", err)
+	}
+	if _, _, _, err := tr2.Handshake(kx2Ctx, secret2, ""); err != nil {
+		t.Logf("handshake 2 failed (acceptable): %v", err)
+		cancel()
+		<-errC
+		return
+	}
+
+	// Read — should be BusyResponse.
+	_, cmd, err := tr2.Read()
+	if err != nil {
+		t.Logf("read busy failed (connection closed): %v", err)
+		cancel()
+		<-errC
+		return
+	}
+	if _, ok := cmd.(*BusyResponse); !ok {
+		t.Fatalf("expected BusyResponse, got %T", cmd)
 	}
 
 	cancel()
