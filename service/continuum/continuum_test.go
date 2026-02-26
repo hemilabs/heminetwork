@@ -10277,8 +10277,10 @@ func TestRemoteAddrNilConn(t *testing.T) {
 }
 
 func TestTCPKeepAlive(t *testing.T) {
+	ctx := t.Context()
+
 	// TCP connection: keepalive should be set without panic.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10295,7 +10297,7 @@ func TestTCPKeepAlive(t *testing.T) {
 		tcpKeepAlive(c, tcpKeepAlivePeriod)
 	}()
 
-	conn, err := net.Dial("tcp", ln.Addr().String())
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
