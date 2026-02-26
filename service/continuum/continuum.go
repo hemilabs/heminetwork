@@ -963,12 +963,20 @@ func (s *Server) connectRandom(ctx context.Context) {
 // the session, and enters handle().  Unlike connect(), errors are logged
 // rather than sent to errC — failed maintenance dials must not kill the
 // server.
+
 // tcpKeepAlive enables TCP keepalive on conn with the given period.
 // Non-TCP connections (e.g. net.Pipe in tests) are a silent no-op.
 func tcpKeepAlive(conn net.Conn, period time.Duration) {
-	if tc, ok := conn.(*net.TCPConn); ok {
-		tc.SetKeepAlive(true)
-		tc.SetKeepAlivePeriod(period)
+	tc, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+	if err := tc.SetKeepAlive(true); err != nil {
+		log.Warningf("tcp keepalive: %v", err)
+		return
+	}
+	if err := tc.SetKeepAlivePeriod(period); err != nil {
+		log.Warningf("tcp keepalive period: %v", err)
 	}
 }
 
