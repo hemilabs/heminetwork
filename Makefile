@@ -13,6 +13,20 @@ export GOPKG=$(PROJECTPATH)/pkg
 
 GO_LDFLAGS=
 
+# Debug build tags.  Enable ceremony initiation commands in hemictl:
+#   CONTINUUM_DEBUG=1 make
+# This adds -tags continuum_debug to all go build/test commands.
+# Production builds omit this — ceremony initiation comes from the
+# blockchain, not from hemictl.
+GO_TAGS=
+ifdef CONTINUUM_DEBUG
+GO_TAGS += continuum_debug
+endif
+ifneq ($(GO_TAGS),)
+GO_TAGS_FLAG=-tags "$(strip $(GO_TAGS))"
+LINT_TAGS_FLAG=--build-tags "$(strip $(GO_TAGS))"
+endif
+
 # renovate: datasource=github-releases depName=golangci/golangci-lint versioning=semver
 GOLANGCI_LINT_VERSION="v2.7.2"
 # renovate: datasource=github-releases depName=joshuasing/golicenser versioning=semver
@@ -48,10 +62,10 @@ go-deps:
 	go mod verify
 
 $(cmds):
-	go build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(GOBIN)/$@ ./cmd/$@
+	go build -trimpath $(GO_TAGS_FLAG) -ldflags "$(GO_LDFLAGS)" -o $(GOBIN)/$@ ./cmd/$@
 
 build:
-	go build ./...
+	go build $(GO_TAGS_FLAG) ./...
 
 install: $(cmds)
 
@@ -64,7 +78,7 @@ export LICENSE_HEADER
 
 lint:
 	$(shell go env GOPATH)/bin/golangci-lint fmt ./...
-	$(shell go env GOPATH)/bin/golangci-lint run --fix ./...
+	$(shell go env GOPATH)/bin/golangci-lint run $(LINT_TAGS_FLAG) --fix ./...
 	$(shell go env GOPATH)/bin/golicenser -tmpl="$$LICENSE_HEADER" -author="Hemi Labs, Inc." -year-mode=git-range -fix ./...
 
 lint-deps:
@@ -77,13 +91,13 @@ tidy:
 	go mod tidy
 
 race:
-	go test -v -race ./...
+	go test $(GO_TAGS_FLAG) -v -race ./...
 
 test:
-	go test -test.timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out -covermode=atomic ./...
+	go test $(GO_TAGS_FLAG) -test.timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out -covermode=atomic ./...
 
 vulncheck:
-	$(shell go env GOPATH)/bin/govulncheck ./...
+	$(shell go env GOPATH)/bin/govulncheck $(GO_TAGS_FLAG) ./...
 
 vulncheck-deps:
 	GOBIN=$(shell go env GOPATH)/bin go install golang.org/x/vuln/cmd/govulncheck@latest
