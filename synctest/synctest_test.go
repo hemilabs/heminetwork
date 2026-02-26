@@ -121,7 +121,7 @@ func TestWaitForSyncSuccessNoSlackNotification(t *testing.T) {
 
 	for _, testCase := range testTable {
 		t.Run(testCase.name, func(t *testing.T) {
-			cleanup := setupServers(t, false, 0, false, testCase.syncInfo, false)
+			cleanup := setupServers(t, false, 0, false, testCase.syncInfo, false, 0)
 			defer cleanup()
 
 			if err := waitForSync(t.Context()); err != nil {
@@ -137,7 +137,27 @@ func TestWaitForSyncSuccessNoSlackNotificationAfterDelayAndValidBlock(t *testing
 			Height: 1,
 		},
 		Synced: true,
-	}, false)
+	}, false, 0)
+	defer cleanup()
+
+	start := time.Now()
+	if err := waitForSync(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Now()
+
+	if end.Sub(start) <= 5*time.Second {
+		t.Fatalf("waiting should have taken at least 5 seconds, took %d", end.Sub(start)*time.Second)
+	}
+}
+
+func TestWaitForSyncSuccessNoSlackNotificationRecoverAfterTBCError(t *testing.T) {
+	cleanup := setupServers(t, false, 5, true, tbc.SyncInfo{
+		Tx: tbc.HashHeight{
+			Height: 1,
+		},
+		Synced: true,
+	}, false, 1)
 	defer cleanup()
 
 	start := time.Now()
@@ -157,7 +177,7 @@ func TestWaitForSyncSuccessWithSlackNotification(t *testing.T) {
 			Height: 1,
 		},
 		Synced: true,
-	}, false)
+	}, false, 0)
 	defer cleanup()
 
 	if err := waitForSync(t.Context()); err != nil {
@@ -244,7 +264,7 @@ func TestGetLogsFromDockerContainers(t *testing.T) {
 					Height: 1,
 				},
 				Synced: true,
-			}, true)
+			}, true, 0)
 			defer cleanup()
 
 			if err := waitForSync(t.Context()); err != nil {
@@ -273,16 +293,24 @@ func TestGetLogsFromDockerContainers(t *testing.T) {
 	}
 }
 
-func setupServers(t *testing.T, useSlack bool, delaySeconds uint, useValidOtherBlock bool, syncInfo tbc.SyncInfo, useDocker bool) func() {
+func setupServers(t *testing.T, useSlack bool, delaySeconds uint, useValidOtherBlock bool, syncInfo tbc.SyncInfo, useDocker bool, tbcErrors uint) func() {
 	lastRequestMtx.Lock()
 	defer lastRequestMtx.Unlock()
 	lastSlackRequests = [][]byte{}
 
 	experimentHealthyAt := time.Now().Add(time.Duration(delaySeconds) * time.Second)
 
+	tbcErrorCount := uint(0)
+
 	testHealthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lastRequestMtx.Lock()
 		defer lastRequestMtx.Unlock()
+
+		if tbcErrorCount < tbcErrors {
+			tbcErrorCount++
+			fmt.Fprintln(w, "thisisbad")
+			return
+		}
 
 		b, err := json.Marshal(syncInfo)
 		if err != nil {
