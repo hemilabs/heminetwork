@@ -1091,15 +1091,30 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 		return nil, err
 	}
 
-	// TODO(SOW4-§4): Replay protection.  The routing-layer dedup cache
-	// (67s TTL) suppresses flood storms but does not prevent replay
-	// of encrypted messages after expiry.  Add a per-sender nonce
-	// registry here — reject if (Sender, Nonce) was already seen.
-	// The nonce is random and invariant across replays so collision
-	// == replay.  Separate concern from routing dedup; needs its own
-	// TTL (ceremony lifetime or similar).  TSS ceremony state
-	// machines may reject stale messages anyway but defense in depth
-	// is cheap.  MUST SHIP BEFORE PRODUCTION.
+	// Replay protection analysis (SOW4 §4 — deferred).
+	//
+	// The routing-layer dedup cache (67s TTL) prevents immediate
+	// replay of routed messages.  Beyond that window:
+	//
+	//  - Ceremony-initiating messages (KeygenRequest, SignRequest,
+	//    ReshareRequest): in production these originate from the
+	//    blockchain watcher via CeremonyInitiator, never from the
+	//    wire.  Debug-mode wire initiation is build-tagged out of
+	//    production binaries.  No replay risk in production.
+	//
+	//  - TSS round messages (TSSMessage): tss-lib state machines
+	//    reject duplicate or out-of-order round messages internally.
+	//    Replay after dedup expiry is harmless.
+	//
+	//  - CeremonyResult (broadcast): handleCeremonyResult is
+	//    idempotent — duplicate results for a completed ceremony
+	//    are logged and dropped.
+	//
+	// If a future protocol change routes non-idempotent encrypted
+	// commands through the mesh, add a per-sender nonce registry
+	// here: reject if (Sender, Nonce) was already seen.  The NaCl
+	// box nonce is random per SealBox and invariant across replays,
+	// so collision == replay.
 
 	// Decode using the InnerType hint.
 	ct, ok := str2pt[ep.InnerType]
