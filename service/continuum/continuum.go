@@ -52,11 +52,11 @@ const (
 
 	// pingInterval is how often each session sends a heartbeat.
 	// Prime to avoid resonance with other periodic timers.
-	pingInterval = 61 * time.Second
+	pingInterval = 41 * time.Second
 
 	// pingTimeout is how long to wait for a pong before closing
 	// the transport.  Prime, well under pingInterval.
-	pingTimeout = 19 * time.Second
+	pingTimeout = 13 * time.Second
 
 	// maintainInterval is how often the server checks whether it
 	// needs to dial additional peers.  Prime, distinct from ping.
@@ -316,6 +316,11 @@ const ceremonyMaxAge = 30 * time.Minute
 
 // ceremonyEvictInterval is the tick period for the eviction goroutine.
 const ceremonyEvictInterval = 5 * time.Minute
+
+// tcpKeepAlivePeriod is the TCP keepalive probe interval.  With Linux
+// default 9 retries, worst-case dead-peer detection is ~153s.
+// Complements the application-layer ping TTL (~54s worst case).
+const tcpKeepAlivePeriod = 17 * time.Second
 
 // forward relays a message that is not destined for us.  If TTL is
 // zero, the message is dropped.  Otherwise TTL is decremented and the
@@ -940,6 +945,15 @@ func (s *Server) connectRandom(ctx context.Context) {
 // the session, and enters handle().  Unlike connect(), errors are logged
 // rather than sent to errC — failed maintenance dials must not kill the
 // server.
+// tcpKeepAlive enables TCP keepalive on conn with the given period.
+// Non-TCP connections (e.g. net.Pipe in tests) are a silent no-op.
+func tcpKeepAlive(conn net.Conn, period time.Duration) {
+	if tc, ok := conn.(*net.TCPConn); ok {
+		tc.SetKeepAlive(true)
+		tc.SetKeepAlivePeriod(period)
+	}
+}
+
 func (s *Server) connectPeer(ctx context.Context, addr string) {
 	defer s.wg.Done()
 
@@ -952,6 +966,7 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 		log.Warningf("connectPeer dial %v: %v", addr, err)
 		return
 	}
+	tcpKeepAlive(conn, tcpKeepAlivePeriod)
 
 	transport := new(Transport)
 	greatSuccess := false
@@ -1694,6 +1709,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		sendErr(ctx, errC, err)
 		return
 	}
+	tcpKeepAlive(conn, tcpKeepAlivePeriod)
 
 	transport := new(Transport)
 	greatSuccess := false
@@ -1833,6 +1849,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 
 		// Handle handshake and session setup in goroutine to prevent
 		// blocking the accept loop.
+		tcpKeepAlive(conn, tcpKeepAlivePeriod)
 		s.wg.Add(1)
 		go s.handleIncomingConnection(ctx, conn)
 	}
