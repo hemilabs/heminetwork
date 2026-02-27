@@ -1,0 +1,65 @@
+# Copyright (c) 2026 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+# Build stage
+FROM golang:1.25.6-alpine3.22@sha256:fa3380ab0d73b706e6b07d2a306a4dc68f20bfc1437a6a6c47c8f88fe4af6f75 AS builder
+
+ARG GO_LDFLAGS
+
+# Add make and git
+RUN apk --no-cache add --update make git
+
+WORKDIR /build/
+
+COPY Makefile .
+COPY go.mod .
+COPY go.sum .
+RUN make go-deps
+
+COPY . .
+RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" transfunctionerd
+
+# Run stage
+FROM cgr.dev/chainguard/static@sha256:99a5f826e71115aef9f63368120a6aa518323e052297718e9bf084fb84def93c
+
+# Build metadata
+ARG VERSION
+ARG VCS_REF
+ARG BUILD_DATE
+LABEL org.opencontainers.image.created=$BUILD_DATE \
+      org.opencontainers.image.authors="Hemi Labs" \
+      org.opencontainers.image.url="https://github.com/hemilabs/heminetwork" \
+      org.opencontainers.image.source="https://github.com/hemilabs/heminetwork" \
+      org.opencontainers.image.version=$VERSION \
+      org.opencontainers.image.revision=$VCS_REF \
+      org.opencontainers.image.vendor="Hemi Labs" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.title="Transfunctioner Daemon" \
+      org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.name="Transfunctioner Daemon" \
+      org.label-schema.url="https://github.com/hemilabs/heminetwork" \
+      org.label-schema.vcs-url="https://github.com/hemilabs/heminetwork" \
+      org.label-schema.vcs-ref=$VCS_REF \
+      org.label-schema.vendor="Hemi Labs" \
+      org.label-schema.version=$VERSION \
+      org.label-schema.schema-version="1.0"
+
+# Copy binary
+COPY --from=builder /build/bin/transfunctionerd /usr/local/bin/transfunctionerd
+
+# Environment variables
+ENV TRF_CONNECT=""
+ENV TRF_HOME=""
+ENV TRF_LISTEN_ADDRESS=""
+ENV TRF_LOG_LEVEL=""
+ENV TRF_PEERS_WANTED=""
+ENV TRF_PPROF_ADDRESS=""
+ENV TRF_PRIVATE_KEY=""
+ENV TRF_PROMETHEUS_ADDRESS=""
+ENV TRF_DNS_NAME=""
+ENV TRF_DNS_REQUIRED=""
+ENV TRF_SEEDS=""
+
+WORKDIR /etc/transfunctionerd/
+ENTRYPOINT ["/usr/local/bin/transfunctionerd"]
