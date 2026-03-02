@@ -850,6 +850,8 @@ func tcpKeepAlive(conn net.Conn, period time.Duration) {
 	}
 }
 
+// XXX (toni): this seems to be getting called for self periodically,
+// failing with "duplicate identity" further down the stack
 func (s *Server) connectPeer(ctx context.Context, addr string) {
 	defer s.wg.Done()
 
@@ -1777,6 +1779,7 @@ func (s *Server) initPaillierPrimes(pctx context.Context) error {
 	ppf, err := os.Open(preparamsFilename)
 	if errors.Is(err, os.ErrNotExist) {
 		log.Infof("Generating TSS Paillier primes")
+		// XXX (toni): this seems to timeout relatively often on startup.
 		lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
 		if err != nil {
 			return err
