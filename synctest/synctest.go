@@ -428,18 +428,11 @@ func l2TipsMatch(ctx context.Context, c *config, lastl2BlockNumber *uint64) (boo
 	controlHash := controlBlock.Hash()
 	experimentHash := experimentalBlock.Hash()
 
-	syncProgress, err := l2Experiment.SyncProgress(ctx)
-	if err != nil {
-		return false, fmt.Errorf("could not get sync progress: %s", err)
-	}
-
-	// if sync progress is nil, then we're synced according to op-geth
-	if syncProgress != nil {
-		return false, nil
-	}
-
 	// check if we're in 5 blocks from the tip
 	for range 5 {
+		log.Tracef(
+			"comparing hashes for latest blocks (control) %s ?= (experiment) %s", experimentHash)
+
 		matching := controlHash.Hex() == experimentHash.Hex()
 
 		if matching {
