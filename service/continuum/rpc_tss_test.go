@@ -889,7 +889,7 @@ func connectRPCPair(t *testing.T, server, client *rpcTSSNode) {
 		}
 		kxBarrier.Done()
 		kxBarrier.Wait()
-		id, _, _, hsErr := serverTr.Handshake(ctx, server.secret, "")
+		id, _, hsErr := serverTr.Handshake(ctx, server.secret)
 		if hsErr != nil {
 			errCh <- fmt.Errorf("server handshake: %w", hsErr)
 			return
@@ -915,7 +915,7 @@ func connectRPCPair(t *testing.T, server, client *rpcTSSNode) {
 		}
 		kxBarrier.Done()
 		kxBarrier.Wait()
-		id, _, _, hsErr := clientTr.Handshake(ctx, client.secret, "")
+		id, _, hsErr := clientTr.Handshake(ctx, client.secret)
 		if hsErr != nil {
 			errCh <- fmt.Errorf("client handshake: %w", hsErr)
 			return
