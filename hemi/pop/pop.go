@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/btcsuite/btcd/txscript"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -45,12 +46,7 @@ type TransactionL2 struct {
 // Serialize serializes a PoP transaction to its byte representation.
 func (tx *TransactionL2) Serialize() []byte {
 	khb := tx.L2Keystone.Serialize()
-
-	var b []byte
-	b = append(b, magic...)
-	b = append(b, khb[:]...)
-
-	return b
+	return slices.Concat(magic, khb[:])
 }
 
 // EncodeToOpReturn produces the pay to script necessary to publish this
@@ -100,12 +96,7 @@ type Transaction struct {
 // Serialize serializes a PoP transaction to its byte representation.
 func (tx *Transaction) Serialize() []byte {
 	khb := tx.Keystone.Serialize()
-
-	var b []byte
-	b = append(b, magic...)
-	b = append(b, khb[:]...)
-
-	return b
+	return slices.Concat(magic, khb[:])
 }
 
 // EncodeToOpReturn produces the pay to script necessary to publish this
