@@ -81,6 +81,12 @@ const (
 	// safe prime generation.  Sufficient for modern hardware;
 	// increase for slow CI runners.
 	defaultPreParamsTimeout = 1 * time.Minute
+
+	// initialPingTimeout is how long to wait for the first pong
+	// after connecting.  Fired immediately post-KX — real peers
+	// reply in milliseconds; ephemeral clients (hemictl) never
+	// pong and get reaped.  Short fuse, no settling.
+	initialPingTimeout = 5 * time.Second
 )
 
 var log = loggo.GetLogger(appName)
@@ -135,6 +141,7 @@ type Server struct {
 
 	// Sessions
 	sessions map[Identity]*Transport
+	ponged   map[Identity]struct{} // peers that responded to at least one ping
 
 	// Secrets
 	secret *Secret
@@ -234,6 +241,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg:          cfg,
 		listenConfig: &net.ListenConfig{},
 		sessions:     make(map[Identity]*Transport, cfg.PeersWanted),
+		ponged:       make(map[Identity]struct{}, cfg.PeersWanted),
 		peers:        make(map[Identity]*PeerRecord),
 		ceremonies:   make(map[CeremonyID]*CeremonyInfo),
 		handshakeSem: make(chan struct{}, cfg.PeersWanted),
@@ -264,6 +272,9 @@ func (s *Server) deleteSession(id *Identity) error {
 		return fmt.Errorf("no session: %v", id)
 	}
 	delete(s.sessions, *id)
+	if s.ponged != nil {
+		delete(s.ponged, *id)
+	}
 	return t.Close()
 }
 
@@ -563,6 +574,19 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 		log.Warningf("initial peer list request %v: %v", id, err)
 	}
 
+	// Liveness ping — fired immediately, short fuse.  Real peers
+	// pong in milliseconds; ephemeral clients (hemictl) never
+	// pong and get reaped when the timeout fires pingExpired.
+	// The regular pingLoop takes over after its first tick.
+	// Write failure is not fatal — the pingLoop will retry.
+	if err := t.Write(s.secret.Identity, PingRequest{
+		OriginTimestamp: time.Now().Unix(),
+	}); err != nil {
+		log.Warningf("initial ping %v: %v", id, err)
+	} else {
+		s.pings.Put(sessionCtx, initialPingTimeout, *id, t, s.pingExpired, nil)
+	}
+
 	for {
 		header, payload, _, err := t.ReadEnvelope()
 		if err != nil {
@@ -695,6 +719,9 @@ func (s *Server) refreshPeerLastSeen(ctx context.Context, id Identity) {
 	pr, ok := s.peers[id]
 	if ok {
 		pr.LastSeen = time.Now().Unix()
+		if s.ponged != nil {
+			s.ponged[id] = struct{}{}
+		}
 	}
 	s.mtx.Unlock()
 
@@ -1410,10 +1437,13 @@ func (s *Server) handlePeerListAdmin() PeerListAdminResponse {
 	}
 	for id, pr := range s.peers {
 		_, connected := s.sessions[id]
+		_, hasPonged := s.ponged[id]
+		self := id == s.secret.Identity
 		resp.Peers = append(resp.Peers, PeerAdminRecord{
 			PeerRecord: *pr,
 			Connected:  connected,
-			Self:       id == s.secret.Identity,
+			Live:       self || (connected && hasPonged),
+			Self:       self,
 		})
 	}
 	return resp
