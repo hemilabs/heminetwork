@@ -41,6 +41,12 @@ const (
 	defaultListenAddress = "localhost:45067"
 	defaultPeersWanted   = 8
 
+	// DNS verification modes for Config.DNS.
+	DNSOff     = "off"     // No DNS verification.
+	DNSForward = "forward" // Forward TXT verify hostname peers; reject IP-only.
+	DNSReverse = "reverse" // Reverse DNS verify IP peers.
+	DNSAll     = "all"     // Forward on hostnames, reverse on IPs.
+
 	// peerTTL is the duration a peer record stays alive without
 	// refresh.  Prime to avoid resonance with other timers.
 	peerTTL = 67 * time.Second
@@ -83,8 +89,8 @@ func init() {
 // Config holds the configuration for a continuum Server.
 type Config struct {
 	Connect                 []string
-	DNSName                 string // Hostname to advertise in hello, empty = don't
-	DNSRequired             bool   // Require remote to advertise and verify DNS
+	DNS                     string // DNSOff, DNSForward, DNSReverse, DNSAll
+	Hostname                string // Hostname to advertise in gossip; empty = IP
 	Home                    string
 	ListenAddress           string
 	LogLevel                string
@@ -157,6 +163,11 @@ type Server struct {
 	// mock resolver pointing at an in-process DNS server.
 	resolver *net.Resolver
 
+	// dnsLookups rate-limits DNS verification per remote IP.
+	// Prevents attackers from forcing unbounded TXT queries by
+	// repeatedly connecting.  Keyed by IP string, TTL of 60s.
+	dnsLookups *ttl.TTL
+
 	// Peer tracking
 	peers    map[Identity]*PeerRecord // all known peers
 	peersTTL *ttl.TTL                 // expiry for known peers
@@ -182,8 +193,11 @@ type Info struct {
 }
 
 // NewDefaultConfig returns a Config with sensible defaults.
+// DNS defaults to DNSForward — operators must set Hostname or
+// explicitly opt out with DNS="off".
 func NewDefaultConfig() *Config {
 	return &Config{
+		DNS:                 DNSForward,
 		LogLevel:            logLevel,
 		PrometheusNamespace: appName,
 		PrivateKey:          "",
@@ -198,6 +212,17 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
+
+	// Validate DNS configuration.
+	switch cfg.DNS {
+	case DNSOff, DNSForward, DNSReverse, DNSAll:
+	default:
+		return nil, fmt.Errorf("invalid DNS mode %q: must be \"off\", \"forward\", \"reverse\", or \"all\"", cfg.DNS)
+	}
+	if (cfg.DNS == DNSForward || cfg.DNS == DNSAll) && cfg.Hostname == "" {
+		return nil, fmt.Errorf("DNS=%q requires Hostname to be set", cfg.DNS)
+	}
+
 	di := newDebugInitiator()
 	return &Server{
 		cfg:          cfg,
@@ -278,24 +303,18 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 		}
 	}()
 
-	id, theirDNS, naclPub, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
+	id, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		// Expected from misconfigured peers and version mismatches.
 		return nil, nil, nil, fmt.Errorf("handshake: %w", err)
 	}
 
-	if s.cfg.DNSRequired {
-		if theirDNS == "" {
-			return nil, nil, nil, errors.New("remote did not advertise dns name")
-		}
-		// NOTE: no rate limiting on DNS lookups here — an attacker
-		// can open connections with fake DNS names and force
-		// unbounded TXT queries.  Mitigated by the handshake
-		// semaphore (SOW4 §6) but not fully addressed.
-		// Deferred to DNS rework (SOW4 §9).
-		if err := s.verifyDNSIdentity(ctx, theirDNS, *id); err != nil {
-			return nil, nil, nil, fmt.Errorf("dns verify: %w", err)
-		}
+	// DNS verification for incoming connections.  In forward mode
+	// we cannot verify (no hostname for the remote yet — they'll
+	// gossip it later).  In reverse/all mode, reverse-verify the
+	// remote IP.
+	if err := s.verifyInboundDNS(ctx, conn.RemoteAddr(), *id); err != nil {
+		return nil, nil, nil, err
 	}
 
 	ok = true
@@ -751,13 +770,11 @@ func (s *Server) seed(ctx context.Context) {
 }
 
 // verifyDNSIdentity does a forward TXT lookup on hostname and verifies
-// the identity in the TXT record matches the expected identity. This
-// avoids reverse DNS lookups which are unreliable.
+// the identity in the TXT record matches the expected identity.
 //
-// NOTE: DNS is NOT an authentication mechanism.  The real identity
-// proof comes from the KX + secretbox layer.  DNS verification is
-// defense-in-depth for operational assurance — it lets operators
-// detect misconfigured or rogue nodes early.  An attacker who
+// DNS verification is defense-in-depth for operational assurance — it
+// lets operators detect misconfigured or rogue nodes early.  The real
+// identity proof comes from the KX + secretbox layer.  An attacker who
 // controls DNS responses can forge TXT records; the crypto layer
 // prevents them from impersonating a node regardless.
 //
@@ -797,6 +814,108 @@ func (s *Server) verifyDNSIdentity(ctx context.Context, hostname string, id Iden
 	return fmt.Errorf("dns no valid txt record for %v", hostname)
 }
 
+// isHostname returns true if host is a DNS name (not an IP address).
+func isHostname(host string) bool {
+	return net.ParseIP(host) == nil
+}
+
+// dnsRateLimited returns true if the remote IP has exceeded the DNS
+// lookup rate limit.  Keyed by IP string with a 60s TTL — each IP
+// gets one lookup attempt per minute.  The handshake semaphore limits
+// concurrency; this limits frequency.
+func (s *Server) dnsRateLimited(remoteAddr net.Addr) bool {
+	host, _, err := net.SplitHostPort(remoteAddr.String())
+	if err != nil {
+		return false
+	}
+	if _, _, err := s.dnsLookups.Get(host); err == nil {
+		return true // already looked up recently
+	}
+	// context.Background is intentional: the rate limit entry must
+	// outlive the caller's request context.  If we used the caller's
+	// ctx, canceling the request would cancel the TTL entry and
+	// defeat the rate limit.
+	s.dnsLookups.Put(context.Background(), 60*time.Second,
+		host, struct{}{}, nil, nil)
+	return false
+}
+
+// verifyOutboundDNS verifies DNS identity for outbound connections
+// (connect and connectPeer).  The dial target determines the
+// verification method:
+//
+//   - Hostname target: forward TXT lookup (DNS="forward" or "all")
+//   - IP target: reverse DNS lookup (DNS="reverse" or "all")
+//   - DNS="off": no verification
+//
+// In forward mode, IP-only peers are rejected — only nodes that
+// advertise a verifiable hostname in gossip are accepted.
+func (s *Server) verifyOutboundDNS(ctx context.Context, dialTarget string, remoteAddr net.Addr, id Identity) error {
+	if s.cfg.DNS == DNSOff {
+		return nil
+	}
+
+	host, _, err := net.SplitHostPort(dialTarget)
+	if err != nil {
+		host = dialTarget
+	}
+
+	if isHostname(host) {
+		// Forward verification — available in forward and all modes.
+		switch s.cfg.DNS {
+		case DNSForward, DNSAll:
+			if s.dnsRateLimited(remoteAddr) {
+				return fmt.Errorf("dns rate limited: %v", remoteAddr)
+			}
+			return s.verifyDNSIdentity(ctx, host, id)
+		}
+		return nil
+	}
+
+	// IP target — forward mode rejects IP-only peers.
+	switch s.cfg.DNS {
+	case DNSForward:
+		return fmt.Errorf("dns forward: rejecting IP-only peer %v", dialTarget)
+	case DNSReverse, DNSAll:
+		if s.dnsRateLimited(remoteAddr) {
+			return fmt.Errorf("dns rate limited: %v", remoteAddr)
+		}
+		ok, err := VerifyRemoteDNSIdentity(ctx, s.dnsResolver(), remoteAddr, id)
+		if err != nil {
+			return fmt.Errorf("dns reverse verify %v: %w", remoteAddr, err)
+		}
+		if !ok {
+			return fmt.Errorf("dns reverse identity mismatch: %v", remoteAddr)
+		}
+		return nil
+	}
+	return nil
+}
+
+// verifyInboundDNS verifies DNS identity for incoming connections.
+// Incoming connections only have a remote IP — no hostname is known
+// until the peer gossips its address.
+//
+//   - DNS="forward": accept without verification (no hostname to check)
+//   - DNS="reverse" or "all": reverse DNS verify the remote IP
+//   - DNS="off": no verification
+func (s *Server) verifyInboundDNS(ctx context.Context, remoteAddr net.Addr, id Identity) error {
+	switch s.cfg.DNS {
+	case DNSReverse, DNSAll:
+		if s.dnsRateLimited(remoteAddr) {
+			return fmt.Errorf("dns rate limited: %v", remoteAddr)
+		}
+		ok, err := VerifyRemoteDNSIdentity(ctx, s.dnsResolver(), remoteAddr, id)
+		if err != nil {
+			return fmt.Errorf("dns reverse verify %v: %w", remoteAddr, err)
+		}
+		if !ok {
+			return fmt.Errorf("dns reverse identity mismatch: %v", remoteAddr)
+		}
+	}
+	return nil
+}
+
 // connectRandom picks a random known peer that has no active session
 // and dials it.  Errors are logged, not fatal.
 func (s *Server) connectRandom(ctx context.Context) {
@@ -811,6 +930,15 @@ func (s *Server) connectRandom(ctx context.Context) {
 		}
 		if pr.Address == "" {
 			continue // no address to dial
+		}
+		// In forward mode, skip peers that only advertise an IP
+		// address — they cannot be verified via TXT lookup.
+		if s.cfg.DNS == DNSForward || s.cfg.DNS == DNSAll {
+			if host, _, err := net.SplitHostPort(pr.Address); err == nil {
+				if !isHostname(host) {
+					continue
+				}
+			}
 		}
 		candidates = append(candidates, *pr)
 	}
@@ -880,21 +1008,18 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 		log.Warningf("connectPeer kx %v: %v", addr, err)
 		return
 	}
-	them, theirDNS, naclPub, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
+	them, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		log.Warningf("connectPeer handshake %v: %v", addr, err)
 		return
 	}
 
-	if s.cfg.DNSRequired {
-		if theirDNS == "" {
-			log.Warningf("connectPeer %v: remote did not advertise dns name", addr)
-			return
-		}
-		if err := s.verifyDNSIdentity(ctx, theirDNS, *them); err != nil {
-			log.Warningf("connectPeer dns verify %v: %v", addr, err)
-			return
-		}
+	// DNS verification based on peer address from gossip.
+	// Hostname addresses get forward TXT verification.
+	// IP addresses get reverse DNS verification (if enabled).
+	if err := s.verifyOutboundDNS(ctx, addr, conn.RemoteAddr(), *them); err != nil {
+		log.Warningf("connectPeer dns %v: %v", addr, err)
+		return
 	}
 
 	if err := s.newSession(them, transport); err != nil {
@@ -1543,10 +1668,21 @@ func (s *Server) registerSelfAsPeer() {
 		return
 	}
 
+	// Advertise hostname:port when Hostname is configured so
+	// peers in forward/all mode can verify us via TXT lookup.
+	// Otherwise advertise IP:port from the bound listener.
+	addr := s.listenAddress
+	if s.cfg.Hostname != "" {
+		_, port, err := net.SplitHostPort(s.listenAddress)
+		if err == nil {
+			addr = net.JoinHostPort(s.cfg.Hostname, port)
+		}
+	}
+
 	s.mtx.Lock()
 	s.peers[s.secret.Identity] = &PeerRecord{
 		Identity: s.secret.Identity,
-		Address:  s.listenAddress,
+		Address:  addr,
 		NaClPub:  naclPub,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
@@ -1639,40 +1775,18 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		sendErr(ctx, errC, err)
 		return
 	}
-	them, theirDNS, naclPub, err := transport.Handshake(ctx, s.secret, s.cfg.DNSName)
+	them, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		sendErr(ctx, errC, err)
 		return
 	}
 
-	if s.cfg.DNSRequired {
-		if theirDNS == "" {
-			sendErr(ctx, errC, errors.New("remote did not advertise dns name"))
-			return
-		}
-
-		// Pin DNS verification to the hostname we dialed, not
-		// what the remote claims.  Without this, a MITM who
-		// intercepts the TCP connection can present their own
-		// identity with theirDNS pointing to attacker-controlled
-		// DNS, and the tautological check passes.  By verifying
-		// against the dial target we ensure the TXT record for
-		// the hostname the operator configured matches the
-		// identity that completed the handshake.
-		//
-		// When the dial target is an IP (no hostname to pin),
-		// fall back to theirDNS — the operator explicitly chose
-		// to connect by IP so there is no hostname expectation.
-		verifyHost := theirDNS
-		if host, _, err := net.SplitHostPort(c); err == nil {
-			if net.ParseIP(host) == nil {
-				verifyHost = host
-			}
-		}
-		if err := s.verifyDNSIdentity(ctx, verifyHost, *them); err != nil {
-			sendErr(ctx, errC, fmt.Errorf("dns verify: %w", err))
-			return
-		}
+	// DNS verification based on the dial target.
+	// Hostname targets get forward TXT verification.
+	// IP targets get reverse DNS verification (if enabled).
+	if err := s.verifyOutboundDNS(ctx, c, conn.RemoteAddr(), *them); err != nil {
+		sendErr(ctx, errC, err)
+		return
 	}
 
 	if err := s.newSession(them, transport); err != nil {
@@ -1863,6 +1977,14 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("seen ttl: %w", err)
 	}
 	s.seen = seen
+
+	// Initialize DNS lookup rate limiter — one lookup per IP
+	// per 60 seconds.
+	dnsLookups, err := ttl.New(s.cfg.PeersWanted, true)
+	if err != nil {
+		return fmt.Errorf("dns ttl: %w", err)
+	}
+	s.dnsLookups = dnsLookups
 
 	// Read or generate Paillier primes.
 	err = s.initPaillierPrimes(ctx)
