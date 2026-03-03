@@ -59,7 +59,7 @@ func continuumDial(ctx context.Context, addr string) (*continuum.Transport, *con
 		return nil, nil, fmt.Errorf("key exchange: %w", err)
 	}
 
-	_, _, _, err = transport.Handshake(ctx, secret, "")
+	_, _, err = transport.Handshake(ctx, secret)
 	if err != nil {
 		return nil, nil, fmt.Errorf("handshake: %w", err)
 	}

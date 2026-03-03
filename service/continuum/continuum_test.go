@@ -53,6 +53,14 @@ var (
 	inAddrArpa = "in-addr.arpa"
 )
 
+// testConfig returns a Config with DNS disabled for unit tests that
+// don't exercise DNS verification.
+func testConfig() *Config {
+	cfg := NewDefaultConfig()
+	cfg.DNS = DNSOff
+	return cfg
+}
+
 type node struct {
 	DNSName           string
 	ReverseDNSName    string
@@ -354,6 +362,7 @@ func newTestServer(t *testing.T, preParams []keygen.LocalPreParams, idx int, lis
 	}
 
 	cfg := &Config{
+		DNS:           DNSOff,
 		Home:          home,
 		ListenAddress: listenAddr,
 		LogLevel:      "continuum=DEBUG",
@@ -438,33 +447,6 @@ func waitForPeers(t *testing.T, s *Server, n int, timeout time.Duration) {
 		case <-ctx.Done():
 			t.Fatalf("server %v: expected %d peers, got %d",
 				s.Identity(), n, s.PeerCount())
-		case <-tick.C:
-		}
-	}
-}
-
-// waitForSessionCount polls until the server has exactly n sessions.
-// Unlike waitForSessions (at least n), this waits for an exact count,
-// which is useful for verifying that rejected connections leave zero
-// sessions.
-func waitForSessionCount(t *testing.T, s *Server, n int, timeout time.Duration) {
-	t.Helper()
-
-	ctx, cancel := context.WithTimeout(t.Context(), timeout)
-	defer cancel()
-
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-
-	for {
-		ids := s.SessionIdentities()
-		if len(ids) == n {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("server %v: expected %d sessions, got %d",
-				s.Identity(), n, len(s.SessionIdentities()))
 		case <-tick.C:
 		}
 	}
@@ -1214,30 +1196,41 @@ func TestDNSSeeding(t *testing.T) {
 	}
 }
 
-func TestDNSHelloAdvertise(t *testing.T) {
+func TestDNSHostnameAdvertise(t *testing.T) {
 	preParams := loadPreParams(t, 2)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
-	// Start A with a DNS name.
+	// Start A with a hostname.
 	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
-	serverA.cfg.DNSName = "nodeA.test.gfy"
+	serverA.cfg.Hostname = "nodeA.test.gfy"
 	errA := make(chan error, 1)
 	go func() { errA <- serverA.Run(ctx) }()
 	addrA := waitForListenAddress(t, serverA, 2*time.Second)
 
-	// Start B connecting to A, also with a DNS name.
+	// Start B connecting to A, also with a hostname.
 	serverB := newTestServer(t, preParams, 1, "localhost:0",
 		[]string{addrA})
-	serverB.cfg.DNSName = "nodeB.test.gfy"
+	serverB.cfg.Hostname = "nodeB.test.gfy"
 	errB := make(chan error, 1)
 	go func() { errB <- serverB.Run(ctx) }()
 
 	// Wait for connection.
 	waitForSessions(t, serverA, 1, 5*time.Second)
 	waitForSessions(t, serverB, 1, 5*time.Second)
-	t.Log("A<->B session established with DNS names advertised")
+
+	// Verify that A advertises hostname:port in its peer record.
+	serverA.mtx.RLock()
+	selfA := serverA.peers[serverA.secret.Identity]
+	serverA.mtx.RUnlock()
+	host, _, err := net.SplitHostPort(selfA.Address)
+	if err != nil {
+		t.Fatalf("split self address: %v", err)
+	}
+	if host != "nodeA.test.gfy" {
+		t.Fatalf("expected hostname nodeA.test.gfy, got %v", host)
+	}
 
 	cancel()
 	for _, errCh := range []chan error{errA, errB} {
@@ -1247,42 +1240,38 @@ func TestDNSHelloAdvertise(t *testing.T) {
 	}
 }
 
-func TestDNSRequired(t *testing.T) {
-	preParams := loadPreParams(t, 2)
+// TestDNSForwardRejectsIPPeer verifies that verifyOutboundDNS in
+// forward mode rejects IP-only peer addresses.
+func TestDNSForwardRejectsIPPeer(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSForward
+	s.cfg.Hostname = "nodeA.test.gfy"
 
-	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
+	// Initialize dnsLookups TTL (normally done in Run).
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
 
-	// Start A which requires DNS from peers.
-	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
-	serverA.cfg.DNSRequired = true
-	errA := make(chan error, 1)
-	go func() { errA <- serverA.Run(ctx) }()
-	addrA := waitForListenAddress(t, serverA, 2*time.Second)
-
-	// Start B WITHOUT a DNS name, connecting to A.
-	serverB := newTestServer(t, preParams, 1, "localhost:0",
-		[]string{addrA})
-	errB := make(chan error, 1)
-	go func() { errB <- serverB.Run(ctx) }()
-	waitForListenAddress(t, serverB, 2*time.Second)
-
-	// B's handshake succeeds from B's perspective, but A rejects
-	// the connection in newTransport because B didn't advertise a
-	// DNS name.  A closes the conn, so B's handle() gets EOF and
-	// exits.  Wait for A to confirm zero sessions.
-	waitForSessionCount(t, serverA, 0, 5*time.Second)
-	t.Log("A correctly rejected B (no DNS name advertised)")
-
-	cancel()
-	for _, errCh := range []chan error{errA, errB} {
-		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatalf("server: %v", err)
-		}
+	id, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+	err = s.verifyOutboundDNS(t.Context(), "127.0.0.1:12345", addr, id.Identity)
+	if err == nil {
+		t.Fatal("expected error for IP-only peer in forward mode")
+	}
+	if !strings.Contains(err.Error(), "rejecting IP-only peer") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestDNSRequiredWithValidDNS(t *testing.T) {
+// TestDNSForwardWithValidHostname verifies that verifyOutboundDNS
+// in forward mode accepts a hostname dial target with valid TXT record.
+func TestDNSForwardWithValidHostname(t *testing.T) {
 	preParams := loadPreParams(t, 2)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1290,30 +1279,13 @@ func TestDNSRequiredWithValidDNS(t *testing.T) {
 
 	domain := "test.gfy"
 
-	// We need to create the servers first to get their identities,
-	// then set up DNS records, then run them.
 	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
 	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
 
-	// Build mock DNS handler with records for both nodes.
+	// Build mock DNS handler with TXT record for B.
 	handler := &dnsHandler{
 		lookup: make(map[string][]dns.RR),
 		nodes:  make(map[string]*node),
-	}
-
-	// A's DNS record — uses 127.0.0.1 since we don't know the port yet,
-	// but the TXT record with identity is what matters for verification.
-	aFQDN := "nodeA." + domain + "."
-	handler.lookup[aFQDN] = []dns.RR{
-		&dns.A{
-			Hdr: dns.Header{Name: aFQDN, Class: dns.ClassINET},
-			A:   net.IPv4(127, 0, 0, 1),
-		},
-		&dns.TXT{
-			Hdr: dns.Header{Name: aFQDN, Class: dns.ClassINET},
-			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-				dnsAppName, serverA.Identity())},
-		},
 	}
 
 	bFQDN := "nodeB." + domain + "."
@@ -1329,47 +1301,48 @@ func TestDNSRequiredWithValidDNS(t *testing.T) {
 		},
 	}
 
-	// Start mock DNS.
 	dnsSrv := newDNSServer(ctx, handler)
 	dnsAddress := dnsSrv.Listener.Addr().String()
-	t.Logf("DNS server at %s", dnsAddress)
 	mockResolver := newResolver(dnsAddress)
 
-	// Configure both nodes: require DNS, advertise DNS name, use
-	// mock resolver.
-	serverA.cfg.DNSRequired = true
-	serverA.cfg.DNSName = "nodeA." + domain
+	// Configure A: forward mode with mock resolver.
+	serverA.cfg.DNS = DNSForward
+	serverA.cfg.Hostname = "nodeA." + domain
 	serverA.resolver = mockResolver
 
-	serverB.cfg.DNSRequired = true
-	serverB.cfg.DNSName = "nodeB." + domain
-	serverB.resolver = mockResolver
+	// Initialize dnsLookups TTL (normally done in Run).
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverA.dnsLookups = dl
 
-	// Start A.
-	errA := make(chan error, 1)
-	go func() { errA <- serverA.Run(ctx) }()
-	addrA := waitForListenAddress(t, serverA, 2*time.Second)
-	t.Logf("A: %v at %s", serverA.Identity(), addrA)
+	// Verify A can forward-verify B's hostname.
+	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+	err = serverA.verifyOutboundDNS(ctx, "nodeB."+domain+":12345", addr,
+		serverB.Identity())
+	if err != nil {
+		t.Fatalf("forward verify should pass: %v", err)
+	}
 
-	// Start B connecting to A.
-	serverB.cfg.Connect = []string{addrA}
-	errB := make(chan error, 1)
-	go func() { errB <- serverB.Run(ctx) }()
-
-	// Both should connect successfully with DNS verification.
-	waitForSessions(t, serverA, 1, 5*time.Second)
-	waitForSessions(t, serverB, 1, 5*time.Second)
-	t.Log("A<->B connected with mutual DNS verification")
+	// Verify wrong identity is rejected.
+	wrongSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = serverA.verifyOutboundDNS(ctx, "nodeB."+domain+":12345", addr,
+		wrongSecret.Identity)
+	if err == nil {
+		t.Fatal("expected error for identity mismatch")
+	}
 
 	cancel()
-	for _, errCh := range []chan error{errA, errB} {
-		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatalf("server: %v", err)
-		}
-	}
 }
 
-func TestDNSIdentityMismatch(t *testing.T) {
+// TestDNSReverseIdentityMismatch verifies that verifyInboundDNS in
+// reverse mode rejects connections where the rDNS identity doesn't
+// match the handshake identity.
+func TestDNSReverseIdentityMismatch(t *testing.T) {
 	preParams := loadPreParams(t, 2)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1386,84 +1359,43 @@ func TestDNSIdentityMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	nodeB, err := createNode("nodeB", domain, net.IPv4(127, 0, 0, 1), 12345)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Override the identity in the node with the wrong one.
+	nodeB.Secret = wrongSecret
+
 	handler := &dnsHandler{
 		lookup: make(map[string][]dns.RR),
 		nodes:  make(map[string]*node),
 	}
-
-	bFQDN := "nodeB." + domain + "."
-	handler.lookup[bFQDN] = []dns.RR{
-		&dns.A{
-			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
-			A:   net.IPv4(127, 0, 0, 1),
-		},
-		&dns.TXT{
-			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
-			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-				dnsAppName, wrongSecret.Identity)},
-		},
-	}
+	forward, reverse := nodeToDNS(nodeB)
+	handler.insertDNS(nodeB, forward, reverse)
 
 	dnsSrv := newDNSServer(ctx, handler)
 	dnsAddress := dnsSrv.Listener.Addr().String()
 	mockResolver := newResolver(dnsAddress)
 
-	// A requires DNS, uses mock resolver.
-	serverA.cfg.DNSRequired = true
+	// A: reverse mode, uses mock resolver.
+	serverA.cfg.DNS = DNSReverse
 	serverA.resolver = mockResolver
 
-	// B advertises DNS name but TXT has wrong identity.
-	serverB.cfg.DNSName = "nodeB." + domain
-
-	errA := make(chan error, 1)
-	go func() { errA <- serverA.Run(ctx) }()
-	addrA := waitForListenAddress(t, serverA, 2*time.Second)
-
-	// B connects to A. A will verify B's DNS and find mismatch.
-	serverB.cfg.Connect = []string{addrA}
-	errB := make(chan error, 1)
-	go func() { errB <- serverB.Run(ctx) }()
-
-	// B's connect should fail because A rejects the DNS mismatch.
-	// The error surfaces on B's side (connect sends to errC).
-	// But wait — the DNS verification happens on A's listen side
-	// (newTransport), not on B's connect side. B's connect will
-	// succeed from B's perspective, but A will reject the transport.
-	// B will then get a read error when A closes the connection.
-	//
-	// Actually, looking at the flow: B dials A, B does KX+handshake.
-	// On A's side, newTransport does KX+handshake+DNS verify. If DNS
-	// verify fails, newTransport returns error, A logs it and
-	// continues accepting. B's handshake completes successfully from
-	// B's side but A never calls newSession, so A closes the conn.
-	// B's connect() gets the error from handshake read timeout or
-	// connection reset.
-
-	// Negative assertion: A should reject B's connection due to DNS
-	// mismatch.  Bounded wait for the connect+reject cycle to complete.
-	// B dials A, KX+handshake completes, A does DNS verify, rejects,
-	// closes conn.  Context-cancellable so the test won't hang.
-	select {
-	case <-ctx.Done():
-		t.Fatal("context cancelled during DNS mismatch check")
-	case <-time.After(500 * time.Millisecond):
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
 	}
+	serverA.dnsLookups = dl
 
-	// A should have no sessions (rejected B).
-	serverA.mtx.RLock()
-	sessions := len(serverA.sessions)
-	serverA.mtx.RUnlock()
-	if sessions != 0 {
-		t.Fatalf("A has %d sessions, want 0", sessions)
+	// Verify reverse lookup returns mismatch.
+	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+	err = serverA.verifyInboundDNS(ctx, addr, serverB.Identity())
+	if err == nil {
+		t.Fatal("expected error for identity mismatch in reverse mode")
 	}
-	t.Log("A correctly rejected B due to DNS identity mismatch")
+	t.Logf("correctly rejected: %v", err)
 
 	cancel()
-	// Don't fail on B's error — it's expected.
-	if err := <-errA; err != nil && !errors.Is(err, context.Canceled) {
-		t.Fatalf("server A: %v", err)
-	}
-	<-errB // drain
 }
 
 func TestVerifyDNSIdentityByName(t *testing.T) {
@@ -3551,7 +3483,7 @@ func TestListenFull(t *testing.T) {
 	if err := tr1.KeyExchange(kxCtx, conn1); err != nil {
 		t.Fatalf("kx 1: %v", err)
 	}
-	if _, _, _, err := tr1.Handshake(kxCtx, s.secret, ""); err != nil {
+	if _, _, err := tr1.Handshake(kxCtx, s.secret); err != nil {
 		t.Logf("handshake 1: %v (may be expected)", err)
 	}
 
@@ -3594,7 +3526,7 @@ func TestListenFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("secret: %v", err)
 	}
-	if _, _, _, err := tr2.Handshake(kx2Ctx, secret2, ""); err != nil {
+	if _, _, err := tr2.Handshake(kx2Ctx, secret2); err != nil {
 		t.Logf("handshake 2 failed (acceptable): %v", err)
 		cancel()
 		<-errC
@@ -3857,51 +3789,39 @@ func TestVerifyRemoteDNSIdentityErrors(t *testing.T) {
 
 // --- miscellaneous error paths ---
 
-// TestNewTransportDNSRequired verifies newTransport rejects peers
-// that don't advertise a DNS name when DNSRequired is set.
-func TestNewTransportDNSRequired(t *testing.T) {
-	preParams := loadPreParams(t, 2)
+// TestNewTransportDNSReverseRejectsNoRDNS verifies newTransport
+// rejects incoming connections in reverse mode when rDNS lookup fails.
+func TestNewTransportDNSReverseRejectsNoRDNS(t *testing.T) {
+	preParams := loadPreParams(t, 1)
 	s := newTestServer(t, preParams, 0, "localhost:0", nil)
-	s.cfg.DNSRequired = true
+	s.cfg.DNS = DNSReverse
 
-	ctx, cancel := context.WithCancel(t.Context())
-	t.Cleanup(cancel)
-
-	errC := make(chan error, 1)
-	go func() { errC <- s.Run(ctx) }()
-	addr := waitForListenAddress(t, s, 2*time.Second)
-
-	// Connect without advertising DNS name.
-	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-
-	tr := new(Transport)
-	kxCtx, kxCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer kxCancel()
-	if err := tr.KeyExchange(kxCtx, conn); err != nil {
-		t.Fatalf("kx: %v", err)
-	}
-
-	// Handshake without DNS name — server should reject.
-	clientSecret, err := NewSecret()
+	// Initialize dnsLookups TTL (normally done in Run).
+	dl, err := ttl.New(8, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err = tr.Handshake(kxCtx, clientSecret, "")
-	// The handshake itself may succeed (it's the server's
-	// newTransport that rejects).  The conn will be closed
-	// by the server.  Either handshake or subsequent read fails.
-	if err != nil {
-		t.Logf("handshake returned error (expected): %v", err)
-	}
+	s.dnsLookups = dl
 
-	cancel()
-	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
-		t.Fatalf("server: %v", err)
+	// Mock resolver that fails all lookups.
+	failResolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return nil, errors.New("mock dns failure")
+		},
 	}
+	s.resolver = failResolver
+
+	id, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 12345}
+	err = s.verifyInboundDNS(t.Context(), addr, id.Identity)
+	if err == nil {
+		t.Fatal("expected error for failed rDNS in reverse mode")
+	}
+	t.Logf("correctly rejected: %v", err)
 }
 
 // --- additional error paths ---
@@ -4108,9 +4028,9 @@ func TestConnectPeerKXError(t *testing.T) {
 	// Must not panic.  KX error is logged.
 }
 
-// TestConnectPeerDNSRequired covers connectPeer L745-750 — remote doesn't
-// advertise DNS name when DNSRequired is set.
-func TestConnectPeerDNSRequired(t *testing.T) {
+// TestConnectPeerDNSForwardRejectsIP covers connectPeer — forward
+// mode rejects IP-only peer addresses from gossip.
+func TestConnectPeerDNSForwardRejectsIP(t *testing.T) {
 	preParams := loadPreParams(t, 2)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -4122,7 +4042,7 @@ func TestConnectPeerDNSRequired(t *testing.T) {
 	go func() { errB <- serverB.Run(ctx) }()
 	addrB := waitForListenAddress(t, serverB, 2*time.Second)
 
-	// Server A: DNSRequired, connects to B.
+	// Server A: forward DNS, connects to B (IP-only address).
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -4131,19 +4051,24 @@ func TestConnectPeerDNSRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dnsLookups, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := &Server{
-		secret:   secret,
-		peersTTL: peersTTL,
-		sessions: make(map[Identity]*Transport),
-		peers:    make(map[Identity]*PeerRecord),
+		secret:     secret,
+		peersTTL:   peersTTL,
+		dnsLookups: dnsLookups,
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
 		cfg: &Config{
 			PeersWanted: 8,
-			DNSRequired: true,
+			DNS:         DNSForward,
 		},
 	}
 	s.wg.Add(1)
 	s.connectPeer(ctx, addrB)
-	// connectPeer should return with warning about missing DNS name.
+	// connectPeer should reject — IP-only peer in forward mode.
 
 	// A should have no sessions.
 	s.mtx.RLock()
@@ -4268,8 +4193,9 @@ func TestConnectPeerHandshakeError(t *testing.T) {
 	// connectPeer logs "handshake" error and returns.
 }
 
-// TestConnectPeerDNSVerifyError covers connectPeer L750 — DNS verify
-// error (server has DNSRequired, remote advertises DNS but verify fails).
+// TestConnectPeerDNSVerifyError covers verifyOutboundDNS — DNS verify
+// error (server has forward DNS, remote advertises hostname but TXT
+// identity mismatches).
 func TestConnectPeerDNSVerifyError(t *testing.T) {
 	preParams := loadPreParams(t, 2)
 
@@ -4280,7 +4206,7 @@ func TestConnectPeerDNSVerifyError(t *testing.T) {
 
 	// Server B advertises a DNS name.
 	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
-	serverB.cfg.DNSName = "nodeB." + domain
+	serverB.cfg.Hostname = "nodeB." + domain
 	errB := make(chan error, 1)
 	go func() { errB <- serverB.Run(ctx) }()
 	addrB := waitForListenAddress(t, serverB, 2*time.Second)
@@ -4306,7 +4232,7 @@ func TestConnectPeerDNSVerifyError(t *testing.T) {
 	dnsSrv := newDNSServer(ctx, handler)
 	mockResolver := newResolver(dnsSrv.Listener.Addr().String())
 
-	// Server A: DNSRequired + wrong DNS data.
+	// Server A: forward DNS + wrong DNS data.
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -4315,20 +4241,25 @@ func TestConnectPeerDNSVerifyError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dnsLookups, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := &Server{
-		secret:   secret,
-		peersTTL: peersTTL,
-		sessions: make(map[Identity]*Transport),
-		peers:    make(map[Identity]*PeerRecord),
-		resolver: mockResolver,
+		secret:     secret,
+		peersTTL:   peersTTL,
+		dnsLookups: dnsLookups,
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
+		resolver:   mockResolver,
 		cfg: &Config{
 			PeersWanted: 8,
-			DNSRequired: true,
+			DNS:         DNSForward,
 		},
 	}
 	s.wg.Add(1)
 	s.connectPeer(ctx, addrB)
-	// connectPeer should fail with "dns identity mismatch".
+	// connectPeer rejects — IP-only target in forward mode.
 
 	s.mtx.RLock()
 	sessions := len(s.sessions)
@@ -7078,7 +7009,7 @@ func TestHandshakeVersionMismatch(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7116,7 +7047,7 @@ func TestHandshakeShortChallenge(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7149,7 +7080,7 @@ func TestHandshakeZeroChallenge(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7182,7 +7113,7 @@ func TestHandshakeBadNaClPub(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7214,7 +7145,7 @@ func TestHandshakeUnexpectedHelloType(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7241,7 +7172,7 @@ func TestHandshakeReadHelloError(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7268,7 +7199,7 @@ func TestHandshakeBadSignature(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7321,7 +7252,7 @@ func TestHandshakeUnexpectedResponseType(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7373,7 +7304,7 @@ func TestHandshakeWriteHelloResponseError(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7402,69 +7333,6 @@ func TestHandshakeWriteHelloResponseError(t *testing.T) {
 
 	if hsErr := <-errCh; hsErr == nil {
 		t.Fatal("expected write error")
-	}
-}
-
-// TestHandshakeWithDNS covers the dns option path in Handshake when
-// dnsName is provided.
-func TestHandshakeWithDNS(t *testing.T) {
-	tr1, tr2, secret := handshakeTestPair(t)
-	remoteSecret, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		// Pass a DNS name — this sets opts["dns"].
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "test.example.com")
-		errCh <- err
-	}()
-
-	// Read HelloRequest and verify it has dns option.
-	_, cmd, _, err := tr2.ReadEnvelope()
-	if err != nil {
-		t.Fatal(err)
-	}
-	hello, ok := cmd.(*HelloRequest)
-	if !ok {
-		t.Fatalf("expected *HelloRequest, got %T", cmd)
-	}
-	if hello.Options["dns"] != "test.example.com" {
-		t.Fatalf("expected dns=test.example.com, got %q", hello.Options["dns"])
-	}
-
-	// Complete the handshake properly.
-	naclPub, _ := remoteSecret.NaClPublicKey()
-	ch := make([]byte, ChallengeSize)
-	ch[0] = 0xCC
-	err = tr2.Write(remoteSecret.Identity, HelloRequest{
-		Version:   ProtocolVersion,
-		Identity:  remoteSecret.Identity,
-		Challenge: ch,
-		NaClPub:   naclPub,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Read HelloResponse from tr1.
-	_, _, _, err = tr2.ReadEnvelope()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Sign the challenge properly and send HelloResponse.
-	combinedChallenge := Hash256(hello.Challenge, tr2.them.Bytes())
-	err = tr2.Write(remoteSecret.Identity, HelloResponse{
-		Signature: remoteSecret.Sign(combinedChallenge),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if hsErr := <-errCh; hsErr != nil {
-		t.Fatalf("handshake failed: %v", hsErr)
 	}
 }
 
@@ -7822,7 +7690,7 @@ func TestHandshakeWriteHelloRequestError(t *testing.T) {
 	tr1.conn.Close()
 	tr1.mtx.Unlock()
 
-	_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+	_, _, err := tr1.Handshake(context.Background(), secret)
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
@@ -7841,7 +7709,7 @@ func TestHandshakeReadHelloResponseError(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7899,7 +7767,7 @@ func TestHandshakeUnexpectedHelloResponseType(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, _, err := tr1.Handshake(context.Background(), secret, "")
+		_, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -8092,21 +7960,21 @@ func TestConnectDuplicateSession(t *testing.T) {
 	<-errB
 }
 
-// TestConnectDNSEmptyName covers connect() when DNSRequired is set
-// and the remote did not advertise a DNS name.
-func TestConnectDNSEmptyName(t *testing.T) {
+// TestConnectDNSForwardRejectsIP covers connect() in forward DNS mode
+// rejecting an IP-only dial target.
+func TestConnectDNSForwardRejectsIP(t *testing.T) {
 	preParams := loadPreParams(t, 2)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	// Server B: no DNS name.
+	// Server B: no hostname.
 	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
 	errB := make(chan error, 1)
 	go func() { errB <- serverB.Run(ctx) }()
 	addrB := waitForListenAddress(t, serverB, 2*time.Second)
 
-	// Server A: DNSRequired=true.
+	// Server A: forward DNS mode.
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -8119,15 +7987,20 @@ func TestConnectDNSEmptyName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dnsLookups, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := &Server{
-		secret:   secret,
-		peersTTL: peersTTL,
-		seen:     seen,
-		sessions: make(map[Identity]*Transport),
-		peers:    make(map[Identity]*PeerRecord),
+		secret:     secret,
+		peersTTL:   peersTTL,
+		dnsLookups: dnsLookups,
+		seen:       seen,
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
 		cfg: &Config{
 			PeersWanted: 8,
-			DNSRequired: true,
+			DNS:         DNSForward,
 		},
 	}
 	errC := make(chan error, 1)
@@ -8139,7 +8012,7 @@ func TestConnectDNSEmptyName(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected DNS error")
 		}
-		if !strings.Contains(err.Error(), "dns name") {
+		if !strings.Contains(err.Error(), "rejecting IP-only peer") {
 			t.Fatalf("wrong error: %v", err)
 		}
 		t.Logf("connect DNS error (expected): %v", err)
@@ -8151,24 +8024,30 @@ func TestConnectDNSEmptyName(t *testing.T) {
 	<-errB
 }
 
-// TestConnectDNSVerifyError covers connect() when DNSRequired is set,
-// the remote advertises a DNS name, but DNS verification fails.
+// TestConnectDNSVerifyError covers connect() in forward DNS mode when
+// the dial target is a hostname but the TXT record has a wrong identity.
 func TestConnectDNSVerifyError(t *testing.T) {
 	preParams := loadPreParams(t, 2)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	domain := "connverify.test"
-
-	// Server B advertises a DNS name.
+	// Server B: listening on localhost.
 	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
-	serverB.cfg.DNSName = "nodeB." + domain
 	errB := make(chan error, 1)
 	go func() { errB <- serverB.Run(ctx) }()
 	addrB := waitForListenAddress(t, serverB, 2*time.Second)
 
-	// DNS server returns wrong identity for nodeB.
+	// Extract port from B's listen address and build a hostname
+	// dial target.  connect() does its own TCP dial via the system
+	// resolver, so we use "localhost" which resolves to 127.0.0.1.
+	_, port, err := net.SplitHostPort(addrB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialTarget := net.JoinHostPort("localhost", port)
+
+	// DNS server returns wrong identity for "localhost".
 	handler := &dnsHandler{
 		lookup: make(map[string][]dns.RR),
 		nodes:  make(map[string]*node),
@@ -8178,10 +8057,9 @@ func TestConnectDNSVerifyError(t *testing.T) {
 		0xF7, 0xF6, 0xF5, 0xF4, 0xF3, 0xF2, 0xF1, 0xF0,
 		0xEF, 0xEE, 0xED, 0xEC,
 	}
-	fqdn := "nodeB." + domain + "."
-	handler.lookup[fqdn] = []dns.RR{
+	handler.lookup["localhost."] = []dns.RR{
 		&dns.TXT{
-			Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
+			Hdr: dns.Header{Name: "localhost.", Class: dns.ClassINET},
 			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
 				dnsAppName, wrongID)},
 		},
@@ -8189,7 +8067,7 @@ func TestConnectDNSVerifyError(t *testing.T) {
 	dnsSrv := newDNSServer(ctx, handler)
 	mockResolver := newResolver(dnsSrv.Listener.Addr().String())
 
-	// Server A: DNSRequired + wrong DNS data.
+	// Server A: forward DNS, wrong TXT data for dial target.
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -8202,28 +8080,33 @@ func TestConnectDNSVerifyError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dnsLookups, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := &Server{
-		secret:   secret,
-		peersTTL: peersTTL,
-		seen:     seen,
-		sessions: make(map[Identity]*Transport),
-		peers:    make(map[Identity]*PeerRecord),
-		resolver: mockResolver,
+		secret:     secret,
+		peersTTL:   peersTTL,
+		dnsLookups: dnsLookups,
+		seen:       seen,
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
+		resolver:   mockResolver,
 		cfg: &Config{
 			PeersWanted: 8,
-			DNSRequired: true,
+			DNS:         DNSForward,
 		},
 	}
 	errC := make(chan error, 1)
 	s.wg.Add(1)
-	go s.connect(ctx, addrB, errC)
+	go s.connect(ctx, dialTarget, errC)
 
 	select {
 	case err := <-errC:
 		if err == nil {
 			t.Fatal("expected DNS verify error")
 		}
-		if !strings.Contains(err.Error(), "dns verify") {
+		if !strings.Contains(err.Error(), "dns identity mismatch") {
 			t.Fatalf("wrong error: %v", err)
 		}
 		t.Logf("connect DNS verify error (expected): %v", err)
@@ -8899,7 +8782,7 @@ func TestAdminPeerList(t *testing.T) {
 	if err := tr.KeyExchange(kxCtx, conn); err != nil {
 		t.Fatalf("kx: %v", err)
 	}
-	if _, _, _, err := tr.Handshake(kxCtx, clientSecret, ""); err != nil {
+	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 
@@ -8951,7 +8834,7 @@ func TestAdminCeremonyStatusNotFound(t *testing.T) {
 	if err := tr.KeyExchange(kxCtx, conn); err != nil {
 		t.Fatalf("kx: %v", err)
 	}
-	if _, _, _, err := tr.Handshake(kxCtx, clientSecret, ""); err != nil {
+	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 
@@ -9014,7 +8897,7 @@ func TestAdminCeremonyList(t *testing.T) {
 	if err := tr.KeyExchange(kxCtx, conn); err != nil {
 		t.Fatalf("kx: %v", err)
 	}
-	if _, _, _, err := tr.Handshake(kxCtx, clientSecret, ""); err != nil {
+	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 
@@ -9092,7 +8975,7 @@ func TestAdminCeremonyStatusFound(t *testing.T) {
 	if err := tr.KeyExchange(kxCtx, conn); err != nil {
 		t.Fatalf("kx: %v", err)
 	}
-	if _, _, _, err := tr.Handshake(kxCtx, clientSecret, ""); err != nil {
+	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 
@@ -9355,7 +9238,7 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 	if err := adminTr.KeyExchange(ctx, conn); err != nil {
 		t.Fatalf("admin KX: %v", err)
 	}
-	if _, _, _, err := adminTr.Handshake(ctx, adminSecret, ""); err != nil {
+	if _, _, err := adminTr.Handshake(ctx, adminSecret); err != nil {
 		t.Fatalf("admin handshake: %v", err)
 	}
 
@@ -9522,7 +9405,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 	if err := adminTr.KeyExchange(ctx, conn); err != nil {
 		t.Fatalf("admin KX: %v", err)
 	}
-	if _, _, _, err := adminTr.Handshake(ctx, adminSecret, ""); err != nil {
+	if _, _, err := adminTr.Handshake(ctx, adminSecret); err != nil {
 		t.Fatalf("admin handshake: %v", err)
 	}
 
@@ -9712,7 +9595,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 // =============================================================================
 
 func TestRunningAccessor(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	if s.Running() {
 		t.Fatal("should not be running")
 	}
@@ -9723,7 +9606,7 @@ func TestRunningAccessor(t *testing.T) {
 }
 
 func TestPromRunningGauge(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	if v := s.promRunning(); v != 0 {
 		t.Fatalf("want 0, got %f", v)
 	}
@@ -9734,7 +9617,7 @@ func TestPromRunningGauge(t *testing.T) {
 }
 
 func TestCollectorsCreated(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	c := s.Collectors()
 	if len(c) == 0 {
 		t.Fatal("no collectors")
@@ -9745,7 +9628,7 @@ func TestCollectorsCreated(t *testing.T) {
 }
 
 func TestIsHealthyAndHealthEndpoint(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	ctx := context.Background()
 	if !s.isHealthy(ctx) {
 		t.Fatal("not healthy")
@@ -9772,7 +9655,7 @@ func TestSendErrHelper(t *testing.T) {
 }
 
 func TestPromPollCancelledContext(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := s.promPoll(ctx); !errors.Is(err, context.Canceled) {
@@ -9813,7 +9696,7 @@ func TestGetPreParamsSeeded(t *testing.T) {
 }
 
 func TestHandleCeremonyResultFailurePath(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	var cid CeremonyID
 	copy(cid[:], []byte("test-failure-result-0000"))
 	s.handleCeremonyResult(CeremonyResult{
@@ -9830,7 +9713,7 @@ func TestHandleCeremonyResultFailurePath(t *testing.T) {
 }
 
 func TestHandleCeremonyResultExistingComplete(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	var cid CeremonyID
 	copy(cid[:], []byte("test-existing-complete-0"))
 	s.registerCeremony(cid, CeremonyKeygen, Identity{}, nil)
@@ -9847,7 +9730,7 @@ func TestHandleCeremonyResultExistingComplete(t *testing.T) {
 }
 
 func TestPeerExpiredCallback(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	secret1, _ := NewSecret()
 	naclPub, _ := secret1.NaClPublicKey()
 	s.mtx.Lock()
@@ -9929,7 +9812,7 @@ func TestSeedDNSResolution(t *testing.T) {
 }
 
 func TestSeedBadHostPortHandling(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	s.cfg.Seeds = []string{"no-port-here"}
 	secret, _ := NewSecret()
 	s.secret = secret
@@ -9945,7 +9828,7 @@ func TestVerifyDNSIdentityMatchAndMismatch(t *testing.T) {
 	dnsSrv := newDNSServer(ctx, handler)
 	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
 
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	s.resolver = newResolver(dnsSrv.Listener.Addr().String())
 	var nodeName string
 	var nodeSecret *Secret
@@ -10063,7 +9946,7 @@ func TestPartiesToIdentitiesBadPartyID(t *testing.T) {
 }
 
 func TestDecryptPayloadUnknownSenderPath(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	secret, _ := NewSecret()
 	s.secret = secret
 	_, err := s.decryptPayload(&EncryptedPayload{Sender: Identity{}})
@@ -10073,7 +9956,7 @@ func TestDecryptPayloadUnknownSenderPath(t *testing.T) {
 }
 
 func TestDecryptPayloadEmptyNaClPubPath(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	secret, _ := NewSecret()
 	s.secret = secret
 	sender, _ := NewSecret()
@@ -10100,7 +9983,7 @@ func TestDecryptPayloadBadInnerTypePath(t *testing.T) {
 	}
 	ep.InnerType = "bogus-type" // override to invalid
 
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	s.secret = recipient
 	s.mtx.Lock()
 	s.peers[sender.Identity] = &PeerRecord{
@@ -10285,7 +10168,7 @@ func TestKvFromTxtParsing(t *testing.T) {
 }
 
 func TestDnsResolverDefaultAndCustom(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	if s.dnsResolver() != net.DefaultResolver {
 		t.Fatal("expected default")
 	}
@@ -10340,17 +10223,70 @@ func TestTCPKeepAlive(t *testing.T) {
 }
 
 func TestNewServerNilUsesDefaults(t *testing.T) {
-	s, err := NewServer(nil)
+	// nil config defaults to DNS=forward which requires Hostname.
+	_, err := NewServer(nil)
+	if err == nil {
+		t.Fatal("expected error: nil config has no Hostname for forward mode")
+	}
+	if !strings.Contains(err.Error(), "requires Hostname") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// With Hostname set, nil-based defaults work.
+	cfg := NewDefaultConfig()
+	cfg.Hostname = "node.test"
+	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if s.cfg.DNS != DNSForward {
+		t.Fatalf("dns=%q, want %q", s.cfg.DNS, DNSForward)
 	}
 	if s.cfg.PeersWanted != 8 {
 		t.Fatalf("peers=%d", s.cfg.PeersWanted)
 	}
 }
 
+func TestNewServerDNSConfigValidation(t *testing.T) {
+	tests := []struct {
+		name     string
+		dns      string
+		hostname string
+		wantErr  string
+	}{
+		{"off mode ok", DNSOff, "", ""},
+		{"empty string rejected", "", "", "invalid DNS mode"},
+		{"forward with hostname ok", DNSForward, "node.test", ""},
+		{"reverse no hostname ok", DNSReverse, "", ""},
+		{"all with hostname ok", DNSAll, "node.test", ""},
+		{"invalid mode", "bogus", "", "invalid DNS mode"},
+		{"forward requires hostname", DNSForward, "", "requires Hostname"},
+		{"all requires hostname", DNSAll, "", "requires Hostname"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewDefaultConfig()
+			cfg.DNS = tt.dns
+			cfg.Hostname = tt.hostname
+			_, err := NewServer(cfg)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %q does not contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestKnownPeersAccessor(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	secret1, _ := NewSecret()
 	naclPub, _ := secret1.NaClPublicKey()
 	s.mtx.Lock()
@@ -10371,7 +10307,7 @@ func TestKnownPeersAccessor(t *testing.T) {
 }
 
 func TestRoutedReceivedAndForwardedCounters(t *testing.T) {
-	s, _ := NewServer(nil)
+	s, _ := NewServer(testConfig())
 	s.routedReceived.Add(5)
 	s.forwarded.Add(3)
 	if s.RoutedReceived() != 5 || s.Forwarded() != 3 {
@@ -10817,7 +10753,7 @@ func adminConnect(t *testing.T, ctx context.Context, addr string) (*Secret, *Tra
 	if err := tr.KeyExchange(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := tr.Handshake(ctx, secret, ""); err != nil {
+	if _, _, err := tr.Handshake(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { tr.Close() })
