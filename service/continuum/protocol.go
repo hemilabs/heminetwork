@@ -542,6 +542,7 @@ type PeerListAdminResponse struct {
 type PeerAdminRecord struct {
 	PeerRecord
 	Connected bool `json:"connected"` // has active session
+	Live      bool `json:"live"`      // connected and responded to at least one ping
 	Self      bool `json:"self"`      // true if this is the server's own record
 }
 
