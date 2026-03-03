@@ -978,13 +978,20 @@ func tcpKeepAlive(conn net.Conn, period time.Duration) {
 	}
 }
 
-// XXX (toni): this seems to be getting called for self periodically,
-// failing with "duplicate identity" further down the stack
 func (s *Server) connectPeer(ctx context.Context, addr string) {
 	defer s.wg.Done()
 
 	log.Debugf("connectPeer: %v", addr)
 	defer log.Debugf("connectPeer: %v exit", addr)
+
+	// Reject self before wasting a dial.
+	s.mtx.RLock()
+	selfAddr := s.listenAddress
+	s.mtx.RUnlock()
+	if selfAddr != "" && addr == selfAddr {
+		log.Debugf("connectPeer: skipping self %v", addr)
+		return
+	}
 
 	d := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := d.DialContext(ctx, "tcp", addr)
@@ -1011,6 +1018,13 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 	them, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		log.Warningf("connectPeer handshake %v: %v", addr, err)
+		return
+	}
+
+	// Defense-in-depth: reject self even if the address didn't
+	// match (e.g. hostname resolved to our IP, NAT hairpin).
+	if *them == s.secret.Identity {
+		log.Warningf("connectPeer: connected to self at %v", addr)
 		return
 	}
 
@@ -1753,6 +1767,15 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	log.Infof("connect: %v", c)
 	defer log.Infof("connect: %v exit", c)
 
+	// Reject self before wasting a dial.
+	s.mtx.RLock()
+	selfAddr := s.listenAddress
+	s.mtx.RUnlock()
+	if selfAddr != "" && c == selfAddr {
+		log.Warningf("connect: skipping self %v", c)
+		return
+	}
+
 	d := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := d.DialContext(ctx, "tcp", c)
 	if err != nil {
@@ -1778,6 +1801,13 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	them, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		sendErr(ctx, errC, err)
+		return
+	}
+
+	// Defense-in-depth: reject self even if the address didn't
+	// match (e.g. hostname resolved to our IP, NAT hairpin).
+	if *them == s.secret.Identity {
+		log.Warningf("connect: connected to self at %v", c)
 		return
 	}
 
@@ -2119,6 +2149,13 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 		// Warning not Error — failed KX/handshake is expected
 		// from port scanners and misconfigured peers.
 		log.Warningf("transport %v: %v", conn.RemoteAddr(), err)
+		return
+	}
+
+	// Reject self-connections (NAT hairpin, misconfigured seeds).
+	if *id == s.secret.Identity {
+		log.Warningf("handleIncomingConnection: rejecting self %v", conn.RemoteAddr())
+		transport.Close()
 		return
 	}
 
