@@ -1250,31 +1250,25 @@ func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
 
 // Handshake advertises to the other side what version and options this
 // transport wishes to use. It is also used to verify that the derived Identity
-// did indeed sign the challenge. If dnsName is non-empty, it is advertised
-// in the hello options so the remote can verify our identity via DNS TXT
-// lookup. Returns the remote identity, their advertised DNS name (empty
-// if they did not advertise one), and their X25519 public key for e2e
-// encryption.
-func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName string) (*Identity, string, []byte, error) {
+// did indeed sign the challenge. Returns the remote identity and their X25519
+// public key for e2e encryption.
+func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, []byte, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
 	// untested: rand.Read fails only on OS entropy exhaustion
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	naclPub, err := secret.NaClPublicKey()
 	// untested: NaClPublicKey wraps NaClPrivateKey; cannot fail with valid secret
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("nacl public key: %w", err)
+		return nil, nil, fmt.Errorf("nacl public key: %w", err)
 	}
 
 	opts := map[string]string{
 		"encoding":    "json",
 		"compression": "none",
-	}
-	if dnsName != "" {
-		opts["dns"] = dnsName
 	}
 
 	// Write HelloRequest
@@ -1286,31 +1280,31 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 		NaClPub:   naclPub,
 	})
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// Read Hello
 	_, cmd, _, err := t.read(readTimeout)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 	helloRequest, ok := cmd.(*HelloRequest)
 	if !ok {
-		return nil, "", nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
+		return nil, nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
 	}
 	// Validate HelloRequest
 	if helloRequest.Version != ProtocolVersion {
-		return nil, "", nil, ErrUnsupportedVersion
+		return nil, nil, ErrUnsupportedVersion
 	}
 	if len(helloRequest.Challenge) != ChallengeSize {
-		return nil, "", nil, ErrInvalidChallenge
+		return nil, nil, ErrInvalidChallenge
 	}
 	if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
-		return nil, "", nil, ErrInvalidChallenge
+		return nil, nil, ErrInvalidChallenge
 	}
 	// Validate NaCl public key length when present.
 	if len(helloRequest.NaClPub) > 0 && len(helloRequest.NaClPub) != NaClPubSize {
-		return nil, "", nil, fmt.Errorf("%w: len %d", ErrInvalidNaClPub, len(helloRequest.NaClPub))
+		return nil, nil, fmt.Errorf("%w: len %d", ErrInvalidNaClPub, len(helloRequest.NaClPub))
 	}
 
 	// Sign combined challenge that is represented by the sha256 hash of
@@ -1319,18 +1313,18 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	// Read HelloResponse
 	header2, cmd2, _, err := t.read(readTimeout)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 	_ = header2
 	helloResponse, ok := cmd2.(*HelloResponse)
 	if !ok {
-		return nil, "", nil, fmt.Errorf("unexpected command: %T", cmd2)
+		return nil, nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
 	// Verify signature over sha256(our challenge + our transport public key)
@@ -1338,13 +1332,11 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret, dnsName strin
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	themID := NewIdentityFromPub(themPub)
-	theirDNS := helloRequest.Options["dns"]
-
-	return &themID, theirDNS, helloRequest.NaClPub, nil
+	return &themID, helloRequest.NaClPub, nil
 }
 
 // readBlob locks the connection and reads a size and the associated blob into
@@ -1595,11 +1587,10 @@ func kvFromTxt(txt string) (map[string]string, error) {
 }
 
 // TXTRecordFromAddress returns one and only one TXT record that is associated
-// with an address.
+// with an address.  Used by DNS="reverse" and DNS="all" modes.
 //
-// Note: reverse DNS is unreliable in cloud environments (AWS, Cloudflare).
-// A future DNS rework will switch to forward-lookup with hints provided
-// during the encrypted handshake.  See SOW4 §9 deferred items.
+// Performs a reverse DNS lookup on the IP, then a TXT lookup on the
+// resulting hostname.
 func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.Addr) (map[string]string, error) {
 	if resolver == nil {
 		resolver = &net.Resolver{}
@@ -1627,19 +1618,15 @@ func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.
 }
 
 // VerifyRemoteDNSIdentity verifies that passed in identity matches its
-// associated TXT record identity. This can be used to determine if a server or
-// client are indeed who they claim they are.
-//
-// Note: reverse DNS verification is unreliable in cloud environments.
-// A future DNS rework will switch to forward-lookup verification.
-// See SOW4 §9 deferred items.
+// associated TXT record identity via reverse DNS lookup.  Used by
+// DNS="reverse" and DNS="all" modes for IP-only peer addresses and
+// incoming connections.
 func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr, id Identity) (bool, error) {
 	m, err := TXTRecordFromAddress(ctx, r, addr)
 	if err != nil {
 		return false, err
 	}
-	// Port field present in TXT record but unused; kept for
-	// future forward-lookup DNS rework.
+	// Port field present in TXT record but unused.
 
 	if m["v"] != dnsAppName {
 		return false, fmt.Errorf("dns invalid app name: '%v'", m["v"])
@@ -1650,6 +1637,3 @@ func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr
 	}
 	return bytes.Equal(id[:], remoteDNSID[:]), nil
 }
-
-// TODO(dns-rework): add VerifyRemoteDNSIdentityByHostname for forward-lookup
-// verification to replace reverse-DNS approach.
