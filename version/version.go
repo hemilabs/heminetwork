@@ -92,7 +92,7 @@ func normalizeVerString(str string) string {
 // BuildInfo returns a string containing information about the build.
 func BuildInfo() string {
 	var out strings.Builder
-	out.WriteString(fmt.Sprintf("v%s (", String()))
+	fmt.Fprintf(&out, "v%s (", String())
 	if Brand != "" {
 		out.WriteString(Brand)
 		out.WriteString(", ")
@@ -101,8 +101,8 @@ func BuildInfo() string {
 		out.WriteString(Component)
 		out.WriteString(", ")
 	}
-	out.WriteString(fmt.Sprintf("%s %s/%s)",
-		runtime.Version(), runtime.GOOS, runtime.GOARCH))
+	fmt.Fprintf(&out, "%s %s/%s)",
+		runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	return out.String()
 }
 

@@ -91,6 +91,11 @@ linters:
       - path: "(.+)_test\\.go"
         linters: [ "errcheck" ]
         text: "Error return value of `c.CloseNow` is not checked"
+
+      # Ignore some linters in tests
+      - path: "(.+)_test\\.go"
+        linters:
+          - prealloc
     paths:
       - "third_party$"
       - "builtin$"
