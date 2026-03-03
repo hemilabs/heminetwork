@@ -76,6 +76,11 @@ const (
 	// seenCapacity is the maximum number of entries in the message
 	// dedup cache.
 	seenCapacity = 1024
+
+	// defaultPreParamsTimeout is the default timeout for Paillier
+	// safe prime generation.  Sufficient for modern hardware;
+	// increase for slow CI runners.
+	defaultPreParamsTimeout = 1 * time.Minute
 )
 
 var log = loggo.GetLogger(appName)
@@ -99,6 +104,7 @@ type Config struct {
 	PingTimeout             time.Duration // 0 uses default (19s)
 	MaintainInterval        time.Duration // 0 uses default (67s)
 	PprofListenAddress      string
+	PreParamsTimeout        time.Duration // 0 uses default (1m); increase for slow CI
 	PrivateKey              string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
@@ -1916,14 +1922,17 @@ func (s *Server) initPaillierPrimes(pctx context.Context) error {
 	log.Tracef("initPaillierPrimes")
 	defer log.Tracef("initPaillierPrimes exit")
 
-	ctx, cancel := context.WithTimeout(pctx, 1*time.Minute)
+	timeout := s.cfg.PreParamsTimeout
+	if timeout == 0 {
+		timeout = defaultPreParamsTimeout
+	}
+	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
 	preparamsFilename := filepath.Join(s.data, "preparams.json")
 	ppf, err := os.Open(preparamsFilename)
 	if errors.Is(err, os.ErrNotExist) {
-		log.Infof("Generating TSS Paillier primes")
-		// XXX (toni): this seems to timeout relatively often on startup.
+		log.Infof("Generating TSS Paillier primes (timeout %v)", timeout)
 		lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
 		if err != nil {
 			return err

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/juju/loggo/v2"
 
@@ -68,6 +69,15 @@ var (
 			DefaultValue: "",
 			Help:         "address and port transfunctionerd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
+		},
+		"TRF_PREPARAMS_TIMEOUT": config.Config{
+			Value:        &cfg.PreParamsTimeout,
+			DefaultValue: time.Duration(0),
+			Help:         "timeout for Paillier safe prime generation on first run (e.g. \"5m\"); 0 uses default 1m",
+			Print:        config.PrintAll,
+			Parse: func(envValue string) (any, error) {
+				return time.ParseDuration(envValue)
+			},
 		},
 		"TRF_PRIVATE_KEY": config.Config{
 			Value:        &cfg.PrivateKey,
