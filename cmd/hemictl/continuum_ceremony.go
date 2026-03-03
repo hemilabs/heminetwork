@@ -409,10 +409,10 @@ func parseMembers(s string) ([]continuum.Identity, error) {
 	return ids, nil
 }
 
-// autoSelectPeers queries the local transfunctionerd for connected
-// peers, filters to those with active sessions and valid NaCl public
-// keys, sorts deterministically by identity bytes, and returns the
-// first n.
+// autoSelectPeers queries the local transfunctionerd for live peers
+// (those that have responded to at least one liveness ping), filters
+// to those with valid NaCl public keys, sorts deterministically by
+// identity bytes, and returns the first n.
 //
 // This is the debug convenience path.  The production path never calls
 // this — the smart contract provides explicit identities.  auto= feeds
@@ -435,7 +435,10 @@ func autoSelectPeers(ctx context.Context, t *continuum.Transport,
 		return nil, fmt.Errorf("unexpected response: %T", cmd)
 	}
 
-	// Filter to connected peers with valid NaCl public keys.
+	// Filter to live peers with valid NaCl public keys.
+	// Live means the peer has responded to at least one ping,
+	// proving real mesh participation — not an ephemeral admin
+	// connection like hemictl itself.
 	// Exclude our own ephemeral identity — hemictl is not a
 	// ceremony participant, it's the stand-in smart contract.
 	eligible := make([]continuum.Identity, 0, len(resp.Peers))
@@ -443,8 +446,8 @@ func autoSelectPeers(ctx context.Context, t *continuum.Transport,
 		if pr.Identity == secret.Identity {
 			continue // exclude ourselves
 		}
-		if !pr.Connected && !pr.Self {
-			continue // not reachable
+		if !pr.Live {
+			continue // not a proven mesh participant
 		}
 		if len(pr.NaClPub) != continuum.NaClPubSize {
 			continue // can't do e2e encryption
