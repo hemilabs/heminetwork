@@ -977,6 +977,82 @@ func TestPingHeartbeat(t *testing.T) {
 	}
 }
 
+// TestLivenessPing verifies that the immediate post-KX liveness ping
+// causes connected peers to be marked Live in the admin response.
+// Ephemeral connections that never pong should not be Live.
+func TestLivenessPing(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Start A.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
+
+	// Start B, connects to A.
+	serverB := newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrA})
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+
+	// Wait for A<->B session.
+	waitForSessions(t, serverA, 1, 3*time.Second)
+	waitForSessions(t, serverB, 1, 3*time.Second)
+
+	idA := serverA.Identity()
+	idB := serverB.Identity()
+
+	// The liveness ping fires immediately in handle().  By the
+	// time sessions are established the pong should be in flight
+	// or already processed.  Poll briefly for ponged state.
+	pollCtx, pollCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer pollCancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
+		resp := serverA.handlePeerListAdmin()
+		allLive := true
+		for _, pr := range resp.Peers {
+			if pr.Identity == idB && !pr.Live {
+				allLive = false
+			}
+			// Self must always be Live.
+			if pr.Identity == idA && !pr.Live {
+				t.Fatal("self not Live in admin response")
+			}
+		}
+		if allLive {
+			break
+		}
+		select {
+		case <-pollCtx.Done():
+			t.Fatal("peer B not Live within timeout")
+		case <-tick.C:
+		}
+	}
+
+	// Verify B also sees A as Live.
+	resp := serverB.handlePeerListAdmin()
+	for _, pr := range resp.Peers {
+		if pr.Identity == idA && !pr.Live {
+			t.Fatal("B does not see A as Live")
+		}
+	}
+
+	cancel()
+	if err := <-errA; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("serverA: %v", err)
+	}
+	if err := <-errB; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("serverB: %v", err)
+	}
+}
+
 // TestSessionReaping verifies that when a peer dies, the surviving node
 // detects the dead session and removes it.
 func TestSessionReaping(t *testing.T) {
@@ -2916,10 +2992,11 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 	s.wg.Add(1)
 	go s.handle(ctx, &peerID, srvTr)
 
-	// Drain the two initial messages handle() sends: PeerNotify
-	// and PeerListRequest.  Without draining, net.Pipe blocks
-	// handle()'s writes and it never enters the dispatch loop.
-	for i := 0; i < 2; i++ {
+	// Drain the initial messages handle() sends: PeerNotify,
+	// PeerListRequest, and liveness PingRequest.  Without draining,
+	// net.Pipe blocks handle()'s writes and it never enters the
+	// dispatch loop.
+	for i := 0; i < 3; i++ {
 		_, _, _, err := cliTr.ReadEnvelope()
 		if err != nil {
 			t.Fatalf("drain initial message %d: %v", i, err)
@@ -3506,13 +3583,17 @@ func TestListenFull(t *testing.T) {
 	}
 	t.Cleanup(func() { conn1.Close() })
 
+	secret1, err := NewSecret()
+	if err != nil {
+		t.Fatalf("secret1: %v", err)
+	}
 	tr1 := new(Transport)
 	kxCtx, kxCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer kxCancel()
 	if err := tr1.KeyExchange(kxCtx, conn1); err != nil {
 		t.Fatalf("kx 1: %v", err)
 	}
-	if _, _, err := tr1.Handshake(kxCtx, s.secret); err != nil {
+	if _, _, err := tr1.Handshake(kxCtx, secret1); err != nil {
 		t.Logf("handshake 1: %v (may be expected)", err)
 	}
 
@@ -5751,8 +5832,8 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 	s.wg.Add(1)
 	go s.handle(ctx, &peerID, srvTr)
 
-	// Drain initial PeerNotify + PeerListRequest.
-	for i := 0; i < 2; i++ {
+	// Drain initial PeerNotify + PeerListRequest + liveness PingRequest.
+	for i := 0; i < 3; i++ {
 		_, _, _, err := cliTr.ReadEnvelope()
 		if err != nil {
 			t.Fatalf("drain initial message %d: %v", i, err)
