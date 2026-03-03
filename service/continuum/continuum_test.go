@@ -3426,6 +3426,35 @@ func TestConnectDialError(t *testing.T) {
 }
 
 // TestConnectPeerDialError verifies connectPeer() handles dial failure.
+// TestConnectPeerSkipsSelf verifies that connectPeer returns immediately
+// when the target address matches our own listen address.
+func TestConnectPeerSkipsSelf(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret:   secret,
+		sessions: make(map[Identity]*Transport),
+		peers:    make(map[Identity]*PeerRecord),
+		cfg:      &Config{DNS: DNSOff, PeersWanted: 8},
+	}
+	s.listenAddress = "127.0.0.1:45067"
+
+	s.wg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		s.connectPeer(t.Context(), "127.0.0.1:45067")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("connectPeer did not skip self")
+	}
+}
+
 func TestConnectPeerDialError(t *testing.T) {
 	secret, err := NewSecret()
 	if err != nil {
@@ -7900,6 +7929,42 @@ func TestTransportKeyExchangeClientWriteError(t *testing.T) {
 		t.Fatal("expected write error from client KX")
 	}
 	t.Logf("client KX error (expected): %v", cliErr)
+}
+
+// TestConnectSkipsSelf verifies that connect() returns immediately
+// when the target address matches our own listen address.
+func TestConnectSkipsSelf(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret:   secret,
+		sessions: make(map[Identity]*Transport),
+		peers:    make(map[Identity]*PeerRecord),
+		cfg:      &Config{DNS: DNSOff, PeersWanted: 8},
+	}
+	s.listenAddress = "127.0.0.1:45067"
+
+	errC := make(chan error, 1)
+	s.wg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		s.connect(t.Context(), "127.0.0.1:45067", errC)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("connect did not skip self")
+	}
+
+	select {
+	case err := <-errC:
+		t.Fatalf("unexpected error on errC: %v", err)
+	default:
+	}
 }
 
 // TestConnectDuplicateSession covers connect() when newSession fails
