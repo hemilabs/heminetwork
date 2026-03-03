@@ -25,7 +25,6 @@ import (
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
-	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/v2/hemi"
@@ -338,7 +337,7 @@ func (s *Server) handleBlockByHashRequest(ctx context.Context, req *tbcapi.Block
 
 	block, err := s.BlockByHash(ctx, req.Hash)
 	if err != nil {
-		if errors.Is(err, database.ErrBlockNotFound) {
+		if errors.Is(err, tbcd.ErrBlockNotFound) {
 			return &tbcapi.BlockByHashResponse{
 				Error: protocol.NotFoundError("block", req.Hash),
 			}, nil
@@ -361,7 +360,7 @@ func (s *Server) handleBlockByHashRawRequest(ctx context.Context, req *tbcapi.Bl
 
 	block, err := s.BlockByHash(ctx, req.Hash)
 	if err != nil {
-		if errors.Is(err, database.ErrBlockNotFound) {
+		if errors.Is(err, tbcd.ErrBlockNotFound) {
 			return &tbcapi.BlockByHashRawResponse{
 				Error: protocol.NotFoundError("block", req.Hash),
 			}, nil
@@ -392,7 +391,7 @@ func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbc
 
 	wireBlockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(req.Height))
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.BlockHeadersByHeightResponse{
 				Error: protocol.NotFoundError("block headers", req.Height),
 			}, nil
@@ -415,7 +414,7 @@ func (s *Server) handleBlockHeadersByHeightRawRequest(ctx context.Context, req *
 
 	rawBlockHeaders, err := s.RawBlockHeadersByHeight(ctx, uint64(req.Height))
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.BlockHeadersByHeightRawResponse{
 				Error: protocol.NotFoundError("block headers", req.Height),
 			}, nil
@@ -559,7 +558,7 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 
 	tx, err := s.TxById(ctx, req.TxID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			responseErr := protocol.NotFoundError("tx", req.TxID)
 			return &tbcapi.TxByIdRawResponse{
 				Error: responseErr,
@@ -591,7 +590,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 
 	tx, err := s.TxById(ctx, req.TxID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			responseErr := protocol.NotFoundError("tx", req.TxID)
 			return &tbcapi.TxByIdResponse{
 				Error: responseErr,
@@ -718,7 +717,7 @@ func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi
 
 	kssList, err := s.KeystonesByHeight(ctx, req.Height, req.Depth)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.KeystonesByHeightResponse{
 				BTCTipHeight: bhb.Height,
 				Error:        protocol.RequestError(err),
@@ -820,7 +819,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	for _, hash := range req.L2KeystoneAbrevHashes {
 		ks, ksBh, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, hash)
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
+			if errors.Is(err, tbcd.ErrNotFound) {
 				blks = append(blks, &tbcapi.L2KeystoneBlockInfo{
 					Error: protocol.NotFoundError("keystone", hash),
 				})
@@ -908,7 +907,7 @@ func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Conte
 
 	ktxsr, err := s.KeystoneTxsByHash(ctx, req)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
 				Error: protocol.NotFoundError("keystone", req.L2KeystoneAbrevHash),
 			}, nil
@@ -980,7 +979,7 @@ func (s *Server) handleZKValueAndScriptByOutpointRequest(ctx context.Context, re
 	amount, pkscript, err := s.ZKValueAndScriptByOutpoint(ctx,
 		tbcd.NewOutpoint(req.Outpoint.Hash, req.Outpoint.Index))
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.ZKValueAndScriptByOutpointResponse{
 				Error: protocol.NotFoundError("outpoint", req.Outpoint),
 			}, nil
@@ -1009,7 +1008,7 @@ func (s *Server) handleZKBalanceByScriptHashRequest(ctx context.Context, req *tb
 	}
 	amount, err := s.ZKBalanceByScriptHash(ctx, sh)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.ZKBalanceByScriptHashResponse{
 				Error: protocol.NotFoundError("scripthash", sh),
 			}, nil
@@ -1037,7 +1036,7 @@ func (s *Server) handleZKSpentOutputsRequest(ctx context.Context, req *tbcapi.ZK
 	}
 	sos, err := s.ZKSpentOutputs(ctx, sh)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.ZKSpentOutputsResponse{
 				Error: protocol.NotFoundError("scripthash", sh),
 			}, nil
@@ -1072,7 +1071,7 @@ func (s *Server) handleZKSpendingOutpointsRequest(ctx context.Context, req *tbca
 
 	sos, err := s.ZKSpendingOutpoints(ctx, req.TxID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.ZKSpendingOutpointsResponse{
 				Error: protocol.NotFoundError("txid", req.TxID),
 			}, nil
@@ -1118,7 +1117,7 @@ func (s *Server) handleZKSpendableOutputsRequest(ctx context.Context, req *tbcap
 	}
 	sos, err := s.ZKSpendableOutputs(ctx, sh)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, tbcd.ErrNotFound) {
 			return &tbcapi.ZKSpentOutputsResponse{
 				Error: protocol.NotFoundError("scripthash", sh),
 			}, nil

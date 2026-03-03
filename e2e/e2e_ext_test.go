@@ -278,7 +278,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		},
 	})
 
-	if err := db.Close(); err != nil {
+	if err := db.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -390,7 +390,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 		},
 	})
 
-	if err := db.Close(); err != nil {
+	if err := db.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -492,7 +492,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{})
 
-	if err := db.Close(); err != nil {
+	if err := db.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -616,7 +616,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 		},
 	})
 
-	if err := db.Close(); err != nil {
+	if err := db.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
 
