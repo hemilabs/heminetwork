@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -23,8 +23,8 @@ const (
 	daemonName      = "transfunctionerd"
 	defaultLogLevel = daemonName + "=INFO"
 	// defaultNetwork  = "mainnet"
-	defaultHome           = "~/." + daemonName
-	defaultMaxConnections = 8
+	defaultHome        = "~/." + daemonName
+	defaultPeersWanted = 8
 )
 
 var (
@@ -33,34 +33,16 @@ var (
 
 	cfg = continuum.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"TRF_CONNECT": config.Config{
+			Value:        &cfg.Connect,
+			DefaultValue: []string{},
+			Help:         "connect to provided hosts directly, this bypasses seeding",
+			Print:        config.PrintAll,
+		},
 		"TRF_HOME": config.Config{
 			Value:        &cfg.Home,
 			DefaultValue: defaultHome,
 			Help:         "data directory",
-			Print:        config.PrintAll,
-		},
-		"TRF_PRIVATE_KEY": config.Config{
-			Value:        &cfg.PrivateKey,
-			DefaultValue: "",
-			Help:         "secp256k1 private key",
-			Print:        config.PrintSecret,
-		},
-		"TRF_LOG_LEVEL": config.Config{
-			Value:        &cfg.LogLevel,
-			DefaultValue: defaultLogLevel,
-			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
-			Print:        config.PrintAll,
-		},
-		"TRF_PROMETHEUS_ADDRESS": config.Config{
-			Value:        &cfg.PrometheusListenAddress,
-			DefaultValue: "",
-			Help:         "address and port transfunctionerd prometheus listens on",
-			Print:        config.PrintAll,
-		},
-		"TRF_PPROF_ADDRESS": config.Config{
-			Value:        &cfg.PprofListenAddress,
-			DefaultValue: "",
-			Help:         "address and port transfunctionerd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
 		"TRF_LISTEN_ADDRESS": config.Config{
@@ -69,13 +51,67 @@ var (
 			Help:         "address and port transfunctionerd listens on for incoming tcp connections",
 			Print:        config.PrintAll,
 		},
-		"TRF_MAX_CONNECTIONS": config.Config{
-			Value:        &cfg.MaxConnections,
-			DefaultValue: defaultMaxConnections,
-			Help:         "maximum allowed connections to transfuctionerd at a time",
+		"TRF_LOG_LEVEL": config.Config{
+			Value:        &cfg.LogLevel,
+			DefaultValue: defaultLogLevel,
+			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
 		},
-		// XXX add DNS security toggle
+		"TRF_PEERS_WANTED": config.Config{
+			Value:        &cfg.PeersWanted,
+			DefaultValue: defaultPeersWanted,
+			Help:         "target number of peer connections to maintain",
+			Print:        config.PrintAll,
+		},
+		"TRF_PPROF_ADDRESS": config.Config{
+			Value:        &cfg.PprofListenAddress,
+			DefaultValue: "",
+			Help:         "address and port transfunctionerd pprof listens on (open <address>/debug/pprof to see available profiles)",
+			Print:        config.PrintAll,
+		},
+		"TRF_PRIVATE_KEY": config.Config{
+			Value:        &cfg.PrivateKey,
+			DefaultValue: "",
+			Help:         "secp256k1 private key",
+			Print:        config.PrintSecret,
+		},
+		"TRF_PROMETHEUS_ADDRESS": config.Config{
+			Value:        &cfg.PrometheusListenAddress,
+			DefaultValue: "",
+			Help:         "address and port transfunctionerd prometheus listens on",
+			Print:        config.PrintAll,
+		},
+		"TRF_DNS": config.Config{
+			Value:        &cfg.DNS,
+			DefaultValue: "forward",
+			Help: "DNS verification mode. Controls how peer identity is " +
+				"verified via DNS TXT records.\n" +
+				"  \"forward\" - verify peers via forward TXT lookup on " +
+				"their advertised hostname; reject IP-only peers (default)\n" +
+				"  \"reverse\" - verify peers via reverse DNS lookup on " +
+				"their IP address\n" +
+				"  \"all\"     - forward verify hostname peers, reverse " +
+				"verify IP peers\n" +
+				"  \"off\"     - no DNS verification (insecure)\n" +
+				"Requires TRF_HOSTNAME when set to \"forward\" or \"all\".",
+			Print: config.PrintAll,
+		},
+		"TRF_HOSTNAME": config.Config{
+			Value:        &cfg.Hostname,
+			DefaultValue: "",
+			Help: "Hostname to advertise in peer gossip. When set, other " +
+				"nodes in forward/all DNS mode can verify this node via " +
+				"TXT record lookup. The TXT record must contain " +
+				"\"v=transfunctioner; identity=<identity>\". Required " +
+				"when TRF_DNS is \"forward\" or \"all\".",
+			Print: config.PrintAll,
+		},
+		"TRF_SEEDS": config.Config{
+			Value:        &cfg.Seeds,
+			DefaultValue: []string{},
+			Help:         "DNS seed hostnames (host:port), ignored when TRF_CONNECT is set",
+			Print:        config.PrintAll,
+		},
 		// XXX add max queue depth per connection
 		// XXX maybe add max commands / second
 		// XXX maybe add white/black list of ips/hosts

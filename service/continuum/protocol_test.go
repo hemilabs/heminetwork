@@ -26,6 +26,7 @@ import (
 	"codeberg.org/miekg/dns"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"golang.org/x/crypto/nacl/box"
 )
 
 func TestEncryptDecrypt(t *testing.T) {
@@ -48,21 +49,30 @@ func TestEncryptDecrypt(t *testing.T) {
 		}
 
 		// Perform actual key exchange
-		encryptionKeyServer, err := KeyExchange(server.us, client.us.PublicKey())
+		s2cKeyServer, c2sKeyServer, err := KeyExchange(server.us, client.us.PublicKey())
 		if err != nil {
 			t.Fatal(err)
 		}
-		encryptionKeyClient, err := KeyExchange(client.us, server.us.PublicKey())
+		s2cKeyClient, c2sKeyClient, err := KeyExchange(client.us, server.us.PublicKey())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(encryptionKeyServer[:], encryptionKeyClient[:]) {
-			t.Fatal("shared key not equal")
+		if !bytes.Equal(s2cKeyServer[:], s2cKeyClient[:]) {
+			t.Fatal("s2c key not equal")
+		}
+		if !bytes.Equal(c2sKeyServer[:], c2sKeyClient[:]) {
+			t.Fatal("c2s key not equal")
+		}
+		if bytes.Equal(s2cKeyServer[:], c2sKeyServer[:]) {
+			t.Fatal("directional keys must differ")
 		}
 
-		// Set keys to simulate incomming key exchange message
-		server.encryptionKey = encryptionKeyServer
-		client.encryptionKey = encryptionKeyClient
+		// Set directional keys: server encrypts with s2c, client
+		// decrypts with s2c.
+		server.encryptKey = s2cKeyServer
+		server.decryptKey = c2sKeyServer
+		client.encryptKey = c2sKeyClient
+		client.decryptKey = s2cKeyClient
 
 		// Encrypt a message
 		message := []byte("this is a super secret message y'all!")
@@ -83,6 +93,183 @@ func TestEncryptDecrypt(t *testing.T) {
 		if !errors.Is(ErrInvalidSecretboxLength, err) {
 			t.Fatalf("expected length error: %v", err)
 		}
+	}
+}
+
+// TestDirectionalKeys proves that the s2c and c2s keys are independent
+// and that using the wrong directional key for decryption fails.
+func TestDirectionalKeys(t *testing.T) {
+	server, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.nonce, err = NewNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := newTransportFromPublicKey(server.us.PublicKey().Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.nonce, err = NewNonce()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Derive directional keys.
+	s2cKey, c2sKey, err := KeyExchange(server.us, client.us.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2cKey2, c2sKey2, err := KeyExchange(client.us, server.us.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity: both sides derive the same pair.
+	if !bytes.Equal(s2cKey[:], s2cKey2[:]) {
+		t.Fatal("s2c keys differ between sides")
+	}
+	if !bytes.Equal(c2sKey[:], c2sKey2[:]) {
+		t.Fatal("c2s keys differ between sides")
+	}
+
+	// Keys MUST differ from each other.
+	if bytes.Equal(s2cKey[:], c2sKey[:]) {
+		t.Fatal("directional keys are identical")
+	}
+
+	// Assign: server encrypts s2c, decrypts c2s.
+	server.encryptKey = s2cKey
+	server.decryptKey = c2sKey
+	client.encryptKey = c2sKey2
+	client.decryptKey = s2cKey2
+
+	message := []byte("directional key test payload")
+
+	// Server→client: client decrypts with s2c key.
+	cipherS2C, err := server.encrypt(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleartext, err := client.decrypt(cipherS2C[3:])
+	if err != nil {
+		t.Fatalf("client failed to decrypt server message: %v", err)
+	}
+	if !bytes.Equal(message, cleartext) {
+		t.Fatal("decrypted message mismatch")
+	}
+
+	// Client→server: server decrypts with c2s key.
+	cipherC2S, err := client.encrypt(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleartext, err = server.decrypt(cipherC2S[3:])
+	if err != nil {
+		t.Fatalf("server failed to decrypt client message: %v", err)
+	}
+	if !bytes.Equal(message, cleartext) {
+		t.Fatal("decrypted message mismatch")
+	}
+
+	// Wrong direction: server cannot decrypt its own s2c message.
+	// Server's decryptKey is c2s which is the wrong key for s2c
+	// ciphertext.
+	_, err = server.decrypt(cipherS2C[3:])
+	if !errors.Is(err, ErrDecrypt) {
+		t.Fatalf("expected ErrDecrypt for wrong-direction decrypt, got: %v", err)
+	}
+
+	// Wrong direction: client cannot decrypt its own c2s message.
+	_, err = client.decrypt(cipherC2S[3:])
+	if !errors.Is(err, ErrDecrypt) {
+		t.Fatalf("expected ErrDecrypt for wrong-direction decrypt, got: %v", err)
+	}
+
+	// Cleartext never appears in ciphertext (basic sanity).
+	if bytes.Contains(cipherS2C, message) {
+		t.Fatal("cleartext found in s2c ciphertext")
+	}
+	if bytes.Contains(cipherC2S, message) {
+		t.Fatal("cleartext found in c2s ciphertext")
+	}
+}
+
+// TestWireEncryption proves that data written through Transport.write to a
+// live connection does not contain cleartext.  It taps the raw bytes on a
+// net.Pipe after a full KeyExchange to verify that the known plaintext
+// never appears on the wire.
+func TestWireEncryption(t *testing.T) {
+	ctx := context.Background()
+	serverPipe, clientPipe := net.Pipe()
+
+	serverTr, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTr := new(Transport)
+
+	// Perform key exchange over the pipe.
+	errCh := make(chan error, 2)
+	go func() { errCh <- serverTr.KeyExchange(ctx, serverPipe) }()
+	go func() { errCh <- clientTr.KeyExchange(ctx, clientPipe) }()
+	for i := 0; i < 2; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("KeyExchange: %v", err)
+		}
+	}
+
+	// Replace server's conn with a tee so we can capture raw wire bytes.
+	spy, spyServer := net.Pipe()
+	var wireBuf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Relay server→spy into wireBuf and forward to original conn.
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := spy.Read(buf)
+			if n > 0 {
+				wireBuf.Write(buf[:n])
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	// Point server transport at our spy pipe.
+	serverTr.mtx.Lock()
+	serverTr.conn = spyServer
+	serverTr.mtx.Unlock()
+
+	// Write a known plaintext through the encrypted transport.
+	plaintext := []byte("SUPER SECRET PLAINTEXT THAT MUST NOT APPEAR ON WIRE")
+	if err := serverTr.write(time.Second, plaintext); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Close to flush the relay goroutine.
+	spyServer.Close()
+	spy.Close()
+	<-done
+
+	raw := wireBuf.Bytes()
+	if len(raw) == 0 {
+		t.Fatal("no bytes captured on wire")
+	}
+	if bytes.Contains(raw, plaintext) {
+		t.Fatal("cleartext found in raw wire bytes — encryption is broken")
+	}
+	if bytes.Equal(raw, plaintext) {
+		t.Fatal("wire bytes are identical to plaintext")
+	}
+
+	// Verify the wire payload is longer than plaintext (nonce + overhead).
+	if len(raw) <= len(plaintext) {
+		t.Fatalf("wire bytes (%d) shorter than plaintext (%d) — missing crypto overhead",
+			len(raw), len(plaintext))
 	}
 }
 
@@ -175,6 +362,393 @@ func TestPayloadHash(t *testing.T) {
 	err = json.Unmarshal(crap, &mmm)
 	if err == nil {
 		t.Fatal("brocken")
+	}
+}
+
+func TestCeremonyID(t *testing.T) {
+	// Create a ceremony ID
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test String()
+	cidStr := cid.String()
+	if len(cidStr) != 64 {
+		t.Fatalf("expected 64 hex chars, got %d", len(cidStr))
+	}
+
+	// Test JSON marshal/unmarshal
+	m := map[string]CeremonyID{"ceremony": cid}
+	em, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mm map[string]CeremonyID
+	err = json.Unmarshal(em, &mm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mm["ceremony"]
+	if !bytes.Equal(got[:], cid[:]) {
+		t.Fatal("ceremony id not equal after json roundtrip")
+	}
+
+	// Test individual marshal/unmarshal
+	el, err := cid.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(el) != `"`+cid.String()+`"` {
+		t.Fatal("unexpected json")
+	}
+	var cid2 CeremonyID
+	err = cid2.UnmarshalJSON(el)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(cid2[:], cid[:]) {
+		t.Fatal("json line not equal to original")
+	}
+
+	// Negative tests
+	var cid3 CeremonyID
+	err = cid3.UnmarshalJSON([]byte(`"tooshort"`))
+	if err == nil {
+		t.Fatal("expected error for short hex")
+	}
+	err = cid3.UnmarshalJSON([]byte(`"not valid hex!!"`))
+	if err == nil {
+		t.Fatal("expected error for invalid hex")
+	}
+}
+
+func TestTSSRPCTypes(t *testing.T) {
+	// Test that all TSS RPC types are properly registered in pt2str/str2pt
+	tssTypes := []struct {
+		name     string
+		pt       PayloadType
+		instance any
+	}{
+		{"KeygenRequest", PKeygenRequest, KeygenRequest{}},
+		{"KeygenResponse", PKeygenResponse, KeygenResponse{}},
+		{"ReshareRequest", PReshareRequest, ReshareRequest{}},
+		{"ReshareResponse", PReshareResponse, ReshareResponse{}},
+		{"SignRequest", PSignRequest, SignRequest{}},
+		{"SignResponse", PSignResponse, SignResponse{}},
+		{"TSSMessage", PTSSMessage, TSSMessage{}},
+		{"CeremonyResult", PCeremonyResult, CeremonyResult{}},
+		{"CeremonyAbort", PCeremonyAbort, CeremonyAbort{}},
+	}
+
+	for _, tc := range tssTypes {
+		t.Run(tc.name, func(t *testing.T) {
+			// Check pt2str mapping
+			rt := reflect.TypeOf(tc.instance)
+			pt, ok := pt2str[rt]
+			if !ok {
+				t.Fatalf("%s not found in pt2str", tc.name)
+			}
+			if pt != tc.pt {
+				t.Fatalf("pt2str[%s] = %q, want %q", tc.name, pt, tc.pt)
+			}
+
+			// Check str2pt mapping (reverse)
+			gotType, ok := str2pt[tc.pt]
+			if !ok {
+				t.Fatalf("%q not found in str2pt", tc.pt)
+			}
+			if gotType != rt {
+				t.Fatalf("str2pt[%q] = %v, want %v", tc.pt, gotType, rt)
+			}
+		})
+	}
+}
+
+func TestTSSMessageJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var id Identity
+	_, err = rand.Read(id[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyReshare,
+		From:       id,
+		Flags:      TSSFlagBroadcast,
+		Data:       []byte("tss wire bytes"),
+		Signature:  []byte("signature bytes"),
+	}
+
+	// Marshal
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal TSSMessage: %v", err)
+	}
+
+	// Unmarshal
+	var got TSSMessage
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal TSSMessage: %v", err)
+	}
+
+	// Verify
+	if !bytes.Equal(got.CeremonyID[:], msg.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Type != msg.Type {
+		t.Fatalf("Type = %d, want %d", got.Type, msg.Type)
+	}
+	if !bytes.Equal(got.From[:], msg.From[:]) {
+		t.Fatal("From mismatch")
+	}
+	if got.Flags != msg.Flags {
+		t.Fatalf("Flags = %d, want %d", got.Flags, msg.Flags)
+	}
+	if !bytes.Equal(got.Data, msg.Data) {
+		t.Fatal("Data mismatch")
+	}
+	if !bytes.Equal(got.Signature, msg.Signature) {
+		t.Fatal("Signature mismatch")
+	}
+}
+
+func TestReshareRequestJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := ReshareRequest{
+		CeremonyID:   cid,
+		Curve:        "secp256k1",
+		OldThreshold: 2,
+		NewThreshold: 3,
+		// Note: OldCommittee/NewCommittee are tss.UnSortedPartyIDs which have their own marshaling
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal ReshareRequest: %v", err)
+	}
+
+	var got ReshareRequest
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal ReshareRequest: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], req.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Curve != req.Curve {
+		t.Fatalf("Curve = %q, want %q", got.Curve, req.Curve)
+	}
+	if got.OldThreshold != req.OldThreshold {
+		t.Fatalf("OldThreshold = %d, want %d", got.OldThreshold, req.OldThreshold)
+	}
+	if got.NewThreshold != req.NewThreshold {
+		t.Fatalf("NewThreshold = %d, want %d", got.NewThreshold, req.NewThreshold)
+	}
+}
+
+func TestSignRequestJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := SignRequest{
+		CeremonyID: cid,
+		KeyID:      []byte("key-identifier"),
+		Threshold:  2,
+		Data:       make([]byte, 32), // 32-byte hash
+	}
+	_, err = rand.Read(req.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal SignRequest: %v", err)
+	}
+
+	var got SignRequest
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal SignRequest: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], req.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if !bytes.Equal(got.KeyID, req.KeyID) {
+		t.Fatal("KeyID mismatch")
+	}
+	if got.Threshold != req.Threshold {
+		t.Fatalf("Threshold = %d, want %d", got.Threshold, req.Threshold)
+	}
+	if !bytes.Equal(got.Data, req.Data) {
+		t.Fatal("Data mismatch")
+	}
+}
+
+func TestSignResponseJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp := SignResponse{
+		CeremonyID: cid,
+		Success:    true,
+		R:          []byte("r-component"),
+		S:          []byte("s-component"),
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal SignResponse: %v", err)
+	}
+
+	var got SignResponse
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal SignResponse: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], resp.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Success != resp.Success {
+		t.Fatal("Success mismatch")
+	}
+	if !bytes.Equal(got.R, resp.R) {
+		t.Fatal("R mismatch")
+	}
+	if !bytes.Equal(got.S, resp.S) {
+		t.Fatal("S mismatch")
+	}
+}
+
+func TestCeremonyResultJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Success case
+	result := CeremonyResult{
+		CeremonyID: cid,
+		Success:    true,
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal CeremonyResult: %v", err)
+	}
+
+	var got CeremonyResult
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal CeremonyResult: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], result.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Success != result.Success {
+		t.Fatal("Success mismatch")
+	}
+
+	// Error case
+	result2 := CeremonyResult{
+		CeremonyID: cid,
+		Success:    false,
+		Error:      "timeout waiting for round 2",
+	}
+
+	data2, err := json.Marshal(result2)
+	if err != nil {
+		t.Fatalf("marshal CeremonyResult with error: %v", err)
+	}
+
+	var got2 CeremonyResult
+	if err := json.Unmarshal(data2, &got2); err != nil {
+		t.Fatalf("unmarshal CeremonyResult with error: %v", err)
+	}
+
+	if got2.Error != result2.Error {
+		t.Fatalf("Error = %q, want %q", got2.Error, result2.Error)
+	}
+}
+
+func TestCeremonyAbortJSON(t *testing.T) {
+	var cid CeremonyID
+	_, err := rand.Read(cid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	abort := CeremonyAbort{
+		CeremonyID: cid,
+		Reason:     "party went offline",
+	}
+
+	data, err := json.Marshal(abort)
+	if err != nil {
+		t.Fatalf("marshal CeremonyAbort: %v", err)
+	}
+
+	var got CeremonyAbort
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal CeremonyAbort: %v", err)
+	}
+
+	if !bytes.Equal(got.CeremonyID[:], abort.CeremonyID[:]) {
+		t.Fatal("CeremonyID mismatch")
+	}
+	if got.Reason != abort.Reason {
+		t.Fatalf("Reason = %q, want %q", got.Reason, abort.Reason)
+	}
+}
+
+func TestCeremonyTypeValues(t *testing.T) {
+	// Verify enum values are distinct and as expected
+	if CeremonyKeygen != 1 {
+		t.Fatalf("CeremonyKeygen = %d, want 1", CeremonyKeygen)
+	}
+	if CeremonyReshare != 2 {
+		t.Fatalf("CeremonyReshare = %d, want 2", CeremonyReshare)
+	}
+	if CeremonySign != 3 {
+		t.Fatalf("CeremonySign = %d, want 3", CeremonySign)
+	}
+
+	// Verify String()
+	if CeremonyKeygen.String() != "keygen" {
+		t.Fatalf("CeremonyKeygen.String() = %q, want %q", CeremonyKeygen.String(), "keygen")
+	}
+	if CeremonyReshare.String() != "reshare" {
+		t.Fatalf("CeremonyReshare.String() = %q, want %q", CeremonyReshare.String(), "reshare")
+	}
+	if CeremonySign.String() != "sign" {
+		t.Fatalf("CeremonySign.String() = %q, want %q", CeremonySign.String(), "sign")
+	}
+
+	// Verify unknown value
+	unknown := CeremonyType(99)
+	if unknown.String() != "unknown(99)" {
+		t.Fatalf("unknown.String() = %q, want %q", unknown.String(), "unknown(99)")
 	}
 }
 
@@ -294,20 +868,26 @@ func TestKeyExchange(t *testing.T) {
 
 	// Send server client public key
 
-	// Server derives ephemeral shared key
-	serverEncryptionKey, err := KeyExchange(serverTransport.us,
+	// Server derives directional keys
+	s2cServer, c2sServer, err := KeyExchange(serverTransport.us,
 		clientTransport.us.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientEncryptionKey, err := KeyExchange(clientTransport.us,
+	s2cClient, c2sClient, err := KeyExchange(clientTransport.us,
 		serverTransport.us.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !bytes.Equal(serverEncryptionKey[:], clientEncryptionKey[:]) {
-		t.Fatal("derived shared key not equal")
+	if !bytes.Equal(s2cServer[:], s2cClient[:]) {
+		t.Fatal("s2c key not equal")
+	}
+	if !bytes.Equal(c2sServer[:], c2sClient[:]) {
+		t.Fatal("c2s key not equal")
+	}
+	if bytes.Equal(s2cServer[:], c2sServer[:]) {
+		t.Fatal("directional keys must differ")
 	}
 }
 
@@ -324,7 +904,7 @@ func TestConnKeyExchange(t *testing.T) {
 			// Create blank transport
 			clientTransport := new(Transport)
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			var wg sync.WaitGroup
 
@@ -383,9 +963,13 @@ func TestConnKeyExchange(t *testing.T) {
 
 			wg.Wait()
 
-			if !bytes.Equal(serverTransport.encryptionKey[:],
-				clientTransport.encryptionKey[:]) {
-				t.Fatal("derived shared key not equal")
+			if !bytes.Equal(serverTransport.encryptKey[:],
+				clientTransport.decryptKey[:]) {
+				t.Fatal("server encrypt key != client decrypt key")
+			}
+			if bytes.Equal(serverTransport.encryptKey[:],
+				serverTransport.decryptKey[:]) {
+				t.Fatal("directional keys must differ")
 			}
 		})
 	}
@@ -488,7 +1072,7 @@ func TestKeyExchangeErrors(t *testing.T) {
 				transport = new(Transport)
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 
 			// Server
@@ -730,7 +1314,7 @@ func TestHandshakeErrors(t *testing.T) {
 					return err
 				}
 				// Read Hello
-				_, cmd, err := tr.read(readTimeout)
+				_, cmd, _, err := tr.read(readTimeout)
 				if err != nil {
 					return err
 				}
@@ -771,7 +1355,7 @@ func TestHandshakeErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 
 			// Server
@@ -841,7 +1425,7 @@ func TestHandshakeErrors(t *testing.T) {
 				}
 			}()
 
-			_, err = serverTransport.Handshake(ctx, serverSecret)
+			_, _, err = serverTransport.Handshake(ctx, serverSecret)
 			if err != nil {
 				if errors.Is(err, tti.expectedError) ||
 					errors.Is(tti.expectedError, ErrNoType) {
@@ -886,7 +1470,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 			// Create blank transport
 			clientTransport := new(Transport)
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			var wg sync.WaitGroup
 
@@ -940,9 +1524,13 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 
 			wg.Wait()
 
-			if !bytes.Equal(serverTransport.encryptionKey[:],
-				clientTransport.encryptionKey[:]) {
-				t.Fatal("derived shared key not equal")
+			if !bytes.Equal(serverTransport.encryptKey[:],
+				clientTransport.decryptKey[:]) {
+				t.Fatal("server encrypt key != client decrypt key")
+			}
+			if bytes.Equal(serverTransport.encryptKey[:],
+				serverTransport.decryptKey[:]) {
+				t.Fatal("directional keys must differ")
 			}
 
 			// Handshake
@@ -953,7 +1541,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				defer wg.Done()
 
 				var err error // prevent data race
-				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
+				derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret)
 				if err != nil {
 					panic(err)
 				}
@@ -981,7 +1569,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				}()
 
 				var err error // prevent data race
-				derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
+				derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret)
 				if err != nil {
 					panic(err)
 				}
@@ -1034,7 +1622,7 @@ func TestConnHandshake(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			var wg sync.WaitGroup
 
@@ -1086,9 +1674,13 @@ func TestConnHandshake(t *testing.T) {
 
 			wg.Wait()
 
-			if !bytes.Equal(serverTransport.encryptionKey[:],
-				clientTransport.encryptionKey[:]) {
-				t.Fatal("derived shared key not equal")
+			if !bytes.Equal(serverTransport.encryptKey[:],
+				clientTransport.decryptKey[:]) {
+				t.Fatal("server encrypt key != client decrypt key")
+			}
+			if bytes.Equal(serverTransport.encryptKey[:],
+				serverTransport.decryptKey[:]) {
+				t.Fatal("directional keys must differ")
 			}
 
 			// Handshake
@@ -1100,7 +1692,7 @@ func TestConnHandshake(t *testing.T) {
 
 				var err error
 
-				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
+				derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret)
 				if err != nil {
 					panic(err)
 				}
@@ -1118,7 +1710,7 @@ func TestConnHandshake(t *testing.T) {
 					}
 				}()
 
-				derivedServer, err = clientTransport.Handshake(ctx, clientSecret)
+				derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret)
 				if err != nil {
 					panic(err)
 				}
@@ -1243,6 +1835,349 @@ func TestSecret(t *testing.T) {
 	}
 	if !recPub.IsEqual(pk.PubKey()) {
 		t.Fatalf("pubKey mismatch: %v != %v", recPub, pk.PubKey())
+	}
+}
+
+// TestNaClKeyDerivation verifies that X25519 keypairs are deterministically
+// derived from secp256k1 private keys, that two different secrets produce
+// different X25519 keys, and that a nacl box round-trip works between the
+// two derived keypairs.
+func TestNaClKeyDerivation(t *testing.T) {
+	secret1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret2, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Determinism: same secret produces same key every time.
+	priv1a, err := secret1.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv1b, err := secret1.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(priv1a.Bytes(), priv1b.Bytes()) {
+		t.Fatal("NaClPrivateKey not deterministic")
+	}
+
+	pub1, err := secret1.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub2, err := secret2.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Different secrets produce different keys.
+	if bytes.Equal(pub1, pub2) {
+		t.Fatal("different secrets produced same NaCl public key")
+	}
+
+	// Key length: X25519 keys are 32 bytes.
+	if len(pub1) != 32 {
+		t.Fatalf("NaCl public key length: got %d, want 32", len(pub1))
+	}
+
+	// nacl box round-trip between the two derived keypairs.
+	priv2, err := secret2.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plaintext := []byte("test message for nacl box round-trip")
+	var nonce [24]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	var pub2Arr, priv1Arr [32]byte
+	copy(pub2Arr[:], pub2)
+	copy(priv1Arr[:], priv1a.Bytes())
+
+	sealed := box.Seal(nil, plaintext, &nonce, &pub2Arr, &priv1Arr)
+
+	var pub1Arr, priv2Arr [32]byte
+	copy(pub1Arr[:], pub1)
+	copy(priv2Arr[:], priv2.Bytes())
+
+	opened, ok := box.Open(nil, sealed, &nonce, &pub1Arr, &priv2Arr)
+	if !ok {
+		t.Fatal("nacl box open failed")
+	}
+	if !bytes.Equal(plaintext, opened) {
+		t.Fatal("nacl box round-trip plaintext mismatch")
+	}
+}
+
+// BenchmarkSealBox measures nacl box encryption throughput.
+func BenchmarkSealBox(b *testing.B) {
+	secret, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientSecret, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientPub, err := recipientSecret.NaClPublicKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	senderPriv, err := secret.NaClPrivateKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	plaintext := make([]byte, 256) // typical PingRequest size
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = SealBox(plaintext, recipientPub, senderPriv,
+			secret.Identity, PPingRequest)
+	}
+}
+
+// BenchmarkOpenBox measures nacl box decryption throughput.
+func BenchmarkOpenBox(b *testing.B) {
+	sender, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipient, err := NewSecret()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientPub, err := recipient.NaClPublicKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	senderPub, err := sender.NaClPublicKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	senderPriv, err := sender.NaClPrivateKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	recipientPriv, err := recipient.NaClPrivateKey()
+	if err != nil {
+		b.Fatal(err)
+	}
+	plaintext := make([]byte, 256)
+	ep, err := SealBox(plaintext, recipientPub, senderPriv,
+		sender.Identity, PPingRequest)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = OpenBox(ep, senderPub, recipientPriv)
+	}
+}
+
+// TestPayloadHashVerification tests the payload hash verification logic
+// in the Transport read method.
+func TestPayloadHashVerification(t *testing.T) {
+	serverTransport, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create transport from server public key
+	clientTransport := new(Transport)
+	clientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+
+	// Server
+	l := net.ListenConfig{}
+	listener, err := l.Listen(ctx, "tcp", net.JoinHostPort("127.0.0.1", "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		t.Logf("Listening: %v", port)
+		conn, err := listener.Accept()
+		if err != nil {
+			panic(err)
+		}
+
+		if err := serverTransport.KeyExchange(ctx, conn); err != nil {
+			panic(err)
+		}
+	}()
+
+	// Client
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		addr, err := net.ResolveTCPAddr("tcp",
+			net.JoinHostPort("127.0.0.1", "0"))
+		if err != nil {
+			panic(err)
+		}
+		d := &net.Dialer{LocalAddr: addr}
+		conn, err := d.DialContext(ctx, "tcp",
+			net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			panic(err)
+		}
+
+		if err := clientTransport.KeyExchange(ctx, conn); err != nil {
+			panic(err)
+		}
+	}()
+
+	wg.Wait()
+
+	if !bytes.Equal(serverTransport.encryptKey[:],
+		clientTransport.decryptKey[:]) {
+		t.Fatal("server encrypt key != client decrypt key")
+	}
+	if bytes.Equal(serverTransport.encryptKey[:],
+		serverTransport.decryptKey[:]) {
+		t.Fatal("directional keys must differ")
+	}
+
+	// Handshake
+	var derivedClient, derivedServer *Identity
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var err error
+		derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	wg.Wait()
+
+	if derivedServer.String() != serverSecret.String() {
+		t.Fatalf("derived server got %v, want %v",
+			derivedServer, serverSecret.Identity)
+	}
+	if derivedClient.String() != clientSecret.String() {
+		t.Fatalf("derived client got %v, want %v",
+			derivedClient, clientSecret.Identity)
+	}
+
+	type testTableItem struct {
+		name          string
+		cmd           any
+		falsePayload  bool
+		falseHash     bool
+		expectedError bool
+	}
+	tests := []testTableItem{
+		{
+			name: "valid_hello_request",
+			cmd:  HelloRequest{},
+		},
+		{
+			name: "valid_keygen_request",
+			cmd:  KeygenRequest{},
+		},
+		{
+			name:          "invalid_hash",
+			cmd:           HelloRequest{},
+			falseHash:     true,
+			expectedError: true,
+		},
+		{
+			name:          "invalid_payload_size",
+			cmd:           HelloRequest{},
+			falsePayload:  true,
+			expectedError: true,
+		},
+	}
+
+	for _, tti := range tests {
+		t.Run(tti.name, func(t *testing.T) {
+			var msgErr error
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _, msgErr = serverTransport.Read()
+			}()
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				pt, ok := pt2str[reflect.TypeOf(tti.cmd)]
+				if !ok {
+					panic(fmt.Sprintf("invalid command type: %T", tti.cmd))
+				}
+				hash, payload, err := NewPayloadFromCommand(tti.cmd)
+				if err != nil {
+					panic(err)
+				}
+				if tti.falseHash {
+					hash = NewPayloadHash([]byte{})
+				}
+				if tti.falsePayload {
+					payload = nil
+				}
+				header, err := json.Marshal(Header{
+					PayloadType: pt,
+					PayloadHash: *hash,
+					Origin:      clientSecret.Identity,
+					Destination: &serverSecret.Identity,
+					TTL:         1,
+				})
+				if err != nil {
+					panic(err)
+				}
+				err = clientTransport.write(writeTimeout, append(header, payload...))
+				if err != nil {
+					panic(err)
+				}
+			}()
+
+			wg.Wait()
+
+			if tti.expectedError {
+				if msgErr == nil {
+					t.Fatalf("expected error")
+				}
+				t.Logf("got expected error: %v", msgErr)
+			} else if msgErr != nil {
+				t.Fatal(msgErr)
+			}
+		})
 	}
 }
 
@@ -1418,4 +2353,94 @@ func TestDNSTXTRecord(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected lame referral")
 	}
+}
+
+func TestKvFromTxt(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    map[string]string
+		wantErr bool
+	}{
+		{
+			name:  "valid record",
+			input: "v=transfunctioner; identity=deadbeef; port=1234",
+			want: map[string]string{
+				"v":        "transfunctioner",
+				"identity": "deadbeef",
+				"port":     "1234",
+			},
+		},
+		{
+			name:  "value containing equals",
+			input: "v=transfunctioner; data=abc=def=ghi",
+			want: map[string]string{
+				"v":    "transfunctioner",
+				"data": "abc=def=ghi",
+			},
+		},
+		{
+			name:  "single pair",
+			input: "v=transfunctioner",
+			want:  map[string]string{"v": "transfunctioner"},
+		},
+		{
+			name:  "whitespace trimming",
+			input: " v = transfunctioner ;  identity = deadbeef ",
+			want: map[string]string{
+				"v":        "transfunctioner",
+				"identity": "deadbeef",
+			},
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "no equals sign",
+			input:   "noequals",
+			wantErr: true,
+		},
+		{
+			name:    "missing value in pair",
+			input:   "v=transfunctioner; novalue",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := kvFromTxt(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("kvFromTxt(%q) = %v, want error",
+						tt.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("kvFromTxt(%q) error: %v", tt.input, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("kvFromTxt(%q) = %v, want %v",
+					tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func FuzzKvFromTxt(f *testing.F) {
+	f.Add("v=transfunctioner; identity=deadbeef; port=1234")
+	f.Add("")
+	f.Add("noequals")
+	f.Add("a=b; c=d; e=f")
+	f.Add("key=val=ue")
+	f.Add("; ; ; ")
+	f.Add("===")
+	f.Add("v=transfunctioner; identity=abc123abc123abc123abc123abc123abc123abc1")
+
+	f.Fuzz(func(t *testing.T, input string) {
+		// Must not panic.
+		_, _ = kvFromTxt(input)
+	})
 }
