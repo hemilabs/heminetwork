@@ -81,17 +81,30 @@ var (
 			Help:         "address and port transfunctionerd prometheus listens on",
 			Print:        config.PrintAll,
 		},
-		"TRF_DNS_NAME": config.Config{
-			Value:        &cfg.DNSName,
-			DefaultValue: "",
-			Help:         "hostname to advertise in hello for DNS identity verification",
-			Print:        config.PrintAll,
+		"TRF_DNS": config.Config{
+			Value:        &cfg.DNS,
+			DefaultValue: "forward",
+			Help: "DNS verification mode. Controls how peer identity is " +
+				"verified via DNS TXT records.\n" +
+				"  \"forward\" - verify peers via forward TXT lookup on " +
+				"their advertised hostname; reject IP-only peers (default)\n" +
+				"  \"reverse\" - verify peers via reverse DNS lookup on " +
+				"their IP address\n" +
+				"  \"all\"     - forward verify hostname peers, reverse " +
+				"verify IP peers\n" +
+				"  \"off\"     - no DNS verification (insecure)\n" +
+				"Requires TRF_HOSTNAME when set to \"forward\" or \"all\".",
+			Print: config.PrintAll,
 		},
-		"TRF_DNS_REQUIRED": config.Config{
-			Value:        &cfg.DNSRequired,
-			DefaultValue: false,
-			Help:         "require remote peers to advertise and verify DNS identity",
-			Print:        config.PrintAll,
+		"TRF_HOSTNAME": config.Config{
+			Value:        &cfg.Hostname,
+			DefaultValue: "",
+			Help: "Hostname to advertise in peer gossip. When set, other " +
+				"nodes in forward/all DNS mode can verify this node via " +
+				"TXT record lookup. The TXT record must contain " +
+				"\"v=transfunctioner; identity=<identity>\". Required " +
+				"when TRF_DNS is \"forward\" or \"all\".",
+			Print: config.PrintAll,
 		},
 		"TRF_SEEDS": config.Config{
 			Value:        &cfg.Seeds,
