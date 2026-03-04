@@ -1609,22 +1609,29 @@ func (s *Server) evictCeremonies(ctx context.Context) {
 		case <-ticker.C:
 		}
 
-		cutoff := time.Now().Add(-ceremonyMaxAge).Unix()
-		var evicted int
-		s.mtx.Lock()
-		for cid, ci := range s.ceremonies {
-			if ci.Status == CeremonyRunning {
-				continue
-			}
-			if ci.StartTime < cutoff {
-				delete(s.ceremonies, cid)
-				evicted++
-			}
+		s.evictStaleCeremonies()
+	}
+}
+
+// evictStaleCeremonies is the single-shot eviction pass used by
+// evictCeremonies.  Exported as a method so tests can call it
+// without waiting for the ticker.
+func (s *Server) evictStaleCeremonies() {
+	cutoff := time.Now().Add(-ceremonyMaxAge).Unix()
+	var evicted int
+	s.mtx.Lock()
+	for cid, ci := range s.ceremonies {
+		if ci.Status == CeremonyRunning {
+			continue
 		}
-		s.mtx.Unlock()
-		if evicted > 0 {
-			log.Debugf("evictCeremonies: removed %d stale entries", evicted)
+		if ci.StartTime < cutoff {
+			delete(s.ceremonies, cid)
+			evicted++
 		}
+	}
+	s.mtx.Unlock()
+	if evicted > 0 {
+		log.Debugf("evictCeremonies: removed %d stale entries", evicted)
 	}
 }
 
