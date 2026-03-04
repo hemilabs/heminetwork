@@ -6268,8 +6268,8 @@ func TestDecryptPayloadNoNaClPub(t *testing.T) {
 	s.wg.Add(1)
 	go s.handle(ctx, &peerID, srvTr)
 
-	// Drain initial PeerNotify + PeerListRequest.
-	for i := 0; i < 2; i++ {
+	// Drain initial PeerNotify + PeerListRequest + liveness PingRequest.
+	for i := 0; i < 3; i++ {
 		_, _, _, err := cliTr.ReadEnvelope()
 		if err != nil {
 			t.Fatalf("drain initial message %d: %v", i, err)
@@ -9773,12 +9773,118 @@ func TestCollectorsCreated(t *testing.T) {
 	}
 }
 
+func TestPromCallbackValues(t *testing.T) {
+	s, _ := NewServer(testConfig())
+
+	// Fresh server: not running, not healthy, no state.
+	if v := s.promRunning(); v != 0 {
+		t.Fatalf("promRunning: got %v, want 0", v)
+	}
+	if v := s.promHealthy(); v != 0 {
+		t.Fatalf("promHealthy: got %v, want 0", v)
+	}
+	if v := s.promUptime(); v != 0 {
+		t.Fatalf("promUptime: got %v, want 0", v)
+	}
+	if v := s.promSessions(); v != 0 {
+		t.Fatalf("promSessions: got %v, want 0", v)
+	}
+	if v := s.promPeersKnown(); v != 0 {
+		t.Fatalf("promPeersKnown: got %v, want 0", v)
+	}
+	if v := s.promPeersLive(); v != 0 {
+		t.Fatalf("promPeersLive: got %v, want 0", v)
+	}
+	if v := s.promForwarded(); v != 0 {
+		t.Fatalf("promForwarded: got %v, want 0", v)
+	}
+	if v := s.promRoutedReceived(); v != 0 {
+		t.Fatalf("promRoutedReceived: got %v, want 0", v)
+	}
+	if v := s.promDedupDropped(); v != 0 {
+		t.Fatalf("promDedupDropped: got %v, want 0", v)
+	}
+	if v := s.promBroadcastsSent(); v != 0 {
+		t.Fatalf("promBroadcastsSent: got %v, want 0", v)
+	}
+	if v := s.promCeremoniesActive(); v != 0 {
+		t.Fatalf("promCeremoniesActive: got %v, want 0", v)
+	}
+	if v := s.promCeremoniesCompleted(); v != 0 {
+		t.Fatalf("promCeremoniesCompleted: got %v, want 0", v)
+	}
+	if v := s.promCeremoniesFailed(); v != 0 {
+		t.Fatalf("promCeremoniesFailed: got %v, want 0", v)
+	}
+
+	// Inject state and verify callbacks reflect it.
+	s.mtx.Lock()
+	s.isRunning = true
+	s.listenAddress = "127.0.0.1:9999"
+	s.startedAt = time.Now().Add(-10 * time.Second)
+	s.sessions[Identity{0x01}] = &Transport{}
+	s.sessions[Identity{0x02}] = &Transport{}
+	s.peers[Identity{0x01}] = &PeerRecord{}
+	s.peers[Identity{0x02}] = &PeerRecord{}
+	s.peers[Identity{0x03}] = &PeerRecord{}
+	s.ponged[Identity{0x01}] = struct{}{}
+	s.mtx.Unlock()
+
+	s.forwarded.Store(42)
+	s.routedReceived.Store(17)
+	s.dedupDropped.Store(5)
+	s.broadcastsSent.Store(3)
+	s.ceremoniesActive.Store(2)
+	s.ceremoniesCompleted.Store(7)
+	s.ceremoniesFailed.Store(1)
+
+	if v := s.promRunning(); v != 1 {
+		t.Fatalf("promRunning: got %v, want 1", v)
+	}
+	if v := s.promHealthy(); v != 1 {
+		t.Fatalf("promHealthy: got %v, want 1", v)
+	}
+	if v := s.promUptime(); v < 9 {
+		t.Fatalf("promUptime: got %v, want >= 9", v)
+	}
+	if v := s.promSessions(); v != 2 {
+		t.Fatalf("promSessions: got %v, want 2", v)
+	}
+	if v := s.promPeersKnown(); v != 3 {
+		t.Fatalf("promPeersKnown: got %v, want 3", v)
+	}
+	if v := s.promPeersLive(); v != 1 {
+		t.Fatalf("promPeersLive: got %v, want 1", v)
+	}
+	if v := s.promForwarded(); v != 42 {
+		t.Fatalf("promForwarded: got %v, want 42", v)
+	}
+	if v := s.promRoutedReceived(); v != 17 {
+		t.Fatalf("promRoutedReceived: got %v, want 17", v)
+	}
+	if v := s.promDedupDropped(); v != 5 {
+		t.Fatalf("promDedupDropped: got %v, want 5", v)
+	}
+	if v := s.promBroadcastsSent(); v != 3 {
+		t.Fatalf("promBroadcastsSent: got %v, want 3", v)
+	}
+	if v := s.promCeremoniesActive(); v != 2 {
+		t.Fatalf("promCeremoniesActive: got %v, want 2", v)
+	}
+	if v := s.promCeremoniesCompleted(); v != 7 {
+		t.Fatalf("promCeremoniesCompleted: got %v, want 7", v)
+	}
+	if v := s.promCeremoniesFailed(); v != 1 {
+		t.Fatalf("promCeremoniesFailed: got %v, want 1", v)
+	}
+}
+
 func TestIsHealthyAndHealthEndpoint(t *testing.T) {
 	ctx := context.Background()
 
 	// A server that is not listening and has no sessions is not healthy.
 	s, _ := NewServer(testConfig())
-	if s.isHealthy(ctx) {
+	if s.isHealthy() {
 		t.Fatal("expected unhealthy: no listener, no sessions")
 	}
 	ok, info, err := s.health(ctx)
@@ -9802,7 +9908,7 @@ func TestIsHealthyAndHealthEndpoint(t *testing.T) {
 	s.sessions[Identity{0x01}] = &Transport{}
 	s.mtx.Unlock()
 
-	if !s.isHealthy(ctx) {
+	if !s.isHealthy() {
 		t.Fatal("expected healthy: listening + session")
 	}
 	ok, info, err = s.health(ctx)
