@@ -198,9 +198,14 @@ type Server struct {
 	isRunning       bool
 }
 
-// Info reports the current status of the server.
+// Info reports the current status of the server.  Returned as the
+// body of the Prometheus /health endpoint.
 type Info struct {
-	Online bool
+	Online    bool   `json:"online"`
+	Healthy   bool   `json:"healthy"`
+	Listening string `json:"listening"` // bound address, empty pre-listen
+	Sessions  int    `json:"sessions"`  // active peer connections
+	Peers     int    `json:"peers"`     // known peer records
 }
 
 // NewDefaultConfig returns a Config with sensible defaults.
@@ -1773,15 +1778,37 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+// isHealthy reports whether the server is ready to participate in the
+// mesh.  A node is healthy when it is listening for connections and
+// has at least one active peer session.  A node with zero sessions
+// cannot route TSS messages or participate in ceremonies.
+//
+// Paillier preParams are not checked here because Run() loads them
+// before starting the listener; if loading fails, Run() returns an
+// error and the service never reaches the health endpoint.
 func (s *Server) isHealthy(_ context.Context) bool {
-	return true // TODO(SOW4-§9): implement real health checks (last-item-before-ship).
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return s.listenAddress != "" && len(s.sessions) > 0
 }
 
 func (s *Server) health(ctx context.Context) (bool, any, error) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	return s.isHealthy(ctx), Info{Online: true}, nil
+	healthy := s.isHealthy(ctx)
+
+	s.mtx.RLock()
+	info := Info{
+		Online:    true,
+		Healthy:   healthy,
+		Listening: s.listenAddress,
+		Sessions:  len(s.sessions),
+		Peers:     len(s.peers),
+	}
+	s.mtx.RUnlock()
+
+	return healthy, info, nil
 }
 
 // sendErr sends err to errC unless ctx is already cancelled.
