@@ -106,6 +106,7 @@ type Config struct {
 	PeersWanted             int
 	PingInterval            time.Duration // 0 uses default (61s)
 	PingTimeout             time.Duration // 0 uses default (19s)
+	InitialPingTimeout      time.Duration // 0 uses default (5s); increase for slow CI
 	MaintainInterval        time.Duration // 0 uses default (67s)
 	PprofListenAddress      string
 	PreParamsTimeout        time.Duration // 0 uses default (1m); increase for slow CI
@@ -597,7 +598,11 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 	}); err != nil {
 		log.Warningf("initial ping %v: %v", id, err)
 	} else {
-		s.pings.Put(sessionCtx, initialPingTimeout, *id, t, s.pingExpired, nil)
+		ipt := s.cfg.InitialPingTimeout
+		if ipt == 0 {
+			ipt = initialPingTimeout
+		}
+		s.pings.Put(sessionCtx, ipt, *id, t, s.pingExpired, nil)
 	}
 
 	for {
