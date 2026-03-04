@@ -815,6 +815,8 @@ func newMockTSSStore() *mockTSSStore {
 	}
 }
 
+func (m *mockTSSStore) Close() error { return nil }
+
 func (m *mockTSSStore) SaveKeyShare(keyID, share []byte) error {
 	if m.saveErr != nil {
 		return m.saveErr
@@ -1411,5 +1413,36 @@ func TestKeyMetadataReshareUpdate(t *testing.T) {
 	}
 	if loaded.Committee[0] != (Identity{0x04}) {
 		t.Fatalf("committee[0]: got %v, want {0x04}", loaded.Committee[0])
+	}
+}
+
+// TestStoreCloseZerosEncKey verifies that Close() zeros the encryption
+// key and nils preParams to limit swap/coredump exposure.
+func TestStoreCloseZerosEncKey(t *testing.T) {
+	dir := t.TempDir()
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := store.(*fileStore)
+
+	// Verify key is non-zero before Close.
+	var zero [32]byte
+	if fs.encKey == zero {
+		t.Fatal("encKey is zero before Close — bad test setup")
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if fs.encKey != zero {
+		t.Fatal("encKey not zeroed after Close")
+	}
+	if fs.preParams != nil {
+		t.Fatal("preParams not nil after Close")
 	}
 }
