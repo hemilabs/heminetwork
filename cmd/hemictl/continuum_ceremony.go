@@ -109,11 +109,13 @@ func init() {
 	continuumActions["keygen"] = continuumKeygen
 	continuumActions["sign"] = continuumSign
 	continuumActions["reshare"] = continuumReshare
+	continuumActions["suggest"] = continuumSuggestPeer
 
 	continuumActionHelp = append(continuumActionHelp,
 		"\tkeygen\t\tTrigger keygen (members=<id1>,<id2>,... OR auto=<n> threshold=<n>)",
 		"\tsign\t\tTrigger sign (members=... OR auto=<n> threshold=<n> key_id=<hex> data=<hex>)",
 		"\treshare\t\tTrigger reshare (old_members=... new_members=... OR old_auto=<n> new_auto=<n> old_threshold=<n> new_threshold=<n> key_id=<hex>)",
+		"\tsuggest\t\tSuggest a peer for continuum to connect to (address=<host:port>)",
 	)
 }
 
@@ -543,4 +545,44 @@ func printCommittee(ceremony string, committee []continuum.Identity, threshold i
 		}
 		fmt.Printf("%s: %v\n", role, id)
 	}
+}
+
+// continuumSuggestPeer sends a request to the local continuum node to
+// attempt connecting to the specified peer address.  This is a debug
+// command for manually testing peer connectivity.
+//
+// Example:
+//
+//	hemictl continuum suggest address=192.168.1.100:45067
+func continuumSuggestPeer(ctx context.Context, args map[string]string) error {
+	address := args["address"]
+	if address == "" {
+		return fmt.Errorf("address required")
+	}
+
+	t, secret, err := continuumDial(ctx, continuumAddress)
+	if err != nil {
+		return err
+	}
+	defer t.Close()
+
+	if err := t.Write(secret.Identity, continuum.PeerAddRequest{Address: address}); err != nil {
+		return fmt.Errorf("send peer add request: %w", err)
+	}
+
+	cmd, err := continuumReadResponse(ctx, t)
+	if err != nil {
+		return err
+	}
+	resp, ok := cmd.(*continuum.PeerAddResponse)
+	if !ok {
+		return fmt.Errorf("unexpected response: %T", cmd)
+	}
+
+	if !resp.Accepted {
+		return fmt.Errorf("peer add rejected: %s", resp.Error)
+	}
+
+	fmt.Printf("peer connection suggested: %s\n", address)
+	return nil
 }
