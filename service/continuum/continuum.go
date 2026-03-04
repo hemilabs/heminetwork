@@ -1576,6 +1576,21 @@ func (s *Server) handleCeremonyList() CeremonyListResponse {
 	return resp
 }
 
+// handlePeerAdd attempts to connect to a peer at the given address.
+func (s *Server) handlePeerAdd(ctx context.Context, addr string) PeerAddResponse {
+	if addr == "" {
+		return PeerAddResponse{
+			Accepted: false,
+			Error:    "address required",
+		}
+	}
+	s.wg.Add(1)
+	go s.connectPeer(ctx, addr)
+	return PeerAddResponse{
+		Accepted: true,
+	}
+}
+
 // evictCeremonies removes completed/failed ceremonies older than
 // ceremonyMaxAge from the tracking map.  Running ceremonies are never
 // evicted.  Called periodically from a goroutine started by Run().
