@@ -49,6 +49,7 @@ func init() {
 		reflect.TypeOf((*PeerListAdminRequest)(nil)):  handlePeerListAdmin,
 		reflect.TypeOf((*CeremonyStatusRequest)(nil)): handleCeremonyStatusReq,
 		reflect.TypeOf((*CeremonyListRequest)(nil)):   handleCeremonyListReq,
+		reflect.TypeOf((*PeerAddRequest)(nil)):        handlePeerAddReq,
 		reflect.TypeOf((*BusyResponse)(nil)):          handleBusyResponse,
 	}
 }
@@ -238,6 +239,18 @@ func handleCeremonyListReq(dc *dispatchCtx, payload any) bool {
 	resp := dc.s.handleCeremonyList()
 	if err := dc.t.Write(dc.s.secret.Identity, resp); err != nil {
 		log.Warningf("admin ceremony list %v: %v", dc.id, err)
+	}
+	return false
+}
+
+func handlePeerAddReq(dc *dispatchCtx, payload any) bool {
+	if !requireAdmin(dc.t, dc.id) {
+		return false
+	}
+	v := payload.(*PeerAddRequest)
+	resp := dc.s.handlePeerAdd(dc.ctx, v.Address)
+	if err := dc.t.Write(dc.s.secret.Identity, resp); err != nil {
+		log.Warningf("admin peer add %v: %v", dc.id, err)
 	}
 	return false
 }
