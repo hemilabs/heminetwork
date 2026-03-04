@@ -10920,6 +10920,7 @@ func TestFiveNodeKeygenAndSign(t *testing.T) {
 		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
 		servers[i].cfg.PeersWanted = 6
 		servers[i].cfg.MaintainInterval = 500 * time.Millisecond
+		servers[i].cfg.InitialPingTimeout = time.Minute // admin client never pongs
 		idx := i
 		g.Go(func() error { return servers[idx].Run(gctx) })
 		addrs[i] = waitForListenAddress(t, servers[i], 2*time.Second)
