@@ -60,6 +60,7 @@ ENV TRF_PROMETHEUS_ADDRESS=""
 ENV TRF_DNS_NAME=""
 ENV TRF_DNS_REQUIRED=""
 ENV TRF_SEEDS=""
+ENV TRF_PREPARAMS_TIMEOUT=""
 
 WORKDIR /etc/transfunctionerd/
 ENTRYPOINT ["/usr/local/bin/transfunctionerd"]
