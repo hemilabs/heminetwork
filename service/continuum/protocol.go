@@ -123,7 +123,15 @@ import (
 //	prove ownership of the accompanying private key. Additionally, the
 //	identity may be stored in a DNS TXT record that is associated with the
 //	remote host.
-//	TODO: define DNS mechanism in more detail.
+//
+//	DNS identity verification: the node resolves TXT records for the
+//	remote host and checks whether any record contains the hex-encoded
+//	identity.  For outbound connections the node does a forward lookup
+//	(host → TXT); for inbound connections it does a reverse lookup
+//	(IP → hostname → TXT).  DNS verification is advisory: failure
+//	logs a warning but does not reject the connection.  The TXT
+//	record format is: "continuum-id=<hex identity>".  Port is
+//	discovered via a SRV record or falls back to the default port.
 //
 // In the continuum protocol every host has a long lived identity. This
 // identity is the RIPEMD160 digest of a public secp256k1 compressed key. This
@@ -135,13 +143,26 @@ import (
 // command. A header is akin to a TCP header that contains routing
 // information, TTL and hints for the remote side to aid in command decoding.
 //
-// TODO:
-//	* routing
-//	* TTL
-//	* gossip rules
-//	* uniqueness of commands
-//	* envelope wrapped in envelope (encrypted routing)
-//	* commands
+// Protocol wire format:
+//   - Routing: each envelope carries a Header with Source, Destination,
+//     and TTL fields.  Messages with a Destination are forwarded
+//     hop-by-hop; broadcasts (nil Destination) are flooded to all
+//     sessions with dedup.
+//   - TTL: decremented at each hop; dropped at zero to prevent
+//     infinite forwarding loops.
+//   - Gossip rules: peers are exchanged via PeerNotify (push) and
+//     PeerListRequest/PeerListResponse (pull).  Each node maintains
+//     a map of known peers and periodically dials under-connected
+//     targets.
+//   - Uniqueness: broadcast dedup uses a TTL-based cache keyed on
+//     (Source, PayloadType, content hash).  Duplicate envelopes
+//     within the TTL window are dropped.
+//   - Envelope wrapping: after KX, all envelopes are NaCl box
+//     encrypted between session peers.  EncryptedPayload carries
+//     the ciphertext; the inner payload is decoded after decryption.
+//   - Commands: typed payloads registered in the pt2rt/str2pt maps
+//     below.  Each type has a string tag for wire encoding and a
+//     reflect.Type for dispatch.
 
 // PayloadType identifies the command type carried by an envelope.
 type PayloadType string
