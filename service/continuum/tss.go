@@ -48,6 +48,7 @@ type TSSTransport interface {
 
 // TSSStore handles encrypted key share storage.
 type TSSStore interface {
+	Close() error
 	SaveKeyShare(keyID []byte, share []byte) error
 	LoadKeyShare(keyID []byte) ([]byte, error)
 	DeleteKeyShare(keyID []byte) error
@@ -88,9 +89,21 @@ var (
 
 type fileStore struct {
 	dir       string
-	encKey    [32]byte // TODO: zero encKey on Close() to limit swap/coredump exposure
+	encKey    [32]byte
 	preParams *keygen.LocalPreParams
 	mu        sync.Mutex
+}
+
+// Close zeros the encryption key to limit exposure in swap files
+// and core dumps.
+func (s *fileStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.encKey {
+		s.encKey[i] = 0
+	}
+	s.preParams = nil
+	return nil
 }
 
 func NewTSSStore(dir string, secret *Secret) (TSSStore, error) {
