@@ -177,6 +177,8 @@ const (
 	PCeremonyStatusResponse PayloadType = "ceremony-status-response"
 	PCeremonyListRequest    PayloadType = "ceremony-list"
 	PCeremonyListResponse   PayloadType = "ceremony-list-response"
+	PPeerAddRequest         PayloadType = "peer-add"
+	PPeerAddResponse        PayloadType = "peer-add-response"
 
 	// Session management
 	PBusyResponse PayloadType = "busy"
@@ -209,6 +211,8 @@ var (
 		reflect.TypeOf(CeremonyStatusResponse{}): PCeremonyStatusResponse,
 		reflect.TypeOf(CeremonyListRequest{}):    PCeremonyListRequest,
 		reflect.TypeOf(CeremonyListResponse{}):   PCeremonyListResponse,
+		reflect.TypeOf(PeerAddRequest{}):         PPeerAddRequest,
+		reflect.TypeOf(PeerAddResponse{}):        PPeerAddResponse,
 
 		// Session management
 		reflect.TypeOf(BusyResponse{}): PBusyResponse,
@@ -569,6 +573,17 @@ type CeremonyListRequest struct{}
 // CeremonyListResponse returns all known ceremonies with their status.
 type CeremonyListResponse struct {
 	Ceremonies []CeremonyStatusResponse `json:"ceremonies"`
+}
+
+// PeerAddRequest requests that the server attempt to connect to a peer.
+type PeerAddRequest struct {
+	Address string `json:"address"` // IP:port or hostname:port
+}
+
+// PeerAddResponse reports the result of a peer add request.
+type PeerAddResponse struct {
+	Accepted bool   `json:"accepted"`
+	Error    string `json:"error,omitempty"`
 }
 
 // BusyResponse is sent post-handshake when the server is at capacity.
