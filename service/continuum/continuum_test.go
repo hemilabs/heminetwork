@@ -9774,17 +9774,53 @@ func TestCollectorsCreated(t *testing.T) {
 }
 
 func TestIsHealthyAndHealthEndpoint(t *testing.T) {
-	s, _ := NewServer(testConfig())
 	ctx := context.Background()
-	if !s.isHealthy(ctx) {
-		t.Fatal("not healthy")
+
+	// A server that is not listening and has no sessions is not healthy.
+	s, _ := NewServer(testConfig())
+	if s.isHealthy(ctx) {
+		t.Fatal("expected unhealthy: no listener, no sessions")
 	}
 	ok, info, err := s.health(ctx)
-	if err != nil || !ok {
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !info.(Info).Online {
-		t.Fatal("not online")
+	if ok {
+		t.Fatal("expected unhealthy from health()")
+	}
+	hi := info.(Info)
+	if !hi.Online {
+		t.Fatal("expected Online=true (service is instantiated)")
+	}
+	if hi.Healthy {
+		t.Fatal("expected Healthy=false")
+	}
+
+	// Simulate a running node: set listenAddress and add a session.
+	s.mtx.Lock()
+	s.listenAddress = "127.0.0.1:12345"
+	s.sessions[Identity{0x01}] = &Transport{}
+	s.mtx.Unlock()
+
+	if !s.isHealthy(ctx) {
+		t.Fatal("expected healthy: listening + session")
+	}
+	ok, info, err = s.health(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected healthy from health()")
+	}
+	hi = info.(Info)
+	if !hi.Healthy {
+		t.Fatal("expected Healthy=true")
+	}
+	if hi.Sessions != 1 {
+		t.Fatalf("expected 1 session, got %d", hi.Sessions)
+	}
+	if hi.Listening != "127.0.0.1:12345" {
+		t.Fatalf("expected listening address, got %q", hi.Listening)
 	}
 }
 
