@@ -2367,6 +2367,14 @@ func (s *Server) Run(pctx context.Context) error {
 
 	log.Infof("continuum service shutting down")
 	s.wg.Wait()
+
+	// Zero key material after all goroutines have exited.
+	if s.tssStore != nil {
+		if cerr := s.tssStore.Close(); cerr != nil {
+			log.Errorf("tss store close: %v", cerr)
+		}
+	}
+
 	log.Infof("continuum service clean shutdown")
 
 	return err
