@@ -2,8 +2,6 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-// Package continuum implements the service that runs the p2p network for
-// MinerFI Multi-Party Threshold Signature Scheme.
 package continuum
 
 import (
