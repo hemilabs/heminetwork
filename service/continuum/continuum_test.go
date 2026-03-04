@@ -3135,6 +3135,99 @@ func TestPingLoopContextCancel(t *testing.T) {
 	}
 }
 
+// --- pingExpired ---
+
+// TestPingExpiredClosesTransport verifies that pingExpired closes
+// the transport when called with valid Identity and *Transport.
+func TestPingExpiredClosesTransport(t *testing.T) {
+	s, _ := NewServer(testConfig())
+
+	srv, cli := connectedTransports(t)
+	_ = cli // keep pipe open so Close succeeds
+
+	id := Identity{0xAA}
+	s.pingExpired(context.Background(), id, srv)
+
+	// Transport should be closed — further writes fail.
+	err := srv.Write(Identity{}, PingRequest{})
+	if err == nil {
+		t.Fatal("expected write to closed transport to fail")
+	}
+}
+
+// TestPingExpiredInvalidKeyType verifies that pingExpired handles
+// a non-Identity key without panicking.
+func TestPingExpiredInvalidKeyType(t *testing.T) {
+	s, _ := NewServer(testConfig())
+	// Should log error and return, not panic.
+	s.pingExpired(context.Background(), "not-an-identity", &Transport{})
+}
+
+// TestPingExpiredInvalidValueType verifies that pingExpired handles
+// a non-*Transport value without panicking.
+func TestPingExpiredInvalidValueType(t *testing.T) {
+	s, _ := NewServer(testConfig())
+	// Should log error and return, not panic.
+	s.pingExpired(context.Background(), Identity{0x01}, "not-a-transport")
+}
+
+// --- evictStaleCeremonies ---
+
+// TestEvictStaleCeremoniesRemovesOld verifies that completed and
+// failed ceremonies older than ceremonyMaxAge are removed, while
+// running ceremonies and recent completions are kept.
+func TestEvictStaleCeremoniesRemovesOld(t *testing.T) {
+	s, _ := NewServer(testConfig())
+
+	old := time.Now().Add(-(ceremonyMaxAge + time.Minute)).Unix()
+	recent := time.Now().Unix()
+
+	cidOldComplete := NewCeremonyID()
+	cidOldFailed := NewCeremonyID()
+	cidOldRunning := NewCeremonyID()
+	cidRecent := NewCeremonyID()
+
+	s.mtx.Lock()
+	s.ceremonies[cidOldComplete] = &CeremonyInfo{
+		Status: CeremonyComplete, StartTime: old,
+	}
+	s.ceremonies[cidOldFailed] = &CeremonyInfo{
+		Status: CeremonyFailed, StartTime: old,
+	}
+	s.ceremonies[cidOldRunning] = &CeremonyInfo{
+		Status: CeremonyRunning, StartTime: old,
+	}
+	s.ceremonies[cidRecent] = &CeremonyInfo{
+		Status: CeremonyComplete, StartTime: recent,
+	}
+	s.mtx.Unlock()
+
+	s.evictStaleCeremonies()
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	if _, ok := s.ceremonies[cidOldComplete]; ok {
+		t.Error("old completed ceremony should have been evicted")
+	}
+	if _, ok := s.ceremonies[cidOldFailed]; ok {
+		t.Error("old failed ceremony should have been evicted")
+	}
+	if _, ok := s.ceremonies[cidOldRunning]; !ok {
+		t.Error("old running ceremony should NOT be evicted")
+	}
+	if _, ok := s.ceremonies[cidRecent]; !ok {
+		t.Error("recent completed ceremony should NOT be evicted")
+	}
+}
+
+// TestEvictStaleCeremoniesEmpty verifies eviction on an empty map
+// completes without error.
+func TestEvictStaleCeremoniesEmpty(t *testing.T) {
+	s, _ := NewServer(testConfig())
+	s.evictStaleCeremonies() // should not panic
+}
+
 // --- handle dispatch error paths ---
 
 // TestHandlePingWriteError verifies that a PingRequest write-back
