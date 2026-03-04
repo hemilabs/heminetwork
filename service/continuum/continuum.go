@@ -191,6 +191,15 @@ type Server struct {
 	// Routing counters for observability and testing.
 	routedReceived atomic.Int64 // messages received at final destination
 	forwarded      atomic.Int64 // messages forwarded to next hop
+	dedupDropped   atomic.Int64 // messages dropped by dedup cache
+	broadcastsSent atomic.Int64 // broadcast originations (not forwards)
+	startedAt      time.Time    // set in Run() for uptime gauge
+
+	// Ceremony counters — updated every promPoll tick so prom
+	// callbacks never iterate the ceremonies map on scrape.
+	ceremoniesActive    atomic.Int64
+	ceremoniesCompleted atomic.Int64
+	ceremoniesFailed    atomic.Int64
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -538,6 +547,7 @@ func (s *Server) broadcastWithTTL(cmd any, ttl uint8) error {
 		}
 	}
 	log.Debugf("Broadcast %T: sent to %d peer(s)", cmd, sent)
+	s.broadcastsSent.Add(1)
 	return nil
 }
 
@@ -606,6 +616,7 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 		if header.Destination != nil {
 			if s.isDuplicate(sessionCtx, header) {
 				log.Debugf("handle %v: duplicate message dropped", id)
+				s.dedupDropped.Add(1)
 				continue
 			}
 		}
@@ -1100,12 +1111,73 @@ func (s *Server) Collectors() []prometheus.Collector {
 
 	if s.promCollectors == nil {
 		// Naming: https://prometheus.io/docs/practices/naming/
+		ns := s.cfg.PrometheusNamespace
 		s.promCollectors = []prometheus.Collector{
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
+				Namespace: ns,
 				Name:      "running",
 				Help:      "Whether the continuum service is running",
 			}, s.promRunning),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "healthy",
+				Help:      "Whether the node is healthy (listening with peers)",
+			}, s.promHealthy),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "uptime_seconds",
+				Help:      "Seconds since the service started",
+			}, s.promUptime),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "sessions_active",
+				Help:      "Number of active peer sessions",
+			}, s.promSessions),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "peers_known",
+				Help:      "Number of known peer records",
+			}, s.promPeersKnown),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "peers_live",
+				Help:      "Peers that responded to at least one ping",
+			}, s.promPeersLive),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "messages_forwarded_total",
+				Help:      "Total messages forwarded to next hop",
+			}, s.promForwarded),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "messages_routed_received_total",
+				Help:      "Total routed messages received at final destination",
+			}, s.promRoutedReceived),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "messages_dedup_dropped_total",
+				Help:      "Total messages dropped by dedup cache",
+			}, s.promDedupDropped),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "broadcasts_sent_total",
+				Help:      "Total broadcasts originated by this node",
+			}, s.promBroadcastsSent),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "ceremonies_active",
+				Help:      "Number of currently running ceremonies",
+			}, s.promCeremoniesActive),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "ceremonies_completed_total",
+				Help:      "Total ceremonies completed successfully",
+			}, s.promCeremoniesCompleted),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "ceremonies_failed_total",
+				Help:      "Total ceremonies that failed",
+			}, s.promCeremoniesFailed),
 		}
 	}
 	return s.promCollectors
@@ -1761,10 +1833,33 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
+		// Single pass through ceremonies — callbacks read atomics.
+		var active, completed, failed int64
+		s.mtx.RLock()
+		for _, ci := range s.ceremonies {
+			switch ci.Status {
+			case CeremonyRunning:
+				active++
+			case CeremonyComplete:
+				completed++
+			case CeremonyFailed:
+				failed++
+			}
+		}
+		s.mtx.RUnlock()
+		s.ceremoniesActive.Store(active)
+		s.ceremoniesCompleted.Store(completed)
+		s.ceremoniesFailed.Store(failed)
+
 		if s.promPollVerbose {
 			s.mtx.RLock()
-			log.Infof("promPoll: peers %d sessions %d",
-				len(s.peers), len(s.sessions))
+			log.Infof("promPoll: peers %d sessions %d live %d "+
+				"fwd %d recv %d dedup %d bcast %d "+
+				"ceremonies active %d complete %d failed %d",
+				len(s.peers), len(s.sessions), len(s.ponged),
+				s.forwarded.Load(), s.routedReceived.Load(),
+				s.dedupDropped.Load(), s.broadcastsSent.Load(),
+				active, completed, failed)
 			s.mtx.RUnlock()
 		}
 	}
@@ -1778,6 +1873,69 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+func (s *Server) promHealthy() float64 {
+	if s.isHealthy() {
+		return 1
+	}
+	return 0
+}
+
+func (s *Server) promUptime() float64 {
+	s.mtx.RLock()
+	t := s.startedAt
+	s.mtx.RUnlock()
+	if t.IsZero() {
+		return 0
+	}
+	return time.Since(t).Seconds()
+}
+
+func (s *Server) promSessions() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return float64(len(s.sessions))
+}
+
+func (s *Server) promPeersKnown() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return float64(len(s.peers))
+}
+
+func (s *Server) promPeersLive() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return float64(len(s.ponged))
+}
+
+func (s *Server) promForwarded() float64 {
+	return float64(s.forwarded.Load())
+}
+
+func (s *Server) promRoutedReceived() float64 {
+	return float64(s.routedReceived.Load())
+}
+
+func (s *Server) promDedupDropped() float64 {
+	return float64(s.dedupDropped.Load())
+}
+
+func (s *Server) promBroadcastsSent() float64 {
+	return float64(s.broadcastsSent.Load())
+}
+
+func (s *Server) promCeremoniesActive() float64 {
+	return float64(s.ceremoniesActive.Load())
+}
+
+func (s *Server) promCeremoniesCompleted() float64 {
+	return float64(s.ceremoniesCompleted.Load())
+}
+
+func (s *Server) promCeremoniesFailed() float64 {
+	return float64(s.ceremoniesFailed.Load())
+}
+
 // isHealthy reports whether the server is ready to participate in the
 // mesh.  A node is healthy when it is listening for connections and
 // has at least one active peer session.  A node with zero sessions
@@ -1786,7 +1944,7 @@ func (s *Server) promRunning() float64 {
 // Paillier preParams are not checked here because Run() loads them
 // before starting the listener; if loading fails, Run() returns an
 // error and the service never reaches the health endpoint.
-func (s *Server) isHealthy(_ context.Context) bool {
+func (s *Server) isHealthy() bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return s.listenAddress != "" && len(s.sessions) > 0
@@ -1796,7 +1954,7 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	healthy := s.isHealthy(ctx)
+	healthy := s.isHealthy()
 
 	s.mtx.RLock()
 	info := Info{
@@ -2023,6 +2181,10 @@ func (s *Server) Run(pctx context.Context) error {
 		return errors.New("continuum already running")
 	}
 	defer s.testAndSetRunning(false)
+
+	s.mtx.Lock()
+	s.startedAt = time.Now()
+	s.mtx.Unlock()
 
 	// Make sure we have a valid secret
 	var err error
