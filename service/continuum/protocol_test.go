@@ -192,7 +192,6 @@ func TestNonce(t *testing.T) {
 	m := make(map[[TransportNonceSize]byte]int, maxNonces)
 	for i := range maxNonces {
 		wg.Go(func() {
-
 			nonce := n.Next() // race nonce
 
 			// But be nice to map inserts
@@ -336,7 +335,6 @@ func TestConnKeyExchange(t *testing.T) {
 			port := listener.Addr().(*net.TCPAddr).Port
 
 			wg.Go(func() {
-
 				t.Logf("Listening: %v", port)
 				conn, err := listener.Accept()
 				if err != nil {
@@ -350,7 +348,6 @@ func TestConnKeyExchange(t *testing.T) {
 
 			// Client
 			wg.Go(func() {
-
 				addr, err := net.ResolveTCPAddr("tcp",
 					net.JoinHostPort("127.0.0.1", "0"))
 				if err != nil {
@@ -883,7 +880,6 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 
 			var clientAddress net.Addr // We obtain client IP when we accept a connection.
 			wg.Go(func() {
-
 				t.Logf("Listening: %v:%v", node1.IP, port)
 				conn, err := listener.Accept()
 				if err != nil {
@@ -898,7 +894,6 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 
 			// Client
 			wg.Go(func() {
-
 				addr, err := net.ResolveTCPAddr("tcp",
 					net.JoinHostPort(node2.IP.String(), "0"))
 				if err != nil {
@@ -927,7 +922,6 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 			var derivedClient, derivedServer *Identity
 
 			wg.Go(func() {
-
 				var err error // prevent data race
 				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
 				if err != nil {
@@ -947,7 +941,6 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 			})
 
 			wg.Go(func() {
-
 				defer func() {
 					if err := clientTransport.Close(); err != nil {
 						panic(err)
@@ -1022,7 +1015,6 @@ func TestConnHandshake(t *testing.T) {
 			port := listener.Addr().(*net.TCPAddr).Port
 
 			wg.Go(func() {
-
 				t.Logf("Listening: %v", port)
 				conn, err := listener.Accept()
 				if err != nil {
@@ -1036,7 +1028,6 @@ func TestConnHandshake(t *testing.T) {
 
 			// Client
 			wg.Go(func() {
-
 				addr, err := net.ResolveTCPAddr("tcp",
 					net.JoinHostPort("127.0.0.1", "0"))
 				if err != nil {
@@ -1065,7 +1056,6 @@ func TestConnHandshake(t *testing.T) {
 			var derivedClient, derivedServer *Identity
 
 			wg.Go(func() {
-
 				var err error
 
 				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
@@ -1075,7 +1065,6 @@ func TestConnHandshake(t *testing.T) {
 			})
 
 			wg.Go(func() {
-
 				var err error
 
 				defer func() {

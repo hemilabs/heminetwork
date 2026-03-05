@@ -607,7 +607,6 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	}
 
 	s.opgethWG.Go(func() {
-
 		err := s.handleOpgethSubscription(ctx)
 		if err != nil {
 			log.Errorf("subscription: %v", err)

@@ -216,7 +216,6 @@ func TestTBCGozerCalls(t *testing.T) {
 	qd := DefaultCommandQueueDepth * 100
 	for range qd {
 		wg.Go(func() {
-
 			fes, err := b.FeeEstimates(ctx)
 			if err != nil {
 				panic(err)
