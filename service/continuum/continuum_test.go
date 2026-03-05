@@ -11437,3 +11437,135 @@ func TestCeremonyLoopDispatch(t *testing.T) {
 	cancel()
 	s.wg.Wait()
 }
+
+// --- ceremonyLoop coverage ---
+
+// TestCeremonyLoopUnknownType verifies that an unknown ceremony type
+// is logged and does not panic.
+func TestCeremonyLoopUnknownType(t *testing.T) {
+	mock := &mockTSS{keygenCalled: make(chan struct{})}
+	s := dispatchTestServer(t, mock)
+
+	di := newDebugInitiator()
+	s.initiator = di
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	s.wg.Add(1)
+	go s.ceremonyLoop(ctx)
+
+	di.Submit(CeremonyRequest{
+		Type: CeremonyType(99), // unknown
+	})
+
+	// Give ceremonyLoop time to process.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	s.wg.Wait()
+}
+
+// TestCeremonyLoopChannelClose verifies that ceremonyLoop exits
+// when the initiator channel is closed.
+func TestCeremonyLoopChannelClose(t *testing.T) {
+	mock := &mockTSS{keygenCalled: make(chan struct{})}
+	s := dispatchTestServer(t, mock)
+
+	di := newDebugInitiator()
+	s.initiator = di
+
+	ctx := t.Context()
+	s.wg.Add(1)
+	go s.ceremonyLoop(ctx)
+
+	close(di.ch) // closes the channel → ceremonyLoop returns
+	s.wg.Wait()
+}
+
+// --- verifyOutboundDNS coverage ---
+
+// TestVerifyOutboundDNSHostnameNonForward verifies that a hostname
+// target in reverse-only mode skips forward verification.
+func TestVerifyOutboundDNSHostnameNonForward(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSReverse // hostname target, but not forward/all
+
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
+
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
+	err = s.verifyOutboundDNS(t.Context(), "node.example.com:9090", addr, secret.Identity)
+	if err != nil {
+		t.Fatalf("expected nil, got: %v", err)
+	}
+}
+
+// TestVerifyOutboundDNSIPRateLimited verifies that rate-limited
+// IP targets in reverse/all mode return an error.
+func TestVerifyOutboundDNSIPRateLimited(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSAll
+
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
+
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fill the rate limiter.
+	for i := 0; i < 10; i++ {
+		_ = s.dnsRateLimited(addr)
+	}
+
+	err = s.verifyOutboundDNS(t.Context(), "10.0.0.1:9090", addr, secret.Identity)
+	if err == nil {
+		t.Fatal("expected rate limit error")
+	}
+	if !strings.Contains(err.Error(), "rate limited") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestVerifyInboundDNSRateLimited verifies that rate-limited
+// inbound connections in reverse mode return an error.
+func TestVerifyInboundDNSRateLimited(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSReverse
+
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
+
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 10; i++ {
+		_ = s.dnsRateLimited(addr)
+	}
+
+	err = s.verifyInboundDNS(t.Context(), addr, secret.Identity)
+	if err == nil {
+		t.Fatal("expected rate limit error")
+	}
+}
