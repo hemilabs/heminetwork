@@ -47,7 +47,7 @@ const (
 
 	maxBlockAge = 30 * time.Second // XXX make this configurable?
 
-	// finality short circuit constants
+	// finality short-circuit constants
 	ultraFinalityDepth = 20
 	minSearchDepth     = -100 // PNOOMA
 
@@ -183,7 +183,7 @@ func (s *Server) geth() (*ethclient.Client, error) {
 	geth := s.opgethClient
 	s.mtx.RUnlock()
 	if geth == nil {
-		return nil, fmt.Errorf("no connected")
+		return nil, fmt.Errorf("not connected")
 	}
 	return geth, nil
 }
@@ -366,7 +366,7 @@ func (s *Server) gethBestHeightHash(pctx context.Context) (uint64, *chainhash.Ha
 // keystone nor any close descendants have reached ultrafinality, requiring
 // N amount of checks for the finality value of N descendants.
 //
-//nolint:unused // hyphotetically useful, but currently unused
+//nolint:unused // hypothetically useful, but currently unused
 func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone, tip uint32) (*bfgapi.L2KeystoneBitcoinFinalityResponse, error) {
 	// Depth must be > 0 but height + depth > 0
 	// so min height is 2 and "min" depth is -1
@@ -482,7 +482,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 
-		// Uncomment this out to add a shortcircuit if there are large gaps
+		// Uncomment to enable short-circuiting when there are large gaps
 		// between keystones getting mined.
 		//
 		// // During our first loop, after we retrieve the BTC Tip from our
@@ -529,8 +529,8 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 
 		var hh *chainhash.Hash
 
-		// Cycle through each response and replace finality value for the best
-		// finality value of its descendants or itself
+		// Cycle through each response and replace the finality value with the best
+		// value from its descendants or itself
 		for _, bk := range aks.L2KeystoneBlocks {
 			if bk.Error != nil {
 				log.Tracef("keystone not found: %v", bk.Error)
@@ -540,7 +540,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]
 			if !ok {
 				// This really shouldn't happen
-				InternalErrorf(w, fmt.Errorf("cannot find stateroot: %v", spew.Sdump(bk)))
+				InternalErrorf(w, fmt.Errorf("cannot find state root: %v", spew.Sdump(bk)))
 				return
 			}
 
