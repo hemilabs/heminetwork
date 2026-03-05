@@ -66,7 +66,7 @@ func Parse(c CfgMap) error {
 					return fmt.Errorf("invalid value for %v: %w", k, err)
 				}
 				reflect.ValueOf(v.Value).Elem().Set(reflect.ValueOf(val))
-				return nil
+				continue
 			}
 
 			switch reflect.TypeOf(v.Value).Elem().Kind() {

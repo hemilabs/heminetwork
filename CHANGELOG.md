@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733),
   [#751](https://github.com/hemilabs/heminetwork/pull/751), [#755](https://github.com/hemilabs/heminetwork/pull/755)).
 
+- Fix bug that led to early exit during Daemon configuration parsing ([#885](https://github.com/hemilabs/heminetwork/pull/885))
+
 ## [v2.0.0]
 
 ### Breaking Changes
@@ -151,7 +153,7 @@ Thank you to everyone who contributed to this release!
 
 ---
 
-_Looking for the changelog for an older version? Check https://github.com/hemilabs/heminetwork/releases_
+_Looking for the changelog for an older version? Check <https://github.com/hemilabs/heminetwork/releases>_
 
 [Unreleased]: https://github.com/hemilabs/heminetwork/compare/v2.0.0...HEAD
 [v2.0.0]: https://github.com/hemilabs/heminetwork/releases/tag/v2.0.0
