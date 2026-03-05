@@ -32,6 +32,7 @@ func TestDispatchMapCompleteness(t *testing.T) {
 		(*PeerListAdminRequest)(nil),
 		(*CeremonyStatusRequest)(nil),
 		(*CeremonyListRequest)(nil),
+		(*PeerAddRequest)(nil),
 		(*BusyResponse)(nil),
 	}
 
@@ -61,6 +62,7 @@ func TestDispatchMapNoExtras(t *testing.T) {
 		reflect.TypeOf((*PeerListAdminRequest)(nil)):  true,
 		reflect.TypeOf((*CeremonyStatusRequest)(nil)): true,
 		reflect.TypeOf((*CeremonyListRequest)(nil)):   true,
+		reflect.TypeOf((*PeerAddRequest)(nil)):        true,
 		reflect.TypeOf((*BusyResponse)(nil)):          true,
 	}
 	for rt := range payloadDispatch {
