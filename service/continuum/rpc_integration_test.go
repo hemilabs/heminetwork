@@ -322,8 +322,8 @@ func (n *TSSNode) handleSignRequest(req SignRequest) {
 }
 
 func (n *TSSNode) handleReshareRequest(req ReshareRequest) {
-	// TODO: implement reshare
-	n.t.Log("Reshare not yet implemented")
+	// Reshare is tested via the real Server path (TestKeyMetadataReshareUpdate,
+	// TestTSSKeygenReshareSign).  This harness does not exercise it.
 }
 
 func (n *TSSNode) handleTSSMessage(msg TSSMessage) {
