@@ -94,7 +94,7 @@ type API interface {
 	Commands() map[Command]reflect.Type
 }
 
-func Read(ctx context.Context, c APIConn, api API) (Command, string, interface{}, error) {
+func Read(ctx context.Context, c APIConn, api API) (Command, string, any, error) {
 	var msg Message
 	if err := c.ReadJSON(ctx, &msg); err != nil {
 		return "", "", nil, err
@@ -113,7 +113,7 @@ func Read(ctx context.Context, c APIConn, api API) (Command, string, interface{}
 }
 
 // Write encodes and sends a payload over the API connection.
-func Write(ctx context.Context, c APIConn, api API, id string, payload interface{}) error {
+func Write(ctx context.Context, c APIConn, api API, id string, payload any) error {
 	cmd, ok := commandFromPayload(payload, api)
 	if !ok {
 		return fmt.Errorf("command unknown for payload %T", payload)
@@ -185,7 +185,7 @@ type Error struct {
 }
 
 // Errorf returns a protocol Error type with an embedded trace.
-func Errorf(msg string, args ...interface{}) *Error {
+func Errorf(msg string, args ...any) *Error {
 	trace, _ := random(8)
 	return &Error{
 		Timestamp: time.Now().Unix(),
@@ -276,7 +276,7 @@ func NewInternalError(err error) *InternalError {
 
 // NewInternalErrorf returns an InternalError constructed from the passed
 // message and arguments.
-func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
+func NewInternalErrorf(msg string, args ...any) *InternalError {
 	return &InternalError{
 		protocol: Errorf("internal error"),
 		internal: fmt.Errorf(msg, args...),
@@ -304,7 +304,7 @@ type APIConn interface {
 type readResult struct {
 	cmd     Command
 	id      string
-	payload interface{}
+	payload any
 	err     error
 }
 
@@ -516,7 +516,7 @@ func (ac *Conn) ConnectCount() int {
 
 // read calls the underlying Read function and returns the command, id and
 // unmarshaled payload.
-func (ac *Conn) read(ctx context.Context, api API) (Command, string, interface{}, error) {
+func (ac *Conn) read(ctx context.Context, api API) (Command, string, any, error) {
 	return Read(ctx, ac, api)
 }
 
@@ -534,7 +534,7 @@ func (ac *Conn) nextMsgID() uint64 {
 }
 
 // Call is a blocking call that returns the command, id and unmarshaled payload.
-func (ac *Conn) Call(ctx context.Context, api API, payload interface{}) (Command, string, interface{}, error) {
+func (ac *Conn) Call(ctx context.Context, api API, payload any) (Command, string, any, error) {
 	log.Tracef("Call: %T", payload)
 	defer log.Tracef("Call exit: %T", payload)
 
@@ -582,7 +582,7 @@ func (ac *Conn) errorAll(err error) {
 }
 
 // Read reads and returns the next command from the API connection.
-func (ac *Conn) Read(ctx context.Context, api API) (Command, string, interface{}, error) {
+func (ac *Conn) Read(ctx context.Context, api API) (Command, string, any, error) {
 	for {
 		cmd, id, payload, err := ac.read(ctx, api)
 		if id == "" || err != nil {
@@ -606,6 +606,6 @@ func (ac *Conn) Read(ctx context.Context, api API) (Command, string, interface{}
 }
 
 // Write encodes and sends a payload over the API connection.
-func (ac *Conn) Write(ctx context.Context, api API, id string, payload interface{}) error {
+func (ac *Conn) Write(ctx context.Context, api API, id string, payload any) error {
 	return Write(ctx, ac, api, id, payload)
 }

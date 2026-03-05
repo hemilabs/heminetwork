@@ -147,10 +147,10 @@ const (
 
 var (
 	pt2str = map[reflect.Type]PayloadType{
-		reflect.TypeOf(HelloRequest{}):  PHelloRequest,
-		reflect.TypeOf(HelloResponse{}): PHelloResponse,
-		reflect.TypeOf(PingRequest{}):   PPingRequest,
-		reflect.TypeOf(PingResponse{}):  PPingResponse,
+		reflect.TypeFor[HelloRequest]():  PHelloRequest,
+		reflect.TypeFor[HelloResponse](): PHelloResponse,
+		reflect.TypeFor[PingRequest]():   PPingRequest,
+		reflect.TypeFor[PingResponse]():  PPingResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type

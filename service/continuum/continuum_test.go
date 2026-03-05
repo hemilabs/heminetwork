@@ -148,7 +148,7 @@ func createDNSNodes(domain string, count byte) *dnsHandler {
 		lookup: make(map[string][]dns.RR),
 		nodes:  make(map[string]*node),
 	}
-	for i := byte(0); i < count; i++ {
+	for i := range count {
 		nodename := fmt.Sprintf("node%v", i+1)
 		n, err := createNode(nodename, domain, net.IPv4(127, 0, 1, i+1),
 			defaultPort)

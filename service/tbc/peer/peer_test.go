@@ -108,7 +108,7 @@ func TestPeer(t *testing.T) {
 		wg    sync.WaitGroup
 	)
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	for i := 0; i < wantPong; i++ {
+	for i := range wantPong {
 		wg.Add(1)
 		go func(nonce uint64) {
 			defer wg.Done()

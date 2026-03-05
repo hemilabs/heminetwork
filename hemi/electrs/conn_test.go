@@ -215,9 +215,7 @@ func createMockServer(t *testing.T) *mockServer {
 		stopCh:  make(chan struct{}, 1),
 	}
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		for {
 			select {
 			case <-s.stopCh:
@@ -233,7 +231,7 @@ func createMockServer(t *testing.T) *mockServer {
 			s.wg.Add(1)
 			go s.handleConnection(t, conn)
 		}
-	}()
+	})
 
 	return s
 }

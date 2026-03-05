@@ -29,7 +29,7 @@ import (
 )
 
 func TestEncryptDecrypt(t *testing.T) {
-	for i := 0; i < 33; i++ {
+	for range 33 {
 		server, err := NewTransportFromCurve(ecdh.X25519())
 		if err != nil {
 			t.Fatal(err)
@@ -190,10 +190,8 @@ func TestNonce(t *testing.T) {
 	)
 	maxNonces := int(1e4)
 	m := make(map[[TransportNonceSize]byte]int, maxNonces)
-	for i := 0; i < maxNonces; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range maxNonces {
+		wg.Go(func() {
 
 			nonce := n.Next() // race nonce
 
@@ -205,7 +203,7 @@ func TestNonce(t *testing.T) {
 					n.key, i))
 			}
 			m[*nonce] = i + 1
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -337,9 +335,7 @@ func TestConnKeyExchange(t *testing.T) {
 			defer listener.Close()
 			port := listener.Addr().(*net.TCPAddr).Port
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				t.Logf("Listening: %v", port)
 				conn, err := listener.Accept()
@@ -350,12 +346,10 @@ func TestConnKeyExchange(t *testing.T) {
 				if err := serverTransport.KeyExchange(ctx, conn); err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			// Client
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				addr, err := net.ResolveTCPAddr("tcp",
 					net.JoinHostPort("127.0.0.1", "0"))
@@ -379,7 +373,7 @@ func TestConnKeyExchange(t *testing.T) {
 				}
 
 				t.Logf("client connected using: %v", clientTransport.Curve())
-			}()
+			})
 
 			wg.Wait()
 
@@ -501,20 +495,16 @@ func TestKeyExchangeErrors(t *testing.T) {
 			port := listener.Addr().(*net.TCPAddr).Port
 
 			// Server conn
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				var cerr error
 				serverConn, cerr = listener.Accept()
 				if cerr != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			// Client conn
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				var cerr error
 				d := &net.Dialer{}
 				clientConn, cerr = d.DialContext(ctx, "tcp",
@@ -522,7 +512,7 @@ func TestKeyExchangeErrors(t *testing.T) {
 				if cerr != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			wg.Wait()
 
@@ -784,20 +774,16 @@ func TestHandshakeErrors(t *testing.T) {
 			port := listener.Addr().(*net.TCPAddr).Port
 
 			// Server conn
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				var cerr error
 				serverConn, cerr = listener.Accept()
 				if cerr != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			// Client conn
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				var cerr error
 				d := &net.Dialer{}
 				clientConn, cerr = d.DialContext(ctx, "tcp",
@@ -805,7 +791,7 @@ func TestHandshakeErrors(t *testing.T) {
 				if cerr != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			wg.Wait()
 
@@ -813,24 +799,20 @@ func TestHandshakeErrors(t *testing.T) {
 			t.Logf("%s: %s", clientTransport, clientConn.LocalAddr())
 
 			// Server conn
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				err := serverTransport.KeyExchange(ctx, serverConn)
 				if err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			// Client conn
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				err := clientTransport.KeyExchange(ctx, clientConn)
 				if err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			wg.Wait()
 
@@ -900,9 +882,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 			port := listener.Addr().(*net.TCPAddr).Port
 
 			var clientAddress net.Addr // We obtain client IP when we accept a connection.
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				t.Logf("Listening: %v:%v", node1.IP, port)
 				conn, err := listener.Accept()
@@ -914,12 +894,10 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				if err := serverTransport.KeyExchange(ctx, conn); err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			// Client
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				addr, err := net.ResolveTCPAddr("tcp",
 					net.JoinHostPort(node2.IP.String(), "0"))
@@ -936,7 +914,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				if err := clientTransport.KeyExchange(ctx, conn); err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			wg.Wait()
 
@@ -948,9 +926,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 			// Handshake
 			var derivedClient, derivedServer *Identity
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				var err error // prevent data race
 				derivedClient, err = serverTransport.Handshake(ctx, serverSecret)
@@ -968,11 +944,9 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				if !ok {
 					panic("client dns")
 				}
-			}()
+			})
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				defer func() {
 					if err := clientTransport.Close(); err != nil {
@@ -997,7 +971,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				if !ok {
 					panic("server dns")
 				}
-			}()
+			})
 
 			wg.Wait()
 
@@ -1047,9 +1021,7 @@ func TestConnHandshake(t *testing.T) {
 			defer listener.Close()
 			port := listener.Addr().(*net.TCPAddr).Port
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				t.Logf("Listening: %v", port)
 				conn, err := listener.Accept()
@@ -1060,12 +1032,10 @@ func TestConnHandshake(t *testing.T) {
 				if err := serverTransport.KeyExchange(ctx, conn); err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			// Client
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				addr, err := net.ResolveTCPAddr("tcp",
 					net.JoinHostPort("127.0.0.1", "0"))
@@ -1082,7 +1052,7 @@ func TestConnHandshake(t *testing.T) {
 				if err := clientTransport.KeyExchange(ctx, conn); err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			wg.Wait()
 
@@ -1094,9 +1064,7 @@ func TestConnHandshake(t *testing.T) {
 			// Handshake
 			var derivedClient, derivedServer *Identity
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				var err error
 
@@ -1104,11 +1072,9 @@ func TestConnHandshake(t *testing.T) {
 				if err != nil {
 					panic(err)
 				}
-			}()
+			})
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				var err error
 
@@ -1122,7 +1088,7 @@ func TestConnHandshake(t *testing.T) {
 				if err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			wg.Wait()
 

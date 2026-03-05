@@ -291,7 +291,7 @@ func (s *Server) fixupCacheChannel(ctx context.Context, b *btcutil.Block, utxos 
 	slots := 128
 	c := make(chan struct{}, slots)
 	defer close(c)
-	for i := 0; i < slots; i++ {
+	for range slots {
 		select {
 		case <-ctx.Done():
 			return nil

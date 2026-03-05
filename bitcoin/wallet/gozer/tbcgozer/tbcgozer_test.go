@@ -101,10 +101,8 @@ func TestTBCGozerConnection(t *testing.T) {
 		cc    int
 	)
 	qd := DefaultCommandQueueDepth * 100
-	for i := 0; i < qd; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range qd {
+		wg.Go(func() {
 			h, _, _, err := b.BestHeightHashTime(ctx)
 			if err != nil {
 				panic(err)
@@ -115,7 +113,7 @@ func TestTBCGozerConnection(t *testing.T) {
 			ccMtx.Lock()
 			cc++
 			ccMtx.Unlock()
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -216,10 +214,8 @@ func TestTBCGozerCalls(t *testing.T) {
 		cc    int
 	)
 	qd := DefaultCommandQueueDepth * 100
-	for i := 0; i < qd; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range qd {
+		wg.Go(func() {
 
 			fes, err := b.FeeEstimates(ctx)
 			if err != nil {
@@ -272,7 +268,7 @@ func TestTBCGozerCalls(t *testing.T) {
 			ccMtx.Lock()
 			cc++
 			ccMtx.Unlock()
-		}()
+		})
 	}
 
 	wg.Wait()

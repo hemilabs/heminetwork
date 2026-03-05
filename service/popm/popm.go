@@ -606,9 +606,7 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 		return fmt.Errorf("hydrate: %w", err)
 	}
 
-	s.opgethWG.Add(1)
-	go func() {
-		defer s.opgethWG.Done()
+	s.opgethWG.Go(func() {
 
 		err := s.handleOpgethSubscription(ctx)
 		if err != nil {
@@ -620,7 +618,7 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 		s.mtx.Lock()
 		s.keystones = nil
 		s.mtx.Unlock()
-	}()
+	})
 
 	<-ctx.Done()
 	s.opgethClient.Close()
@@ -913,18 +911,14 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
 			log.Infof("prometheus clean shutdown")
-		}()
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		})
+		s.wg.Go(func() {
 			err := s.promPoll(ctx)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
@@ -932,7 +926,7 @@ func (s *Server) Run(pctx context.Context) error {
 				}
 				return
 			}
-		}()
+		})
 	}
 
 	// pprof
@@ -943,27 +937,21 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create pprof server: %w", err)
 		}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
 				log.Errorf("pprof server terminated with error: %v", err)
 				return
 			}
 			log.Infof("pprof server clean shutdown")
-		}()
+		})
 	}
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		s.opgeth(ctx)
-	}()
+	})
 
 	// Mining
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		t := time.NewTimer(defaultL2KeystoneRetryTimeout)
 		for {
 			t.Reset(defaultL2KeystoneRetryTimeout)
@@ -979,7 +967,7 @@ func (s *Server) Run(pctx context.Context) error {
 				log.Errorf("mine: %v", err)
 			}
 		}
-	}()
+	})
 
 	log.Infof("bitcoin address : %v", s.btcAddress)
 	log.Infof("ethereum address: %v", s.ethAddress)

@@ -300,11 +300,9 @@ func (pm *PeerManager) AllBlock(ctx context.Context, f func(ctx context.Context,
 		if !p.IsConnected() {
 			continue
 		}
-		wgAll.Add(1)
-		go func() {
-			defer wgAll.Done()
+		wgAll.Go(func() {
 			f(ctx, p)
-		}()
+		})
 	}
 	pm.mtx.RUnlock()
 
