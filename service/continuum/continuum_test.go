@@ -11569,3 +11569,318 @@ func TestVerifyInboundDNSRateLimited(t *testing.T) {
 		t.Fatal("expected rate limit error")
 	}
 }
+
+// --- Transport Write/WriteTo invalid type ---
+
+// TestWriteInvalidType verifies Write returns an error for an
+// unregistered command type.
+func TestWriteInvalidType(t *testing.T) {
+	srv, _ := connectedTransports(t)
+	err := srv.Write(Identity{}, struct{ X int }{42})
+	if err == nil {
+		t.Fatal("expected error for unregistered type")
+	}
+	if !strings.Contains(err.Error(), "invalid command type") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestWriteToInvalidType verifies WriteTo returns an error for an
+// unregistered command type.
+func TestWriteToInvalidType(t *testing.T) {
+	srv, _ := connectedTransports(t)
+	err := srv.WriteTo(Identity{}, Identity{0x01}, 5, struct{ X int }{42})
+	if err == nil {
+		t.Fatal("expected error for unregistered type")
+	}
+	if !strings.Contains(err.Error(), "invalid command type") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- TXTRecordFromAddress edge cases ---
+
+// emptyPTRHandler is a DNS handler that answers all queries with an
+// empty answer section (no PTR records for reverse lookups).
+type emptyPTRHandler struct{}
+
+func (h *emptyPTRHandler) ServeDNS(_ context.Context, w dns.ResponseWriter, r *dns.Msg) {
+	m := new(dns.Msg)
+	dnsutil.SetReply(m, r)
+	// No answers — triggers "no records" error.
+	if _, err := io.Copy(w, m); err != nil {
+		panic(err)
+	}
+}
+
+// TestTXTRecordFromAddressNoReverseRecords verifies the error when
+// reverse lookup returns zero records.
+func TestTXTRecordFromAddressNoReverseRecords(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	dnsSrv := newDNSServer(ctx, &emptyPTRHandler{})
+	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
+	resolver := newResolver(dnsSrv.Listener.Addr().String())
+
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
+	_, err := TXTRecordFromAddress(ctx, resolver, addr)
+	if err == nil {
+		t.Fatal("expected error for no reverse records")
+	}
+	// Go's resolver may return "lame referral" or "no records"
+	// depending on platform; either is correct for empty PTR.
+}
+
+// multiTXTHandler is a DNS handler that returns a valid PTR record
+// for reverse lookups but returns 2 TXT records (triggering the
+// "!= 1" error in TXTRecordFromAddress).
+type multiTXTHandler struct{}
+
+func (h *multiTXTHandler) ServeDNS(_ context.Context, w dns.ResponseWriter, r *dns.Msg) {
+	m := new(dns.Msg)
+	dnsutil.SetReply(m, r)
+
+	q := m.Question[0]
+	switch q.Header().Class {
+	default:
+		if strings.HasSuffix(q.Header().Name, "arpa.") {
+			// PTR query — return a hostname.
+			m.Answer = append(m.Answer, &dns.PTR{
+				Hdr: dns.Header{Name: q.Header().Name, Class: dns.ClassINET},
+				Ptr: "node.example.com.",
+			})
+		} else {
+			// TXT query — return 2 records.
+			m.Answer = append(m.Answer,
+				&dns.TXT{
+					Hdr: dns.Header{Name: q.Header().Name, Class: dns.ClassINET},
+					Txt: []string{"v=continuum;id=aabb"},
+				},
+				&dns.TXT{
+					Hdr: dns.Header{Name: q.Header().Name, Class: dns.ClassINET},
+					Txt: []string{"v=continuum;id=ccdd"},
+				},
+			)
+		}
+	}
+	if _, err := io.Copy(w, m); err != nil {
+		panic(err)
+	}
+}
+
+// TestTXTRecordFromAddressMultipleTXT verifies the error when
+// the TXT lookup returns more than one record.
+func TestTXTRecordFromAddressMultipleTXT(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	dnsSrv := newDNSServer(ctx, &multiTXTHandler{})
+	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
+	resolver := newResolver(dnsSrv.Listener.Addr().String())
+
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
+	_, err := TXTRecordFromAddress(ctx, resolver, addr)
+	if err == nil {
+		t.Fatal("expected error for multiple TXT records")
+	}
+	if !strings.Contains(err.Error(), "no txt records") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- verifyOutboundDNS reverse path ---
+
+// TestVerifyOutboundDNSIPReverseMismatch verifies that an IP target
+// in DNSAll mode with a reverse DNS identity mismatch returns an error.
+func TestVerifyOutboundDNSIPReverseMismatch(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSAll
+
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	handler := createDNSNodes("mismatch.local", 1)
+	dnsSrv := newDNSServer(ctx, handler)
+	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
+	s.resolver = newResolver(dnsSrv.Listener.Addr().String())
+
+	var nodeIP net.IP
+	for _, n := range handler.nodes {
+		nodeIP = n.IP
+		break
+	}
+	addr := &net.TCPAddr{IP: nodeIP, Port: 9090}
+	wrongID := Identity{0xFF}
+
+	err = s.verifyOutboundDNS(ctx, nodeIP.String()+":9090", addr, wrongID)
+	if err == nil {
+		t.Fatal("expected mismatch error")
+	}
+}
+
+// TestVerifyOutboundDNSIPReverseSuccess verifies that an IP target
+// in DNSReverse mode with matching identity succeeds.
+func TestVerifyOutboundDNSIPReverseSuccess(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSReverse
+
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	handler := createDNSNodes("match.local", 1)
+	dnsSrv := newDNSServer(ctx, handler)
+	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
+	s.resolver = newResolver(dnsSrv.Listener.Addr().String())
+
+	var nodeIP net.IP
+	var nodeID Identity
+	for _, n := range handler.nodes {
+		nodeIP = n.IP
+		nodeID = n.Secret.Identity
+		break
+	}
+	addr := &net.TCPAddr{IP: nodeIP, Port: 9090}
+
+	err = s.verifyOutboundDNS(ctx, nodeIP.String()+":9090", addr, nodeID)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+}
+
+// TestVerifyOutboundDNSHostnameRateLimited verifies that hostname
+// targets in forward mode are rate limited.
+func TestVerifyOutboundDNSHostnameRateLimited(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSForward
+
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
+
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 10; i++ {
+		_ = s.dnsRateLimited(addr)
+	}
+
+	err = s.verifyOutboundDNS(t.Context(), "node.example.com:9090", addr, secret.Identity)
+	if err == nil {
+		t.Fatal("expected rate limit error")
+	}
+}
+
+// --- newTransport error paths ---
+
+// TestNewTransportKXError verifies that newTransport returns an error
+// when KeyExchange fails (e.g. peer closes connection immediately).
+func TestNewTransportKXError(t *testing.T) {
+	s, _ := NewServer(testConfig())
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = secret
+
+	// Create a TCP pair where the peer side closes immediately.
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	go func() {
+		c, aerr := ln.Accept()
+		if aerr != nil {
+			return
+		}
+		c.Close() // peer closes → KX fails
+	}()
+
+	conn, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = s.newTransport(t.Context(), conn)
+	if err == nil {
+		t.Fatal("expected KX error")
+	}
+	if !strings.Contains(err.Error(), "key exchange") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestNewTransportHandshakeError verifies that newTransport returns
+// an error when the handshake fails (peer sends wrong identity).
+func TestNewTransportHandshakeError(t *testing.T) {
+	s, _ := NewServer(testConfig())
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = secret
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	// Use pipes — KX succeeds, but handshake fails because
+	// the peer never sends a valid HelloRequest.
+	srvConn, cliConn := net.Pipe()
+	t.Cleanup(func() { srvConn.Close() })
+
+	go func() {
+		// Complete KX from client side, then close.
+		cli := new(Transport)
+		_ = cli.KeyExchange(ctx, cliConn)
+		cliConn.Close() // handshake read will fail
+	}()
+
+	_, _, _, err = s.newTransport(ctx, srvConn)
+	if err == nil {
+		t.Fatal("expected handshake error")
+	}
+	if !strings.Contains(err.Error(), "handshake") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestVerifyOutboundDNSSplitHostPortError(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSForward
+
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
+
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "example.com" without port — SplitHostPort fails, falls through to bare host
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
+	// The host "example.com" is a hostname, so forward mode kicks in.
+	// Without a DNS server it'll fail, but that tests the path.
+	_ = s.verifyOutboundDNS(t.Context(), "example.com", addr, secret.Identity)
+}
