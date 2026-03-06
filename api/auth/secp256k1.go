@@ -136,9 +136,9 @@ func (s *Secp256k1Auth) RemotePublicKey() *dcrsecpk256k1.PublicKey {
 // Commands returns the protocol commands for this authenticator.
 func (s *Secp256k1Auth) Commands() map[protocol.Command]reflect.Type {
 	return map[protocol.Command]reflect.Type{
-		CmdSecp256k1Hello:                  reflect.TypeOf(Secp256k1Hello{}),
-		CmdSecp256k1HelloChallenge:         reflect.TypeOf(Secp256k1HelloChallenge{}),
-		CmdSecp256k1HelloChallengeAccepted: reflect.TypeOf(Secp256k1HelloChallengeAccepted{}),
+		CmdSecp256k1Hello:                  reflect.TypeFor[Secp256k1Hello](),
+		CmdSecp256k1HelloChallenge:         reflect.TypeFor[Secp256k1HelloChallenge](),
+		CmdSecp256k1HelloChallengeAccepted: reflect.TypeFor[Secp256k1HelloChallengeAccepted](),
 	}
 }
 

@@ -26,7 +26,7 @@ endpoint.**
 
 ### 🏁 Prerequisites
 
-Ensure Go v1.25 or newer is installed on your system.
+Ensure Go v1.26 or newer is installed on your system.
 
 ### Using Makefile
 

@@ -204,7 +204,7 @@ func TestClientReap(t *testing.T) {
 	// Launch 5 clients
 	var wg sync.WaitGroup
 	clientCount := 5
-	for i := 0; i < clientCount; i++ {
+	for i := range clientCount {
 		wg.Add(1)
 		go func(x int) {
 			defer wg.Done()
@@ -470,7 +470,7 @@ func TestProxy(t *testing.T) {
 func TestFanout(t *testing.T) {
 	serverCount := 5
 	servers := make([]string, 0, serverCount)
-	for i := 0; i < serverCount; i++ {
+	for i := range serverCount {
 		s := newServer(i, nil)
 		defer s.Close()
 
@@ -498,7 +498,7 @@ func TestFanout(t *testing.T) {
 	)
 	clientCount := serverCount * 100
 	answers := make([]int, serverCount)
-	for i := 0; i < clientCount; i++ {
+	for i := range clientCount {
 		wg.Add(1)
 		go func(x int) {
 			defer wg.Done()
@@ -568,7 +568,7 @@ func TestPersistence(t *testing.T) {
 	serverCount := 5
 
 	servers := make([]string, 0, serverCount)
-	for i := 0; i < serverCount; i++ {
+	for i := range serverCount {
 		s := newServer(i, nil)
 		defer s.Close()
 
@@ -596,7 +596,7 @@ func TestPersistence(t *testing.T) {
 	c := &http.Client{
 		Transport: http.DefaultTransport,
 	}
-	for i := 0; i < clientCount; i++ {
+	for i := range clientCount {
 		x := i
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 			"http://"+hpCfg.ListenAddress, newEthReq("ping"))
@@ -660,7 +660,7 @@ func TestFailover(t *testing.T) {
 	serverCount := 5
 
 	servers := make([]string, 0, serverCount)
-	for i := 0; i < serverCount; i++ {
+	for i := range serverCount {
 		s := newServer(i, nil)
 		defer s.Close()
 
@@ -691,7 +691,7 @@ func TestFailover(t *testing.T) {
 		Transport: http.DefaultTransport,
 	}
 	var nextUnhealthy int
-	for i := 0; i < clientCount; i++ {
+	for i := range clientCount {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 			"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 		if err != nil {

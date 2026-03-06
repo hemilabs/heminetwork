@@ -284,7 +284,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		}
 		defer body.Close()
 
-		var jr []map[string]interface{}
+		var jr []map[string]any
 		err = json.NewDecoder(body).Decode(&jr)
 		if err != nil {
 			return fmt.Errorf("decode: %w", err)
@@ -304,7 +304,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		}
 		defer body.Close()
 
-		var jr []map[string]interface{}
+		var jr []map[string]any
 		err = json.NewDecoder(body).Decode(&jr)
 		if err != nil {
 			return fmt.Errorf("decode: %w", err)
@@ -340,7 +340,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		}
 		defer body.Close()
 
-		var jr []map[string]interface{}
+		var jr []map[string]any
 		err = json.NewDecoder(body).Decode(&jr)
 		if err != nil {
 			return fmt.Errorf("decode: %w", err)
@@ -1240,7 +1240,7 @@ func p2p(flags []string) error {
 	switch action {
 	case "feefilter":
 		// loop here for a bit since fee filter shows up late
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			time.Sleep(100 * time.Millisecond)
 			msg, err = cp.FeeFilter()
 			if err != nil {

@@ -924,7 +924,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	// to be removed match the tip the caller wants to be canonical after
 	// the removal.
 	tipAfterRemovalHash := tipAfterRemoval.BlockHash()
-	for i := 0; i < len(headersParsed); i++ {
+	for i := range headersParsed {
 		headerToCheck := headersParsed[i]
 		hash := headerToCheck.BlockHash()
 
@@ -965,7 +965,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		// Check all potential children. If one has our header to remove's hash as their
 		// previous block, then make sure it is in the removal list. Two or more cannot
 		// be in our removal list because they would have failed contiguous check prior.
-		for j := 0; j < len(potentialChildren); j++ {
+		for j := range potentialChildren {
 			toCheck := potentialChildren[j]
 			parent := toCheck.ParentHash()
 			if !bytes.Equal(parent[:], hash[:]) {
@@ -1010,7 +1010,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	}
 
 	//
-	for i := 0; i < len(fullHeadersFromDb); i++ {
+	for i := range fullHeadersFromDb {
 		// This should be impossible since above loop should have errored when
 		// getting header, but extra sanity.
 		if fullHeadersFromDb[i] == nil {
@@ -1054,7 +1054,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 	// Insert each block header deletion into the batch (for header itself and
 	// height-header association)
-	for i := 0; i < len(headersParsed); i++ {
+	for i := range headersParsed {
 		// Delete header i
 		bhash := headersParsed[i].BlockHash()
 		fh := fullHeadersFromDb[i]

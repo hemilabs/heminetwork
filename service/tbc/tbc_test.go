@@ -705,7 +705,7 @@ func TestForksWithGen(t *testing.T) {
 				earliestA := ""
 				earliestB := ""
 
-				for i := 0; i < 3; i++ {
+				for i := range 3 {
 					// invalidate B and reconsider A to grow chain A
 					if earliestB != "" {
 						invalidateBlock(ctx, t, bitcoindContainer, earliestB)
@@ -1508,7 +1508,7 @@ func hexToRawHeader(hexStr string) (*[80]byte, error) {
 
 	parsed := testutil.DecodeHex(hexStr)
 	header := [80]byte{}
-	for i := 0; i < 80; i++ {
+	for i := range 80 {
 		header[i] = parsed[i]
 	}
 
@@ -1522,7 +1522,7 @@ func hexToHash(hexStr string) (*[32]byte, error) {
 
 	parsed := testutil.DecodeHex(hexStr)
 	hash := [32]byte{}
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		hash[i] = parsed[i]
 	}
 
@@ -1682,7 +1682,7 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 	}
 
 	// STEP 1: Walk chain forward 9 blocks after genesis
-	for i := 0; i < len(simpleChainHeaders); i++ {
+	for i := range len(simpleChainHeaders) {
 		blockraw, err := hexToRawHeader(simpleChainHeaders[i])
 		if err != nil {
 			t.Errorf("unable to parse hex header %s", simpleChainHeaders[i])
@@ -1874,7 +1874,7 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 		parsedHeaders := make([]*wire.BlockHeader, 3)
 		var lastHashToAdd *chainhash.Hash
 
-		for j := 0; j < 3; j++ {
+		for j := range 3 {
 			blockraw, err := hexToRawHeader(simpleChainHeaders[i+j])
 			if err != nil {
 				t.Errorf("unable to parse hex header %s", simpleChainHeaders[i+j])

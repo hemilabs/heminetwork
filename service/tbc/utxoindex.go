@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -291,7 +291,7 @@ func (s *Server) fixupCacheChannel(ctx context.Context, b *btcutil.Block, utxos 
 	slots := 128
 	c := make(chan struct{}, slots)
 	defer close(c)
-	for i := 0; i < slots; i++ {
+	for range slots {
 		select {
 		case <-ctx.Done():
 			return nil

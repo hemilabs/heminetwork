@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -37,7 +37,7 @@ func TestLRUCache(t *testing.T) {
 
 	prevHash := chainhash.Hash{} // genesis
 	blocks := make([]chainhash.Hash, 0, maxCache*2)
-	for i := 0; i < maxCache; i++ {
+	for i := range maxCache {
 		h, _, r := newBlock(&prevHash, uint32(i))
 		t.Logf("%v: %v", i, h)
 		blocks = append(blocks, h)
@@ -117,7 +117,7 @@ func TestMapCache(t *testing.T) {
 
 	prevHash := chainhash.Hash{} // genesis
 	headers := make([]chainhash.Hash, 0, maxCacheCount*2)
-	for i := 0; i < maxCacheCount; i++ {
+	for i := range maxCacheCount {
 		h, bh := newHeader(&prevHash, uint32(i))
 		t.Logf("%v: %v", i, h)
 		headers = append(headers, h)

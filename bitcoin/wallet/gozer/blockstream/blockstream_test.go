@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -27,12 +27,12 @@ func mockHttpServer() *httptest.Server {
 		fakeHash := "00000000c5cbf1fcdc75539ac75fe8a98417976e548197355b3e5f6c4e884a17"
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/address/") && strings.HasSuffix(r.URL.Path, "/utxo"):
-			utxos := []map[string]interface{}{
+			utxos := []map[string]any{
 				{
 					"txid":  chainhash.Hash{},
 					"vout":  1,
 					"value": 100000000,
-					"status": map[string]interface{}{
+					"status": map[string]any{
 						"confirmed":    true,
 						"block_height": 1,
 						"block_hash":   chainhash.Hash{},

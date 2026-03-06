@@ -111,11 +111,11 @@ func TestTTLExpire(t *testing.T) {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
+	for i := range count {
 		wg.Add(1)
 		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callback, nil)
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		key := strconv.Itoa(i)
 		if _, _, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)
@@ -135,7 +135,7 @@ func TestTTLExpire(t *testing.T) {
 	}
 
 	// Check that all items are expired
-	for i := 0; i < count; i++ {
+	for i := range count {
 		key := strconv.Itoa(i)
 		if _, expired, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)
@@ -156,7 +156,7 @@ func TestTTLCancel(t *testing.T) {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
+	for i := range count {
 		wg.Add(1)
 		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callbackPanic, callback)
 	}
@@ -164,7 +164,7 @@ func TestTTLCancel(t *testing.T) {
 	if l != count {
 		t.Fatalf("invalid len got %v want %v", l, count)
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		key := strconv.Itoa(i)
 		if _, _, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)
@@ -193,7 +193,7 @@ func TestTTLDelete(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	for i := 0; i < count; i++ {
+	for i := range count {
 		tm.Put(ctx, time.Second, strconv.Itoa(i), i, callbackPanic,
 			callbackPanic)
 	}
@@ -201,7 +201,7 @@ func TestTTLDelete(t *testing.T) {
 	if l != count {
 		t.Fatalf("invalid len got %v want %v", l, count)
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		key := strconv.Itoa(i)
 		if expired, err := tm.Delete(key); err != nil {
 			t.Fatal(err)
@@ -227,7 +227,7 @@ func TestTTLDeleteByValue(t *testing.T) {
 	defer cancel()
 
 	x := 1337
-	for i := 0; i < count; i++ {
+	for i := range count {
 		tm.Put(ctx, time.Second, strconv.Itoa(i), x, callbackPanic,
 			callbackPanic)
 	}

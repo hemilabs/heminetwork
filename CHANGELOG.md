@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Update required Go version to [Go 1.25](https://tip.golang.org/doc/go1.25)
-  ([#673](https://github.com/hemilabs/heminetwork/pull/673), [#698](https://github.com/hemilabs/heminetwork/pull/698)).
+- Update required Go version to [Go 1.26](https://tip.golang.org/doc/go1.26)
+  ([#673](https://github.com/hemilabs/heminetwork/pull/673), [#698](https://github.com/hemilabs/heminetwork/pull/698),
+  [#896](https://github.com/hemilabs/heminetwork/pull/896)).
 
 - Move `testutil` into the `internal/` package, removing it from the public API
   ([#735](https://github.com/hemilabs/heminetwork/pull/735)).

@@ -23,7 +23,7 @@ jobs:
       DOCKER_IMAGE_TAG: optimism-stack:latest
     strategy:
       matrix:
-        go-version: [ "1.25.x" ]
+        go-version: [ "1.26.x" ]
         gethl1:
           - "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     steps:

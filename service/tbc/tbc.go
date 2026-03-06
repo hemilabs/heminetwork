@@ -3119,15 +3119,13 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create pprof server: %w", err)
 		}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
 				log.Errorf("pprof server terminated with error: %v", err)
 				return
 			}
 			log.Infof("pprof server clean shutdown")
-		}()
+		})
 	}
 
 	// Prometheus
@@ -3138,18 +3136,14 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
 			log.Infof("prometheus clean shutdown")
-		}()
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		})
+		s.wg.Go(func() {
 			err := s.promPoll(ctx)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
@@ -3157,14 +3151,12 @@ func (s *Server) Run(pctx context.Context) error {
 				}
 				return
 			}
-		}()
+		})
 	}
 
 	errC := make(chan error)
 	if s.cfg.PeersWanted > 0 {
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			err := s.pm.Run(ctx)
 			log.Infof("Peer manager shutting down")
 			if err != nil {
@@ -3175,12 +3167,10 @@ func (s *Server) Run(pctx context.Context) error {
 			} else {
 				log.Infof("Peer manager clean shutdown")
 			}
-		}()
+		})
 
 		// connected peers
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			for {
 				p, err := s.pm.RandomConnect(ctx)
 				if err != nil {
@@ -3198,12 +3188,10 @@ func (s *Server) Run(pctx context.Context) error {
 					}
 				}(p)
 			}
-		}()
+		})
 
 		// ping loop
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			ticker := time.NewTicker(13 * time.Second)
 			for {
 				select {
@@ -3214,7 +3202,7 @@ func (s *Server) Run(pctx context.Context) error {
 				}
 				s.pm.All(ctx, s.pingPeer)
 			}
-		}()
+		})
 	}
 
 	// Welcome user.
