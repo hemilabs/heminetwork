@@ -324,15 +324,14 @@ snapshot:
   version_template: "{{ incpatch .Version }}-dev-{{ .ShortCommit }}"
 
 # Generates the changelog.
-changelog:
-  use: "github-native"
+changelog: {}
 
 # Creates a GitHub release.
 release:
   github:
     owner: "hemilabs"
     name: "heminetwork"
-  replace_existing_draft: true
+  draft: true
   prerelease: "auto"
 
 # Closes milestones for the released tag.
