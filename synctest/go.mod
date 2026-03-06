@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork/synctest
 
 go 1.26
 
-toolchain go1.26.0
+toolchain go1.26.1
 
 require (
 	github.com/caarlos0/env/v11 v11.4.0
