@@ -339,10 +339,10 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 		return nil, nil, nil, fmt.Errorf("handshake: %w", err)
 	}
 
-	// DNS verification for incoming connections.  In forward mode
-	// we cannot verify (no hostname for the remote yet — they'll
-	// gossip it later).  In reverse/all mode, reverse-verify the
-	// remote IP.
+	// DNS verification for incoming connections.  Loopback is
+	// exempt (admin clients like hemictl).  In forward mode we
+	// cannot verify (no hostname yet).  In reverse/all mode,
+	// reverse-verify the remote IP.
 	if err := s.verifyInboundDNS(ctx, conn.RemoteAddr(), *id); err != nil {
 		return nil, nil, nil, err
 	}
@@ -952,6 +952,12 @@ func (s *Server) verifyOutboundDNS(ctx context.Context, dialTarget string, remot
 //   - DNS="reverse" or "all": reverse DNS verify the remote IP
 //   - DNS="off": no verification
 func (s *Server) verifyInboundDNS(ctx context.Context, remoteAddr net.Addr, id Identity) error {
+	// Loopback connections are localhost admin clients (hemictl).
+	// DNS is meaningless for 127.0.0.1 and would reject the only
+	// way to send commands to the node.  Same pattern as requireAdmin.
+	if isLocalhost(remoteAddr) {
+		return nil
+	}
 	switch s.cfg.DNS {
 	case DNSReverse, DNSAll:
 		if s.dnsRateLimited(remoteAddr) {
