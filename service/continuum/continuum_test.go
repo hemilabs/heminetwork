@@ -1435,7 +1435,7 @@ func TestDNSReverseIdentityMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nodeB, err := createNode("nodeB", domain, net.IPv4(127, 0, 0, 1), 12345)
+	nodeB, err := createNode("nodeB", domain, net.IPv4(10, 0, 0, 99), 12345)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1464,7 +1464,7 @@ func TestDNSReverseIdentityMismatch(t *testing.T) {
 	serverA.dnsLookups = dl
 
 	// Verify reverse lookup returns mismatch.
-	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 99), Port: 12345}
 	err = serverA.verifyInboundDNS(ctx, addr, serverB.Identity())
 	if err == nil {
 		t.Fatal("expected error for identity mismatch in reverse mode")
@@ -11858,7 +11858,10 @@ func TestNewTransportHandshakeError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected handshake error")
 	}
-	if !strings.Contains(err.Error(), "handshake") {
+	// newTransport does KX then handshake; pipe races mean the
+	// error may surface at either stage.
+	e := err.Error()
+	if !strings.Contains(e, "handshake") && !strings.Contains(e, "key exchange") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -11883,4 +11886,95 @@ func TestVerifyOutboundDNSSplitHostPortError(t *testing.T) {
 	// The host "example.com" is a hostname, so forward mode kicks in.
 	// Without a DNS server it'll fail, but that tests the path.
 	_ = s.verifyOutboundDNS(t.Context(), "example.com", addr, secret.Identity)
+}
+
+// TestNewTransportLoopbackSkipsDNS verifies that newTransport skips DNS
+// verification for loopback connections.  Without this, hemictl cannot
+// connect to the local transfunctionerd when DNS is enabled.
+func TestNewTransportLoopbackSkipsDNS(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.DNS = DNSAll
+
+	// Initialize server secret (normally done by Run).
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = secret
+
+	dl, err := ttl.New(8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.dnsLookups = dl
+
+	// Resolver that always fails.  If called, DNS was not skipped.
+	resolverCalled := false
+	s.resolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			resolverCalled = true
+			return nil, errors.New("dns should not be called for loopback")
+		},
+	}
+
+	// TCP listener on loopback.
+	lc := &net.ListenConfig{}
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	// Client goroutine: dial, KX, handshake.
+	errCh := make(chan error, 1)
+	go func() {
+		d := &net.Dialer{}
+		conn, err := d.DialContext(ctx, "tcp", ln.Addr().String())
+		if err != nil {
+			errCh <- err
+			return
+		}
+		tr := new(Transport)
+		if err := tr.KeyExchange(ctx, conn); err != nil {
+			conn.Close()
+			errCh <- err
+			return
+		}
+		cliSecret, err := NewSecret()
+		if err != nil {
+			tr.Close()
+			errCh <- err
+			return
+		}
+		_, _, err = tr.Handshake(ctx, cliSecret)
+		tr.Close()
+		errCh <- err
+	}()
+
+	// Server side: accept + newTransport.
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id, transport, _, err := s.newTransport(ctx, conn)
+	if err != nil {
+		t.Fatalf("newTransport on loopback should succeed, got: %v", err)
+	}
+	transport.Close()
+	_ = id
+
+	if resolverCalled {
+		t.Fatal("DNS resolver was called for loopback connection")
+	}
+
+	// Wait for client.
+	if err := <-errCh; err != nil {
+		t.Fatalf("client error: %v", err)
+	}
 }
