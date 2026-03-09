@@ -3614,7 +3614,7 @@ func TestConnectPeerSkipsSelf(t *testing.T) {
 	s.wg.Add(1)
 	done := make(chan struct{})
 	go func() {
-		s.connectPeer(t.Context(), "127.0.0.1:45067")
+		s.connectPeer(t.Context(), "127.0.0.1:45067", "")
 		close(done)
 	}()
 
@@ -3643,7 +3643,7 @@ func TestConnectPeerDialError(t *testing.T) {
 	s.wg.Add(1)
 	done := make(chan struct{})
 	go func() {
-		s.connectPeer(ctx, "127.0.0.1:1")
+		s.connectPeer(ctx, "127.0.0.1:1", "")
 		close(done)
 	}()
 
@@ -4227,7 +4227,7 @@ func TestConnectPeerKXError(t *testing.T) {
 		cfg:      &Config{PeersWanted: 8},
 	}
 	s.wg.Add(1)
-	s.connectPeer(ctx, ln.Addr().String())
+	s.connectPeer(ctx, ln.Addr().String(), "")
 	// Must not panic.  KX error is logged.
 }
 
@@ -4270,7 +4270,7 @@ func TestConnectPeerDNSForwardRejectsIP(t *testing.T) {
 		},
 	}
 	s.wg.Add(1)
-	s.connectPeer(ctx, addrB)
+	s.connectPeer(ctx, addrB, "")
 	// connectPeer should reject — IP-only peer in forward mode.
 
 	// A should have no sessions.
@@ -4392,7 +4392,7 @@ func TestConnectPeerHandshakeError(t *testing.T) {
 		cfg:      &Config{PeersWanted: 8},
 	}
 	s.wg.Add(1)
-	s.connectPeer(ctx, ln.Addr().String())
+	s.connectPeer(ctx, ln.Addr().String(), "")
 	// connectPeer logs "handshake" error and returns.
 }
 
@@ -4461,7 +4461,7 @@ func TestConnectPeerDNSVerifyError(t *testing.T) {
 		},
 	}
 	s.wg.Add(1)
-	s.connectPeer(ctx, addrB)
+	s.connectPeer(ctx, addrB, "")
 	// connectPeer rejects — IP-only target in forward mode.
 
 	s.mtx.RLock()
@@ -11976,5 +11976,90 @@ func TestNewTransportLoopbackSkipsDNS(t *testing.T) {
 	// Wait for client.
 	if err := <-errCh; err != nil {
 		t.Fatalf("client error: %v", err)
+	}
+}
+
+// TestSeedForwardModePreservesHostname verifies that seed() in forward
+// DNS mode passes the original hostname:port to connectPeer instead of
+// resolving it to an IP.  This ensures the PeerRecord gossiped to the
+// mesh carries a hostname that other nodes can verify via TXT lookup.
+func TestSeedForwardModePreservesHostname(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Start seed node A with a hostname configured.
+	serverA := newTestServer(t, preParams, 0, "localhost:0", nil)
+	serverA.cfg.Hostname = "seed1.test.gfy"
+	errA := make(chan error, 1)
+	go func() { errA <- serverA.Run(ctx) }()
+	addrA := waitForListenAddress(t, serverA, 2*time.Second)
+	t.Logf("A: %v at %s", serverA.Identity(), addrA)
+
+	_, port, err := net.SplitHostPort(addrA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock DNS: resolve seed1.test.gfy to A's listen IP and
+	// serve a TXT record with A's identity for forward verification.
+	ip := net.ParseIP("127.0.0.1")
+	seedFQDN := "seed1.test.gfy."
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &dnsHandler{
+		lookup: make(map[string][]dns.RR),
+		nodes:  make(map[string]*node),
+	}
+	handler.lookup[seedFQDN] = []dns.RR{
+		&dns.A{
+			Hdr: dns.Header{Name: seedFQDN, Class: dns.ClassINET},
+			A:   ip,
+		},
+		&dns.TXT{
+			Hdr: dns.Header{Name: seedFQDN, Class: dns.ClassINET},
+			Txt: []string{fmt.Sprintf("v=%v; identity=%v; port=%v",
+				dnsAppName, serverA.Identity(), portNum)},
+		},
+	}
+	dnsSrv := newDNSServer(ctx, handler)
+	dnsAddress := dnsSrv.Listener.Addr().String()
+
+	// Start node B in forward DNS mode, seeding via hostname.
+	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
+	serverB.cfg.DNS = DNSForward
+	serverB.cfg.Seeds = []string{"seed1.test.gfy:" + port}
+	serverB.resolver = newResolver(dnsAddress)
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+	waitForListenAddress(t, serverB, 2*time.Second)
+
+	// Wait for B to connect to A.
+	waitForSessions(t, serverB, 1, 5*time.Second)
+
+	// Verify B stored A's address as hostname:port, not IP:port.
+	serverB.mtx.RLock()
+	prA, ok := serverB.peers[serverA.secret.Identity]
+	serverB.mtx.RUnlock()
+	if !ok {
+		t.Fatal("B does not have A in peer map")
+	}
+	host, _, err := net.SplitHostPort(prA.Address)
+	if err != nil {
+		t.Fatalf("split peer address: %v", err)
+	}
+	if !isHostname(host) {
+		t.Fatalf("expected hostname in peer address, got IP: %v", prA.Address)
+	}
+	t.Logf("B stored A as %s (hostname preserved)", prA.Address)
+
+	cancel()
+	for _, errCh := range []chan error{errA, errB} {
+		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("server: %v", err)
+		}
 	}
 }
