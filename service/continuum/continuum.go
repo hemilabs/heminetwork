@@ -807,16 +807,29 @@ func (s *Server) seed(ctx context.Context) {
 			log.Errorf("seed parse: %v", err)
 			continue
 		}
+
 		ips, err := resolver.LookupHost(seedCtx, host)
 		if err != nil {
 			log.Errorf("seed lookup %v: %v", host, err)
 			continue
 		}
+
+		// In forward/all mode with a hostname seed, resolve
+		// for dialing but pass the original hostname:port as
+		// the gossip address.  Peers need the hostname for
+		// forward TXT verification.
+		//
+		// In reverse/off mode, the resolved IP is correct
+		// for both dialing and gossip (rDNS verification).
+		var gossipAddr string
+		if isHostname(host) && (s.cfg.DNS == DNSForward || s.cfg.DNS == DNSAll) {
+			gossipAddr = v
+		}
 		for _, ip := range ips {
 			addr := net.JoinHostPort(ip, port)
 			log.Infof("seed resolved %v -> %v", v, addr)
 			s.wg.Add(1)
-			go s.connectPeer(ctx, addr)
+			go s.connectPeer(ctx, addr, gossipAddr)
 		}
 	}
 }
@@ -1012,13 +1025,8 @@ func (s *Server) connectRandom(ctx context.Context) {
 		pr.Identity, pr.Address)
 
 	s.wg.Add(1)
-	go s.connectPeer(ctx, pr.Address)
+	go s.connectPeer(ctx, pr.Address, "")
 }
-
-// connectPeer dials addr, performs key exchange and handshake, registers
-// the session, and enters handle().  Unlike connect(), errors are logged
-// rather than sent to errC — failed maintenance dials must not kill the
-// server.
 
 // tcpKeepAlive enables TCP keepalive on conn with the given period.
 // Non-TCP connections (e.g. net.Pipe in tests) are a silent no-op.
@@ -1036,7 +1044,16 @@ func tcpKeepAlive(conn net.Conn, period time.Duration) {
 	}
 }
 
-func (s *Server) connectPeer(ctx context.Context, addr string) {
+// connectPeer dials addr, performs key exchange and handshake, registers
+// the session, and enters handle().  Unlike connect(), errors are logged
+// rather than sent to errC - failed maintenance dials must not kill the
+// server.
+//
+// gossipAddr overrides the address stored in the PeerRecord and used
+// for DNS verification.  When empty, addr is used for both.  seed()
+// passes a hostname:port gossipAddr in forward/all mode so the mesh
+// gossips hostnames instead of resolved IPs.
+func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 	defer s.wg.Done()
 
 	log.Debugf("connectPeer: %v", addr)
@@ -1089,8 +1106,12 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 	// DNS verification based on peer address from gossip.
 	// Hostname addresses get forward TXT verification.
 	// IP addresses get reverse DNS verification (if enabled).
-	if err := s.verifyOutboundDNS(ctx, addr, conn.RemoteAddr(), *them); err != nil {
-		log.Warningf("connectPeer dns %v: %v", addr, err)
+	recordAddr := gossipAddr
+	if recordAddr == "" {
+		recordAddr = addr
+	}
+	if err := s.verifyOutboundDNS(ctx, recordAddr, conn.RemoteAddr(), *them); err != nil {
+		log.Warningf("connectPeer dns %v: %v", recordAddr, err)
 		return
 	}
 
@@ -1101,7 +1122,7 @@ func (s *Server) connectPeer(ctx context.Context, addr string) {
 
 	s.addPeer(ctx, PeerRecord{
 		Identity: *them,
-		Address:  addr,
+		Address:  recordAddr,
 		NaClPub:  naclPub,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
@@ -1591,7 +1612,7 @@ func (s *Server) handlePeerAdd(ctx context.Context, addr string) PeerAddResponse
 		}
 	}
 	s.wg.Add(1)
-	go s.connectPeer(ctx, addr)
+	go s.connectPeer(ctx, addr, "")
 	return PeerAddResponse{
 		Accepted: true,
 	}
