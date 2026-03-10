@@ -131,7 +131,7 @@ services:
   # Ethereum L1 node
   geth-l1:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.17.0@sha256:40a8dc32e3eac888174a0f4aa1182f3a876e8e8ac22129de21ec3538ad0ac664"
+    image: "ethereum/client-go:v1.17.1@sha256:66eee4d024e0f8ef180f1fa9578cfaccb5926d543f315f6d7d609a71aa644873"
     profiles: ["L1", "full"]
     volumes:
       - geth_data:/tmp/geth
