@@ -6,7 +6,7 @@ toolchain go1.26.1
 
 require (
 	github.com/caarlos0/env/v11 v11.4.0
-	github.com/docker/docker v28.5.1+incompatible
+	github.com/docker/docker v28.5.2+incompatible
 	github.com/ethereum/go-ethereum v1.17.1
 	github.com/go-test/deep v1.1.1
 	github.com/hemilabs/heminetwork/v2 v2.0.0-rc.1.0.20260210123146-3d9f4a8d6010
