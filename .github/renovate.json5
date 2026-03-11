@@ -27,6 +27,13 @@
       enabled: false,
     },
     {
+      description: 'Enable Go toolchain updates',
+      matchManagers: ['gomod'],
+      matchDepTypes: ['toolchain'],
+      enabled: true,
+      rangeStrategy: 'bump',
+    },
+    {
       matchManagers: ['github-actions'],
       commitMessagePrefix: 'ci:',
     },
