@@ -13,6 +13,12 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// ttlGen is the context key for the per-Put generation number.
+// The ttl goroutine extracts its generation from ctx.Value and
+// compares it against the current map entry to detect stale
+// wakeups after a key has been overwritten by a subsequent Put.
+type ttlGen struct{}
+
 // value wraps a value stored in the TTL map and includes additional metadata.
 type value struct {
 	value any
@@ -21,6 +27,8 @@ type value struct {
 	remove  func(context.Context, any, any) // called when removed from map
 
 	timeoutExpired bool // set when this value has expired
+
+	gen uint64 // generation number assigned by Put
 
 	// Value context
 	ctx    context.Context
@@ -38,6 +46,7 @@ type TTL struct {
 	mtx sync.Mutex
 
 	autoDelete bool
+	gen        uint64 // monotonic generation counter for Put
 	m          map[any]*value
 }
 
@@ -66,6 +75,12 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 	if !ok {
 		return
 	}
+	// If a subsequent Put overwrote this key, the current entry
+	// has a different generation.  This goroutine is stale — exit
+	// without callbacks or deletion.
+	if g, _ := ctx.Value(ttlGen{}).(uint64); g != v.gen {
+		return
+	}
 
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
@@ -76,10 +91,9 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 		}
 
 	case errors.Is(err, context.Canceled):
-		// This is the caller calling cancel
-		if v.remove != nil {
-			go v.remove(v.callbackContext, key, v.value)
-		}
+		// Cancel already fired the remove callback directly;
+		// v.remove was nil'd to prevent double-fire.  Nothing
+		// to do here except autoDelete cleanup below.
 	}
 
 	if tm.autoDelete {
@@ -95,13 +109,23 @@ func (tm *TTL) Put(pctx context.Context, ttl time.Duration, key any, val any, ex
 	tm.mtx.Lock()
 	defer tm.mtx.Unlock()
 
+	// Cancel the previous entry's context so its goroutine exits
+	// promptly.  The generation check in ttl() prevents the stale
+	// goroutine from firing callbacks or deleting the new entry.
+	if old, ok := tm.m[key]; ok {
+		old.cancel()
+	}
+
+	tm.gen++
 	v := &value{
 		value:           val,
 		expired:         expired,
 		remove:          remove,
+		gen:             tm.gen,
 		callbackContext: pctx,
 	}
-	v.ctx, v.cancel = context.WithTimeout(pctx, ttl)
+	v.ctx, v.cancel = context.WithTimeout(
+		context.WithValue(pctx, ttlGen{}, tm.gen), ttl)
 	tm.m[key] = v
 	go tm.ttl(v.ctx, key)
 }
@@ -120,16 +144,35 @@ func (tm *TTL) Get(key any) (any, bool, error) {
 }
 
 // Cancel aborts the waiting function and calls the remove callback.
+// The callback is invoked directly (in a goroutine to avoid blocking
+// the caller) rather than delegated to the ttl goroutine, so a
+// racing Put cannot swallow it.
 func (tm *TTL) Cancel(key any) error {
 	tm.mtx.Lock()
-	defer tm.mtx.Unlock()
 
 	v, ok := tm.m[key]
 	if !ok {
+		tm.mtx.Unlock()
 		return ErrNotFound
 	}
 	v.cancel()
 
+	if tm.autoDelete {
+		delete(tm.m, key)
+	}
+
+	// Capture and nil the callback under the lock so the ttl
+	// goroutine cannot double-fire it.
+	removeFn := v.remove
+	v.remove = nil
+	cbCtx := v.callbackContext
+	val := v.value
+
+	tm.mtx.Unlock()
+
+	if removeFn != nil {
+		go removeFn(cbCtx, key, val)
+	}
 	return nil
 }
 
