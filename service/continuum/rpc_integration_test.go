@@ -219,6 +219,12 @@ func (n *TSSNode) handleKeygenRequest(req KeygenRequest) {
 		return
 	}
 
+	if req.Threshold < 0 || req.Threshold >= len(sortedPids) {
+		n.t.Logf("Node %s: invalid threshold %d for %d parties",
+			n.id, req.Threshold, len(sortedPids))
+		return
+	}
+
 	params := tss.NewParameters(tss.S256(), ctx, ourPid, len(sortedPids), req.Threshold)
 
 	outCh := make(chan tss.Message, 100)
@@ -289,6 +295,12 @@ func (n *TSSNode) handleSignRequest(req SignRequest) {
 	}
 	if ourPid == nil {
 		n.t.Logf("Node %s not in signing committee", n.id)
+		return
+	}
+
+	if req.Threshold < 0 || req.Threshold >= len(sortedPids) {
+		n.t.Logf("Node %s: invalid threshold %d for %d parties",
+			n.id, req.Threshold, len(sortedPids))
 		return
 	}
 
