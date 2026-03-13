@@ -20,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hemilabs/x/tss-lib/v2/common"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/resharing"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/signing"
@@ -283,14 +282,21 @@ type tssImpl struct {
 
 type ceremony struct {
 	ctype     CeremonyType
-	party     tss.Party
 	pids      tss.SortedPartyIDs
 	pidToID   map[string]Identity
-	outCh     chan tss.Message
-	errCh     chan error
 	done      chan struct{}
 	threshold int
 	keyID     []byte
+
+	// Round-function path (keygen, sign): HandleMessage delivers
+	// parsed messages here; the ceremony driver reads with select
+	// on ctx.Done().
+	inCh chan tss.ParsedMessage
+
+	// Channel-based path (reshare, pending conversion).
+	party tss.Party
+	outCh chan tss.Message
+	errCh chan error
 
 	// Reshare only: dual party support for overlapping committees.
 	// oldParty runs the old committee role; party runs the new committee role.
@@ -325,76 +331,121 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 		return nil, err
 	}
 
+	n := len(pids)
+	ourIdx := ourPid.Index
 	peerCtx := tss.NewPeerContext(pids)
-	params := tss.NewParameters(tss.S256(), peerCtx, ourPid, len(pids), threshold)
+	params := tss.NewParameters(tss.S256(), peerCtx, ourPid, n, threshold)
 	params.SetCeremonyID(ceremonyID[:])
-	params.SetSSIDNonce(0) // attempt counter; new CeremonyID per retry
-
-	outCh := make(chan tss.Message, len(pids)*10)
-	endCh := make(chan *keygen.LocalPartySaveData, 1)
-
-	party := keygen.NewLocalParty(params, outCh, endCh, *preParams).(*keygen.LocalParty)
+	params.SetSSIDNonce(0)
 
 	c := &ceremony{
-		ctype:     CeremonyKeygen,
-		party:     party,
-		pids:      pids,
-		pidToID:   pidToID,
-		outCh:     outCh,
-		errCh:     make(chan error, 1),
-		done:      make(chan struct{}),
-		threshold: threshold,
+		ctype:   CeremonyKeygen,
+		pids:    pids,
+		pidToID: pidToID,
+		done:    make(chan struct{}),
+		inCh:    make(chan tss.ParsedMessage, n*4),
 	}
-
 	t.ceremoniesMu.Lock()
 	t.ceremonies[ceremonyID] = c
 	t.ceremoniesMu.Unlock()
-
 	defer func() {
+		close(c.done)
 		t.ceremoniesMu.Lock()
 		delete(t.ceremonies, ceremonyID)
 		t.ceremoniesMu.Unlock()
 	}()
 
-	go t.pumpMessages(ctx, ceremonyID, c)
-
-	if err := party.Start(); err != nil {
-		return nil, fmt.Errorf("start keygen: %w", err.Cause())
+	// Round 1
+	state, r1out, err := keygen.Round1(ctx, params, *preParams)
+	if err != nil {
+		return nil, fmt.Errorf("keygen round 1: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r1out.Messages); err != nil {
+		return nil, fmt.Errorf("send r1: %w", err)
 	}
 
-	select {
-	case <-ctx.Done():
-		close(c.done)
-		return nil, ctx.Err()
-	case err := <-c.errCh:
-		close(c.done)
-		return nil, err
-	case save := <-endCh:
-		close(c.done)
-		keyID := sha256.Sum256(save.ECDSAPub.X().Bytes())
-		shareData, err := json.Marshal(save)
-		if err != nil {
-			return nil, fmt.Errorf("marshal key share: %w", err)
-		}
-		if err := t.store.SaveKeyShare(keyID[:16], shareData); err != nil {
-			return nil, fmt.Errorf("save key share: %w", err)
-		}
-		// Persist metadata so reshare can discover the committee
-		// and threshold without operator input.
-		pubKey := append(save.ECDSAPub.X().Bytes(),
-			save.ECDSAPub.Y().Bytes()...)
-		meta := &KeyMetadata{
-			Committee: parties,
-			Threshold: threshold,
-			KeyID:     keyID[:16],
-			PublicKey: pubKey,
-			CreatedAt: time.Now().UTC(),
-		}
-		if err := t.store.SaveKeyMetadata(keyID[:16], meta); err != nil {
-			return nil, fmt.Errorf("save key metadata: %w", err)
-		}
-		return keyID[:16], nil
+	buf := newMsgBuf(c.inCh)
+	selfR1 := r1out.Messages[0].(tss.ParsedMessage)
+	r1All, err := buf.collect(ctx, n-1, n, func(m tss.ParsedMessage) (int, bool) {
+		_, ok := m.Content().(*keygen.KGRound1Message)
+		return m.GetFrom().Index, ok
+	})
+	if err != nil {
+		return nil, fmt.Errorf("collect r1: %w", err)
 	}
+	r1All[ourIdx] = selfR1
+
+	// Round 2
+	r2out, err := keygen.Round2(state, r1All)
+	if err != nil {
+		return nil, fmt.Errorf("keygen round 2: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r2out.Messages); err != nil {
+		return nil, fmt.Errorf("send r2: %w", err)
+	}
+
+	r2p2p, r2bcast, err := buf.collectDual(ctx, n-1, n,
+		func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*keygen.KGRound2Message1)
+			return m.GetFrom().Index, ok
+		},
+		func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*keygen.KGRound2Message2)
+			return m.GetFrom().Index, ok
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("collect r2: %w", err)
+	}
+	r2p2p[ourIdx] = state.ExportR2P2PSelf()
+	r2bcast[ourIdx] = state.ExportR2BcastSelf()
+
+	// Round 3
+	r3out, err := keygen.Round3(state, r2p2p, r2bcast)
+	if err != nil {
+		return nil, fmt.Errorf("keygen round 3: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r3out.Messages); err != nil {
+		return nil, fmt.Errorf("send r3: %w", err)
+	}
+
+	selfR3 := r3out.Messages[0].(tss.ParsedMessage)
+	r3All, err := buf.collect(ctx, n-1, n, func(m tss.ParsedMessage) (int, bool) {
+		_, ok := m.Content().(*keygen.KGRound3Message)
+		return m.GetFrom().Index, ok
+	})
+	if err != nil {
+		return nil, fmt.Errorf("collect r3: %w", err)
+	}
+	r3All[ourIdx] = selfR3
+
+	// Round 4
+	r4out, err := keygen.Round4(state, r3All)
+	if err != nil {
+		return nil, fmt.Errorf("keygen round 4: %w", err)
+	}
+
+	save := r4out.Save
+	keyID := sha256.Sum256(save.ECDSAPub.X().Bytes())
+	shareData, err := json.Marshal(save)
+	if err != nil {
+		return nil, fmt.Errorf("marshal key share: %w", err)
+	}
+	if err := t.store.SaveKeyShare(keyID[:16], shareData); err != nil {
+		return nil, fmt.Errorf("save key share: %w", err)
+	}
+	pubKey := append(save.ECDSAPub.X().Bytes(), save.ECDSAPub.Y().Bytes()...)
+	meta := &KeyMetadata{
+		Committee: parties,
+		Threshold: threshold,
+		KeyID:     keyID[:16],
+		PublicKey: pubKey,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := t.store.SaveKeyMetadata(keyID[:16], meta); err != nil {
+		return nil, fmt.Errorf("save key metadata: %w", err)
+	}
+	return keyID[:16], nil
 }
 
 func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte, parties []Identity, threshold int, data [32]byte) ([]byte, []byte, error) {
@@ -406,7 +457,6 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 	if err != nil {
 		return nil, nil, fmt.Errorf("load key share: %w", err)
 	}
-
 	var keyShare keygen.LocalPartySaveData
 	if err := json.Unmarshal(shareData, &keyShare); err != nil {
 		return nil, nil, fmt.Errorf("unmarshal key share: %w", err)
@@ -417,55 +467,212 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 		return nil, nil, err
 	}
 
+	n := len(pids)
+	ourIdx := ourPid.Index
 	peerCtx := tss.NewPeerContext(pids)
-	params := tss.NewParameters(tss.S256(), peerCtx, ourPid, len(pids), threshold)
+	params := tss.NewParameters(tss.S256(), peerCtx, ourPid, n, threshold)
 	params.SetCeremonyID(ceremonyID[:])
-	params.SetSSIDNonce(0) // attempt counter; new CeremonyID per retry
-
-	outCh := make(chan tss.Message, len(pids)*10)
-	endCh := make(chan *common.SignatureData, 1)
-
-	party := signing.NewLocalParty(new(big.Int).SetBytes(data[:]), params, keyShare, outCh, endCh, 32).(*signing.LocalParty)
+	params.SetSSIDNonce(0)
 
 	c := &ceremony{
-		ctype:     CeremonySign,
-		party:     party,
-		pids:      pids,
-		pidToID:   pidToID,
-		outCh:     outCh,
-		errCh:     make(chan error, 1),
-		done:      make(chan struct{}),
-		threshold: threshold,
-		keyID:     keyID,
+		ctype:   CeremonySign,
+		pids:    pids,
+		pidToID: pidToID,
+		done:    make(chan struct{}),
+		keyID:   keyID,
+		inCh:    make(chan tss.ParsedMessage, n*10),
 	}
-
 	t.ceremoniesMu.Lock()
 	t.ceremonies[ceremonyID] = c
 	t.ceremoniesMu.Unlock()
-
 	defer func() {
+		close(c.done)
 		t.ceremoniesMu.Lock()
 		delete(t.ceremonies, ceremonyID)
 		t.ceremoniesMu.Unlock()
 	}()
 
-	go t.pumpMessages(ctx, ceremonyID, c)
+	msg := new(big.Int).SetBytes(data[:])
 
-	if err := party.Start(); err != nil {
-		return nil, nil, fmt.Errorf("start signing: %w", err.Cause())
+	// Round 1
+	state, r1out, err := signing.SignRound1(params, keyShare, msg, nil, 32)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 1: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r1out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r1: %w", err)
 	}
 
-	select {
-	case <-ctx.Done():
-		close(c.done)
-		return nil, nil, ctx.Err()
-	case err := <-c.errCh:
-		close(c.done)
-		return nil, nil, err
-	case sig := <-endCh:
-		close(c.done)
-		return sig.R, sig.S, nil
+	buf := newMsgBuf(c.inCh)
+	r1p2p, r1bcast, err := buf.collectDual(ctx, n-1, n,
+		func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*signing.SignRound1Message1)
+			return m.GetFrom().Index, ok
+		},
+		func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*signing.SignRound1Message2)
+			return m.GetFrom().Index, ok
+		},
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("collect sign r1: %w", err)
 	}
+
+	// Round 2
+	r2out, err := signing.SignRound2(state, r1p2p, r1bcast)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 2: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r2out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r2: %w", err)
+	}
+
+	r2p2p, err := buf.collect(ctx, n-1, n, func(m tss.ParsedMessage) (int, bool) {
+		_, ok := m.Content().(*signing.SignRound2Message)
+		return m.GetFrom().Index, ok
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("collect sign r2: %w", err)
+	}
+
+	// Round 3
+	r3out, err := signing.SignRound3(state, r2p2p)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 3: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r3out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r3: %w", err)
+	}
+
+	selfR3 := r3out.Messages[0].(tss.ParsedMessage)
+	r3bcast, err := buf.collect(ctx, n-1, n, func(m tss.ParsedMessage) (int, bool) {
+		_, ok := m.Content().(*signing.SignRound3Message)
+		return m.GetFrom().Index, ok
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("collect sign r3: %w", err)
+	}
+	r3bcast[ourIdx] = selfR3
+
+	// Round 4
+	r4out, err := signing.SignRound4(state, r3bcast)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 4: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r4out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r4: %w", err)
+	}
+
+	selfR4 := r4out.Messages[0].(tss.ParsedMessage)
+	r4bcast, err := buf.collect(ctx, n-1, n, func(m tss.ParsedMessage) (int, bool) {
+		_, ok := m.Content().(*signing.SignRound4Message)
+		return m.GetFrom().Index, ok
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("collect sign r4: %w", err)
+	}
+	r4bcast[ourIdx] = selfR4
+
+	// Round 5
+	r5out, err := signing.SignRound5(state, r4bcast)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 5: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r5out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r5: %w", err)
+	}
+	selfR5 := r5out.Messages[0].(tss.ParsedMessage)
+
+	// Round 6 (no inbound needed)
+	r6out, err := signing.SignRound6(state)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 6: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r6out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r6: %w", err)
+	}
+	selfR6 := r6out.Messages[0].(tss.ParsedMessage)
+
+	// Collect Round 5 + Round 6 (interleaved)
+	r5bcast, r6bcast, err := buf.collectDual(ctx, n-1, n,
+		func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*signing.SignRound5Message)
+			return m.GetFrom().Index, ok
+		},
+		func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*signing.SignRound6Message)
+			return m.GetFrom().Index, ok
+		},
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("collect sign r5+r6: %w", err)
+	}
+	r5bcast[ourIdx] = selfR5
+	r6bcast[ourIdx] = selfR6
+
+	// Round 7
+	r7out, err := signing.SignRound7(state, r5bcast, r6bcast)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 7: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r7out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r7: %w", err)
+	}
+	selfR7 := r7out.Messages[0].(tss.ParsedMessage)
+
+	// Round 8 (no inbound needed)
+	r8out, err := signing.SignRound8(state)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 8: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r8out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r8: %w", err)
+	}
+	selfR8 := r8out.Messages[0].(tss.ParsedMessage)
+
+	// Collect Round 7 + Round 8 (interleaved)
+	r7bcast, r8bcast, err := buf.collectDual(ctx, n-1, n,
+		func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*signing.SignRound7Message)
+			return m.GetFrom().Index, ok
+		},
+		func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*signing.SignRound8Message)
+			return m.GetFrom().Index, ok
+		},
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("collect sign r7+r8: %w", err)
+	}
+	r7bcast[ourIdx] = selfR7
+	r8bcast[ourIdx] = selfR8
+
+	// Round 9
+	r9out, err := signing.SignRound9(state, r7bcast, r8bcast)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign round 9: %w", err)
+	}
+	if err := t.sendRound(c, ceremonyID, r9out.Messages); err != nil {
+		return nil, nil, fmt.Errorf("send sign r9: %w", err)
+	}
+
+	selfR9 := r9out.Messages[0].(tss.ParsedMessage)
+	r9bcast, err := buf.collect(ctx, n-1, n, func(m tss.ParsedMessage) (int, bool) {
+		_, ok := m.Content().(*signing.SignRound9Message)
+		return m.GetFrom().Index, ok
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("collect sign r9: %w", err)
+	}
+	r9bcast[ourIdx] = selfR9
+
+	// Finalize
+	final, err := signing.SignFinalize(state, r9bcast)
+	if err != nil {
+		return nil, nil, fmt.Errorf("sign finalize: %w", err)
+	}
+
+	return final.Signature.R, final.Signature.S, nil
 }
 
 func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []byte, oldParties, newParties []Identity, oldThreshold, newThreshold int) error {
@@ -708,9 +915,14 @@ func (t *tssImpl) HandleMessage(from Identity, ceremonyID CeremonyID, data []byt
 		return fmt.Errorf("parse message: %w", err)
 	}
 
-	// tss-lib update errors are non-fatal (e.g., duplicate messages)
-	_, _ = c.party.Update(parsed)
+	// Round-function path: deliver to inCh.
+	if c.inCh != nil {
+		c.inCh <- parsed
+		return nil
+	}
 
+	// Channel-based path (reshare, pending conversion).
+	_, _ = c.party.Update(parsed)
 	return nil
 }
 
@@ -888,41 +1100,6 @@ func (t *tssImpl) buildResharePartyContext(
 	}
 	// ourPid may be nil if self is not in this committee (valid).
 	return sorted, ourPid, pidToID, keyToID, nil
-}
-
-func (t *tssImpl) pumpMessages(ctx context.Context, ceremonyID CeremonyID, c *ceremony) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.done:
-			return
-		case msg := <-c.outCh:
-			wireData, _, err := msg.WireBytes()
-			if err != nil {
-				continue
-			}
-
-			// Prepend broadcast flag: 0x01 = broadcast, 0x00 = p2p
-			var data []byte
-			if msg.GetTo() == nil {
-				data = append([]byte{0x01}, wireData...)
-				for _, pid := range c.pids {
-					if pid.Id == t.self.String() {
-						continue
-					}
-					to := c.pidToID[pid.Id]
-					_ = t.transport.Send(to, ceremonyID, data)
-				}
-			} else {
-				data = append([]byte{0x00}, wireData...)
-				for _, dest := range msg.GetTo() {
-					to := c.pidToID[dest.Id]
-					_ = t.transport.Send(to, ceremonyID, data)
-				}
-			}
-		}
-	}
 }
 
 // pumpReshareMessages routes outgoing reshare messages with committee
