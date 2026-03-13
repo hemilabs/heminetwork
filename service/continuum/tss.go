@@ -311,6 +311,10 @@ func NewTSS(self Identity, store TSSStore, transport TSSTransport) TSS {
 }
 
 func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []Identity, threshold int) ([]byte, error) {
+	if threshold < 0 || threshold >= len(parties) {
+		return nil, fmt.Errorf("invalid threshold %d for %d parties", threshold, len(parties))
+	}
+
 	preParams, err := t.store.GetPreParams(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get preparams: %w", err)
@@ -323,6 +327,8 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 
 	peerCtx := tss.NewPeerContext(pids)
 	params := tss.NewParameters(tss.S256(), peerCtx, ourPid, len(pids), threshold)
+	params.SetCeremonyID(ceremonyID[:])
+	params.SetSSIDNonce(0) // attempt counter; new CeremonyID per retry
 
 	outCh := make(chan tss.Message, len(pids)*10)
 	endCh := make(chan *keygen.LocalPartySaveData, 1)
@@ -392,6 +398,10 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 }
 
 func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte, parties []Identity, threshold int, data [32]byte) ([]byte, []byte, error) {
+	if threshold < 0 || threshold >= len(parties) {
+		return nil, nil, fmt.Errorf("invalid threshold %d for %d parties", threshold, len(parties))
+	}
+
 	shareData, err := t.store.LoadKeyShare(keyID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load key share: %w", err)
@@ -409,6 +419,8 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 
 	peerCtx := tss.NewPeerContext(pids)
 	params := tss.NewParameters(tss.S256(), peerCtx, ourPid, len(pids), threshold)
+	params.SetCeremonyID(ceremonyID[:])
+	params.SetSSIDNonce(0) // attempt counter; new CeremonyID per retry
 
 	outCh := make(chan tss.Message, len(pids)*10)
 	endCh := make(chan *common.SignatureData, 1)
@@ -514,6 +526,8 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 		params := tss.NewReSharingParameters(tss.S256(), oldCtx, newCtx,
 			ourOldPid, len(oldPids), oldThreshold,
 			len(newPids), newThreshold)
+		params.SetCeremonyID(ceremonyID[:])
+		params.SetSSIDNonce(0) // attempt counter; new CeremonyID per retry
 		oldParty = resharing.NewLocalParty(params, keyShare, outCh, endCh)
 	}
 
@@ -525,6 +539,8 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 		params := tss.NewReSharingParameters(tss.S256(), oldCtx, newCtx,
 			ourNewPid, len(oldPids), oldThreshold,
 			len(newPids), newThreshold)
+		params.SetCeremonyID(ceremonyID[:])
+		params.SetSSIDNonce(0) // attempt counter; new CeremonyID per retry
 		save := keygen.NewLocalPartySaveData(len(newPids))
 		save.LocalPreParams = *preParams
 		newParty = resharing.NewLocalParty(params, save, outCh, endCh)

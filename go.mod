@@ -19,7 +19,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.16.8
 	github.com/go-test/deep v1.1.1
-	github.com/hemilabs/x/tss-lib/v2 v2.0.0-20251204143115-5f2203dde989
+	github.com/hemilabs/x/tss-lib/v2 v2.0.0-20260305152852-563c8b59ea2a
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
@@ -127,3 +127,5 @@ require (
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/hemilabs/x/tss-lib/v2 => /home/marco/Documents/src/x/tss-lib
