@@ -13,7 +13,7 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/hemilabs/x/tss-lib/v2/tss"
+	"github.com/hemilabs/x/tss-lib/v3/tss"
 )
 
 // Elect performs a deterministic pseudorandom committee election from

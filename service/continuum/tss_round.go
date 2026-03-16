@@ -8,18 +8,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hemilabs/x/tss-lib/v2/tss"
+	"github.com/hemilabs/x/tss-lib/v3/tss"
 )
 
 // msgBuf accumulates inbound messages across rounds.  Messages that
 // arrive early (from a faster peer in a later round) are kept in
 // the buffer until the local node reaches that round.
 type msgBuf struct {
-	ch  <-chan tss.ParsedMessage
-	buf []tss.ParsedMessage
+	ch  <-chan *tss.Message
+	buf []*tss.Message
 }
 
-func newMsgBuf(ch <-chan tss.ParsedMessage) *msgBuf {
+func newMsgBuf(ch <-chan *tss.Message) *msgBuf {
 	return &msgBuf{ch: ch}
 }
 
@@ -30,13 +30,13 @@ func (b *msgBuf) collect(
 	ctx context.Context,
 	n int,
 	nParties int,
-	accept func(tss.ParsedMessage) (slot int, ok bool),
-) ([]tss.ParsedMessage, error) {
-	out := make([]tss.ParsedMessage, nParties)
+	accept func(*tss.Message) (slot int, ok bool),
+) ([]*tss.Message, error) {
+	out := make([]*tss.Message, nParties)
 	got := 0
 
 	// Drain buffer first.
-	keep := make([]tss.ParsedMessage, 0, len(b.buf))
+	keep := make([]*tss.Message, 0, len(b.buf))
 	for _, m := range b.buf {
 		if got < n {
 			if slot, ok := accept(m); ok && out[slot] == nil {
@@ -71,15 +71,15 @@ func (b *msgBuf) collectDual(
 	ctx context.Context,
 	n int,
 	nParties int,
-	acceptA func(tss.ParsedMessage) (slot int, ok bool),
-	acceptB func(tss.ParsedMessage) (slot int, ok bool),
-) (a, b2 []tss.ParsedMessage, err error) {
-	a = make([]tss.ParsedMessage, nParties)
-	b2 = make([]tss.ParsedMessage, nParties)
+	acceptA func(*tss.Message) (slot int, ok bool),
+	acceptB func(*tss.Message) (slot int, ok bool),
+) (a, b2 []*tss.Message, err error) {
+	a = make([]*tss.Message, nParties)
+	b2 = make([]*tss.Message, nParties)
 	gotA, gotB := 0, 0
 
 	// Drain buffer first.
-	keep := make([]tss.ParsedMessage, 0, len(b.buf))
+	keep := make([]*tss.Message, 0, len(b.buf))
 	for _, m := range b.buf {
 		matched := false
 		if gotA < n {
@@ -135,13 +135,13 @@ func (b *msgBuf) collectDual(
 // threshold-based, so the ceremony succeeds as long as t+1 peers
 // receive the message.  A missing message causes a collect timeout
 // on the receiving end, not silent corruption.
-func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []tss.Message) error {
+func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Message) error {
 	for _, msg := range msgs {
-		wireData, _, err := msg.WireBytes()
+		wireData, err := marshalTSSContent(msg.Content)
 		if err != nil {
-			return fmt.Errorf("wire bytes: %w", err)
+			return fmt.Errorf("marshal content: %w", err)
 		}
-		if msg.GetTo() == nil {
+		if msg.To == nil {
 			data := append([]byte{0x01}, wireData...)
 			for _, pid := range c.pids {
 				if pid.Id == t.self.String() {
@@ -153,7 +153,7 @@ func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []tss.Messa
 			}
 		} else {
 			data := append([]byte{0x00}, wireData...)
-			for _, dest := range msg.GetTo() {
+			for _, dest := range msg.To {
 				if err := t.transport.Send(c.pidToID[dest.Id], ceremonyID, data); err != nil {
 					log.Debugf("send p2p %x to %s: %v", ceremonyID, dest.Id, err)
 				}
@@ -173,18 +173,18 @@ func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []tss.Messa
 //	bit 0: to old committee
 //	bit 1: to new committee
 //	bit 2: from new committee (sender key is XORed)
-func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []tss.Message, fromNew bool) error {
+func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Message, fromNew bool) error {
 	for _, msg := range msgs {
-		wireData, routing, err := msg.WireBytes()
+		wireData, err := marshalTSSContent(msg.Content)
 		if err != nil {
-			return fmt.Errorf("wire bytes: %w", err)
+			return fmt.Errorf("marshal content: %w", err)
 		}
 
 		// Build committee flags.
 		var cflags byte
-		if routing.IsToOldCommittee {
+		if msg.IsToOldCommittee {
 			cflags |= 0x01
-		} else if routing.IsToOldAndNewCommittees {
+		} else if msg.IsToOldAndNewCommittees {
 			cflags |= 0x01 | 0x02
 		} else {
 			// Default: to new committee.
@@ -195,7 +195,7 @@ func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []ts
 		}
 
 		var bcast byte
-		if routing.IsBroadcast {
+		if msg.IsBroadcast {
 			bcast = 0x01
 		}
 
@@ -204,7 +204,7 @@ func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []ts
 		data[1] = cflags
 		copy(data[2:], wireData)
 
-		if routing.To == nil {
+		if msg.To == nil {
 			// Broadcast: send to all unique peers across both
 			// committees, skipping self.
 			sent := make(map[Identity]bool)
@@ -229,7 +229,7 @@ func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []ts
 				}
 			}
 		} else {
-			for _, dest := range routing.To {
+			for _, dest := range msg.To {
 				id := c.pidToID[dest.Id]
 				if id == t.self {
 					continue
