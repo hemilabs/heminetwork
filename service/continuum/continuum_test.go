@@ -32,8 +32,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
-	"github.com/hemilabs/x/tss-lib/v2/tss"
+	"github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
+	"github.com/hemilabs/x/tss-lib/v3/tss"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/sync/errgroup"
@@ -10964,7 +10964,7 @@ func TestHandleReshareMessageRouting(t *testing.T) {
 		oldPids: oldPids,
 		newPids: newPids,
 		pidToID: pidToID,
-		inCh:    make(chan tss.ParsedMessage, 10),
+		inCh:    make(chan *tss.Message, 10),
 	}
 	impl.ceremoniesMu.Lock()
 	impl.ceremonies[cid] = c
