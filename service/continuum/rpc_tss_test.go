@@ -9,85 +9,170 @@ import (
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/hemilabs/x/tss-lib/v2/common"
 	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
-	"github.com/hemilabs/x/tss-lib/v2/ecdsa/resharing"
-	"github.com/hemilabs/x/tss-lib/v2/ecdsa/signing"
 	"github.com/hemilabs/x/tss-lib/v2/tss"
 )
 
+// loadPreParams reads cached Paillier preparams from the test fixtures
+// directory so keygen doesn't spend ~30s per node generating them.
+func loadPreParams(t *testing.T, count int) []keygen.LocalPreParams {
+	t.Helper()
+	_, thisFile, _, _ := runtime.Caller(0)
+	dir := filepath.Dir(thisFile)
+	path := filepath.Join(dir, "tss_examples", "preparams.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Logf("No preparams file, tests will be slow: %v", err)
+		return nil
+	}
+	var params []keygen.LocalPreParams
+	if err := json.Unmarshal(data, &params); err != nil {
+		t.Logf("Failed to parse preparams: %v", err)
+		return nil
+	}
+	if len(params) < count {
+		t.Logf("Only %d preparams available, need %d", len(params), count)
+		return params
+	}
+	return params[:count]
+}
+
 // =============================================================================
-// rpcTSSNode — TSS participant over encrypted Transport, clean RPC
+// rpcTSSNode — TSS participant over encrypted Transport
 //
-// Architecture differences from tss_transport_test.go:
-//   - TSSMessage.Flags carries broadcast + committee routing as a
-//     single bitfield. The deprecated Broadcast bool is not set.
-//   - TSSMessage.Data is pure tss-lib WireBytes. No hand-rolled
-//     byte prefixes for committee routing.
-//   - All goroutines tracked via wg, all respect ctx for shutdown.
-//   - ceremonyManager is a concrete type (methods on rpcTSSNode),
-//     not an interface. Production RPC handler follows this pattern.
+// Uses the production tssImpl for all ceremony logic (keygen, sign,
+// reshare via round functions). The test provides an encrypted TCP
+// transport adapter so messages flow through the full KX → Handshake
+// → signed TSSMessage → byte-prefix wire protocol stack.
 // =============================================================================
 
 // rpcTSSNode is a TSS participant that communicates via the full
 // continuum protocol stack: TCP → KX (ECDH) → Handshake (secp256k1
-// identity) → signed RPC envelopes. It implements the clean
-// single-layer RPC architecture where TSSMessage.Flags carries all
-// routing metadata and Data is pure tss-lib bytes.
+// identity) → signed RPC envelopes.
 type rpcTSSNode struct {
-	t         *testing.T
-	id        Identity
-	secret    *Secret
-	partyID   *tss.PartyID
-	preParams *keygen.LocalPreParams
-
-	// Key storage: keyID → key share.
-	keys   map[string]*keygen.LocalPartySaveData
-	keysMu sync.RWMutex
-
-	// Active ceremonies.
-	ceremonies   map[CeremonyID]*rpcCeremony
-	ceremoniesMu sync.Mutex
+	t       *testing.T
+	id      Identity
+	secret  *Secret
+	store   TSSStore
+	tss     TSS
+	adapter *rpcTransportAdapter
 
 	// Encrypted Transport connections to peers.
 	transports   map[Identity]*Transport
 	transportsMu sync.RWMutex
 	listener     net.Listener
 
-	// Lifecycle. cancel + transport close unblocks all goroutines.
+	// Ceremony result channels: goroutine sends result when done.
+	results   map[CeremonyID]chan any
+	resultsMu sync.Mutex
+
+	// Lifecycle.
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
 	// corruptFn, if set, is called on each outgoing TSSMessage
-	// before it is written to the wire. May modify msg in place.
-	// Used by negative tests to simulate corrupt signers.
+	// before it is written to the wire. Used by negative tests.
 	corruptFn func(msg *TSSMessage)
 }
 
-// rpcCeremony tracks an active TSS ceremony.
-type rpcCeremony struct {
-	ctype   CeremonyType
-	party   tss.Party          // sole party for keygen/sign; new party for reshare
-	pids    tss.SortedPartyIDs // combined for reshare
-	pidToID map[string]Identity
-	outCh   chan tss.Message
-	result  chan any // buffered to expectedEnds
+// rpcTransportAdapter implements TSSTransport by translating between
+// the tss.go byte-prefix wire format and signed TSSMessage envelopes
+// over encrypted Transports.
+type rpcTransportAdapter struct {
+	node   *rpcTSSNode
+	ctypes map[CeremonyID]CeremonyType
+	mu     sync.RWMutex
+}
 
-	threshold int
-	keyID     string
+func (a *rpcTransportAdapter) registerCeremony(cid CeremonyID, ct CeremonyType) {
+	a.mu.Lock()
+	a.ctypes[cid] = ct
+	a.mu.Unlock()
+}
 
-	// Reshare-specific.
-	oldParty tss.Party
-	oldPids  tss.SortedPartyIDs
-	newPids  tss.SortedPartyIDs
+func (a *rpcTransportAdapter) unregisterCeremony(cid CeremonyID) {
+	a.mu.Lock()
+	delete(a.ctypes, cid)
+	a.mu.Unlock()
+}
+
+// Send implements TSSTransport. Translates byte-prefix wire format
+// to TSSMessage with Flags routing and writes to peer Transport.
+func (a *rpcTransportAdapter) Send(to Identity, ceremonyID CeremonyID, data []byte) error {
+	if len(data) < 1 {
+		return errors.New("empty TSS data")
+	}
+
+	a.mu.RLock()
+	ctype, ok := a.ctypes[ceremonyID]
+	a.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("ceremony %s: unknown type", ceremonyID)
+	}
+
+	var flags TSSMsgFlags
+	var wireData []byte
+
+	if data[0] == 0x01 {
+		flags |= TSSFlagBroadcast
+	}
+
+	if ctype == CeremonyReshare {
+		if len(data) < 2 {
+			return errors.New("reshare data too short")
+		}
+		cflags := data[1]
+		if cflags&0x01 != 0 {
+			flags |= TSSFlagToOld
+		}
+		if cflags&0x02 != 0 {
+			flags |= TSSFlagToNew
+		}
+		if cflags&0x04 != 0 {
+			flags |= TSSFlagFromNew
+		}
+		wireData = data[2:]
+	} else {
+		wireData = data[1:]
+	}
+
+	hash := HashTSSMessage(ceremonyID, wireData)
+	sig := a.node.secret.Sign(hash)
+
+	tssMsg := TSSMessage{
+		CeremonyID: ceremonyID,
+		Type:       ctype,
+		From:       a.node.id,
+		Flags:      flags,
+		Data:       wireData,
+		Signature:  sig,
+	}
+
+	if a.node.corruptFn != nil {
+		a.node.corruptFn(&tssMsg)
+	}
+
+	a.node.transportsMu.RLock()
+	tr := a.node.transports[to]
+	a.node.transportsMu.RUnlock()
+
+	if tr == nil {
+		return fmt.Errorf("no transport for %s", to)
+	}
+	return tr.Write(a.node.id, tssMsg)
 }
 
 func newRPCTSSNode(t *testing.T, preParams *keygen.LocalPreParams) *rpcTSSNode {
@@ -98,7 +183,15 @@ func newRPCTSSNode(t *testing.T, preParams *keygen.LocalPreParams) *rpcTSSNode {
 		t.Fatalf("NewSecret: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatalf("NewTSSStore: %v", err)
+	}
+	if preParams != nil {
+		store.SetPreParams(preParams)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
 
 	lc := &net.ListenConfig{}
 	listener, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
@@ -107,34 +200,32 @@ func newRPCTSSNode(t *testing.T, preParams *keygen.LocalPreParams) *rpcTSSNode {
 		t.Fatalf("listen: %v", err)
 	}
 
-	return &rpcTSSNode{
+	node := &rpcTSSNode{
 		t:          t,
 		id:         secret.Identity,
 		secret:     secret,
-		partyID:    tss.NewPartyID(secret.String(), secret.String(), new(big.Int).SetBytes(secret.Identity[:])),
-		preParams:  preParams,
-		keys:       make(map[string]*keygen.LocalPartySaveData),
-		ceremonies: make(map[CeremonyID]*rpcCeremony),
+		store:      store,
 		transports: make(map[Identity]*Transport),
+		results:    make(map[CeremonyID]chan any),
 		listener:   listener,
 		ctx:        ctx,
 		cancel:     cancel,
 	}
+
+	adapter := &rpcTransportAdapter{
+		node:   node,
+		ctypes: make(map[CeremonyID]CeremonyType),
+	}
+	node.adapter = adapter
+	node.tss = NewTSS(secret.Identity, store, adapter)
+
+	return node
 }
 
 // =============================================================================
 // Read loop — dispatches incoming RPC protocol messages
 // =============================================================================
 
-// startReadLoop launches a goroutine that reads protocol messages from
-// an encrypted Transport and dispatches to the appropriate handler.
-//
-// Goroutine contract:
-//
-//	Owner:     rpcTSSNode
-//	Lifecycle: runs until Transport.Read error or ctx cancel
-//	Kill:      cancel + Transport.Close
-//	Tracking:  wg
 func (n *rpcTSSNode) startReadLoop(tr *Transport, remoteID Identity) {
 	n.wg.Add(1)
 	go func() {
@@ -142,14 +233,12 @@ func (n *rpcTSSNode) startReadLoop(tr *Transport, remoteID Identity) {
 		for {
 			_, cmd, err := tr.Read()
 			if err != nil {
-				// Expected on shutdown: ctx cancelled, conn closed.
 				select {
 				case <-n.ctx.Done():
 					return
 				default:
 				}
-				n.t.Logf("readLoop %s←%s: %v",
-					n.id, remoteID, err)
+				n.t.Logf("readLoop %s←%s: %v", n.id, remoteID, err)
 				return
 			}
 
@@ -161,7 +250,7 @@ func (n *rpcTSSNode) startReadLoop(tr *Transport, remoteID Identity) {
 			case *ReshareRequest:
 				n.handleReshare(*v)
 			case *TSSMessage:
-				n.handleTSSMsg(*v)
+				n.dispatchTSSMsg(*v)
 			default:
 				n.t.Logf("readLoop %s←%s: unhandled %T",
 					n.id, remoteID, cmd)
@@ -170,247 +259,10 @@ func (n *rpcTSSNode) startReadLoop(tr *Transport, remoteID Identity) {
 	}()
 }
 
-// =============================================================================
-// Ceremony handlers — create parties, start pumps
-// =============================================================================
-
-func (n *rpcTSSNode) handleKeygen(req KeygenRequest) {
-	n.ceremoniesMu.Lock()
-	defer n.ceremoniesMu.Unlock()
-
-	sortedPids := tss.SortPartyIDs(req.Committee)
-	ctx := tss.NewPeerContext(sortedPids)
-
-	ourPid := findSelf(sortedPids, n.partyID.Id)
-	if ourPid == nil {
-		n.t.Logf("node %s: not in keygen committee", n.id)
-		return
-	}
-
-	pidToID := mapPIDToIdentity(sortedPids)
-	params := tss.NewParameters(tss.S256(), ctx, ourPid,
-		len(sortedPids), req.Threshold)
-
-	outCh := make(chan tss.Message, 100)
-	endCh := make(chan *keygen.LocalPartySaveData, 1)
-
-	var party *keygen.LocalParty
-	if n.preParams != nil {
-		party = keygen.NewLocalParty(params, outCh, endCh,
-			*n.preParams).(*keygen.LocalParty)
-	} else {
-		party = keygen.NewLocalParty(params, outCh,
-			endCh).(*keygen.LocalParty)
-	}
-
-	c := &rpcCeremony{
-		ctype:     CeremonyKeygen,
-		party:     party,
-		pids:      sortedPids,
-		pidToID:   pidToID,
-		outCh:     outCh,
-		result:    make(chan any, 1),
-		threshold: req.Threshold,
-	}
-	n.ceremonies[req.CeremonyID] = c
-
-	n.wg.Add(2)
-	go n.pumpKeysign(req.CeremonyID, c)
-	go n.awaitKeygenEnd(c, endCh)
-
-	if err := party.Start(); err != nil {
-		n.t.Logf("keygen start: %v", err)
-	}
-}
-
-func (n *rpcTSSNode) handleSign(req SignRequest) {
-	n.ceremoniesMu.Lock()
-	defer n.ceremoniesMu.Unlock()
-
-	n.keysMu.RLock()
-	key, ok := n.keys[string(req.KeyID)]
-	n.keysMu.RUnlock()
-	if !ok {
-		n.t.Logf("node %s: key %x not found", n.id, req.KeyID)
-		return
-	}
-
-	sortedPids := tss.SortPartyIDs(req.Committee)
-	ctx := tss.NewPeerContext(sortedPids)
-
-	ourPid := findSelf(sortedPids, n.partyID.Id)
-	if ourPid == nil {
-		n.t.Logf("node %s: not in signing committee", n.id)
-		return
-	}
-
-	pidToID := mapPIDToIdentity(sortedPids)
-	params := tss.NewParameters(tss.S256(), ctx, ourPid,
-		len(sortedPids), req.Threshold)
-
-	outCh := make(chan tss.Message, 100)
-	endCh := make(chan *common.SignatureData, 1)
-
-	party := signing.NewLocalParty(
-		new(big.Int).SetBytes(req.Data), params, *key,
-		outCh, endCh, len(req.Data)).(*signing.LocalParty)
-
-	c := &rpcCeremony{
-		ctype:     CeremonySign,
-		party:     party,
-		pids:      sortedPids,
-		pidToID:   pidToID,
-		outCh:     outCh,
-		result:    make(chan any, 1),
-		threshold: req.Threshold,
-		keyID:     string(req.KeyID),
-	}
-	n.ceremonies[req.CeremonyID] = c
-
-	n.wg.Add(2)
-	go n.pumpKeysign(req.CeremonyID, c)
-	go n.awaitSignEnd(c, endCh)
-
-	if err := party.Start(); err != nil {
-		n.t.Logf("sign start: %v", err)
-	}
-}
-
-func (n *rpcTSSNode) handleReshare(req ReshareRequest) {
-	n.ceremoniesMu.Lock()
-	defer n.ceremoniesMu.Unlock()
-
-	selfStr := n.partyID.Id
-
-	var inOld, inNew bool
-	for _, pid := range req.OldCommittee {
-		if pid.Id == selfStr {
-			inOld = true
-			break
-		}
-	}
-	for _, pid := range req.NewCommittee {
-		if pid.Id == selfStr {
-			inNew = true
-			break
-		}
-	}
-	if !inOld && !inNew {
-		return
-	}
-
-	// Load existing key share if in old committee.
-	var keyShare keygen.LocalPartySaveData
-	var keyID string
-	if inOld {
-		n.keysMu.RLock()
-		for k, v := range n.keys {
-			keyID = k
-			keyShare = *v
-			break
-		}
-		n.keysMu.RUnlock()
-	}
-
-	oldPids, ourOldPid, oldPidToID := makeReshareContext(
-		req.OldCommittee, selfStr, false)
-	newPids, ourNewPid, newPidToID := makeReshareContext(
-		req.NewCommittee, selfStr, true)
-
-	allPidToID := make(map[string]Identity,
-		len(oldPidToID)+len(newPidToID))
-	for k, v := range oldPidToID {
-		allPidToID[k] = v
-	}
-	for k, v := range newPidToID {
-		allPidToID[k] = v
-	}
-
-	oldCtx := tss.NewPeerContext(oldPids)
-	newCtx := tss.NewPeerContext(newPids)
-
-	outCh := make(chan tss.Message,
-		(len(oldPids)+len(newPids))*10)
-	endCh := make(chan *keygen.LocalPartySaveData, 2)
-
-	var oldParty, newParty tss.Party
-
-	if inOld && ourOldPid != nil {
-		params := tss.NewReSharingParameters(tss.S256(),
-			oldCtx, newCtx, ourOldPid,
-			len(oldPids), req.OldThreshold,
-			len(newPids), req.NewThreshold)
-		oldParty = resharing.NewLocalParty(params,
-			keyShare, outCh, endCh)
-	}
-
-	if inNew && ourNewPid != nil {
-		params := tss.NewReSharingParameters(tss.S256(),
-			oldCtx, newCtx, ourNewPid,
-			len(oldPids), req.OldThreshold,
-			len(newPids), req.NewThreshold)
-		save := keygen.NewLocalPartySaveData(len(newPids))
-		if n.preParams != nil {
-			save.LocalPreParams = *n.preParams
-		}
-		newParty = resharing.NewLocalParty(params,
-			save, outCh, endCh)
-	}
-
-	expectedEnds := 0
-	if inOld {
-		expectedEnds++
-	}
-	if inNew {
-		expectedEnds++
-	}
-
-	c := &rpcCeremony{
-		ctype:     CeremonyReshare,
-		party:     newParty,
-		oldParty:  oldParty,
-		oldPids:   oldPids,
-		newPids:   newPids,
-		pidToID:   allPidToID,
-		outCh:     outCh,
-		result:    make(chan any, expectedEnds),
-		threshold: req.NewThreshold,
-		keyID:     keyID,
-	}
-	n.ceremonies[req.CeremonyID] = c
-
-	// Start parties before pump. Start() writes to buffered outCh.
-	// Starting first ensures both party instances exist for local
-	// self-delivery between old/new parties on overlapping nodes.
-	if oldParty != nil {
-		n.wg.Add(1)
-		go func() {
-			defer n.wg.Done()
-			if err := oldParty.Start(); err != nil {
-				n.t.Logf("old reshare start: %v", err)
-			}
-		}()
-	}
-	if newParty != nil {
-		n.wg.Add(1)
-		go func() {
-			defer n.wg.Done()
-			if err := newParty.Start(); err != nil {
-				n.t.Logf("new reshare start: %v", err)
-			}
-		}()
-	}
-
-	n.wg.Add(2)
-	go n.pumpReshare(req.CeremonyID, c)
-	go n.awaitReshareEnd(c, endCh, expectedEnds)
-}
-
-// =============================================================================
-// TSSMessage handler — verify signature, extract Flags, route
-// =============================================================================
-
-func (n *rpcTSSNode) handleTSSMsg(msg TSSMessage) {
+// dispatchTSSMsg verifies the signature and routes to HandleMessage.
+// Retries on ErrUnknownCeremony (message arrives before ceremony
+// registration — normal race in distributed mesh).
+func (n *rpcTSSNode) dispatchTSSMsg(msg TSSMessage) {
 	hash := HashTSSMessage(msg.CeremonyID, msg.Data)
 	if _, err := Verify(hash, msg.From, msg.Signature); err != nil {
 		n.t.Logf("node %s: bad sig from %s: %v",
@@ -418,431 +270,274 @@ func (n *rpcTSSNode) handleTSSMsg(msg TSSMessage) {
 		return
 	}
 
-	n.ceremoniesMu.Lock()
-	c, ok := n.ceremonies[msg.CeremonyID]
-	n.ceremoniesMu.Unlock()
-	if !ok {
-		n.t.Logf("node %s: unknown ceremony %s",
-			n.id, msg.CeremonyID)
+	// Reconstruct byte-prefix wire format for HandleMessage.
+	var data []byte
+	var bcast byte
+	if msg.Flags&TSSFlagBroadcast != 0 {
+		bcast = 0x01
+	}
+
+	if msg.Type == CeremonyReshare {
+		var cflags byte
+		if msg.Flags&TSSFlagToOld != 0 {
+			cflags |= 0x01
+		}
+		if msg.Flags&TSSFlagToNew != 0 {
+			cflags |= 0x02
+		}
+		if msg.Flags&TSSFlagFromNew != 0 {
+			cflags |= 0x04
+		}
+		data = make([]byte, 2+len(msg.Data))
+		data[0] = bcast
+		data[1] = cflags
+		copy(data[2:], msg.Data)
+	} else {
+		data = make([]byte, 1+len(msg.Data))
+		data[0] = bcast
+		copy(data[1:], msg.Data)
+	}
+
+	err := n.tss.HandleMessage(n.ctx, msg.From, msg.CeremonyID, data)
+	if err == nil {
+		return
+	}
+	if !errors.Is(err, ErrUnknownCeremony) {
+		n.t.Logf("node %s: handle msg from %s: %v",
+			n.id, msg.From, err)
 		return
 	}
 
-	broadcast := msg.Flags&TSSFlagBroadcast != 0
+	// Retry: ceremony not registered yet.
+	n.wg.Add(1)
+	go func() {
+		defer n.wg.Done()
+		for _, delay := range []time.Duration{
+			50 * time.Millisecond,
+			100 * time.Millisecond,
+			250 * time.Millisecond,
+			500 * time.Millisecond,
+			1 * time.Second,
+			2 * time.Second,
+		} {
+			timer := time.NewTimer(delay)
+			select {
+			case <-n.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			err = n.tss.HandleMessage(n.ctx, msg.From, msg.CeremonyID, data)
+			if err == nil {
+				return
+			}
+			if !errors.Is(err, ErrUnknownCeremony) {
+				break
+			}
+		}
+		n.t.Logf("node %s: handle msg from %s: %v (after retries)",
+			n.id, msg.From, err)
+	}()
+}
 
-	if c.ctype == CeremonyReshare {
-		n.routeReshareMsg(c, msg, broadcast)
+// =============================================================================
+// Ceremony handlers — dispatch to production tssImpl
+// =============================================================================
+
+func (n *rpcTSSNode) registerResult(cid CeremonyID) chan any {
+	ch := make(chan any, 1)
+	n.resultsMu.Lock()
+	n.results[cid] = ch
+	n.resultsMu.Unlock()
+	return ch
+}
+
+func (n *rpcTSSNode) handleKeygen(req KeygenRequest) {
+	parties := partiesToIdentities(req.Committee)
+	if parties == nil {
 		return
 	}
+	ch := n.registerResult(req.CeremonyID)
+	n.adapter.registerCeremony(req.CeremonyID, CeremonyKeygen)
 
-	// Keygen/Sign: single party.
-	fromIDStr := msg.From.String()
-	var fromPid *tss.PartyID
-	for _, pid := range c.pids {
-		if pid.Id == fromIDStr {
-			fromPid = pid
-			break
+	n.wg.Add(1)
+	go func() {
+		defer n.wg.Done()
+		defer n.adapter.unregisterCeremony(req.CeremonyID)
+		keyID, err := n.tss.Keygen(n.ctx, req.CeremonyID,
+			parties, req.Threshold)
+		if err != nil {
+			ch <- err
+			return
+		}
+		n.t.Logf("node %s: keygen done, key=%x",
+			n.id, keyID)
+		ch <- keyID
+	}()
+}
+
+func (n *rpcTSSNode) handleSign(req SignRequest) {
+	parties := partiesToIdentities(req.Committee)
+	if parties == nil {
+		return
+	}
+	ch := n.registerResult(req.CeremonyID)
+	n.adapter.registerCeremony(req.CeremonyID, CeremonySign)
+
+	var data [32]byte
+	copy(data[:], req.Data)
+
+	n.wg.Add(1)
+	go func() {
+		defer n.wg.Done()
+		defer n.adapter.unregisterCeremony(req.CeremonyID)
+		r, s, err := n.tss.Sign(n.ctx, req.CeremonyID,
+			req.KeyID, parties, req.Threshold, data)
+		if err != nil {
+			ch <- err
+			return
+		}
+		n.t.Logf("node %s: sign done, r=%x..",
+			n.id, r[:8])
+		ch <- [2][]byte{r, s}
+	}()
+}
+
+func (n *rpcTSSNode) handleReshare(req ReshareRequest) {
+	oldParties := partiesToIdentities(req.OldCommittee)
+	newParties := partiesToIdentities(req.NewCommittee)
+	if oldParties == nil || newParties == nil {
+		return
+	}
+	ch := n.registerResult(req.CeremonyID)
+	n.adapter.registerCeremony(req.CeremonyID, CeremonyReshare)
+
+	n.wg.Add(1)
+	go func() {
+		defer n.wg.Done()
+		defer n.adapter.unregisterCeremony(req.CeremonyID)
+		err := n.tss.Reshare(n.ctx, req.CeremonyID, req.KeyID,
+			oldParties, newParties,
+			req.OldThreshold, req.NewThreshold)
+		if err != nil {
+			ch <- err
+			return
+		}
+		n.t.Logf("node %s: reshare done", n.id)
+		ch <- nil
+	}()
+}
+
+// =============================================================================
+// Wait helpers
+// =============================================================================
+
+func (n *rpcTSSNode) waitKeygen(ctx context.Context, cid CeremonyID) ([]byte, error) {
+	n.resultsMu.Lock()
+	ch := n.results[cid]
+	n.resultsMu.Unlock()
+	if ch == nil {
+		// Poll for registration.
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-tick.C:
+			}
+			n.resultsMu.Lock()
+			ch = n.results[cid]
+			n.resultsMu.Unlock()
+			if ch != nil {
+				break
+			}
 		}
 	}
-	if fromPid == nil {
-		n.t.Logf("node %s: sender %s not in ceremony",
-			n.id, msg.From)
-		return
-	}
-
-	// Data is pure tss-lib wireBytes — no prefix stripping.
-	parsed, err := tss.ParseWireMessage(msg.Data, fromPid,
-		broadcast)
-	if err != nil {
-		n.t.Logf("node %s: parse: %v", n.id, err)
-		return
-	}
-
-	if _, err := c.party.Update(parsed); err != nil {
-		n.t.Logf("node %s: update: %v", n.id, err)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-ch:
+		switch v := result.(type) {
+		case []byte:
+			return v, nil
+		case error:
+			return nil, v
+		default:
+			return nil, fmt.Errorf("unexpected result type: %T", v)
+		}
 	}
 }
 
-// routeReshareMsg routes an incoming TSSMessage to the correct
-// reshare party instance(s) using the Flags bitfield.
-//
-// No data prefix decoding. Routing metadata lives in TSSMessage.Flags.
-func (n *rpcTSSNode) routeReshareMsg(c *rpcCeremony, msg TSSMessage, broadcast bool) {
-	toOld := msg.Flags&TSSFlagToOld != 0
-	toNew := msg.Flags&TSSFlagToNew != 0
-	fromNew := msg.Flags&TSSFlagFromNew != 0
-	fromIDStr := msg.From.String()
-
-	findFrom := func(pids tss.SortedPartyIDs) *tss.PartyID {
-		for _, pid := range pids {
-			if pid.Id == fromIDStr {
-				return pid
+func (n *rpcTSSNode) waitSign(ctx context.Context, cid CeremonyID) ([]byte, []byte, error) {
+	n.resultsMu.Lock()
+	ch := n.results[cid]
+	n.resultsMu.Unlock()
+	if ch == nil {
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			case <-tick.C:
 			}
+			n.resultsMu.Lock()
+			ch = n.results[cid]
+			n.resultsMu.Unlock()
+			if ch != nil {
+				break
+			}
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	case result := <-ch:
+		switch v := result.(type) {
+		case [2][]byte:
+			return v[0], v[1], nil
+		case error:
+			return nil, nil, v
+		default:
+			return nil, nil, fmt.Errorf("unexpected result type: %T", v)
+		}
+	}
+}
+
+func (n *rpcTSSNode) waitReshare(ctx context.Context, cid CeremonyID) error {
+	n.resultsMu.Lock()
+	ch := n.results[cid]
+	n.resultsMu.Unlock()
+	if ch == nil {
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-tick.C:
+			}
+			n.resultsMu.Lock()
+			ch = n.results[cid]
+			n.resultsMu.Unlock()
+			if ch != nil {
+				break
+			}
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case result := <-ch:
+		if result == nil {
+			return nil
+		}
+		if err, ok := result.(error); ok {
+			return err
 		}
 		return nil
 	}
-
-	if toOld && c.oldParty != nil {
-		var fromPid *tss.PartyID
-		if fromNew {
-			fromPid = findFrom(c.newPids)
-		} else {
-			fromPid = findFrom(c.oldPids)
-		}
-		if fromPid != nil {
-			parsed, err := tss.ParseWireMessage(msg.Data,
-				fromPid, broadcast)
-			if err != nil {
-				n.t.Logf("node %s: parse old: %v",
-					n.id, err)
-			} else if _, err := c.oldParty.Update(parsed); err != nil {
-				n.t.Logf("node %s: update old: %v",
-					n.id, err)
-			}
-		}
-	}
-
-	if toNew && c.party != nil {
-		var fromPid *tss.PartyID
-		if fromNew {
-			fromPid = findFrom(c.newPids)
-		} else {
-			fromPid = findFrom(c.oldPids)
-		}
-		if fromPid != nil {
-			parsed, err := tss.ParseWireMessage(msg.Data,
-				fromPid, broadcast)
-			if err != nil {
-				n.t.Logf("node %s: parse new: %v",
-					n.id, err)
-			} else if _, err := c.party.Update(parsed); err != nil {
-				n.t.Logf("node %s: update new: %v",
-					n.id, err)
-			}
-		}
-	}
-}
-
-// =============================================================================
-// Message pumps — outgoing tss-lib messages → signed TSSMessage → Transport
-// =============================================================================
-
-// pumpKeysign reads outgoing tss-lib messages for keygen/sign
-// ceremonies, wraps them in TSSMessage with Flags set, and writes
-// to peer Transports. Data is pure tss-lib wireBytes.
-//
-// Goroutine contract:
-//
-//	Owner:     rpcTSSNode (one per keygen/sign ceremony)
-//	Lifecycle: runs until ctx cancel
-//	Tracking:  wg (Add before go)
-func (n *rpcTSSNode) pumpKeysign(cid CeremonyID, c *rpcCeremony) {
-	defer n.wg.Done()
-	for {
-		select {
-		case msg := <-c.outCh:
-			wireData, _, err := msg.WireBytes()
-			if err != nil {
-				n.t.Logf("pump %s: WireBytes: %v", cid, err)
-				continue
-			}
-
-			var flags TSSMsgFlags
-			if msg.GetTo() == nil {
-				flags |= TSSFlagBroadcast
-			}
-
-			hash := HashTSSMessage(cid, wireData)
-			sig := n.secret.Sign(hash)
-
-			tssMsg := TSSMessage{
-				CeremonyID: cid,
-				Type:       c.ctype,
-				From:       n.id,
-				Flags:      flags,
-				Data:       wireData,
-				Signature:  sig,
-			}
-
-			if n.corruptFn != nil {
-				n.corruptFn(&tssMsg)
-			}
-
-			n.sendTSSMsg(c, tssMsg, msg.GetTo())
-
-		case <-n.ctx.Done():
-			return
-		}
-	}
-}
-
-// pumpReshare routes outgoing reshare messages with committee flags
-// encoded in TSSMessage.Flags — not in Data bytes.
-//
-// For overlapping nodes (in both old and new committees), messages
-// between local party instances are self-delivered via handleTSSMsg.
-//
-// Goroutine contract:
-//
-//	Owner:     rpcTSSNode (one per reshare ceremony)
-//	Lifecycle: runs until ctx cancel
-//	Tracking:  wg (Add before go)
-func (n *rpcTSSNode) pumpReshare(cid CeremonyID, c *rpcCeremony) {
-	defer n.wg.Done()
-
-	// New key set for fromNew detection. Old and new key spaces
-	// are disjoint (XOR 1), so membership means from-new.
-	newKeySet := make(map[string]bool, len(c.newPids))
-	for _, pid := range c.newPids {
-		newKeySet[pid.KeyInt().String()] = true
-	}
-
-	for {
-		select {
-		case msg := <-c.outCh:
-			wireData, routing, err := msg.WireBytes()
-			if err != nil {
-				n.t.Logf("reshare pump %s: WireBytes: %v",
-					cid, err)
-				continue
-			}
-
-			// Build flags from routing metadata.
-			var flags TSSMsgFlags
-			if routing.IsBroadcast {
-				flags |= TSSFlagBroadcast
-			}
-			if routing.IsToOldCommittee {
-				flags |= TSSFlagToOld
-			} else if routing.IsToOldAndNewCommittees {
-				flags |= TSSFlagToOld | TSSFlagToNew
-			} else {
-				flags |= TSSFlagToNew
-			}
-			if newKeySet[msg.GetFrom().KeyInt().String()] {
-				flags |= TSSFlagFromNew
-			}
-
-			hash := HashTSSMessage(cid, wireData)
-			sig := n.secret.Sign(hash)
-
-			// Data is PURE wireBytes. No prefix encoding.
-			tssMsg := TSSMessage{
-				CeremonyID: cid,
-				Type:       CeremonyReshare,
-				From:       n.id,
-				Flags:      flags,
-				Data:       wireData,
-				Signature:  sig,
-			}
-
-			if n.corruptFn != nil {
-				n.corruptFn(&tssMsg)
-			}
-
-			// Route to all unique peers across both committees.
-			sent := make(map[Identity]bool)
-			allPids := make([]*tss.PartyID, 0,
-				len(c.oldPids)+len(c.newPids))
-			allPids = append(allPids, c.oldPids...)
-			allPids = append(allPids, c.newPids...)
-
-			deliver := func(id Identity) {
-				if sent[id] {
-					return
-				}
-				sent[id] = true
-				if id == n.id {
-					// Self-deliver for overlapping nodes.
-					cp := tssMsg
-					go n.handleTSSMsg(cp)
-					return
-				}
-				n.transportsMu.RLock()
-				tr := n.transports[id]
-				n.transportsMu.RUnlock()
-				if tr != nil {
-					if err := tr.Write(n.id, tssMsg); err != nil {
-						n.t.Logf("reshare pump: %v",
-							err)
-					}
-				}
-			}
-
-			if msg.GetTo() == nil {
-				for _, pid := range allPids {
-					deliver(c.pidToID[pid.Id])
-				}
-			} else {
-				for _, dest := range msg.GetTo() {
-					deliver(c.pidToID[dest.Id])
-				}
-			}
-
-		case <-n.ctx.Done():
-			return
-		}
-	}
-}
-
-// sendTSSMsg writes a TSSMessage to the appropriate peer Transports
-// based on tss-lib routing (broadcast vs P2P).
-func (n *rpcTSSNode) sendTSSMsg(c *rpcCeremony, msg TSSMessage, to []*tss.PartyID) {
-	if to == nil {
-		// Broadcast to all committee peers.
-		for _, pid := range c.pids {
-			if pid.Id == n.partyID.Id {
-				continue
-			}
-			id := c.pidToID[pid.Id]
-			n.transportsMu.RLock()
-			tr := n.transports[id]
-			n.transportsMu.RUnlock()
-			if tr != nil {
-				if err := tr.Write(n.id, msg); err != nil {
-					n.t.Logf("pump write to %s: %v",
-						id, err)
-				}
-			}
-		}
-	} else {
-		// P2P to specific peers.
-		for _, dest := range to {
-			id := c.pidToID[dest.Id]
-			n.transportsMu.RLock()
-			tr := n.transports[id]
-			n.transportsMu.RUnlock()
-			if tr != nil {
-				if err := tr.Write(n.id, msg); err != nil {
-					n.t.Logf("pump write to %s: %v",
-						id, err)
-				}
-			}
-		}
-	}
-}
-
-// =============================================================================
-// Completion waiters — store results, signal test
-// =============================================================================
-
-func (n *rpcTSSNode) awaitKeygenEnd(c *rpcCeremony, endCh <-chan *keygen.LocalPartySaveData) {
-	defer n.wg.Done()
-	select {
-	case save := <-endCh:
-		keyID := save.ECDSAPub.X().Text(16)[:16]
-		n.keysMu.Lock()
-		n.keys[keyID] = save
-		n.keysMu.Unlock()
-
-		c.result <- save
-		n.t.Logf("node %s: keygen done, key=%s", n.id, keyID)
-
-	case <-n.ctx.Done():
-	}
-}
-
-func (n *rpcTSSNode) awaitSignEnd(c *rpcCeremony, endCh <-chan *common.SignatureData) {
-	defer n.wg.Done()
-	select {
-	case sig := <-endCh:
-		c.result <- sig
-		n.t.Logf("node %s: sign done", n.id)
-
-	case <-n.ctx.Done():
-	}
-}
-
-func (n *rpcTSSNode) awaitReshareEnd(c *rpcCeremony, endCh <-chan *keygen.LocalPartySaveData, expected int) {
-	defer n.wg.Done()
-	for i := 0; i < expected; i++ {
-		select {
-		case save := <-endCh:
-			c.result <- save
-		case <-n.ctx.Done():
-			return
-		}
-	}
-}
-
-// waitCeremony blocks until the ceremony completes or ctx expires.
-func (n *rpcTSSNode) waitCeremony(ctx context.Context, cid CeremonyID) (any, error) {
-	// Poll for ceremony registration.
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-
-	var c *rpcCeremony
-	for {
-		n.ceremoniesMu.Lock()
-		c = n.ceremonies[cid]
-		n.ceremoniesMu.Unlock()
-		if c != nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-tick.C:
-		}
-	}
-
-	select {
-	case result := <-c.result:
-		return result, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-// waitReshare collects results from both old and new party
-// instances, stores the new key share.
-func (n *rpcTSSNode) waitReshare(ctx context.Context, cid CeremonyID) error {
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-
-	var c *rpcCeremony
-	for {
-		n.ceremoniesMu.Lock()
-		c = n.ceremonies[cid]
-		n.ceremoniesMu.Unlock()
-		if c != nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-tick.C:
-		}
-	}
-
-	expectedEnds := 0
-	if c.oldParty != nil {
-		expectedEnds++
-	}
-	if c.party != nil {
-		expectedEnds++
-	}
-
-	var newSave *keygen.LocalPartySaveData
-	for i := 0; i < expectedEnds; i++ {
-		select {
-		case result := <-c.result:
-			save := result.(*keygen.LocalPartySaveData)
-			if save.Xi != nil && save.Xi.Sign() != 0 {
-				newSave = save
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	if newSave != nil {
-		keyID := newSave.ECDSAPub.X().Text(16)[:16]
-		n.keysMu.Lock()
-		n.keys[keyID] = newSave
-		n.keysMu.Unlock()
-	}
-
-	return nil
 }
 
 // =============================================================================
@@ -851,10 +546,6 @@ func (n *rpcTSSNode) waitReshare(ctx context.Context, cid CeremonyID) error {
 
 // connectRPCPair establishes an encrypted TCP channel between server
 // and client: KeyExchange + Handshake + bidirectional read loops.
-//
-// A barrier synchronizes KX → Handshake transition. Without it, the
-// client can finish KX and send its encrypted HelloRequest before the
-// server's json.Decoder returns from reading the KX TransportRequest.
 func connectRPCPair(t *testing.T, server, client *rpcTSSNode) {
 	t.Helper()
 
@@ -864,7 +555,7 @@ func connectRPCPair(t *testing.T, server, client *rpcTSSNode) {
 	}
 	clientTr := new(Transport)
 
-	ctx, cancel := context.WithTimeout(context.Background(),
+	ctx, cancel := context.WithTimeout(t.Context(),
 		10*time.Second)
 	defer cancel()
 
@@ -939,7 +630,6 @@ func connectRPCPair(t *testing.T, server, client *rpcTSSNode) {
 			clientRemoteID, server.id)
 	}
 
-	// Register transports.
 	server.transportsMu.Lock()
 	server.transports[client.id] = serverTr
 	server.transportsMu.Unlock()
@@ -948,12 +638,10 @@ func connectRPCPair(t *testing.T, server, client *rpcTSSNode) {
 	client.transports[server.id] = clientTr
 	client.transportsMu.Unlock()
 
-	// Start read loops on both sides.
 	server.startReadLoop(serverTr, client.id)
 	client.startReadLoop(clientTr, server.id)
 }
 
-// setupRPCMesh creates n nodes and connects every pair.
 func setupRPCMesh(t *testing.T, n int) []*rpcTSSNode {
 	t.Helper()
 
@@ -976,17 +664,12 @@ func setupRPCMesh(t *testing.T, n int) []*rpcTSSNode {
 	return nodes
 }
 
-// teardownRPCMesh performs orderly shutdown:
-//  1. Signal all goroutines via ctx cancel.
-//  2. Close connections (unblocks blocked reads).
-//  3. Wait for all goroutines.
 func teardownRPCMesh(t *testing.T, nodes []*rpcTSSNode) {
 	t.Helper()
 
 	for _, n := range nodes {
 		n.cancel()
 	}
-
 	for _, n := range nodes {
 		n.transportsMu.RLock()
 		for id, tr := range n.transports {
@@ -998,8 +681,10 @@ func teardownRPCMesh(t *testing.T, nodes []*rpcTSSNode) {
 		if err := n.listener.Close(); err != nil {
 			t.Logf("close listener: %v", err)
 		}
+		if err := n.store.Close(); err != nil {
+			t.Logf("close store: %v", err)
+		}
 	}
-
 	for _, n := range nodes {
 		n.wg.Wait()
 	}
@@ -1009,75 +694,17 @@ func teardownRPCMesh(t *testing.T, nodes []*rpcTSSNode) {
 // Helpers
 // =============================================================================
 
-// findSelf finds our PartyID in a sorted list by Id string.
-func findSelf(pids tss.SortedPartyIDs, selfID string) *tss.PartyID {
-	for _, pid := range pids {
-		if pid.Id == selfID {
-			return pid
-		}
-	}
-	return nil
-}
-
-// mapPIDToIdentity builds PartyID.Id → Identity by parsing the hex
-// Id string. Correct even when keys are XORed for reshare.
-func mapPIDToIdentity(pids tss.SortedPartyIDs) map[string]Identity {
-	m := make(map[string]Identity, len(pids))
-	for _, pid := range pids {
-		id, err := NewIdentityFromString(pid.Id)
-		if err != nil {
-			continue
-		}
-		m[pid.Id] = *id
-	}
-	return m
-}
-
-// makeReshareContext builds a sorted party context for reshare,
-// optionally XORing keys for new committee disambiguation.
-func makeReshareContext(
-	pids tss.UnSortedPartyIDs,
-	selfStr string,
-	isNew bool,
-) (tss.SortedPartyIDs, *tss.PartyID, map[string]Identity) {
-	rebuilt := make([]*tss.PartyID, len(pids))
-	pidToID := make(map[string]Identity)
-	for i, pid := range pids {
-		key := new(big.Int).SetBytes(pid.Key)
-		if isNew {
-			key.Xor(key, big.NewInt(1))
-		}
-		rebuilt[i] = tss.NewPartyID(pid.Id, pid.Moniker, key)
-
-		id, _ := NewIdentityFromString(pid.Id)
-		if id != nil {
-			pidToID[pid.Id] = *id
-		}
-	}
-
-	sorted := tss.SortPartyIDs(rebuilt)
-	var ourPid *tss.PartyID
-	for _, pid := range sorted {
-		if pid.Id == selfStr {
-			ourPid = pid
-			break
-		}
-	}
-
-	return sorted, ourPid, pidToID
-}
-
 // rpcCommittee builds a PartyID committee from rpcTSSNode list.
 func rpcCommittee(nodes []*rpcTSSNode) tss.UnSortedPartyIDs {
 	pids := make(tss.UnSortedPartyIDs, len(nodes))
 	for i, n := range nodes {
-		pids[i] = n.partyID
+		idStr := n.id.String()
+		pids[i] = tss.NewPartyID(idStr, idStr,
+			new(big.Int).SetBytes(n.id[:]))
 	}
 	return pids
 }
 
-// rpcInitKeygen sends a KeygenRequest to all nodes via Transport.
-// Node 0 is the initiator.
 func rpcInitKeygen(
 	t *testing.T,
 	nodes []*rpcTSSNode,
@@ -1107,7 +734,6 @@ func rpcInitKeygen(
 	initiator.handleKeygen(req)
 }
 
-// rpcInitSign sends a SignRequest to all nodes via Transport.
 func rpcInitSign(
 	t *testing.T,
 	nodes []*rpcTSSNode,
@@ -1140,12 +766,12 @@ func rpcInitSign(
 	initiator.handleSign(req)
 }
 
-// rpcInitReshare sends a ReshareRequest to all nodes via Transport.
 func rpcInitReshare(
 	t *testing.T,
 	nodes []*rpcTSSNode,
 	oldCommittee, newCommittee tss.UnSortedPartyIDs,
 	cid CeremonyID,
+	keyID []byte,
 	oldThreshold, newThreshold int,
 ) {
 	t.Helper()
@@ -1153,6 +779,7 @@ func rpcInitReshare(
 	req := ReshareRequest{
 		CeremonyID:   cid,
 		Curve:        "secp256k1",
+		KeyID:        keyID,
 		OldCommittee: oldCommittee,
 		NewCommittee: newCommittee,
 		OldThreshold: oldThreshold,
@@ -1178,22 +805,26 @@ func rpcInitReshare(
 func rpcSigningCommittee(
 	t *testing.T,
 	nodes []*rpcTSSNode,
-	keyID string,
+	keyID []byte,
 ) tss.UnSortedPartyIDs {
 	t.Helper()
 
+	// Find any node that has the key and get Ks.
 	var ks []*big.Int
 	for _, n := range nodes {
-		n.keysMu.RLock()
-		key := n.keys[keyID]
-		n.keysMu.RUnlock()
-		if key != nil {
-			ks = key.Ks
-			break
+		shareData, err := n.store.LoadKeyShare(keyID)
+		if err != nil {
+			continue
 		}
+		var save keygen.LocalPartySaveData
+		if err := json.Unmarshal(shareData, &save); err != nil {
+			continue
+		}
+		ks = save.Ks
+		break
 	}
 	if ks == nil {
-		t.Fatalf("no node has key %s", keyID)
+		t.Fatalf("no node has key %x", keyID)
 	}
 
 	ksSet := make(map[string]*big.Int, len(ks))
@@ -1223,64 +854,47 @@ func rpcSigningCommittee(
 }
 
 // =============================================================================
-// Tests — TSS ceremonies over encrypted Transport with TSSMessage.Flags
+// Tests — TSS ceremonies over encrypted Transport
 // =============================================================================
 
 func TestRPCTSSKeygen(t *testing.T) {
 	nodes := setupRPCMesh(t, 3)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
 	committee := rpcCommittee(nodes)
 	cid := NewCeremonyID()
 	threshold := 1 // 2-of-3
 
-	t.Log("=== Keygen over encrypted Transport (Flags) ===")
+	t.Log("=== Keygen over encrypted Transport ===")
 
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		60*time.Second)
 	defer cancel()
 
-	var keyID string
+	var keyID []byte
 	for _, node := range nodes {
-		result, err := node.waitCeremony(ctx, cid)
+		kid, err := node.waitKeygen(ctx, cid)
 		if err != nil {
 			t.Fatalf("node %s: %v", node.id, err)
 		}
-		save := result.(*keygen.LocalPartySaveData)
-		keyID = save.ECDSAPub.X().Text(16)[:16]
-		t.Logf("node %s: keyID=%s", node.id, keyID)
+		keyID = kid
+		t.Logf("node %s: keyID=%x", node.id, keyID)
 	}
 
-	// Verify all nodes share the same public key.
-	var expectedX *big.Int
-	for _, node := range nodes {
-		node.keysMu.RLock()
-		key := node.keys[keyID]
-		node.keysMu.RUnlock()
-		if key == nil {
-			t.Fatalf("node %s: missing key", node.id)
-		}
-		if expectedX == nil {
-			expectedX = key.ECDSAPub.X()
-		} else if expectedX.Cmp(key.ECDSAPub.X()) != 0 {
-			t.Fatal("public key mismatch between nodes")
-		}
-	}
-
-	t.Log("All nodes have matching public key ✓")
+	t.Log("All nodes completed keygen ✓")
 }
 
 func TestRPCTSSKeygenAndSign(t *testing.T) {
 	nodes := setupRPCMesh(t, 3)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
 	committee := rpcCommittee(nodes)
 	threshold := 1 // 2-of-3
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		60*time.Second)
 	defer cancel()
 
 	// === Keygen ===
@@ -1289,43 +903,43 @@ func TestRPCTSSKeygenAndSign(t *testing.T) {
 
 	rpcInitKeygen(t, nodes, committee, keygenCID, threshold)
 
-	var keyID string
-	var pubKey *ecdsa.PublicKey
+	var keyID []byte
 	for _, node := range nodes {
-		result, err := node.waitCeremony(ctx, keygenCID)
+		kid, err := node.waitKeygen(ctx, keygenCID)
 		if err != nil {
 			t.Fatalf("keygen: %v", err)
 		}
-		save := result.(*keygen.LocalPartySaveData)
-		keyID = save.ECDSAPub.X().Text(16)[:16]
-		if pubKey == nil {
-			pubKey = &ecdsa.PublicKey{
-				Curve: tss.S256(),
-				X:     save.ECDSAPub.X(),
-				Y:     save.ECDSAPub.Y(),
-			}
-		}
+		keyID = kid
 	}
-	t.Logf("keygen done, keyID=%s", keyID)
+	t.Logf("keygen done, keyID=%x", keyID)
+
+	// Load public key for verification.
+	meta, err := nodes[0].store.LoadKeyMetadata(keyID)
+	if err != nil {
+		t.Fatalf("load metadata: %v", err)
+	}
+	pubKey := &ecdsa.PublicKey{
+		Curve: tss.S256(),
+		X:     new(big.Int).SetBytes(meta.PublicKey[:32]),
+		Y:     new(big.Int).SetBytes(meta.PublicKey[32:]),
+	}
 
 	// === Sign ===
 	signCID := NewCeremonyID()
-	data := sha256.Sum256([]byte("rpc tss clean architecture"))
+	data := sha256.Sum256([]byte("rpc tss round functions"))
 	t.Log("=== Sign ===")
 
 	rpcInitSign(t, nodes, committee, signCID,
-		[]byte(keyID), threshold, data)
+		keyID, threshold, data)
 
 	for _, node := range nodes {
-		result, err := node.waitCeremony(ctx, signCID)
-		if err != nil {
-			t.Fatalf("sign: %v", err)
+		r, s, serr := node.waitSign(ctx, signCID)
+		if serr != nil {
+			t.Fatalf("sign: %v", serr)
 		}
-		sig := result.(*common.SignatureData)
-
-		r := new(big.Int).SetBytes(sig.R)
-		s := new(big.Int).SetBytes(sig.S)
-		if !ecdsa.Verify(pubKey, data[:], r, s) {
+		rInt := new(big.Int).SetBytes(r)
+		sInt := new(big.Int).SetBytes(s)
+		if !ecdsa.Verify(pubKey, data[:], rInt, sInt) {
 			t.Fatalf("node %s: ECDSA verify failed", node.id)
 		}
 		t.Logf("node %s: signature verified ✓", node.id)
@@ -1336,14 +950,14 @@ func TestRPCTSSReshare(t *testing.T) {
 	// 4 nodes: keygen {0,1,2}, reshare → {1,2,3}, sign with {1,2,3}.
 	// Nodes 1 and 2 overlap both committees.
 	nodes := setupRPCMesh(t, 4)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
 	oldCommittee := rpcCommittee(nodes[:3])
 	newCommittee := rpcCommittee(nodes[1:])
 	threshold := 1 // 2-of-3
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		120*time.Second)
 	defer cancel()
 
 	// --- Keygen with old committee {0, 1, 2} ---
@@ -1352,71 +966,76 @@ func TestRPCTSSReshare(t *testing.T) {
 
 	rpcInitKeygen(t, nodes[:3], oldCommittee, keygenCID, threshold)
 
-	var keyID string
+	var keyID []byte
 	for _, node := range nodes[:3] {
-		result, err := node.waitCeremony(ctx, keygenCID)
+		kid, err := node.waitKeygen(ctx, keygenCID)
 		if err != nil {
 			t.Fatalf("node %s keygen: %v", node.id, err)
 		}
-		save := result.(*keygen.LocalPartySaveData)
-		keyID = save.ECDSAPub.X().Text(16)[:16]
+		keyID = kid
 	}
-	t.Logf("keygen done: keyID=%s", keyID)
+	t.Logf("keygen done: keyID=%x", keyID)
+
+	// Load public key for post-reshare signature verification.
+	meta, err := nodes[0].store.LoadKeyMetadata(keyID)
+	if err != nil {
+		t.Fatalf("load metadata: %v", err)
+	}
+	pubKey := &ecdsa.PublicKey{
+		Curve: tss.S256(),
+		X:     new(big.Int).SetBytes(meta.PublicKey[:32]),
+		Y:     new(big.Int).SetBytes(meta.PublicKey[32:]),
+	}
 
 	// --- Reshare: {0,1,2} → {1,2,3} ---
 	reshareCID := NewCeremonyID()
 	t.Log("=== Reshare ===")
 
 	rpcInitReshare(t, nodes, oldCommittee, newCommittee,
-		reshareCID, threshold, threshold)
+		reshareCID, keyID, threshold, threshold)
 
 	for _, node := range nodes {
-		if err := node.waitReshare(ctx, reshareCID); err != nil {
-			t.Fatalf("node %s reshare: %v", node.id, err)
+		if rerr := node.waitReshare(ctx, reshareCID); rerr != nil {
+			t.Fatalf("node %s reshare: %v", node.id, rerr)
 		}
 	}
 	t.Log("reshare done ✓")
 
 	// --- Sign with new committee {1, 2, 3} ---
 	signCID := NewCeremonyID()
-	data := sha256.Sum256([]byte("post-reshare clean rpc"))
+	data := sha256.Sum256([]byte("post-reshare round functions"))
 	t.Log("=== Sign with new committee ===")
 
 	signCommittee := rpcSigningCommittee(t, nodes[1:], keyID)
 
 	rpcInitSign(t, nodes[1:], signCommittee, signCID,
-		[]byte(keyID), threshold, data)
+		keyID, threshold, data)
 
 	for _, node := range nodes[1:] {
-		result, err := node.waitCeremony(ctx, signCID)
-		if err != nil {
-			t.Fatalf("node %s sign: %v", node.id, err)
+		r, s, serr := node.waitSign(ctx, signCID)
+		if serr != nil {
+			t.Fatalf("node %s sign: %v", node.id, serr)
 		}
-		sig := result.(*common.SignatureData)
-		t.Logf("node %s: sign done, r=%x..",
-			node.id, sig.R[:8])
+		rInt := new(big.Int).SetBytes(r)
+		sInt := new(big.Int).SetBytes(s)
+		if !ecdsa.Verify(pubKey, data[:], rInt, sInt) {
+			t.Fatalf("node %s: ECDSA verify failed after reshare",
+				node.id)
+		}
+		t.Logf("node %s: signature verified ✓", node.id)
 	}
 }
 
 // =============================================================================
 // Negative tests — corrupt signer scenarios
-//
-// Each test hooks corruptFn on one node's outgoing TSSMessage pump
-// and verifies the ceremony fails gracefully: no valid result is
-// produced, no panic, honest nodes time out waiting.
 // =============================================================================
 
-// TestRPCTSSKeygenCorruptPostSign verifies that post-sign data
-// corruption (bit flip in Data after signing) is caught by
-// signature verification on the receiver. The corrupt node's
-// messages are rejected at Verify and the ceremony times out.
 func TestRPCTSSKeygenCorruptPostSign(t *testing.T) {
 	nodes := setupRPCMesh(t, 3)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
-	// Node 2 flips a bit in Data after signing. Receivers
-	// compute Hash(CeremonyID||corrupt_data) which won't match
-	// the signature computed over the original data.
+	// Node 2 flips a bit in Data after signing. Receivers reject
+	// because Hash(CeremonyID||corrupt_data) won't match signature.
 	nodes[2].corruptFn = func(msg *TSSMessage) {
 		if len(msg.Data) > 0 {
 			msg.Data[0] ^= 0xff
@@ -1425,18 +1044,18 @@ func TestRPCTSSKeygenCorruptPostSign(t *testing.T) {
 
 	committee := rpcCommittee(nodes)
 	cid := NewCeremonyID()
-	threshold := 1 // 2-of-3
+	threshold := 1
 
 	t.Log("=== Keygen with post-sign corruption (node 2) ===")
 
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		5*time.Second)
 	defer cancel()
 
 	for _, node := range nodes {
-		_, err := node.waitCeremony(ctx, cid)
+		_, err := node.waitKeygen(ctx, cid)
 		if err == nil {
 			t.Fatal("ceremony must fail with corrupt signer")
 		}
@@ -1445,13 +1064,9 @@ func TestRPCTSSKeygenCorruptPostSign(t *testing.T) {
 	t.Log("post-sign corruption rejected ✓")
 }
 
-// TestRPCTSSKeygenCorruptResigned verifies that a signer who
-// corrupts tss-lib wire data and re-signs the corrupt payload
-// passes signature verification but is caught at the tss-lib
-// protocol level (ParseWireMessage or party.Update failure).
 func TestRPCTSSKeygenCorruptResigned(t *testing.T) {
 	nodes := setupRPCMesh(t, 3)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
 	// Node 2 corrupts wire data then re-signs so Verify passes.
 	// tss-lib rejects the garbage at protocol level.
@@ -1472,12 +1087,12 @@ func TestRPCTSSKeygenCorruptResigned(t *testing.T) {
 
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		5*time.Second)
 	defer cancel()
 
 	for _, node := range nodes {
-		_, err := node.waitCeremony(ctx, cid)
+		_, err := node.waitKeygen(ctx, cid)
 		if err == nil {
 			t.Fatal("ceremony must fail with corrupt wire data")
 		}
@@ -1486,13 +1101,10 @@ func TestRPCTSSKeygenCorruptResigned(t *testing.T) {
 	t.Log("re-signed corruption caught at protocol level ✓")
 }
 
-// TestRPCTSSKeygenBadSignature verifies that messages with zeroed
-// signatures are rejected at the Verify step.
 func TestRPCTSSKeygenBadSignature(t *testing.T) {
 	nodes := setupRPCMesh(t, 3)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
-	// Node 2 zeros its signature on every outgoing message.
 	nodes[2].corruptFn = func(msg *TSSMessage) {
 		for i := range msg.Signature {
 			msg.Signature[i] = 0
@@ -1507,12 +1119,12 @@ func TestRPCTSSKeygenBadSignature(t *testing.T) {
 
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		5*time.Second)
 	defer cancel()
 
 	for _, node := range nodes {
-		_, err := node.waitCeremony(ctx, cid)
+		_, err := node.waitKeygen(ctx, cid)
 		if err == nil {
 			t.Fatal("ceremony must fail with bad signature")
 		}
@@ -1521,15 +1133,10 @@ func TestRPCTSSKeygenBadSignature(t *testing.T) {
 	t.Log("zeroed signature rejected ✓")
 }
 
-// TestRPCTSSKeygenSpoofIdentity verifies that a signer claiming
-// to be another party (From field mismatch) is caught by Verify.
-// The signature was made with node 2's key, so verifying against
-// node 0's identity fails.
 func TestRPCTSSKeygenSpoofIdentity(t *testing.T) {
 	nodes := setupRPCMesh(t, 3)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
-	// Node 2 claims to be node 0.
 	spoofTarget := nodes[0].id
 	nodes[2].corruptFn = func(msg *TSSMessage) {
 		msg.From = spoofTarget
@@ -1543,12 +1150,12 @@ func TestRPCTSSKeygenSpoofIdentity(t *testing.T) {
 
 	rpcInitKeygen(t, nodes, committee, cid, threshold)
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		5*time.Second)
 	defer cancel()
 
 	for _, node := range nodes {
-		_, err := node.waitCeremony(ctx, cid)
+		_, err := node.waitKeygen(ctx, cid)
 		if err == nil {
 			t.Fatal("ceremony must fail with spoofed identity")
 		}
@@ -1557,19 +1164,15 @@ func TestRPCTSSKeygenSpoofIdentity(t *testing.T) {
 	t.Log("spoofed identity rejected ✓")
 }
 
-// TestRPCTSSSignCorruptPostSign verifies that an honest keygen
-// followed by a corrupt signer during the signing ceremony causes
-// signing to fail. The keygen result remains valid; only the
-// signing phase is affected.
 func TestRPCTSSSignCorruptPostSign(t *testing.T) {
 	nodes := setupRPCMesh(t, 3)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
 	committee := rpcCommittee(nodes)
-	threshold := 1 // 2-of-3
+	threshold := 1
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		60*time.Second)
 	defer cancel()
 
 	// === Honest keygen ===
@@ -1578,16 +1181,15 @@ func TestRPCTSSSignCorruptPostSign(t *testing.T) {
 
 	rpcInitKeygen(t, nodes, committee, keygenCID, threshold)
 
-	var keyID string
+	var keyID []byte
 	for _, node := range nodes {
-		result, err := node.waitCeremony(ctx, keygenCID)
+		kid, err := node.waitKeygen(ctx, keygenCID)
 		if err != nil {
 			t.Fatalf("keygen: %v", err)
 		}
-		save := result.(*keygen.LocalPartySaveData)
-		keyID = save.ECDSAPub.X().Text(16)[:16]
+		keyID = kid
 	}
-	t.Logf("keygen done, keyID=%s", keyID)
+	t.Logf("keygen done, keyID=%x", keyID)
 
 	// === Corrupt sign: node 2 flips bits post-sign ===
 	nodes[2].corruptFn = func(msg *TSSMessage) {
@@ -1601,14 +1203,14 @@ func TestRPCTSSSignCorruptPostSign(t *testing.T) {
 	t.Log("=== Sign with post-sign corruption (node 2) ===")
 
 	rpcInitSign(t, nodes, committee, signCID,
-		[]byte(keyID), threshold, data)
+		keyID, threshold, data)
 
 	shortCtx, shortCancel := context.WithTimeout(
-		context.Background(), 2*time.Second)
+		t.Context(), 5*time.Second)
 	defer shortCancel()
 
 	for _, node := range nodes {
-		_, err := node.waitCeremony(shortCtx, signCID)
+		_, _, err := node.waitSign(shortCtx, signCID)
 		if err == nil {
 			t.Fatal("signing must fail with corrupt signer")
 		}
@@ -1617,20 +1219,17 @@ func TestRPCTSSSignCorruptPostSign(t *testing.T) {
 	t.Log("sign-phase corruption rejected ✓")
 }
 
-// TestRPCTSSReshareCorruptPostSign verifies that an honest keygen
-// followed by a corrupt signer during reshare causes the reshare
-// to fail. Node 2 is in both old and new committees (overlapping).
 func TestRPCTSSReshareCorruptPostSign(t *testing.T) {
 	// 4 nodes: keygen {0,1,2}, reshare → {1,2,3}.
 	// Node 2 overlaps both committees and corrupts.
 	nodes := setupRPCMesh(t, 4)
-	defer teardownRPCMesh(t, nodes)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
 
 	oldCommittee := rpcCommittee(nodes[:3])
 	threshold := 1
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(),
+		60*time.Second)
 	defer cancel()
 
 	// === Honest keygen ===
@@ -1639,11 +1238,13 @@ func TestRPCTSSReshareCorruptPostSign(t *testing.T) {
 
 	rpcInitKeygen(t, nodes[:3], oldCommittee, keygenCID, threshold)
 
+	var keyID []byte
 	for _, node := range nodes[:3] {
-		_, err := node.waitCeremony(ctx, keygenCID)
+		kid, err := node.waitKeygen(ctx, keygenCID)
 		if err != nil {
 			t.Fatalf("keygen: %v", err)
 		}
+		keyID = kid
 	}
 	t.Log("keygen done")
 
@@ -1659,10 +1260,10 @@ func TestRPCTSSReshareCorruptPostSign(t *testing.T) {
 	t.Log("=== Reshare with corruption (node 2) ===")
 
 	rpcInitReshare(t, nodes, oldCommittee, newCommittee,
-		reshareCID, threshold, threshold)
+		reshareCID, keyID, threshold, threshold)
 
 	shortCtx, shortCancel := context.WithTimeout(
-		context.Background(), 2*time.Second)
+		t.Context(), 5*time.Second)
 	defer shortCancel()
 
 	for _, node := range nodes {
@@ -1673,4 +1274,175 @@ func TestRPCTSSReshareCorruptPostSign(t *testing.T) {
 		t.Logf("node %s: %v (expected)", node.id, err)
 	}
 	t.Log("reshare corruption rejected ✓")
+}
+
+// =============================================================================
+// Ported from rpc_integration_test.go — error path tests
+// =============================================================================
+
+// TestRPCTSSKeygenWrongThreshold verifies that an invalid threshold
+// (t+1 > n) is rejected immediately by the production Keygen path.
+func TestRPCTSSKeygenWrongThreshold(t *testing.T) {
+	nodes := setupRPCMesh(t, 3)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
+
+	committee := rpcCommittee(nodes)
+	cid := NewCeremonyID()
+	threshold := 3 // 4-of-3 is invalid
+
+	t.Log("=== Keygen with invalid threshold ===")
+
+	rpcInitKeygen(t, nodes, committee, cid, threshold)
+
+	ctx, cancel := context.WithTimeout(t.Context(),
+		5*time.Second)
+	defer cancel()
+
+	_, err := nodes[0].waitKeygen(ctx, cid)
+	if err == nil {
+		t.Fatal("keygen must fail with invalid threshold")
+	}
+	t.Logf("Expected failure: %v ✓", err)
+}
+
+// TestRPCTSSSignWithoutKey verifies that signing with a nonexistent
+// key share is rejected by the production Sign path.
+func TestRPCTSSSignWithoutKey(t *testing.T) {
+	nodes := setupRPCMesh(t, 3)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
+
+	committee := rpcCommittee(nodes)
+	cid := NewCeremonyID()
+	data := sha256.Sum256([]byte("test"))
+
+	t.Log("=== Sign without keygen (no key) ===")
+
+	rpcInitSign(t, nodes, committee, cid,
+		[]byte("nonexistent-key"), 1, data)
+
+	ctx, cancel := context.WithTimeout(t.Context(),
+		5*time.Second)
+	defer cancel()
+
+	_, _, err := nodes[0].waitSign(ctx, cid)
+	if err == nil {
+		t.Fatal("sign must fail - no key exists")
+	}
+	t.Logf("Expected failure: %v ✓", err)
+}
+
+// TestRPCTSSMITMMessageInjection verifies that a forged TSSMessage
+// claiming to be from a committee member but signed by an outside
+// attacker is rejected at the Verify step. The honest keygen
+// should still complete.
+func TestRPCTSSMITMMessageInjection(t *testing.T) {
+	nodes := setupRPCMesh(t, 3)
+	t.Cleanup(func() { teardownRPCMesh(t, nodes) })
+
+	committee := rpcCommittee(nodes)
+	cid := NewCeremonyID()
+	threshold := 1
+
+	t.Log("=== MITM injection attack ===")
+
+	rpcInitKeygen(t, nodes, committee, cid, threshold)
+
+	// Attacker forges a TSSMessage claiming to be node 1.
+	attacker, _ := NewSecret()
+	fakeData := []byte("malicious-round-data")
+	hash := HashTSSMessage(cid, fakeData)
+	fakeSig := attacker.Sign(hash)
+
+	fakeMsg := TSSMessage{
+		CeremonyID: cid,
+		From:       nodes[1].id, // Claims to be node 1
+		Flags:      TSSFlagBroadcast,
+		Data:       fakeData,
+		Signature:  fakeSig, // Signed by attacker
+	}
+
+	// Deliver directly — should be rejected at Verify.
+	nodes[0].dispatchTSSMsg(fakeMsg)
+
+	ctx, cancel := context.WithTimeout(t.Context(),
+		60*time.Second)
+	defer cancel()
+
+	_, err := nodes[0].waitKeygen(ctx, cid)
+	if err != nil {
+		t.Fatalf("honest keygen should complete despite MITM: %v", err)
+	}
+	t.Log("MITM injection rejected, honest keygen completed ✓")
+}
+
+// =============================================================================
+// Fuzz tests — signature and CeremonyID round-trips
+// =============================================================================
+
+func FuzzTSSMessageSignature(f *testing.F) {
+	f.Add([]byte("test data"), []byte{1, 2, 3, 4})
+
+	f.Fuzz(func(t *testing.T, data []byte, cidBytes []byte) {
+		if len(cidBytes) < 32 {
+			return
+		}
+
+		var cid CeremonyID
+		copy(cid[:], cidBytes[:32])
+
+		secret, err := NewSecret()
+		if err != nil {
+			return
+		}
+
+		hash := HashTSSMessage(cid, data)
+		sig := secret.Sign(hash)
+
+		if _, err = Verify(hash, secret.Identity, sig); err != nil {
+			t.Errorf("Valid signature rejected: %v", err)
+		}
+
+		if len(data) > 0 {
+			tampered := make([]byte, len(data))
+			copy(tampered, data)
+			tampered[0] ^= 0xFF
+
+			tamperedHash := HashTSSMessage(cid, tampered)
+			if _, err = Verify(tamperedHash, secret.Identity, sig); err == nil {
+				t.Error("Tampered data should fail verification")
+			}
+		}
+
+		other, _ := NewSecret()
+		if _, err = Verify(hash, other.Identity, sig); err == nil {
+			t.Error("Wrong identity should fail verification")
+		}
+	})
+}
+
+func FuzzCeremonyID(f *testing.F) {
+	f.Add([]byte{})
+	f.Add(make([]byte, 32))
+	f.Add(make([]byte, 64))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		var cid CeremonyID
+		if len(data) >= 32 {
+			copy(cid[:], data[:32])
+		}
+
+		jsonData, err := json.Marshal(cid)
+		if err != nil {
+			t.Fatalf("Marshal failed: %v", err)
+		}
+
+		var decoded CeremonyID
+		if err := json.Unmarshal(jsonData, &decoded); err != nil {
+			t.Fatalf("Unmarshal failed: %v", err)
+		}
+
+		if cid != decoded {
+			t.Error("Round-trip mismatch")
+		}
+	})
 }

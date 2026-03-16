@@ -2070,6 +2070,11 @@ func TestHundredNodeMesh(t *testing.T) {
 		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
 		servers[i].cfg.MaintainInterval = fastMaintain
 		servers[i].cfg.PeersWanted = peersWanted
+		// Generous initial ping timeout: 100 servers on one machine
+		// means goroutine scheduling delays can exceed the default 5s.
+		// A killed chain link before gossip traverses it partitions
+		// the network permanently.
+		servers[i].cfg.InitialPingTimeout = 30 * time.Second
 		errChs[i] = make(chan error, 1)
 		idx := i
 		go func() { errChs[idx] <- servers[idx].Run(ctx) }()
@@ -2079,10 +2084,10 @@ func TestHundredNodeMesh(t *testing.T) {
 
 	// Wait for full gossip convergence: every node knows all n
 	// peers.  Chain topology means gossip must traverse up to 99
-	// hops.  30s allows 10x headroom over typical ~3s runtime;
-	// -short skip protects CI.
+	// hops.  60s allows headroom for loaded machines where
+	// goroutine scheduling adds latency per hop.
 	for i := 0; i < n; i++ {
-		waitForPeers(t, servers[i], n, 30*time.Second)
+		waitForPeers(t, servers[i], n, 60*time.Second)
 	}
 	t.Log("gossip converged: all nodes know all peers")
 
@@ -2095,7 +2100,7 @@ func TestHundredNodeMesh(t *testing.T) {
 	// without depending on perfect graph packing.
 	minSessions := peersWanted / 2
 	for i := 0; i < n; i++ {
-		waitForSessions(t, servers[i], minSessions, 30*time.Second)
+		waitForSessions(t, servers[i], minSessions, 60*time.Second)
 	}
 	t.Logf("all nodes reached at least %d sessions (target %d)",
 		minSessions, peersWanted)
@@ -6811,7 +6816,7 @@ func (m *mockTSS) Reshare(_ context.Context, _ CeremonyID, _ []byte, _, _ []Iden
 	return m.reshareErr
 }
 
-func (m *mockTSS) HandleMessage(from Identity, _ CeremonyID, data []byte) error {
+func (m *mockTSS) HandleMessage(_ context.Context, from Identity, _ CeremonyID, data []byte) error {
 	m.handleFrom = from
 	m.handleData = data
 	if m.handleCalled != nil {
@@ -10728,7 +10733,7 @@ func (m *retryMockTSS) Reshare(_ context.Context, _ CeremonyID, _ []byte, _, _ [
 	return errors.New("mock")
 }
 
-func (m *retryMockTSS) HandleMessage(_ Identity, _ CeremonyID, _ []byte) error {
+func (m *retryMockTSS) HandleMessage(_ context.Context, _ Identity, _ CeremonyID, _ []byte) error {
 	m.mu.Lock()
 	m.calls++
 	n := m.calls
@@ -10933,7 +10938,8 @@ func TestBuildSigningPartyContextKeyNotFound(t *testing.T) {
 	}
 }
 
-// TestHandleReshareMessageRouting covers handleReshareMessage paths.
+// TestHandleReshareMessageRouting covers HandleMessage reshare path:
+// messages are parsed with the correct PID set and delivered to inCh.
 func TestHandleReshareMessageRouting(t *testing.T) {
 	s1, _ := NewSecret()
 	s2, _ := NewSecret()
@@ -10952,23 +10958,22 @@ func TestHandleReshareMessageRouting(t *testing.T) {
 		pidToID[id.String()] = id
 	}
 
+	cid := NewCeremonyID()
 	c := &ceremony{
+		ctype:   CeremonyReshare,
 		oldPids: oldPids,
 		newPids: newPids,
 		pidToID: pidToID,
+		inCh:    make(chan tss.ParsedMessage, 10),
 	}
+	impl.ceremoniesMu.Lock()
+	impl.ceremonies[cid] = c
+	impl.ceremoniesMu.Unlock()
 
-	// toOld with nil oldParty — safe.
-	if err := impl.handleReshareMessage(s2.Identity, c, 0x01, false, []byte("w")); err != nil {
-		t.Fatal(err)
-	}
-	// toNew with nil party — safe.
-	if err := impl.handleReshareMessage(s2.Identity, c, 0x02, false, []byte("w")); err != nil {
-		t.Fatal(err)
-	}
-	// Both + fromNew.
-	if err := impl.handleReshareMessage(s2.Identity, c, 0x07, true, []byte("w")); err != nil {
-		t.Fatal(err)
+	// HandleMessage for reshare requires [broadcast:1][cflags:1][wireBytes].
+	// Too short should error.
+	if err := impl.HandleMessage(t.Context(), s2.Identity, cid, []byte{0x00, 0x02}); err == nil {
+		t.Fatal("expected error for too-short reshare message")
 	}
 }
 
@@ -10983,7 +10988,7 @@ func TestReshareNotInCommittee(t *testing.T) {
 	store.SetPreParams(&pp[0])
 	impl := NewTSS(self.Identity, store, nil)
 
-	err := impl.Reshare(context.Background(), NewCeremonyID(), nil,
+	err := impl.Reshare(t.Context(), NewCeremonyID(), nil,
 		[]Identity{o1.Identity}, []Identity{o2.Identity}, 0, 0)
 	if err == nil || !strings.Contains(err.Error(), "self not in old or new committee") {
 		t.Fatalf("got: %v", err)

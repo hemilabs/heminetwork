@@ -307,7 +307,7 @@ func (s *Server) deleteAllSessions() {
 
 	for _, it := range closing {
 		if err := it.t.Close(); err != nil {
-			log.Errorf("close session %v: %v", it.id, err)
+			log.Debugf("close session %v: %v", it.id, err)
 		}
 	}
 }
@@ -556,16 +556,32 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 	// Per-session context: cancelled when handle() exits (read
 	// error, shutdown, etc.), which also stops the pingLoop.
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
+
+	// Defer order (LIFO): cleanup → sessionCancel → wg.Done.
+	// sessionCancel must fire before wg.Done so the transport-
+	// close goroutine below exits before the server's wg.Wait
+	// returns.
+	defer s.wg.Done()
 	defer sessionCancel()
 	defer func() {
 		// Disarm any pending ping timeout so pingExpired does
 		// not fire on an already-closing transport.
 		_, _ = s.pings.Delete(*id)
 		if err := s.deleteSession(id); err != nil {
-			log.Errorf("delete session %v: %v", id, err)
+			log.Debugf("delete session %v: %v", id, err)
 		}
 	}()
-	defer s.wg.Done()
+
+	// Close transport on context cancellation to unblock
+	// ReadEnvelope.  deleteAllSessions covers the common case,
+	// but connections mid-handshake can finish newSession+handle
+	// after deleteAllSessions ran.  This goroutine guarantees
+	// every handle() unblocks.  Lifecycle: bounded by
+	// sessionCtx; exits before wg.Done via defer ordering above.
+	go func() {
+		<-sessionCtx.Done()
+		t.Close()
+	}()
 
 	log.Debugf("handle: %v", id)
 	defer log.Debugf("handle exit: %v", id)
@@ -991,6 +1007,7 @@ func (s *Server) verifyInboundDNS(ctx context.Context, remoteAddr net.Addr, id I
 // and dials it.  Errors are logged, not fatal.
 func (s *Server) connectRandom(ctx context.Context) {
 	s.mtx.RLock()
+	gap := s.cfg.PeersWanted - len(s.sessions)
 	candidates := make([]PeerRecord, 0, len(s.peers))
 	for id, pr := range s.peers {
 		if id == s.secret.Identity {
@@ -1015,17 +1032,29 @@ func (s *Server) connectRandom(ctx context.Context) {
 	}
 	s.mtx.RUnlock()
 
-	if len(candidates) == 0 {
+	if gap <= 0 || len(candidates) == 0 {
 		return
 	}
 
-	// Pick one at random to avoid topology clustering.
-	pr := candidates[mrand.IntN(len(candidates))]
-	log.Infof("maintainConnections: dialing %v at %v",
-		pr.Identity, pr.Address)
+	// Shuffle to avoid topology clustering. Dial up to the
+	// remaining gap — some will be rejected (BusyResponse from
+	// full peers), but trying multiple per cycle converges
+	// faster than one-per-cycle in large meshes.
+	mrand.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	})
 
-	s.wg.Add(1)
-	go s.connectPeer(ctx, pr.Address, "")
+	if gap > len(candidates) {
+		gap = len(candidates)
+	}
+
+	for i := 0; i < gap; i++ {
+		pr := candidates[i]
+		log.Infof("maintainConnections: dialing %v at %v",
+			pr.Identity, pr.Address)
+		s.wg.Add(1)
+		go s.connectPeer(ctx, pr.Address, "")
+	}
 }
 
 // tcpKeepAlive enables TCP keepalive on conn with the given period.
