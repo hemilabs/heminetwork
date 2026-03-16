@@ -315,7 +315,7 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 	// backoff up to ~5 seconds before giving up.  The retry runs
 	// in a goroutine to avoid blocking the connection handler
 	// (which might be delivering the KeygenRequest itself).
-	err := s.tss.HandleMessage(msg.From, msg.CeremonyID, data)
+	err := s.tss.HandleMessage(s.tssCtx, msg.From, msg.CeremonyID, data)
 	if err == nil {
 		return
 	}
@@ -343,7 +343,7 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 				return
 			case <-timer.C:
 			}
-			err = s.tss.HandleMessage(msg.From, msg.CeremonyID, data)
+			err = s.tss.HandleMessage(s.tssCtx, msg.From, msg.CeremonyID, data)
 			if err == nil {
 				return
 			}
