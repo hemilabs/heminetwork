@@ -37,7 +37,7 @@ type TSS interface {
 	Keygen(ctx context.Context, ceremonyID CeremonyID, parties []Identity, threshold int) (keyID []byte, err error)
 	Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte, parties []Identity, threshold int, data [32]byte) (r, s []byte, err error)
 	Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []byte, oldParties, newParties []Identity, oldThreshold, newThreshold int) error
-	HandleMessage(from Identity, ceremonyID CeremonyID, data []byte) error
+	HandleMessage(ctx context.Context, from Identity, ceremonyID CeremonyID, data []byte) error
 }
 
 // TSSTransport handles outbound message delivery.
@@ -281,30 +281,21 @@ type tssImpl struct {
 }
 
 type ceremony struct {
-	ctype     CeremonyType
-	pids      tss.SortedPartyIDs
-	pidToID   map[string]Identity
-	done      chan struct{}
-	threshold int
-	keyID     []byte
+	ctype   CeremonyType
+	pids    tss.SortedPartyIDs
+	pidToID map[string]Identity
+	keyID   []byte
 
-	// Round-function path (keygen, sign): HandleMessage delivers
-	// parsed messages here; the ceremony driver reads with select
-	// on ctx.Done().
+	// Round-function path: HandleMessage delivers parsed messages
+	// here; the ceremony driver reads with select on ctx.Done().
+	// Buffers are sized generously (n*4 keygen, n*10 sign,
+	// (old+new)*10 reshare) so HandleMessage rarely blocks; the
+	// caller's ctx breaks the send if the ceremony has finished.
 	inCh chan tss.ParsedMessage
 
-	// Channel-based path (reshare, pending conversion).
-	party tss.Party
-	outCh chan tss.Message
-	errCh chan error
-
-	// Reshare only: dual party support for overlapping committees.
-	// oldParty runs the old committee role; party runs the new committee role.
-	oldParty   tss.Party
-	oldPids    tss.SortedPartyIDs
-	newPids    tss.SortedPartyIDs
-	oldKeyToID map[string]Identity // PartyID key bytes → Identity
-	newKeyToID map[string]Identity // PartyID key bytes → Identity
+	// Reshare only: dual PID sets for message routing.
+	oldPids tss.SortedPartyIDs
+	newPids tss.SortedPartyIDs
 }
 
 func NewTSS(self Identity, store TSSStore, transport TSSTransport) TSS {
@@ -317,6 +308,9 @@ func NewTSS(self Identity, store TSSStore, transport TSSTransport) TSS {
 }
 
 func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []Identity, threshold int) ([]byte, error) {
+	log.Tracef("Keygen %x", ceremonyID)
+	defer log.Tracef("Keygen %x exit", ceremonyID)
+
 	if threshold < 0 || threshold >= len(parties) {
 		return nil, fmt.Errorf("invalid threshold %d for %d parties", threshold, len(parties))
 	}
@@ -342,14 +336,12 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 		ctype:   CeremonyKeygen,
 		pids:    pids,
 		pidToID: pidToID,
-		done:    make(chan struct{}),
 		inCh:    make(chan tss.ParsedMessage, n*4),
 	}
 	t.ceremoniesMu.Lock()
 	t.ceremonies[ceremonyID] = c
 	t.ceremoniesMu.Unlock()
 	defer func() {
-		close(c.done)
 		t.ceremoniesMu.Lock()
 		delete(t.ceremonies, ceremonyID)
 		t.ceremoniesMu.Unlock()
@@ -376,7 +368,7 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 	r1All[ourIdx] = selfR1
 
 	// Round 2
-	r2out, err := keygen.Round2(state, r1All)
+	r2out, err := keygen.Round2(ctx, state, r1All)
 	if err != nil {
 		return nil, fmt.Errorf("keygen round 2: %w", err)
 	}
@@ -401,7 +393,7 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 	r2bcast[ourIdx] = state.ExportR2BcastSelf()
 
 	// Round 3
-	r3out, err := keygen.Round3(state, r2p2p, r2bcast)
+	r3out, err := keygen.Round3(ctx, state, r2p2p, r2bcast)
 	if err != nil {
 		return nil, fmt.Errorf("keygen round 3: %w", err)
 	}
@@ -420,7 +412,7 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 	r3All[ourIdx] = selfR3
 
 	// Round 4
-	r4out, err := keygen.Round4(state, r3All)
+	r4out, err := keygen.Round4(ctx, state, r3All)
 	if err != nil {
 		return nil, fmt.Errorf("keygen round 4: %w", err)
 	}
@@ -434,7 +426,9 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 	if err := t.store.SaveKeyShare(keyID[:16], shareData); err != nil {
 		return nil, fmt.Errorf("save key share: %w", err)
 	}
-	pubKey := append(save.ECDSAPub.X().Bytes(), save.ECDSAPub.Y().Bytes()...)
+	pubKey := make([]byte, 64)
+	save.ECDSAPub.X().FillBytes(pubKey[:32])
+	save.ECDSAPub.Y().FillBytes(pubKey[32:])
 	meta := &KeyMetadata{
 		Committee: parties,
 		Threshold: threshold,
@@ -449,6 +443,9 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 }
 
 func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte, parties []Identity, threshold int, data [32]byte) ([]byte, []byte, error) {
+	log.Tracef("Sign %x key=%x", ceremonyID, keyID)
+	defer log.Tracef("Sign %x exit", ceremonyID)
+
 	if threshold < 0 || threshold >= len(parties) {
 		return nil, nil, fmt.Errorf("invalid threshold %d for %d parties", threshold, len(parties))
 	}
@@ -478,7 +475,6 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 		ctype:   CeremonySign,
 		pids:    pids,
 		pidToID: pidToID,
-		done:    make(chan struct{}),
 		keyID:   keyID,
 		inCh:    make(chan tss.ParsedMessage, n*10),
 	}
@@ -486,7 +482,6 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 	t.ceremonies[ceremonyID] = c
 	t.ceremoniesMu.Unlock()
 	defer func() {
-		close(c.done)
 		t.ceremoniesMu.Lock()
 		delete(t.ceremonies, ceremonyID)
 		t.ceremoniesMu.Unlock()
@@ -519,7 +514,7 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 	}
 
 	// Round 2
-	r2out, err := signing.SignRound2(state, r1p2p, r1bcast)
+	r2out, err := signing.SignRound2(ctx, state, r1p2p, r1bcast)
 	if err != nil {
 		return nil, nil, fmt.Errorf("sign round 2: %w", err)
 	}
@@ -536,7 +531,7 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 	}
 
 	// Round 3
-	r3out, err := signing.SignRound3(state, r2p2p)
+	r3out, err := signing.SignRound3(ctx, state, r2p2p)
 	if err != nil {
 		return nil, nil, fmt.Errorf("sign round 3: %w", err)
 	}
@@ -676,6 +671,9 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 }
 
 func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []byte, oldParties, newParties []Identity, oldThreshold, newThreshold int) error {
+	log.Tracef("Reshare %x key=%x old=%d new=%d", ceremonyID, keyID, len(oldParties), len(newParties))
+	defer log.Tracef("Reshare %x exit", ceremonyID)
+
 	// Determine self's committee membership.
 	inOld := false
 	for _, id := range oldParties {
@@ -707,51 +705,31 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 		}
 	}
 
+	// Get pre-params if self is in the new committee.
+	var preParams keygen.LocalPreParams
+	if inNew {
+		pp, err := t.store.GetPreParams(ctx)
+		if err != nil {
+			return fmt.Errorf("get preparams for reshare: %w", err)
+		}
+		preParams = *pp
+	}
+
 	// Build party contexts with key rotation for new committee.
-	// Old committee uses Identity bytes as PartyID key.
-	// New committee XORs keys with 1 so tss-lib sees disjoint
-	// committees even when parties overlap.
-	oldPids, ourOldPid, oldPidToID, oldKeyToID, err := t.buildResharePartyContext(oldParties, false)
+	oldPids, ourOldPid, oldPidToID, _, err := t.buildResharePartyContext(oldParties, false)
 	if err != nil {
 		return fmt.Errorf("build old context: %w", err)
 	}
-	newPids, ourNewPid, newPidToID, newKeyToID, err := t.buildResharePartyContext(newParties, true)
+	newPids, ourNewPid, newPidToID, _, err := t.buildResharePartyContext(newParties, true)
 	if err != nil {
 		return fmt.Errorf("build new context: %w", err)
 	}
 
+	oldPC := len(oldPids)
+	newPC := len(newPids)
+
 	oldCtx := tss.NewPeerContext(oldPids)
 	newCtx := tss.NewPeerContext(newPids)
-
-	outCh := make(chan tss.Message, (len(oldPids)+len(newPids))*10)
-	endCh := make(chan *keygen.LocalPartySaveData, 2)
-
-	// Create party instances. Overlapping nodes get two instances.
-	var oldParty, newParty tss.Party
-
-	if inOld {
-		params := tss.NewReSharingParameters(tss.S256(), oldCtx, newCtx,
-			ourOldPid, len(oldPids), oldThreshold,
-			len(newPids), newThreshold)
-		params.SetCeremonyID(ceremonyID[:])
-		params.SetSSIDNonce(0) // attempt counter; new CeremonyID per retry
-		oldParty = resharing.NewLocalParty(params, keyShare, outCh, endCh)
-	}
-
-	if inNew {
-		preParams, err := t.store.GetPreParams(ctx)
-		if err != nil {
-			return fmt.Errorf("get preparams for reshare: %w", err)
-		}
-		params := tss.NewReSharingParameters(tss.S256(), oldCtx, newCtx,
-			ourNewPid, len(oldPids), oldThreshold,
-			len(newPids), newThreshold)
-		params.SetCeremonyID(ceremonyID[:])
-		params.SetSSIDNonce(0) // attempt counter; new CeremonyID per retry
-		save := keygen.NewLocalPartySaveData(len(newPids))
-		save.LocalPreParams = *preParams
-		newParty = resharing.NewLocalParty(params, save, outCh, endCh)
-	}
 
 	// Combined pidToID for message routing.
 	allPidToID := make(map[string]Identity)
@@ -763,115 +741,322 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 	}
 
 	c := &ceremony{
-		ctype:      CeremonyReshare,
-		party:      newParty,
-		oldParty:   oldParty,
-		pidToID:    allPidToID,
-		oldPids:    oldPids,
-		newPids:    newPids,
-		oldKeyToID: oldKeyToID,
-		newKeyToID: newKeyToID,
-		outCh:      outCh,
-		errCh:      make(chan error, 2),
-		done:       make(chan struct{}),
-		threshold:  newThreshold,
-		keyID:      keyID,
+		ctype:   CeremonyReshare,
+		pidToID: allPidToID,
+		oldPids: oldPids,
+		newPids: newPids,
+		keyID:   keyID,
+		inCh:    make(chan tss.ParsedMessage, (oldPC+newPC)*10),
 	}
-
 	t.ceremoniesMu.Lock()
 	t.ceremonies[ceremonyID] = c
 	t.ceremoniesMu.Unlock()
-
 	defer func() {
 		t.ceremoniesMu.Lock()
 		delete(t.ceremonies, ceremonyID)
 		t.ceremoniesMu.Unlock()
 	}()
 
-	// Start parties BEFORE the message pump. Start() writes to the
-	// buffered outCh but won't block. Starting parties first ensures
-	// that when pumpReshareMessages self-delivers messages between
-	// local old/new parties, both have already been initialized and
-	// can accept updates.
-	expectedEnds := 0
+	// Create round-function states. Overlapping nodes get two
+	// states — one per committee role.
+	var oldState, newState *resharing.ReshareState
+
+	// ================================================================
+	// Round 1: old committee produces DGRound1Message → new committee
+	// ================================================================
+	var selfR1 tss.ParsedMessage
 	if inOld {
-		expectedEnds++
+		params := tss.NewReSharingParameters(tss.S256(), oldCtx, newCtx,
+			ourOldPid, oldPC, oldThreshold, newPC, newThreshold)
+		params.SetCeremonyID(ceremonyID[:])
+		params.SetSSIDNonce(0)
+		st, out, rerr := resharing.ReshareRound1(params, keyShare, keygen.LocalPreParams{})
+		if rerr != nil {
+			return fmt.Errorf("reshare round 1 (old): %w", rerr)
+		}
+		oldState = st
+		if serr := t.sendReshareRound(c, ceremonyID, out.Messages, false); serr != nil {
+			return fmt.Errorf("send reshare r1: %w", serr)
+		}
+		if len(out.Messages) > 0 {
+			selfR1 = out.Messages[0].(tss.ParsedMessage)
+		}
 	}
 	if inNew {
-		expectedEnds++
+		params := tss.NewReSharingParameters(tss.S256(), oldCtx, newCtx,
+			ourNewPid, oldPC, oldThreshold, newPC, newThreshold)
+		params.SetCeremonyID(ceremonyID[:])
+		params.SetSSIDNonce(0)
+		save := keygen.NewLocalPartySaveData(newPC)
+		save.LocalPreParams = preParams
+		st, _, rerr := resharing.ReshareRound1(params, save, preParams)
+		if rerr != nil {
+			return fmt.Errorf("reshare round 1 (new): %w", rerr)
+		}
+		newState = st
 	}
 
-	if oldParty != nil {
-		go func() {
-			if err := oldParty.Start(); err != nil {
-				select {
-				case <-ctx.Done():
-				case c.errCh <- fmt.Errorf("start old resharing: %w", err.Cause()):
-				}
+	buf := newMsgBuf(c.inCh)
+
+	// New committee needs Round 1 messages from old committee.
+	var r1Msgs []tss.ParsedMessage
+	if inNew {
+		nR1 := oldPC
+		if inOld {
+			nR1-- // self already available
+		}
+		r1Msgs = make([]tss.ParsedMessage, oldPC)
+		if nR1 > 0 {
+			collected, cerr := buf.collect(ctx, nR1, oldPC, func(m tss.ParsedMessage) (int, bool) {
+				_, ok := m.Content().(*resharing.DGRound1Message)
+				return m.GetFrom().Index, ok
+			})
+			if cerr != nil {
+				return fmt.Errorf("collect reshare r1: %w", cerr)
 			}
-		}()
-	}
-	if newParty != nil {
-		go func() {
-			if err := newParty.Start(); err != nil {
-				select {
-				case <-ctx.Done():
-				case c.errCh <- fmt.Errorf("start new resharing: %w", err.Cause()):
-				}
-			}
-		}()
+			copy(r1Msgs, collected)
+		}
+		if selfR1 != nil {
+			r1Msgs[ourOldPid.Index] = selfR1
+		}
 	}
 
-	go t.pumpReshareMessages(ctx, ceremonyID, c)
-
-	// Collect results. New committee party produces Xi != nil.
-	var newSave *keygen.LocalPartySaveData
-	received := 0
-	for received < expectedEnds {
-		select {
-		case <-ctx.Done():
-			close(c.done)
-			return ctx.Err()
-		case err := <-c.errCh:
-			close(c.done)
-			return err
-		case save := <-endCh:
-			received++
-			if save.Xi != nil && save.Xi.Sign() != 0 {
-				newSave = save
+	// ================================================================
+	// Round 2: new committee produces DGRound2Message1 (→ new) +
+	//          DGRound2Message2 ACK (→ old)
+	// ================================================================
+	var selfR2Msg1, selfR2Msg2 tss.ParsedMessage
+	if inNew {
+		out, rerr := resharing.ReshareRound2(newState, r1Msgs)
+		if rerr != nil {
+			return fmt.Errorf("reshare round 2 (new): %w", rerr)
+		}
+		if serr := t.sendReshareRound(c, ceremonyID, out.Messages, true); serr != nil {
+			return fmt.Errorf("send reshare r2: %w", serr)
+		}
+		for _, msg := range out.Messages {
+			pm := msg.(tss.ParsedMessage)
+			switch pm.Content().(type) {
+			case *resharing.DGRound2Message1:
+				selfR2Msg1 = pm
+			case *resharing.DGRound2Message2:
+				selfR2Msg2 = pm
 			}
 		}
 	}
-	close(c.done)
+	if inOld {
+		if _, rerr := resharing.ReshareRound2(oldState, r1Msgs); rerr != nil {
+			return fmt.Errorf("reshare round 2 (old): %w", rerr)
+		}
+	}
 
-	// Save new key share if self is in the new committee.
-	if newSave != nil {
-		newShareData, err := json.Marshal(newSave)
+	// Old committee collects DGRound2Message2 ACK from new committee.
+	// (Used by Round 3 which is old-committee only.)
+	var r2AckMsgs []tss.ParsedMessage
+	if inOld {
+		nR2Ack := newPC
+		if inNew {
+			nR2Ack-- // have self from output
+		}
+		collected, cerr := buf.collect(ctx, nR2Ack, newPC, func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*resharing.DGRound2Message2)
+			return m.GetFrom().Index, ok
+		})
+		if cerr != nil {
+			return fmt.Errorf("collect reshare r2 ack: %w", cerr)
+		}
+		r2AckMsgs = collected
+		if selfR2Msg2 != nil {
+			r2AckMsgs[ourNewPid.Index] = selfR2Msg2
+		}
+	}
+
+	// New committee collects DGRound2Message1 from new peers.
+	// (Used by Round 4 which is new-committee only.)
+	var r2NewMsgs []tss.ParsedMessage
+	if inNew {
+		nR2New := newPC - 1 // always have self
+		collected, cerr := buf.collect(ctx, nR2New, newPC, func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*resharing.DGRound2Message1)
+			return m.GetFrom().Index, ok
+		})
+		if cerr != nil {
+			return fmt.Errorf("collect reshare r2 new: %w", cerr)
+		}
+		r2NewMsgs = collected
+		if selfR2Msg1 != nil {
+			r2NewMsgs[ourNewPid.Index] = selfR2Msg1
+		}
+	}
+
+	// ================================================================
+	// Round 3: old committee sends VSS shares (P2P → new) +
+	//          decommitment (broadcast → new)
+	// ================================================================
+	var selfR3Bcast tss.ParsedMessage
+	var selfR3P2P tss.ParsedMessage // P2P to our new role (overlapping)
+	if inOld {
+		out, rerr := resharing.ReshareRound3(oldState, r2AckMsgs)
+		if rerr != nil {
+			return fmt.Errorf("reshare round 3 (old): %w", rerr)
+		}
+		if serr := t.sendReshareRound(c, ceremonyID, out.Messages, false); serr != nil {
+			return fmt.Errorf("send reshare r3: %w", serr)
+		}
+		for _, msg := range out.Messages {
+			pm := msg.(tss.ParsedMessage)
+			switch pm.Content().(type) {
+			case *resharing.DGRound3Message1:
+				if inNew {
+					for _, to := range pm.GetTo() {
+						if to.Id == ourNewPid.Id {
+							selfR3P2P = pm
+						}
+					}
+				}
+			case *resharing.DGRound3Message2:
+				selfR3Bcast = pm
+			}
+		}
+	}
+	if inNew {
+		if _, rerr := resharing.ReshareRound3(newState, r2AckMsgs); rerr != nil {
+			return fmt.Errorf("reshare round 3 (new): %w", rerr)
+		}
+	}
+
+	// New committee collects Round 3 messages from old committee.
+	var r3P2P, r3Bcast []tss.ParsedMessage
+	if inNew {
+		nR3 := oldPC
+		if inOld {
+			nR3-- // have self from output
+		}
+		var cerr error
+		r3P2P, cerr = buf.collect(ctx, nR3, oldPC, func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*resharing.DGRound3Message1)
+			return m.GetFrom().Index, ok
+		})
+		if cerr != nil {
+			return fmt.Errorf("collect reshare r3 p2p: %w", cerr)
+		}
+		if selfR3P2P != nil {
+			r3P2P[ourOldPid.Index] = selfR3P2P
+		}
+
+		r3Bcast, cerr = buf.collect(ctx, nR3, oldPC, func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*resharing.DGRound3Message2)
+			return m.GetFrom().Index, ok
+		})
+		if cerr != nil {
+			return fmt.Errorf("collect reshare r3 bcast: %w", cerr)
+		}
+		if selfR3Bcast != nil {
+			r3Bcast[ourOldPid.Index] = selfR3Bcast
+		}
+	}
+
+	// ================================================================
+	// Round 4: new committee verifies, produces FacProof (P2P → new) +
+	//          ACK (broadcast → old+new)
+	// ================================================================
+	var selfR4Bcast tss.ParsedMessage
+	if inNew {
+		out, rerr := resharing.ReshareRound4(ctx, newState, r2NewMsgs, r3P2P, r3Bcast)
+		if rerr != nil {
+			return fmt.Errorf("reshare round 4 (new): %w", rerr)
+		}
+		if serr := t.sendReshareRound(c, ceremonyID, out.Messages, true); serr != nil {
+			return fmt.Errorf("send reshare r4: %w", serr)
+		}
+		for _, msg := range out.Messages {
+			pm := msg.(tss.ParsedMessage)
+			if _, ok := pm.Content().(*resharing.DGRound4Message2); ok {
+				selfR4Bcast = pm
+			}
+		}
+	}
+	if inOld {
+		if _, rerr := resharing.ReshareRound4(ctx, oldState, nil, nil, nil); rerr != nil {
+			return fmt.Errorf("reshare round 4 (old): %w", rerr)
+		}
+	}
+
+	// New committee collects DGRound4Message1 P2P from new peers.
+	var r4P2P []tss.ParsedMessage
+	if inNew {
+		nR4P2P := newPC - 1 // self is excluded from P2P
+		r4P2P, err = buf.collect(ctx, nR4P2P, newPC, func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*resharing.DGRound4Message1)
+			return m.GetFrom().Index, ok
+		})
 		if err != nil {
-			return fmt.Errorf("marshal new key share: %w", err)
+			return fmt.Errorf("collect reshare r4 p2p: %w", err)
 		}
-		if err := t.store.SaveKeyShare(keyID, newShareData); err != nil {
-			return fmt.Errorf("save new key share: %w", err)
+	}
+
+	// All nodes collect DGRound4Message2 broadcast from new committee.
+	var r4Bcast []tss.ParsedMessage
+	{
+		nR4Bcast := newPC
+		if inNew {
+			nR4Bcast-- // have self from output
 		}
-		// Update metadata with new committee and threshold.
-		pubKey := append(newSave.ECDSAPub.X().Bytes(),
-			newSave.ECDSAPub.Y().Bytes()...)
-		meta := &KeyMetadata{
-			Committee: newParties,
-			Threshold: newThreshold,
-			KeyID:     keyID,
-			PublicKey: pubKey,
-			CreatedAt: time.Now().UTC(),
+		r4Bcast, err = buf.collect(ctx, nR4Bcast, newPC, func(m tss.ParsedMessage) (int, bool) {
+			_, ok := m.Content().(*resharing.DGRound4Message2)
+			return m.GetFrom().Index, ok
+		})
+		if err != nil {
+			return fmt.Errorf("collect reshare r4 bcast: %w", err)
 		}
-		if err := t.store.SaveKeyMetadata(keyID, meta); err != nil {
-			return fmt.Errorf("save key metadata: %w", err)
+		if selfR4Bcast != nil {
+			r4Bcast[ourNewPid.Index] = selfR4Bcast
+		}
+	}
+
+	// ================================================================
+	// Round 5: finalize
+	// ================================================================
+	if inNew {
+		out, rerr := resharing.ReshareRound5(newState, r4P2P, r4Bcast)
+		if rerr != nil {
+			return fmt.Errorf("reshare round 5 (new): %w", rerr)
+		}
+		if out.Save != nil {
+			newShareData, merr := json.Marshal(out.Save)
+			if merr != nil {
+				return fmt.Errorf("marshal new key share: %w", merr)
+			}
+			if serr := t.store.SaveKeyShare(keyID, newShareData); serr != nil {
+				return fmt.Errorf("save new key share: %w", serr)
+			}
+			pubKey := make([]byte, 64)
+			out.Save.ECDSAPub.X().FillBytes(pubKey[:32])
+			out.Save.ECDSAPub.Y().FillBytes(pubKey[32:])
+			meta := &KeyMetadata{
+				Committee: newParties,
+				Threshold: newThreshold,
+				KeyID:     keyID,
+				PublicKey: pubKey,
+				CreatedAt: time.Now().UTC(),
+			}
+			if serr := t.store.SaveKeyMetadata(keyID, meta); serr != nil {
+				return fmt.Errorf("save key metadata: %w", serr)
+			}
+		}
+	}
+	if inOld {
+		if _, rerr := resharing.ReshareRound5(oldState, nil, r4Bcast); rerr != nil {
+			return fmt.Errorf("reshare round 5 (old): %w", rerr)
 		}
 	}
 
 	return nil
 }
 
-func (t *tssImpl) HandleMessage(from Identity, ceremonyID CeremonyID, data []byte) error {
+func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID CeremonyID, data []byte) error {
+	log.Tracef("HandleMessage from=%s ceremony=%x len=%d", from, ceremonyID, len(data))
+
 	t.ceremoniesMu.Lock()
 	c, ok := t.ceremonies[ceremonyID]
 	t.ceremoniesMu.Unlock()
@@ -886,7 +1071,36 @@ func (t *tssImpl) HandleMessage(from Identity, ceremonyID CeremonyID, data []byt
 			return errors.New("reshare message too short")
 		}
 		isBroadcast := data[0] == 0x01
-		return t.handleReshareMessage(from, c, data[1], isBroadcast, data[2:])
+		cflags := data[1]
+		wireData := data[2:]
+		fromNew := cflags&0x04 != 0
+
+		// Parse with correct PID set based on sender committee.
+		fromIDStr := from.String()
+		pids := c.oldPids
+		if fromNew {
+			pids = c.newPids
+		}
+		var fromPid *tss.PartyID
+		for _, pid := range pids {
+			if pid.Id == fromIDStr {
+				fromPid = pid
+				break
+			}
+		}
+		if fromPid == nil {
+			return errors.New("sender not in reshare ceremony")
+		}
+		parsed, err := tss.ParseWireMessage(wireData, fromPid, isBroadcast)
+		if err != nil {
+			return fmt.Errorf("parse reshare message: %w", err)
+		}
+		select {
+		case c.inCh <- parsed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return nil
 	}
 
 	// Keygen/Sign wire format: [broadcast:1][wireBytes]
@@ -915,76 +1129,11 @@ func (t *tssImpl) HandleMessage(from Identity, ceremonyID CeremonyID, data []byt
 		return fmt.Errorf("parse message: %w", err)
 	}
 
-	// Round-function path: deliver to inCh.
-	if c.inCh != nil {
-		c.inCh <- parsed
-		return nil
+	select {
+	case c.inCh <- parsed:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-
-	// Channel-based path (reshare, pending conversion).
-	_, _ = c.party.Update(parsed)
-	return nil
-}
-
-// handleReshareMessage routes an incoming reshare message to the
-// correct party instance(s) based on committee target flags.
-//
-// Committee flags byte:
-//
-//	bit 0: to old committee
-//	bit 1: to new committee
-//	bit 2: from new committee (sender key is XORed)
-func (t *tssImpl) handleReshareMessage(from Identity, c *ceremony, cflags byte, isBroadcast bool, wireData []byte) error {
-	toOld := cflags&0x01 != 0
-	toNew := cflags&0x02 != 0
-	fromNew := cflags&0x04 != 0
-	fromIDStr := from.String()
-
-	// Reconstruct the sender's PartyID with the correct key.
-	// The sender encodes whether it used old or new (XORed) key.
-	findFromPid := func(pids tss.SortedPartyIDs) *tss.PartyID {
-		for _, pid := range pids {
-			if pid.Id == fromIDStr {
-				return pid
-			}
-		}
-		return nil
-	}
-
-	if toOld && c.oldParty != nil {
-		var fromPid *tss.PartyID
-		if fromNew {
-			fromPid = findFromPid(c.newPids)
-		} else {
-			fromPid = findFromPid(c.oldPids)
-		}
-		if fromPid != nil {
-			parsed, err := tss.ParseWireMessage(wireData, fromPid, isBroadcast)
-			if err != nil {
-				return fmt.Errorf("parse reshare msg for old party: %w", err)
-			}
-			// Non-fatal update errors.
-			_, _ = c.oldParty.Update(parsed)
-		}
-	}
-
-	if toNew && c.party != nil {
-		var fromPid *tss.PartyID
-		if fromNew {
-			fromPid = findFromPid(c.newPids)
-		} else {
-			fromPid = findFromPid(c.oldPids)
-		}
-		if fromPid != nil {
-			parsed, err := tss.ParseWireMessage(wireData, fromPid, isBroadcast)
-			if err != nil {
-				return fmt.Errorf("parse reshare msg for new party: %w", err)
-			}
-			// Non-fatal update errors.
-			_, _ = c.party.Update(parsed)
-		}
-	}
-
 	return nil
 }
 
@@ -1100,133 +1249,4 @@ func (t *tssImpl) buildResharePartyContext(
 	}
 	// ourPid may be nil if self is not in this committee (valid).
 	return sorted, ourPid, pidToID, keyToID, nil
-}
-
-// pumpReshareMessages routes outgoing reshare messages with committee
-// target flags encoded in the wire format.
-//
-// Wire format: [broadcast:1][committee_flags:1][wireBytes]
-//
-// The broadcast byte (position 0) is consumed by the transport layer.
-// The committee flags byte (position 1) rides inside the transport
-// payload and is consumed by handleReshareMessage:
-//
-//	bit 0: to old committee
-//	bit 1: to new committee
-//	bit 2: from new committee (sender key is XORed)
-//
-// For overlapping nodes (in both old and new committees), messages
-// between the two local party instances are delivered directly via
-// handleReshareMessage rather than through the transport.
-func (t *tssImpl) pumpReshareMessages(ctx context.Context, ceremonyID CeremonyID, c *ceremony) {
-	// Build lookup of new committee keys for fromNew detection.
-	// Old and new key spaces are disjoint (XOR 1), so a key
-	// appearing in newKeySet means the message is from the
-	// new committee party instance.
-	newKeySet := make(map[string]bool)
-	for _, pid := range c.newPids {
-		newKeySet[pid.KeyInt().String()] = true
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-c.done:
-			return
-		case msg := <-c.outCh:
-			wireData, routing, err := msg.WireBytes()
-			if err != nil {
-				continue
-			}
-
-			// Build broadcast byte for transport layer.
-			var bcast byte
-			if routing.IsBroadcast {
-				bcast = 0x01
-			}
-
-			// Build committee flags byte.
-			var cflags byte
-			if routing.IsToOldCommittee {
-				cflags |= 0x01
-			} else if routing.IsToOldAndNewCommittees {
-				cflags |= 0x01 | 0x02
-			} else {
-				// Default: to new committee.
-				cflags |= 0x02
-			}
-
-			// Determine from committee by checking key space.
-			fromKey := msg.GetFrom().KeyInt()
-			if newKeySet[fromKey.String()] {
-				cflags |= 0x04 // from new committee
-			}
-
-			isBroadcast := bcast == 0x01
-
-			// Build transport payload: [broadcast][cflags][wireData]
-			data := make([]byte, 2+len(wireData))
-			data[0] = bcast
-			data[1] = cflags
-			copy(data[2:], wireData)
-
-			dest := msg.GetTo()
-			if dest == nil {
-				// Broadcast: send to all unique peers,
-				// plus deliver locally for overlapping party.
-				sent := make(map[Identity]bool)
-				for _, pid := range c.oldPids {
-					id := c.pidToID[pid.Id]
-					if sent[id] {
-						continue
-					}
-					sent[id] = true
-					if id == t.self {
-						wd := make([]byte, len(wireData))
-						copy(wd, wireData)
-						go func(cf byte, b bool, w []byte) {
-							_ = t.handleReshareMessage(t.self, c, cf, b, w)
-						}(cflags, isBroadcast, wd)
-						continue
-					}
-					_ = t.transport.Send(id, ceremonyID, data)
-				}
-				for _, pid := range c.newPids {
-					id := c.pidToID[pid.Id]
-					if sent[id] {
-						continue
-					}
-					sent[id] = true
-					if id == t.self {
-						wd := make([]byte, len(wireData))
-						copy(wd, wireData)
-						go func(cf byte, b bool, w []byte) {
-							_ = t.handleReshareMessage(t.self, c, cf, b, w)
-						}(cflags, isBroadcast, wd)
-						continue
-					}
-					_ = t.transport.Send(id, ceremonyID, data)
-				}
-			} else {
-				sent := make(map[Identity]bool)
-				for _, destPID := range dest {
-					id := c.pidToID[destPID.Id]
-					if sent[id] {
-						continue
-					}
-					sent[id] = true
-					if id == t.self {
-						wd := make([]byte, len(wireData))
-						copy(wd, wireData)
-						go func(cf byte, b bool, w []byte) {
-							_ = t.handleReshareMessage(t.self, c, cf, b, w)
-						}(cflags, isBroadcast, wd)
-						continue
-					}
-					_ = t.transport.Send(id, ceremonyID, data)
-				}
-			}
-		}
-	}
 }
