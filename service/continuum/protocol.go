@@ -27,7 +27,7 @@ import (
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-	"github.com/hemilabs/x/tss-lib/v2/tss"
+	"github.com/hemilabs/x/tss-lib/v3/tss"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
@@ -510,7 +510,7 @@ type TSSMessage struct {
 	Type       CeremonyType `json:"type"`       // Ceremony type hint
 	From       Identity     `json:"from"`       // Originating party (for sig verification)
 	Flags      TSSMsgFlags  `json:"flags"`      // Broadcast + committee routing
-	Data       []byte       `json:"data"`       // tss-lib WireBytes()
+	Data       []byte       `json:"data"`       // serialized TSS message content
 	Signature  []byte       `json:"signature"`  // Sign(Hash(CeremonyID || Data))
 }
 
