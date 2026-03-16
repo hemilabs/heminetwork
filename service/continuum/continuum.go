@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
+	"github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
