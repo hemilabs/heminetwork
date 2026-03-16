@@ -58,6 +58,7 @@ linters:
         - "TODO"
         - "FIXME"
     gomoddirectives:
+      replace-local: true # Temporary: tss-lib fork not yet pushed.
       replace-allow-list:
         - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
     nolintlint:

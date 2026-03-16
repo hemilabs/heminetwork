@@ -36,7 +36,7 @@ func (b *msgBuf) collect(
 	got := 0
 
 	// Drain buffer first.
-	var keep []tss.ParsedMessage
+	keep := make([]tss.ParsedMessage, 0, len(b.buf))
 	for _, m := range b.buf {
 		if got < n {
 			if slot, ok := accept(m); ok && out[slot] == nil {
@@ -79,7 +79,7 @@ func (b *msgBuf) collectDual(
 	gotA, gotB := 0, 0
 
 	// Drain buffer first.
-	var keep []tss.ParsedMessage
+	keep := make([]tss.ParsedMessage, 0, len(b.buf))
 	for _, m := range b.buf {
 		matched := false
 		if gotA < n {
@@ -131,7 +131,10 @@ func (b *msgBuf) collectDual(
 }
 
 // sendRound serializes outbound round messages and sends them via
-// the transport.
+// the transport.  Send errors are logged but not fatal — TSS is
+// threshold-based, so the ceremony succeeds as long as t+1 peers
+// receive the message.  A missing message causes a collect timeout
+// on the receiving end, not silent corruption.
 func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []tss.Message) error {
 	for _, msg := range msgs {
 		wireData, _, err := msg.WireBytes()
@@ -144,12 +147,96 @@ func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []tss.Messa
 				if pid.Id == t.self.String() {
 					continue
 				}
-				_ = t.transport.Send(c.pidToID[pid.Id], ceremonyID, data)
+				if err := t.transport.Send(c.pidToID[pid.Id], ceremonyID, data); err != nil {
+					log.Debugf("send broadcast %x to %s: %v", ceremonyID, pid.Id, err)
+				}
 			}
 		} else {
 			data := append([]byte{0x00}, wireData...)
 			for _, dest := range msg.GetTo() {
-				_ = t.transport.Send(c.pidToID[dest.Id], ceremonyID, data)
+				if err := t.transport.Send(c.pidToID[dest.Id], ceremonyID, data); err != nil {
+					log.Debugf("send p2p %x to %s: %v", ceremonyID, dest.Id, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// sendReshareRound serializes outbound reshare round messages with
+// committee target flags encoded in the wire format.  Send errors
+// are logged but not fatal — TSS is threshold-based, so the ceremony
+// succeeds as long as t+1 peers receive the message.
+//
+// Wire format: [broadcast:1][committee_flags:1][wireBytes]
+//
+//	bit 0: to old committee
+//	bit 1: to new committee
+//	bit 2: from new committee (sender key is XORed)
+func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []tss.Message, fromNew bool) error {
+	for _, msg := range msgs {
+		wireData, routing, err := msg.WireBytes()
+		if err != nil {
+			return fmt.Errorf("wire bytes: %w", err)
+		}
+
+		// Build committee flags.
+		var cflags byte
+		if routing.IsToOldCommittee {
+			cflags |= 0x01
+		} else if routing.IsToOldAndNewCommittees {
+			cflags |= 0x01 | 0x02
+		} else {
+			// Default: to new committee.
+			cflags |= 0x02
+		}
+		if fromNew {
+			cflags |= 0x04
+		}
+
+		var bcast byte
+		if routing.IsBroadcast {
+			bcast = 0x01
+		}
+
+		data := make([]byte, 2+len(wireData))
+		data[0] = bcast
+		data[1] = cflags
+		copy(data[2:], wireData)
+
+		if routing.To == nil {
+			// Broadcast: send to all unique peers across both
+			// committees, skipping self.
+			sent := make(map[Identity]bool)
+			for _, pid := range c.oldPids {
+				id := c.pidToID[pid.Id]
+				if sent[id] || id == t.self {
+					continue
+				}
+				sent[id] = true
+				if err := t.transport.Send(id, ceremonyID, data); err != nil {
+					log.Debugf("send reshare broadcast %x to %s: %v", ceremonyID, id, err)
+				}
+			}
+			for _, pid := range c.newPids {
+				id := c.pidToID[pid.Id]
+				if sent[id] || id == t.self {
+					continue
+				}
+				sent[id] = true
+				if err := t.transport.Send(id, ceremonyID, data); err != nil {
+					log.Debugf("send reshare broadcast %x to %s: %v", ceremonyID, id, err)
+				}
+			}
+		} else {
+			for _, dest := range routing.To {
+				id := c.pidToID[dest.Id]
+				if id == t.self {
+					continue
+				}
+				if err := t.transport.Send(id, ceremonyID, data); err != nil {
+					log.Debugf("send reshare p2p %x to %s: %v", ceremonyID, id, err)
+				}
 			}
 		}
 	}
