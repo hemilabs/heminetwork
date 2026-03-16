@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hemilabs/x/tss-lib/v2/ecdsa/keygen"
-	"github.com/hemilabs/x/tss-lib/v2/tss"
+	"github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
+	"github.com/hemilabs/x/tss-lib/v3/tss"
 )
 
 // loadPreParams reads cached Paillier preparams from the test fixtures
