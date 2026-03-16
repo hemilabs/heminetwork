@@ -894,6 +894,12 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
+		var err error
+		s.prom.diskFree, err = diskFree(s.cfg.LevelDBHome)
+		if err != nil {
+			return fmt.Errorf("disk free: %w", err)
+		}
+
 		s.prom.syncInfo = s.Synced(ctx)
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
 		s.prom.blockCache = s.g.db.BlockCacheStats()
@@ -907,14 +913,14 @@ func (s *Server) promPoll(ctx context.Context) error {
 			log.Infof("Pending blocks %v/%v connected peers %v "+
 				"good peers %v bad peers %v mempool %v %v "+
 				"block cache hits: %v misses: %v purges: %v size: %v "+
-				"blocks: %v",
+				"blocks: %v disk free: %v",
 				s.blocks.Len(), defaultPendingBlocks, s.prom.connected,
 				s.prom.good, s.prom.bad, s.prom.mempoolCount,
 				humanize.Bytes(uint64(s.prom.mempoolSize)),
 				s.prom.blockCache.Hits, s.prom.blockCache.Misses,
 				s.prom.blockCache.Purges,
 				humanize.Bytes(uint64(s.prom.blockCache.Size)),
-				s.prom.blockCache.Items)
+				s.prom.blockCache.Items, humanize.IBytes(s.prom.diskFree))
 			s.mtx.RUnlock()
 		}
 	}
