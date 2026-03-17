@@ -221,7 +221,7 @@ func (s *fileStore) ListKeys() ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var keys [][]byte //nolint:prealloc // unknown entry count after filtering
+	var keys [][]byte
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
