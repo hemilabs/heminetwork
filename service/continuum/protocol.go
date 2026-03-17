@@ -651,6 +651,10 @@ const (
 
 	NaClPubSize = 32 // X25519 public key length
 
+	// secp256k1KeySize is the expected byte length of a secp256k1
+	// private key (32 bytes = 256 bits).
+	secp256k1KeySize = 32
+
 	dnsAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
 )
 
@@ -896,7 +900,7 @@ func NewSecretFromString(secret string) (*Secret, error) {
 		return nil, err
 	}
 	// This may not always be the case and may need to be a range.
-	if len(s) != 32 {
+	if len(s) != secp256k1KeySize {
 		return nil, fmt.Errorf("invalid key")
 	}
 	return NewSecretFromPrivate(secp256k1.PrivKeyFromBytes(s)), nil
@@ -940,6 +944,11 @@ var (
 	// placeholders until we decide on timeout handling
 	readTimeout  time.Duration = 4 * time.Second
 	writeTimeout time.Duration = 4 * time.Second
+
+	// handshakeTimeout bounds the X25519 key exchange.  The
+	// deadline is set on the net.Conn directly because the KX
+	// reads/writes are not context-aware (crypto/ecdh).
+	handshakeTimeout = 5 * time.Second
 )
 
 // Transport is an opaque type that provides encrypted transport for
@@ -1149,11 +1158,11 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		}
 	}()
 
-	// The key exchange should finish in less than 5 seconds.
+	// The key exchange should finish within the handshake timeout.
 	// The deadline is set on the net.Conn directly because the KX
 	// reads/writes are not context-aware (crypto/ecdh).  The parent
 	// context is used for cancellation in the caller.
-	timeout := 5 * time.Second
+	timeout := handshakeTimeout
 	// untested: SetDeadline cannot fail on real net.TCPConn; requires mock net.Conn
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return err
