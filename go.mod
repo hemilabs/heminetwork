@@ -1,8 +1,8 @@
 module github.com/hemilabs/heminetwork/v2
 
-go 1.25.0
+go 1.26.0
 
-toolchain go1.25.4
+toolchain go1.26.1
 
 require (
 	codeberg.org/miekg/dns v0.5.26
@@ -19,7 +19,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.16.8
 	github.com/go-test/deep v1.1.1
-	github.com/hemilabs/x/tss-lib/v3 v3.0.0-00000000000000-000000000000
+	github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260317125154-30339d0b0ce1
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
@@ -127,5 +127,3 @@ require (
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/hemilabs/x/tss-lib/v3 => /home/marco/Documents/src/x/tss-lib
