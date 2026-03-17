@@ -14,7 +14,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -133,23 +132,8 @@ func (n *TSSNetwork) GetIdentities() []Identity {
 
 func loadTestPreParams(t *testing.T, store *fileStore, index int) {
 	t.Helper()
-	_, thisFile, _, _ := runtime.Caller(0)
-	dir := filepath.Dir(thisFile)
-	path := filepath.Join(dir, "tss_examples", "preparams.json")
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return // No preparams, tests will be slow
-	}
-
-	var params []keygen.LocalPreParams
-	if err := json.Unmarshal(data, &params); err != nil {
-		return
-	}
-
-	if index < len(params) {
-		store.preParams = &params[index]
-	}
+	params := testPreParams(t, index+1)
+	store.preParams = &params[index]
 }
 
 // =============================================================================
