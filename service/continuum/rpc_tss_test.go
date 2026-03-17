@@ -126,25 +126,25 @@ func (a *rpcTransportAdapter) Send(to Identity, ceremonyID CeremonyID, data []by
 	var flags TSSMsgFlags
 	var wireData []byte
 
-	if data[0] == 0x01 {
+	if data[0] == msgTypeBroadcast {
 		flags |= TSSFlagBroadcast
 	}
 
 	if ctype == CeremonyReshare {
-		if len(data) < 2 {
+		if len(data) < wireHeaderLen {
 			return errors.New("reshare data too short")
 		}
 		cflags := data[1]
-		if cflags&0x01 != 0 {
+		if cflags&cflagToOld != 0 {
 			flags |= TSSFlagToOld
 		}
-		if cflags&0x02 != 0 {
+		if cflags&cflagToNew != 0 {
 			flags |= TSSFlagToNew
 		}
-		if cflags&0x04 != 0 {
+		if cflags&cflagFromNew != 0 {
 			flags |= TSSFlagFromNew
 		}
-		wireData = data[2:]
+		wireData = data[wireHeaderLen:]
 	} else {
 		wireData = data[1:]
 	}
@@ -274,24 +274,24 @@ func (n *rpcTSSNode) dispatchTSSMsg(msg TSSMessage) {
 	var data []byte
 	var bcast byte
 	if msg.Flags&TSSFlagBroadcast != 0 {
-		bcast = 0x01
+		bcast = msgTypeBroadcast
 	}
 
 	if msg.Type == CeremonyReshare {
 		var cflags byte
 		if msg.Flags&TSSFlagToOld != 0 {
-			cflags |= 0x01
+			cflags |= cflagToOld
 		}
 		if msg.Flags&TSSFlagToNew != 0 {
-			cflags |= 0x02
+			cflags |= cflagToNew
 		}
 		if msg.Flags&TSSFlagFromNew != 0 {
-			cflags |= 0x04
+			cflags |= cflagFromNew
 		}
-		data = make([]byte, 2+len(msg.Data))
+		data = make([]byte, wireHeaderLen+len(msg.Data))
 		data[0] = bcast
 		data[1] = cflags
-		copy(data[2:], msg.Data)
+		copy(data[wireHeaderLen:], msg.Data)
 	} else {
 		data = make([]byte, 1+len(msg.Data))
 		data[0] = bcast
