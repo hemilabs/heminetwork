@@ -470,7 +470,7 @@ func TestTSSNetworkMessageDelivery(t *testing.T) {
 	impl.ceremoniesMu.Unlock()
 
 	// Send from node1 to node2
-	err := node1.transport.Send(node2.id, cid, []byte{0x01, 0x00}) // broadcast flag + empty
+	err := node1.transport.Send(node2.id, cid, []byte{msgTypeBroadcast, 0x00}) // broadcast flag + empty
 	if err != nil {
 		t.Fatalf("Send failed: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestTSSNetworkRouting(t *testing.T) {
 	impl.ceremoniesMu.Unlock()
 
 	// Send from node0 to node1
-	_ = nodes[0].transport.Send(nodes[1].id, cid, []byte{0x01, 0x00})
+	_ = nodes[0].transport.Send(nodes[1].id, cid, []byte{msgTypeBroadcast, 0x00})
 	msgCount.Add(1)
 
 	t.Logf("Messages sent to node 1: %d", msgCount.Load())
@@ -1008,7 +1008,7 @@ func TestHandleMessageUnknownCeremony(t *testing.T) {
 	secret, _ := NewSecret()
 	impl := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{})
 
-	err := impl.HandleMessage(t.Context(), secret.Identity, NewCeremonyID(), []byte{0x01, 0x00})
+	err := impl.HandleMessage(t.Context(), secret.Identity, NewCeremonyID(), []byte{msgTypeBroadcast, 0x00})
 	if !errors.Is(err, ErrUnknownCeremony) {
 		t.Fatalf("expected ErrUnknownCeremony, got: %v", err)
 	}
@@ -1023,7 +1023,7 @@ func TestHandleMessageTooShort(t *testing.T) {
 	ti.ceremonies[cid] = &ceremony{ctype: CeremonyKeygen}
 	ti.ceremoniesMu.Unlock()
 
-	err := ti.HandleMessage(t.Context(), secret.Identity, cid, []byte{0x01})
+	err := ti.HandleMessage(t.Context(), secret.Identity, cid, []byte{msgTypeP2P})
 	if err == nil || err.Error() != "message too short" {
 		t.Fatalf("expected 'message too short', got: %v", err)
 	}
@@ -1038,7 +1038,7 @@ func TestHandleMessageReshareTooShort(t *testing.T) {
 	ti.ceremonies[cid] = &ceremony{ctype: CeremonyReshare}
 	ti.ceremoniesMu.Unlock()
 
-	err := ti.HandleMessage(t.Context(), secret.Identity, cid, []byte{0x01, 0x02})
+	err := ti.HandleMessage(t.Context(), secret.Identity, cid, []byte{msgTypeBroadcast, cflagToNew})
 	if err == nil || err.Error() != "reshare message too short" {
 		t.Fatalf("expected 'reshare message too short', got: %v", err)
 	}
@@ -1061,7 +1061,7 @@ func TestHandleMessageSenderNotInCeremony(t *testing.T) {
 	ti.ceremoniesMu.Unlock()
 
 	// 'other' is not in the ceremony's pids.
-	err := ti.HandleMessage(t.Context(), other.Identity, cid, []byte{0x01, 0x00})
+	err := ti.HandleMessage(t.Context(), other.Identity, cid, []byte{msgTypeBroadcast, 0x00})
 	if err == nil || err.Error() != "sender not in ceremony" {
 		t.Fatalf("expected 'sender not in ceremony', got: %v", err)
 	}

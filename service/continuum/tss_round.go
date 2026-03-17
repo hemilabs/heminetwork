@@ -11,6 +11,29 @@ import (
 	"github.com/hemilabs/x/tss-lib/v3/tss"
 )
 
+// maxWireDataLen bounds the size of a marshaled TSS message payload.
+// Prevents integer overflow in size computations on 32-bit platforms
+// and guards against pathological memory usage from oversized messages.
+const maxWireDataLen = 16 * 1024 * 1024 // 16 MiB
+
+// Wire format constants for TSS round messages.
+//
+// Keygen/sign: [bcast:1][wireBytes...]
+// Reshare:     [bcast:1][committee_flags:1][wireBytes...]
+const (
+	// Message type (byte 0).
+	msgTypeP2P       byte = 0x00 // unicast to specific party
+	msgTypeBroadcast byte = 0x01 // broadcast to all parties
+
+	// Committee routing flags (byte 1, reshare only, bitfield).
+	cflagToOld   byte = 0x01 // bit 0: route to old committee
+	cflagToNew   byte = 0x02 // bit 1: route to new committee
+	cflagFromNew byte = 0x04 // bit 2: sender is on new committee
+
+	// wireHeaderLen is the reshare header size: [bcast][cflags].
+	wireHeaderLen = 2
+)
+
 // msgBuf accumulates inbound messages across rounds.  Messages that
 // arrive early (from a faster peer in a later round) are kept in
 // the buffer until the local node reaches that round.
@@ -142,7 +165,7 @@ func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Mess
 			return fmt.Errorf("marshal content: %w", err)
 		}
 		if msg.To == nil {
-			data := append([]byte{0x01}, wireData...)
+			data := append([]byte{msgTypeBroadcast}, wireData...)
 			for _, pid := range c.pids {
 				if pid.Id == t.self.String() {
 					continue
@@ -152,7 +175,7 @@ func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Mess
 				}
 			}
 		} else {
-			data := append([]byte{0x00}, wireData...)
+			data := append([]byte{msgTypeP2P}, wireData...)
 			for _, dest := range msg.To {
 				if err := t.transport.Send(c.pidToID[dest.Id], ceremonyID, data); err != nil {
 					log.Debugf("send p2p %x to %s: %v", ceremonyID, dest.Id, err)
@@ -183,26 +206,30 @@ func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []*t
 		// Build committee flags.
 		var cflags byte
 		if msg.IsToOldCommittee {
-			cflags |= 0x01
+			cflags |= cflagToOld
 		} else if msg.IsToOldAndNewCommittees {
-			cflags |= 0x01 | 0x02
+			cflags |= cflagToOld | cflagToNew
 		} else {
 			// Default: to new committee.
-			cflags |= 0x02
+			cflags |= cflagToNew
 		}
 		if fromNew {
-			cflags |= 0x04
+			cflags |= cflagFromNew
 		}
 
-		var bcast byte
+		bcast := msgTypeP2P
 		if msg.IsBroadcast {
-			bcast = 0x01
+			bcast = msgTypeBroadcast
 		}
 
-		data := make([]byte, 2+len(wireData))
+		if len(wireData) > maxWireDataLen {
+			return fmt.Errorf("marshal content: wire data too large (%d bytes)", len(wireData))
+		}
+
+		data := make([]byte, wireHeaderLen+len(wireData))
 		data[0] = bcast
 		data[1] = cflags
-		copy(data[2:], wireData)
+		copy(data[wireHeaderLen:], wireData)
 
 		if msg.To == nil {
 			// Broadcast: send to all unique peers across both

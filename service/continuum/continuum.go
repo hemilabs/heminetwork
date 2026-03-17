@@ -85,6 +85,14 @@ const (
 	// reply in milliseconds; ephemeral clients (hemictl) never
 	// pong and get reaped.  Short fuse, no settling.
 	initialPingTimeout = 5 * time.Second
+
+	// dialTimeout bounds how long a connectPeer or seed-dial waits
+	// for the TCP handshake.
+	dialTimeout = 10 * time.Second
+
+	// promPollInterval is how often the Prometheus scrape loop
+	// refreshes ceremony/peer gauges.
+	promPollInterval = 5 * time.Second
 )
 
 var log = loggo.GetLogger(appName)
@@ -1097,7 +1105,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		return
 	}
 
-	d := &net.Dialer{Timeout: 10 * time.Second}
+	d := &net.Dialer{Timeout: dialTimeout}
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		log.Warningf("connectPeer dial %v: %v", addr, err)
@@ -1907,7 +1915,7 @@ func (s *Server) testAndSetRunning(b bool) bool {
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(promPollInterval)
 	for {
 		select {
 		case <-ctx.Done():
@@ -2078,7 +2086,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		return
 	}
 
-	d := &net.Dialer{Timeout: 10 * time.Second}
+	d := &net.Dialer{Timeout: dialTimeout}
 	conn, err := d.DialContext(ctx, "tcp", c)
 	if err != nil {
 		sendErr(ctx, errC, err)
