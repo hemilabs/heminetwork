@@ -2036,8 +2036,8 @@ func TestFiveNodeMesh(t *testing.T) {
 // all identities across the full chain, and maintainConnections must
 // fill each node's session count toward the target.
 func TestHundredNodeMesh(t *testing.T) {
-	if testing.Short() {
-		t.Skip("100-node mesh test is slow")
+	if testing.Short() || raceEnabled {
+		t.Skip("100-node mesh too slow under -short or -race")
 	}
 
 	const n = 100
