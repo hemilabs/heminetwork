@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
 - Add multiple RPC commands to regular and authenticated TBC routes ([#1026](https://github.com/hemilabs/heminetwork/pull/1026)).
 - Add maximum fee configuration to `popmd` ([#1037](https://github.com/hemilabs/heminetwork/pull/1037)).
+- Add TSS peer mesh with keygen, signing, and resharing ceremonies using
+  hemilabs/x tss-lib v3 channel-free round functions, encrypted RPC transport,
+  DNS seeding, coordinator election, and wire format for 32 ECDSA/EdDSA message
+  types ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 
 ### Changed
 
