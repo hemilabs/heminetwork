@@ -5,6 +5,7 @@
 package continuum
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sync"
@@ -14,6 +15,18 @@ import (
 )
 
 // =============================================================================
+// tssRetryBackoff is the fixed backoff schedule for retrying
+// HandleMessage when a TSSMessage arrives before its ceremony is
+// registered.  Totals ~4 seconds.
+var tssRetryBackoff = []time.Duration{
+	50 * time.Millisecond,
+	100 * time.Millisecond,
+	250 * time.Millisecond,
+	500 * time.Millisecond,
+	1 * time.Second,
+	2 * time.Second,
+}
+
 // Server TSS Transport — TSSTransport over encrypted RPC sessions
 //
 // Bridges the TSS engine (tss.go) to the protocol layer. Outgoing
@@ -81,25 +94,25 @@ func (st *serverTSSTransport) Send(to Identity, ceremonyID CeremonyID, data []by
 	var flags TSSMsgFlags
 	var wireData []byte
 
-	if data[0] == 0x01 {
+	if data[0] == msgTypeBroadcast {
 		flags |= TSSFlagBroadcast
 	}
 
 	if ctype == CeremonyReshare {
-		if len(data) < 2 {
+		if len(data) < wireHeaderLen {
 			return errors.New("reshare data too short")
 		}
 		cflags := data[1]
-		if cflags&0x01 != 0 {
+		if cflags&cflagToOld != 0 {
 			flags |= TSSFlagToOld
 		}
-		if cflags&0x02 != 0 {
+		if cflags&cflagToNew != 0 {
 			flags |= TSSFlagToNew
 		}
-		if cflags&0x04 != 0 {
+		if cflags&cflagFromNew != 0 {
 			flags |= TSSFlagFromNew
 		}
-		wireData = data[2:]
+		wireData = data[wireHeaderLen:]
 	} else {
 		wireData = data[1:]
 	}
@@ -193,9 +206,9 @@ func (s *Server) dispatchSign(req CeremonyRequest) {
 		log.Errorf("sign %s: empty committee", req.CeremonyID)
 		return
 	}
-	if len(req.Data) != 32 {
-		log.Errorf("sign %s: data must be 32 bytes, got %d",
-			req.CeremonyID, len(req.Data))
+	if len(req.Data) != sha256.Size {
+		log.Errorf("sign %s: data must be %d bytes, got %d",
+			req.CeremonyID, sha256.Size, len(req.Data))
 		return
 	}
 
@@ -281,26 +294,26 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 
 	// Reconstruct byte-prefix wire format for HandleMessage.
 	var data []byte
-	var bcast byte
+	bcast := msgTypeP2P
 	if msg.Flags&TSSFlagBroadcast != 0 {
-		bcast = 0x01
+		bcast = msgTypeBroadcast
 	}
 
 	if msg.Type == CeremonyReshare {
 		var cflags byte
 		if msg.Flags&TSSFlagToOld != 0 {
-			cflags |= 0x01
+			cflags |= cflagToOld
 		}
 		if msg.Flags&TSSFlagToNew != 0 {
-			cflags |= 0x02
+			cflags |= cflagToNew
 		}
 		if msg.Flags&TSSFlagFromNew != 0 {
-			cflags |= 0x04
+			cflags |= cflagFromNew
 		}
-		data = make([]byte, 2+len(msg.Data))
+		data = make([]byte, wireHeaderLen+len(msg.Data))
 		data[0] = bcast
 		data[1] = cflags
-		copy(data[2:], msg.Data)
+		copy(data[wireHeaderLen:], msg.Data)
 	} else {
 		data = make([]byte, 1+len(msg.Data))
 		data[0] = bcast
@@ -328,14 +341,7 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		for _, delay := range []time.Duration{
-			50 * time.Millisecond,
-			100 * time.Millisecond,
-			250 * time.Millisecond,
-			500 * time.Millisecond,
-			1 * time.Second,
-			2 * time.Second,
-		} {
+		for _, delay := range tssRetryBackoff {
 			timer := time.NewTimer(delay)
 			select {
 			case <-s.tssCtx.Done():
