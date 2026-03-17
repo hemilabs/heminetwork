@@ -20,7 +20,7 @@ require (
 	github.com/ethereum/go-ethereum v1.17.2
 	github.com/go-test/deep v1.1.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/hemilabs/x/tss-lib/v2 v2.0.0-20260323155920-652fbe589795
+	github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260507172513-c23bec7119b9
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
@@ -43,7 +43,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/btcsuite/btclog v1.0.0 // indirect
-	github.com/btcsuite/btcutil v1.0.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.1 // indirect

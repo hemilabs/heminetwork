@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `TxByID` to the `gozer.Gozer` interface with `tbcGozer`
   implementation backed by TBC RPC
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Add TSS peer mesh with keygen, signing, and resharing ceremonies using
+  hemilabs/x tss-lib v3 channel-free round functions, encrypted RPC transport,
+  DNS seeding, coordinator election, and wire format for 32 ECDSA/EdDSA message
+  types ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 
 ### Changed
 
