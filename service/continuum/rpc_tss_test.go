@@ -14,9 +14,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"os"
-	"path/filepath"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -25,28 +22,11 @@ import (
 	"github.com/hemilabs/x/tss-lib/v3/tss"
 )
 
-// loadPreParams reads cached Paillier preparams from the test fixtures
-// directory so keygen doesn't spend ~30s per node generating them.
+// loadPreParams reads cached Paillier preparams from the embedded
+// fixture so keygen doesn't spend ~30s per node generating them.
 func loadPreParams(t *testing.T, count int) []keygen.LocalPreParams {
 	t.Helper()
-	_, thisFile, _, _ := runtime.Caller(0)
-	dir := filepath.Dir(thisFile)
-	path := filepath.Join(dir, "tss_examples", "preparams.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Logf("No preparams file, tests will be slow: %v", err)
-		return nil
-	}
-	var params []keygen.LocalPreParams
-	if err := json.Unmarshal(data, &params); err != nil {
-		t.Logf("Failed to parse preparams: %v", err)
-		return nil
-	}
-	if len(params) < count {
-		t.Logf("Only %d preparams available, need %d", len(params), count)
-		return params
-	}
-	return params[:count]
+	return testPreParams(t, count)
 }
 
 // =============================================================================
