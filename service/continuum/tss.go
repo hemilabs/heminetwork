@@ -1070,10 +1070,10 @@ func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID C
 		if len(data) < 3 {
 			return errors.New("reshare message too short")
 		}
-		isBroadcast := data[0] == 0x01
+		isBroadcast := data[0] == msgTypeBroadcast
 		cflags := data[1]
-		wireData := data[2:]
-		fromNew := cflags&0x04 != 0
+		wireData := data[wireHeaderLen:]
+		fromNew := cflags&cflagFromNew != 0
 
 		// Parse with correct PID set based on sender committee.
 		fromIDStr := from.String()
@@ -1108,7 +1108,7 @@ func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID C
 		return errors.New("message too short")
 	}
 
-	isBroadcast := data[0] == 0x01
+	isBroadcast := data[0] == msgTypeBroadcast
 	wireData := data[1:]
 
 	// Keygen/Sign: single party routing.
