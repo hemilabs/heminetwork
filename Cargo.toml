@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = ["crates/trust"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.94.0"
+repository = "https://github.com/hemilabs/heminetwork"

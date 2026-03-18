@@ -1,5 +1,6 @@
 ### Hemi
 /bin/
+/target/
 /dist/
 /pkg/
 /.gocache/

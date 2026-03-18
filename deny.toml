@@ -1,0 +1,17 @@
+# https://embarkstudios.github.io/cargo-deny/checks/index.html
+[graph]
+all-features = true
+
+[advisories]
+unmaintained = "workspace"
+unsound = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "MIT",
+]
