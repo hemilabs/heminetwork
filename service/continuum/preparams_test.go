@@ -13,7 +13,7 @@ import (
 	_ "embed"
 )
 
-//go:embed tss_examples/preparams.json
+//go:embed testdata/preparams.json
 var embeddedPreParams []byte
 
 // testPreParams returns cached Paillier preparams from the embedded
