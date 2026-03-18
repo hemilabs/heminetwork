@@ -192,8 +192,8 @@ github.com/hashicorp/go-bexpr v0.1.10 h1:9kuI5PFotCboP3dkDYFr/wi0gg0QVbSNz5oFRpx
 github.com/hashicorp/go-bexpr v0.1.10/go.mod h1:oxlubA2vC/gFVfX1A6JGp7ls7uCDlfJn732ehYYg+g0=
 github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+lD48awMYo=
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
-github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260317144455-db049c54ff4c h1:JI5EJZ636PhCVBfKOB5QAxPA1yiOB/0LGfxBfF40feE=
-github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260317144455-db049c54ff4c/go.mod h1:jokWBqHufTHlhL5HpszJh7k1aDYj7Xe1jDuv6lZJPeM=
+github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260318154558-0f75bda287fb h1:FAQ07w1X4mB7FnvxGhMI+HLW47vBe/fgKWosORp+kTg=
+github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260318154558-0f75bda287fb/go.mod h1:jokWBqHufTHlhL5HpszJh7k1aDYj7Xe1jDuv6lZJPeM=
 github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db h1:IZUYC/xb3giYwBLMnr8d0TGTzPKFGNTCGgGLoyeX330=
 github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db/go.mod h1:xTEYN9KCHxuYHs+NmrmzFcnvHMzLLNiGFafCb1n3Mfg=
 github.com/holiman/bloomfilter/v2 v2.0.3 h1:73e0e/V0tCydx14a0SCYS/EWCxgwLZ18CZcZKVu0fao=
