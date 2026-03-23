@@ -57,10 +57,9 @@ impl TrustDB {
     }
 
     pub fn get_cf(&self, cf: &TrustDBTable) -> ColumnFamilyRef<'_> {
-        self.db.cf_handle(cf.as_str()).unwrap_or_else(|| panic!(
-            "CF '{}' must exist after successful open",
-            cf.as_str()
-        ))
+        self.db
+            .cf_handle(cf.as_str())
+            .unwrap_or_else(|| panic!("CF '{}' must exist after successful open", cf.as_str()))
     }
 
     pub fn put<K, V>(&self, cf: &TrustDBTable, key: K, value: V) -> Result<()>
