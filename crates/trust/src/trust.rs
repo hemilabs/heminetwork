@@ -33,14 +33,14 @@ impl TrustConfig {
 
 // XXX remove when fields are used
 #[allow(dead_code)]
-pub struct Trust<'a> {
+pub struct Trust {
     db: TrustDB,
-    cfg: &'a TrustConfig,
+    cfg: TrustConfig,
     network: Network,
 }
 
-impl<'a> Trust<'a> {
-    pub fn new(cfg: &'a TrustConfig) -> Result<Self> {
+impl Trust {
+    pub fn new(cfg: TrustConfig) -> Result<Self> {
         let network = match cfg.network.as_str() {
             "regtest" => Network::Regtest,
             "testnet3" | "testnet" => Network::Testnet,
@@ -68,7 +68,7 @@ mod tests {
         assert!(tmp.is_some());
 
         let cfg = TrustConfig::new_default_config(tmp.unwrap());
-        let s = Trust::new(&cfg);
+        let s = Trust::new(cfg);
         assert!(s.is_ok());
     }
 
@@ -80,7 +80,7 @@ mod tests {
 
         let mut cfg = TrustConfig::new_default_config(tmp.unwrap());
         cfg.network = "fake".to_string();
-        let e = Trust::new(&cfg);
+        let e = Trust::new(cfg);
         match e.err().expect("invalid network should return error") {
             TrustError::InvalidNetwork(_) => (),
             other_err => panic!("unexpected error {other_err}"),
