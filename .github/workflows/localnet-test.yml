@@ -41,7 +41,7 @@ jobs:
         id: cache-optimism-stack
         env:
           LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ${{ env.LOCALNET_OPTIMISM_STACK_CACHE_FILE }}
           key: optimism-stack-${{ steps.dockerfile-hash.outputs.hash }}
