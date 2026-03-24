@@ -1,7 +1,9 @@
-use crate::trust_db::{TrustDB, TrustDBError};
+use crate::trust_db::{TrustDB, TrustDBError, TrustDBTable::MetadataCF};
 use bitcoin::Network;
 use std::path::Path;
 use thiserror::Error;
+
+static DB_METADATA_KEY_UPSTREAM_STATE_ID: &str = "upstream_state_id";
 
 #[derive(Error, Debug)]
 pub enum TrustError {
@@ -54,6 +56,16 @@ impl Trust {
 
         Ok(Self { db, cfg, network })
     }
+
+    pub fn set_upstream_state_id(&self, upstream_state_id: &[u8; 32]) {
+        self.db
+            .put(
+                &MetadataCF,
+                DB_METADATA_KEY_UPSTREAM_STATE_ID,
+                upstream_state_id,
+            )
+            .expect("could not insert into metadata table: {e}")
+    }
 }
 
 #[cfg(test)]
@@ -84,6 +96,45 @@ mod tests {
         match e.err().expect("invalid network should return error") {
             TrustError::InvalidNetwork(_) => (),
             other_err => panic!("unexpected error {other_err}"),
+        }
+    }
+
+    #[test]
+    fn test_set_upstream_state_id() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test_yes");
+
+        match trust.db.get(&MetadataCF, DB_METADATA_KEY_UPSTREAM_STATE_ID) {
+            Err(e) => panic!("could not get upstream state id from metadata table: {e}"),
+            Ok(state_id) => {
+                assert_eq!(state_id, b"this_is_a_test_for_this_test_yes");
+            }
+        }
+    }
+
+    #[test]
+    fn test_set_upstream_state_id_more_than_once() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test_yes");
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test____");
+
+        match trust.db.get(&MetadataCF, DB_METADATA_KEY_UPSTREAM_STATE_ID) {
+            Err(e) => panic!("could not get upstream state id from metadata table: {e}"),
+            Ok(state_id) => {
+                assert_eq!(state_id, b"this_is_a_test_for_this_test____");
+            }
         }
     }
 }
