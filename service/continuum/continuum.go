@@ -1488,7 +1488,7 @@ func requireAdmin(t *Transport, id *Identity) bool {
 // The ceremony context derives from s.tssCtx so server shutdown
 // propagates cancellation to all waiting callers.
 func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity, committee []Identity) {
-	ctx, cancel := context.WithCancel(s.tssCtx)
+	ctx, cancel := context.WithCancel(s.tssCtx) //nolint:gosec // cancel stored in CeremonyInfo, called on ceremony completion
 	s.mtx.Lock()
 	s.ceremonies[cid] = &CeremonyInfo{
 		Type:        ct,
