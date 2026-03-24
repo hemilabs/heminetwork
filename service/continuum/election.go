@@ -56,8 +56,8 @@ func Elect(seed []byte, peers []Identity, committee int) ([]Identity, error) {
 		hash := h.Sum(nil)
 
 		r := binary.BigEndian.Uint64(hash[:8])
-		remaining := uint64(len(sorted) - i)
-		j := i + int(r%remaining)
+		remaining := len(sorted) - i
+		j := i + int(r%uint64(remaining)) //nolint:gosec // remaining < len(sorted) which fits in int
 		sorted[i], sorted[j] = sorted[j], sorted[i]
 	}
 
