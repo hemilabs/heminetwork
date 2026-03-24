@@ -1232,7 +1232,7 @@ func TestHandshakeErrors(t *testing.T) {
 				nonce := tr.nonce.Next()
 				msg := []byte("test")
 				var size [4]byte
-				binary.BigEndian.PutUint32(size[:], uint32(len(msg)+len(nonce)))
+				binary.BigEndian.PutUint32(size[:], uint32(len(msg)+len(nonce))) //nolint:gosec // test payload
 				header := append(size[1:4], nonce[0:24]...)
 				_, err := tr.conn.Write(append(header, msg...))
 				return err
