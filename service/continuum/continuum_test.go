@@ -1753,7 +1753,7 @@ func TestAddPeerBadNaClPub(t *testing.T) {
 	}
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id := Identity{byte(i + 10)}
+			id := Identity{byte(i + 10)} //nolint:gosec // test loop i < 10
 			got := s.addPeer(ctx, PeerRecord{
 				Identity: id,
 				NaClPub:  tt.naclPub,
@@ -2065,7 +2065,7 @@ func TestHundredNodeMesh(t *testing.T) {
 	for i := 0; i < n; i++ {
 		var connect []string
 		if i > 0 {
-			connect = []string{addrs[i-1]}
+			connect = []string{addrs[i-1]} //nolint:gosec // guarded by i > 0
 		}
 		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
 		servers[i].cfg.MaintainInterval = fastMaintain
@@ -5463,7 +5463,7 @@ func TestReadDecryptError(t *testing.T) {
 			blob[i] = byte(i)
 		}
 		var size [3]byte
-		binary.BigEndian.PutUint16(size[1:3], uint16(len(blob)))
+		binary.BigEndian.PutUint16(size[1:3], uint16(len(blob))) //nolint:gosec // test payload < 64KB
 		size[0] = 0
 		_, _ = sp.Write(size[:])
 		_, _ = sp.Write(blob)
@@ -9620,7 +9620,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 	for i := 0; i < n; i++ {
 		var connect []string
 		if i > 0 {
-			connect = []string{addrs[i-1]}
+			connect = []string{addrs[i-1]} //nolint:gosec // guarded by i > 0
 		}
 		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
 		servers[i].cfg.PeersWanted = 6 // n-1 peer sessions + admin headroom
@@ -11013,7 +11013,7 @@ func TestFiveNodeKeygenAndSign(t *testing.T) {
 	for i := 0; i < n; i++ {
 		var connect []string
 		if i > 0 {
-			connect = []string{addrs[i-1]}
+			connect = []string{addrs[i-1]} //nolint:gosec // guarded by i > 0
 		}
 		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
 		servers[i].cfg.PeersWanted = 6
