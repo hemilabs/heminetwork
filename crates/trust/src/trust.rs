@@ -11,6 +11,8 @@ pub enum TrustError {
     TrustDB(#[from] TrustDBError),
     #[error("Invalid network: {0}")]
     InvalidNetwork(String),
+    #[error("Not found: {0}")]
+    NotFound(String),
 }
 
 pub type Result<T> = std::result::Result<T, TrustError>;
@@ -65,6 +67,21 @@ impl Trust {
                 upstream_state_id,
             )
             .expect("could not insert into metadata table: {e}")
+    }
+
+    pub fn get_upstream_state_id(&self) -> Result<[u8; 32]> {
+        let upstream_state_id_binding =
+            &self.db.get(&MetadataCF, DB_METADATA_KEY_UPSTREAM_STATE_ID);
+
+        let upstream_state_id = match upstream_state_id_binding {
+            Ok(u) => u.as_array::<32>(),
+            Err(e) => return Err(TrustError::NotFound(e.to_string())),
+        };
+
+        match upstream_state_id {
+            Some(u) => Ok(*u),
+            None => panic!("could not return upstream_state_id as a 32 byte array"),
+        }
     }
 }
 
@@ -135,6 +152,81 @@ mod tests {
             Ok(state_id) => {
                 assert_eq!(state_id, b"this_is_a_test_for_this_test____");
             }
+        }
+    }
+
+    #[test]
+    fn test_get_upstream_state_id() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        trust
+            .db
+            .put(
+                &MetadataCF,
+                DB_METADATA_KEY_UPSTREAM_STATE_ID,
+                b"this_is_a_test_for_this_test_yes",
+            )
+            .unwrap();
+
+        match trust.get_upstream_state_id() {
+            Ok(u) => assert_eq!(u, *b"this_is_a_test_for_this_test_yes"),
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    #[test]
+    fn test_get_upstream_state_id_gets_the_latest() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        trust
+            .db
+            .put(
+                &MetadataCF,
+                DB_METADATA_KEY_UPSTREAM_STATE_ID,
+                b"this_is_a_test_for_this_test_yes",
+            )
+            .unwrap();
+
+        trust
+            .db
+            .put(
+                &MetadataCF,
+                DB_METADATA_KEY_UPSTREAM_STATE_ID,
+                b"this_is_a_test_for_this_test____",
+            )
+            .unwrap();
+
+        match trust.get_upstream_state_id() {
+            Ok(u) => assert_eq!(u, *b"this_is_a_test_for_this_test____"),
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    #[test]
+    fn test_get_upstream_state_id_not_found() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        match trust
+            .get_upstream_state_id()
+            .expect_err("there should be no upstream state id")
+        {
+            TrustError::NotFound(_) => (),
+            other_err => panic!("unexpected error {other_err}"),
         }
     }
 }
