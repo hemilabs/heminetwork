@@ -18,6 +18,6 @@ allow = [
     "CC0-1.0",
     "ISC",
     "MIT",
-    "MITNFA", // https://spdx.org/licenses/MITNFA.html
+    "MITNFA", # https://spdx.org/licenses/MITNFA.html
     "Unicode-3.0",
 ]
