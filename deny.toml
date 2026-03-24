@@ -13,5 +13,11 @@ unknown-git = "deny"
 [licenses]
 confidence-threshold = 0.93
 allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
     "MIT",
+    "MITNFA", # https://spdx.org/licenses/MITNFA.html
+    "Unicode-3.0",
 ]
