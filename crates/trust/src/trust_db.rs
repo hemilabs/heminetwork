@@ -223,7 +223,7 @@ impl TrustDB {
             let (_, hash) = TrustDB::key_to_height_hash(&enc);
             bhs.push(self.block_header_by_hash(hash)?);
         }
-        if bhs.len() == 0 {
+        if bhs.is_empty() {
             return Err(TrustDBError::NotFound(height.to_string()));
         }
         Ok(bhs)
