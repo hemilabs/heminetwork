@@ -10,10 +10,10 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/subtle"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	mrand "math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -1045,13 +1045,19 @@ func (s *Server) connectRandom(ctx context.Context) {
 		return
 	}
 
-	// Shuffle to avoid topology clustering. Dial up to the
-	// remaining gap — some will be rejected (BusyResponse from
-	// full peers), but trying multiple per cycle converges
-	// faster than one-per-cycle in large meshes.
-	mrand.Shuffle(len(candidates), func(i, j int) {
+	// Shuffle to avoid topology clustering using crypto/rand.
+	// Dial up to the remaining gap — some will be rejected
+	// (BusyResponse from full peers), but trying multiple per
+	// cycle converges faster than one-per-cycle in large meshes.
+	for i := len(candidates) - 1; i > 0; i-- {
+		var buf [8]byte
+		if _, err := rand.Read(buf[:]); err != nil {
+			log.Warningf("maintainConnections: rand.Read: %v", err)
+			break
+		}
+		j := int(binary.BigEndian.Uint64(buf[:]) % uint64(i+1))
 		candidates[i], candidates[j] = candidates[j], candidates[i]
-	})
+	}
 
 	if gap > len(candidates) {
 		gap = len(candidates)
