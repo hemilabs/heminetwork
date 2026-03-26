@@ -1416,7 +1416,7 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 		return nil, err
 	}
 
-	// Replay protection analysis (SOW4 §4 — deferred).
+	// Replay protection analysis.
 	//
 	// The routing-layer dedup cache (67s TTL) prevents immediate
 	// replay of routed messages.  Beyond that window:
