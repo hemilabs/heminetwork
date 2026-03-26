@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -894,7 +895,7 @@ func (s *Server) verifyDNSIdentity(ctx context.Context, hostname string, id Iden
 		if err != nil {
 			continue
 		}
-		if bytes.Equal(id[:], remoteDNSID[:]) {
+		if subtle.ConstantTimeCompare(id[:], remoteDNSID[:]) == 1 {
 			return nil
 		}
 		return fmt.Errorf("dns identity mismatch: got %v, want %v",
