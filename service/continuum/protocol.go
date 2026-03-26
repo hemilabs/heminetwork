@@ -307,7 +307,7 @@ type Header struct {
 	Origin      Identity    `json:"origin"`                // Origin identity
 	Destination *Identity   `json:"destination,omitempty"` // Intended receiver
 	TTL         uint8       `json:"ttl"`                   // Time To Live
-	// Path []Identity // Deferred: requires per-hop signing (see SOW4 §9).
+	// Path []Identity // Deferred: requires per-hop signing.
 }
 
 // HelloRequest is the first command that is sent to the other side after the
