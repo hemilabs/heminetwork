@@ -11,6 +11,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -878,7 +879,7 @@ func Verify(hash []byte, remote Identity, sig []byte) (*secp256k1.PublicKey, err
 		return nil, ErrNotCompact
 	}
 	recoveredID := NewIdentityFromPub(publicKey)
-	if !bytes.Equal(recoveredID[:], remote[:]) {
+	if subtle.ConstantTimeCompare(recoveredID[:], remote[:]) != 1 {
 		return nil, ErrIdentityMismatch
 	}
 	return publicKey, nil
@@ -1477,7 +1478,7 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, []byte, error) {
 
 	// Verify payload hash matches the declared hash in header
 	expectedHash := NewPayloadHash(payloadBytes)
-	if !bytes.Equal(header.PayloadHash[:], expectedHash[:]) {
+	if subtle.ConstantTimeCompare(header.PayloadHash[:], expectedHash[:]) != 1 {
 		return nil, nil, nil, fmt.Errorf("payload hash mismatch: got %v, want %v",
 			expectedHash, header.PayloadHash)
 	}
@@ -1681,5 +1682,5 @@ func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr
 	if err != nil {
 		return false, fmt.Errorf("dns invalid identity: %w", err)
 	}
-	return bytes.Equal(id[:], remoteDNSID[:]), nil
+	return subtle.ConstantTimeCompare(id[:], remoteDNSID[:]) == 1, nil
 }
