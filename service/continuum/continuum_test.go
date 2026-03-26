@@ -378,6 +378,15 @@ func newTestServer(t *testing.T, preParams []keygen.LocalPreParams, idx int, lis
 	// Pre-set secret so Identity() works before Run().  Run() will
 	// reconstruct the same secret from cfg.PrivateKey.
 	server.secret = secret
+
+	// Wire up debug initiator for tests — production builds get
+	// nil from serverDebugInit(), but tests need wire-initiated
+	// ceremonies.
+	if server.debugInit == nil {
+		di := newDebugInitiator()
+		server.debugInit = di
+		server.initiator = di
+	}
 	return server
 }
 
