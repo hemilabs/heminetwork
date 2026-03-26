@@ -521,10 +521,16 @@ func (m TSSMessage) IsBroadcast() bool {
 }
 
 // HashTSSMessage computes the hash that must be signed for a
-// TSSMessage. Hash = SHA256(CeremonyID || Data).
+// TSSMessage. Hash = SHA256("continuum-tss-msg-v1" || CeremonyID || len(Data) || Data).
+// The domain separator prevents cross-protocol signature replay.
+// The length prefix prevents ambiguous CeremonyID/Data splits.
 func HashTSSMessage(cid CeremonyID, data []byte) []byte {
 	h := sha256.New()
+	h.Write([]byte("continuum-tss-msg-v1"))
 	h.Write(cid[:])
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
+	h.Write(lenBuf[:])
 	h.Write(data)
 	return h.Sum(nil)
 }
@@ -1058,14 +1064,31 @@ func (t *Transport) setTransportFromPublicKey(publicKey []byte) error {
 	return ErrNoSuitableCurve
 }
 
-// Close closes the underlying connection but leaves the ephemeral encryption
-// key and connection set. This is deliberate to prevent reuse.
+// Close closes the underlying connection and zeros key material to
+// limit exposure in swap files and core dumps.
 func (t *Transport) Close() error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	if t.conn == nil {
 		return ErrNoConn
 	}
+	// Zero key material.
+	if t.encryptKey != nil {
+		for i := range t.encryptKey {
+			t.encryptKey[i] = 0
+		}
+	}
+	if t.decryptKey != nil {
+		for i := range t.decryptKey {
+			t.decryptKey[i] = 0
+		}
+	}
+	if t.nonce != nil {
+		for i := range t.nonce.key {
+			t.nonce.key[i] = 0
+		}
+	}
+	t.us = nil
 	return t.conn.Close()
 }
 
@@ -1356,7 +1379,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 
 	// Sign combined challenge that is represented by the sha256 hash of
 	// their challenge plus ephemeral transport public key and reply.
-	combinedChallenge := Hash256(helloRequest.Challenge, t.them.Bytes())
+	combinedChallenge := Hash256([]byte("continuum-challenge-v1"), helloRequest.Challenge, t.them.Bytes())
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
@@ -1375,7 +1398,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 	}
 
 	// Verify signature over sha256(our challenge + our transport public key)
-	linkedChallenge := Hash256(ourChallenge[:], t.us.PublicKey().Bytes())
+	linkedChallenge := Hash256([]byte("continuum-challenge-v1"), ourChallenge[:], t.us.PublicKey().Bytes())
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
