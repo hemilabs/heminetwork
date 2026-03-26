@@ -167,7 +167,7 @@ type Server struct {
 	// Ceremony initiation — the seam between external triggers
 	// (blockchain or debug) and the TSS engine.
 	initiator CeremonyInitiator
-	debugInit *debugInitiator // nil in production (blockchain initiator)
+	debugInit *debugInitiator // non-nil only in continuum_debug builds
 
 	// Listener
 	listenConfig  *net.ListenConfig
@@ -258,7 +258,16 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("DNS=%q requires Hostname to be set", cfg.DNS)
 	}
 
-	di := newDebugInitiator()
+	di := serverDebugInit()
+	var init CeremonyInitiator
+	if di != nil {
+		init = di
+	} else {
+		// Production: no debug initiator.  ceremonyLoop blocks
+		// on the nil channel until the blockchain watcher is
+		// wired in.
+		init = &noopInitiator{}
+	}
 	return &Server{
 		cfg:          cfg,
 		listenConfig: &net.ListenConfig{},
@@ -267,7 +276,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		peers:        make(map[Identity]*PeerRecord),
 		ceremonies:   make(map[CeremonyID]*CeremonyInfo),
 		handshakeSem: make(chan struct{}, cfg.PeersWanted),
-		initiator:    di,
+		initiator:    init,
 		debugInit:    di,
 		tssCtx:       context.Background(), // replaced by Run() with lifecycle context
 	}, nil
