@@ -46,6 +46,13 @@ type CeremonyRequest struct {
 	NewThreshold int
 }
 
+// noopInitiator is used in production builds until the blockchain
+// watcher is wired in.  Its nil channel blocks the ceremonyLoop
+// select forever; the loop exits only via ctx.Done().
+type noopInitiator struct{}
+
+func (noopInitiator) CeremonyChan() <-chan CeremonyRequest { return nil }
+
 // debugInitiator implements CeremonyInitiator for debug mode.
 // The protocol dispatch loop converts incoming KeygenRequest,
 // SignRequest, and ReshareRequest messages into CeremonyRequest
