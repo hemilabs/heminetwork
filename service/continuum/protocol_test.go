@@ -80,16 +80,31 @@ func TestEncryptDecrypt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cleartext, err := client.decrypt(em[3:]) // clip size that is done by read normally
+
+		// Phase 1: decrypt the frame header to get body size.
+		if len(em) < transportFrameHeaderSize {
+			t.Fatalf("encrypted too short: %d", len(em))
+		}
+		bodySize, err := client.decryptFrameHeader(em[:transportFrameHeaderSize])
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("decrypt frame header: %v", err)
+		}
+		body := em[transportFrameHeaderSize:]
+		if uint32(len(body)) != bodySize {
+			t.Fatalf("body size mismatch: header says %d, got %d", bodySize, len(body))
+		}
+
+		// Phase 2: decrypt the body to get the payload.
+		cleartext, err := client.decrypt(body)
+		if err != nil {
+			t.Fatal("could not decrypt")
 		}
 		if !bytes.Equal(message, cleartext) {
 			t.Fatal("message not equal")
 		}
 
-		// Clip blob to test length test
-		_, err = client.decrypt(em[3:8]) // clip nonce
+		// Truncated body triggers length error.
+		_, err = client.decrypt(body[:5])
 		if !errors.Is(ErrInvalidSecretboxLength, err) {
 			t.Fatalf("expected length error: %v", err)
 		}
@@ -152,7 +167,11 @@ func TestDirectionalKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleartext, err := client.decrypt(cipherS2C[3:])
+	bodySize, err := client.decryptFrameHeader(cipherS2C[:transportFrameHeaderSize])
+	if err != nil {
+		t.Fatalf("client failed to decrypt header: %v", err)
+	}
+	cleartext, err := client.decrypt(cipherS2C[transportFrameHeaderSize : transportFrameHeaderSize+int(bodySize)])
 	if err != nil {
 		t.Fatalf("client failed to decrypt server message: %v", err)
 	}
@@ -165,7 +184,11 @@ func TestDirectionalKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleartext, err = server.decrypt(cipherC2S[3:])
+	bodySize, err = server.decryptFrameHeader(cipherC2S[:transportFrameHeaderSize])
+	if err != nil {
+		t.Fatalf("server failed to decrypt header: %v", err)
+	}
+	cleartext, err = server.decrypt(cipherC2S[transportFrameHeaderSize : transportFrameHeaderSize+int(bodySize)])
 	if err != nil {
 		t.Fatalf("server failed to decrypt client message: %v", err)
 	}
@@ -175,14 +198,14 @@ func TestDirectionalKeys(t *testing.T) {
 
 	// Wrong direction: server cannot decrypt its own s2c message.
 	// Server's decryptKey is c2s which is the wrong key for s2c
-	// ciphertext.
-	_, err = server.decrypt(cipherS2C[3:])
+	// ciphertext — header decryption fails first.
+	_, err = server.decryptFrameHeader(cipherS2C[:transportFrameHeaderSize])
 	if !errors.Is(err, ErrDecrypt) {
 		t.Fatalf("expected ErrDecrypt for wrong-direction decrypt, got: %v", err)
 	}
 
 	// Wrong direction: client cannot decrypt its own c2s message.
-	_, err = client.decrypt(cipherC2S[3:])
+	_, err = client.decryptFrameHeader(cipherC2S[:transportFrameHeaderSize])
 	if !errors.Is(err, ErrDecrypt) {
 		t.Fatalf("expected ErrDecrypt for wrong-direction decrypt, got: %v", err)
 	}
@@ -1227,14 +1250,14 @@ func TestHandshakeErrors(t *testing.T) {
 		{
 			name:          "invalid encryption",
 			curve:         ecdh.P256(),
-			expectedError: ErrInvalidSecretboxLength,
+			expectedError: ErrDecrypt,
 			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
-				nonce := tr.nonce.Next()
-				msg := []byte("test")
-				var size [4]byte
-				binary.BigEndian.PutUint32(size[:], uint32(len(msg)+len(nonce))) //nolint:gosec // test payload
-				header := append(size[1:4], nonce[0:24]...)
-				_, err := tr.conn.Write(append(header, msg...))
+				// Send garbage bytes the size of a v2 frame
+				// header.  readBlob reads exactly 44 bytes and
+				// tries to authenticate them — this must fail.
+				garbage := make([]byte, transportFrameHeaderSize)
+				_, _ = rand.Read(garbage)
+				_, err := tr.conn.Write(garbage)
 				return err
 			},
 		},
