@@ -2585,8 +2585,8 @@ func TestDecryptPayloadSuccess(t *testing.T) {
 func TestEncryptMessageTooLarge(t *testing.T) {
 	srv, _ := connectedTransports(t)
 
-	// TransportMaxSize is 0x00ffffff (16MB).  A payload of that
-	// size plus nonce + secretbox overhead exceeds the limit.
+	// TransportMaxSize is 1MB.  A payload of that size plus
+	// nonce + secretbox overhead exceeds the limit.
 	huge := make([]byte, TransportMaxSize)
 	_, err := srv.encrypt(huge)
 	if !errors.Is(err, ErrMessageTooLarge) {
@@ -5262,18 +5262,29 @@ func TestDecryptBadCiphertext(t *testing.T) {
 		}
 	})
 
-	t.Run("tampered", func(t *testing.T) {
-		// Create valid ciphertext then tamper.
+	t.Run("tampered header", func(t *testing.T) {
+		// Create valid ciphertext then tamper with the header.
 		ct, err := srv.encrypt([]byte(`{"payloadtype":"PingRequest"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Tamper with ciphertext body (skip 3-byte size prefix).
-		if len(ct) > 10 {
-			ct[len(ct)-1] ^= 0xff
+		// Flip a byte in the 44-byte encrypted header.
+		ct[transportFrameHeaderSize-1] ^= 0xff
+		_, err = srv.decryptFrameHeader(ct[:transportFrameHeaderSize])
+		if !errors.Is(err, ErrDecrypt) {
+			t.Fatalf("expected ErrDecrypt, got: %v", err)
 		}
-		// Strip size prefix for decrypt.
-		_, err = srv.decrypt(ct[3:])
+	})
+
+	t.Run("tampered body", func(t *testing.T) {
+		// Create valid ciphertext then tamper with the body.
+		ct, err := srv.encrypt([]byte(`{"payloadtype":"PingRequest"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Flip a byte in the body.
+		ct[len(ct)-1] ^= 0xff
+		_, err = srv.decrypt(ct[transportFrameHeaderSize:])
 		if !errors.Is(err, ErrDecrypt) {
 			t.Fatalf("expected ErrDecrypt, got: %v", err)
 		}
@@ -5424,26 +5435,29 @@ func TestReadBlobConnectionReset(t *testing.T) {
 }
 
 // TestReadBlobPartialRead covers readBlob when the connection closes
-// after writing the size but before the full blob arrives.
+// after writing a valid encrypted frame header but before the full
+// body arrives.
 func TestReadBlobPartialRead(t *testing.T) {
 	sp, cp := net.Pipe()
 	defer cp.Close()
 
-	_, cli := connectedTransports(t)
+	srv, cli := connectedTransports(t)
 	// Replace the client transport's connection with our pipe.
 	cli.mtx.Lock()
 	cli.conn = cp
 	cli.mtx.Unlock()
 
 	go func() {
-		// Write a valid 3-byte size header for 100 bytes.
-		var size [3]byte
-		size[0] = 0
-		size[1] = 0
-		size[2] = 100
-		_, _ = sp.Write(size[:])
-		// Write only 10 bytes then close — short read.
-		_, _ = sp.Write(make([]byte, 10))
+		// Encrypt a real message to produce a valid frame header.
+		blob, err := srv.encrypt([]byte(`{"payloadtype":"PingRequest"}`))
+		if err != nil {
+			panic(err)
+		}
+		// Write the full 44-byte header so readBlob learns the
+		// authenticated body size, then write only a few body bytes
+		// and close — triggering a short body read.
+		_, _ = sp.Write(blob[:transportFrameHeaderSize])
+		_, _ = sp.Write(blob[transportFrameHeaderSize : transportFrameHeaderSize+5])
 		sp.Close()
 	}()
 

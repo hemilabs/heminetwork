@@ -50,9 +50,10 @@ import (
 // a key exchange, followed by a handshake where the other party's identity
 // is verified. After this, envelopes can be shared freely between both sides.
 //
-// An envelope is constructed on the wire as: [size+nonce][header+payload].
-// The size and nonce are unencrypted, the former being used to validate the
-// amount of data to be read, and the latter for decrypting the message.
+// An envelope is constructed on the wire using two-phase authenticated
+// framing.  Phase 1 is a fixed-size 44-byte encrypted header containing
+// the body size.  Phase 2 is the encrypted payload whose length is
+// authenticated from phase 1.  No cleartext framing exists on the wire.
 //
 // Once an envelope is decrypted there are two distinct pieces, a header
 // and a message + payload. The header contains information akin to TCP
@@ -97,11 +98,11 @@ import (
 // At this point, both sides have directional keys which they use to encrypt
 // all packets going forward using NaCl's secretbox. The server encrypts with
 // the s2c key and decrypts with the c2s key; the client does the inverse.
-// Protocol requires one
-// packet per secretbox and the wire format is 24 bits of cleartext that
-// designates encrypted blob length. The encrypted blob comprises of a 24 byte
-// nonce plus ciphertext. Decrypting is done by calling secretbox open using
-// the directional key and nonce.
+// Protocol requires one logical message per pair of secretbox operations.
+// The wire format is a 44-byte encrypted header (containing the body
+// size) followed by the encrypted body.  Decrypting is done by opening
+// the header secretbox to learn the body size, then opening the body
+// secretbox for the payload.
 //
 // Note on nonces: When using secretbox it is imperative to not use duplicate
 // nonces. In order to prevent reuse both sides generate a random 256 bit key
@@ -647,12 +648,17 @@ func IsBroadcastable(cmd any) bool {
 
 // Protocol and transport wire constants.
 const (
-	TransportVersion = 1 // Transport protocol version
+	TransportVersion = 2 // Transport protocol version
 
 	ProtocolVersion = 1 // Node version
 
-	TransportNonceSize = 24         // 24 bytes, per secretbox
-	TransportMaxSize   = 0x00ffffff // 24 bit, 3 bytes
+	TransportNonceSize = 24      // 24 bytes, per secretbox
+	TransportMaxSize   = 1 << 20 // 1 MB — sufficient for 100-party TSS
+
+	// transportFrameHeaderSize is the fixed-size encrypted header
+	// read by the receiver before any variable-length data.
+	//   24 (nonce) + secretbox(4-byte body_size) = 24 + 4 + 16 = 44
+	transportFrameHeaderSize = TransportNonceSize + 4 + secretbox.Overhead
 
 	ChallengeSize = 32 // 32 bytes random data
 
@@ -1275,47 +1281,83 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	return nil
 }
 
-// encrypt encrypts the passed in slice. The returned encrypted data is
-// prepended with a length and a nonce. This is to facilitate writes directly
-// on the wire.
+// encrypt encrypts the passed in slice using two-phase authenticated
+// framing.  Phase 1 is a fixed-size encrypted header containing the
+// body size.  Phase 2 is the encrypted payload.
+//
+// Wire format (v2):
+//
+//	[24-byte nonce_h][secretbox(4-byte body_size)]   <- fixed 44 bytes
+//	[24-byte nonce_p][secretbox(payload)]             <- body_size bytes
+//
+// body_size = TransportNonceSize + len(payload) + secretbox.Overhead
+//
+// No cleartext framing.  An attacker corrupting any byte of the
+// 44-byte header causes secretbox.Open to fail.  The receiver never
+// trusts an unauthenticated length.
 func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
-	ts := TransportNonceSize + len(cleartext) + secretbox.Overhead
-	if ts > TransportMaxSize {
+	// Body = nonce_p + secretbox(payload).
+	bodySize := TransportNonceSize + len(cleartext) + secretbox.Overhead
+	if bodySize > TransportMaxSize {
 		return nil, ErrMessageTooLarge
 	}
 
-	// Encode size to prefix nonce
-	var size [4]byte
-	binary.BigEndian.PutUint32(size[:], uint32(ts))
-	nonce := t.nonce.Next()
-	blob := secretbox.Seal(append(size[1:4], nonce[:]...), cleartext, nonce,
-		t.encryptKey)
+	// Phase 1: encrypt the body size.
+	nonceH := t.nonce.Next()
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(bodySize))
+	header := make([]byte, 0, transportFrameHeaderSize)
+	header = append(header, nonceH[:]...)
+	header = secretbox.Seal(header, lenBuf[:], nonceH, t.encryptKey)
 
-	// diagnostic
-	// untested: diagnostic assertion; unreachable unless secretbox implementation is broken
-	if ts != len(blob)-3 {
-		panic(fmt.Errorf("encryption diagnostic: wanted %v got %v",
-			ts, len(blob)))
-	}
-	return blob, nil
+	// Phase 2: encrypt the payload.
+	nonceP := t.nonce.Next()
+	body := make([]byte, 0, bodySize)
+	body = append(body, nonceP[:]...)
+	body = secretbox.Seal(body, cleartext, nonceP, t.encryptKey)
+
+	// Combine phases.
+	out := make([]byte, 0, len(header)+len(body))
+	out = append(out, header...)
+	out = append(out, body...)
+	return out, nil
 }
 
-// decrypt decrypts the passed in ciphertext. The ciphertext must be prefixed
-// with the nonce. Note that the three byte length must have been clipped off.
-func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
-	// Make sure we have received enough bytes to decrypt.
-	if len(ciphertext) < TransportNonceSize+1+secretbox.Overhead {
+// decrypt decrypts a phase-2 body blob: [nonce_p][secretbox(payload)].
+func (t *Transport) decrypt(body []byte) ([]byte, error) {
+	if len(body) < TransportNonceSize+1+secretbox.Overhead {
 		return nil, ErrInvalidSecretboxLength
 	}
 
 	var nonce [TransportNonceSize]byte
-	copy(nonce[:], ciphertext[:TransportNonceSize])
-	cleartext, ok := secretbox.Open(nil, ciphertext[TransportNonceSize:], &nonce,
+	copy(nonce[:], body[:TransportNonceSize])
+	cleartext, ok := secretbox.Open(nil, body[TransportNonceSize:], &nonce,
 		t.decryptKey)
 	if !ok {
 		return nil, ErrDecrypt
 	}
 	return cleartext, nil
+}
+
+// decryptFrameHeader decrypts the fixed-size 44-byte frame header
+// and returns the authenticated body size.
+func (t *Transport) decryptFrameHeader(header []byte) (uint32, error) {
+	if len(header) != transportFrameHeaderSize {
+		return 0, fmt.Errorf("frame header: want %d bytes, got %d",
+			transportFrameHeaderSize, len(header))
+	}
+
+	var nonce [TransportNonceSize]byte
+	copy(nonce[:], header[:TransportNonceSize])
+	lenBuf, ok := secretbox.Open(nil, header[TransportNonceSize:], &nonce,
+		t.decryptKey)
+	if !ok {
+		return 0, ErrDecrypt
+	}
+	if len(lenBuf) != 4 {
+		return 0, fmt.Errorf("frame header: decrypted %d bytes, want 4", len(lenBuf))
+	}
+	return binary.BigEndian.Uint32(lenBuf), nil
 }
 
 // Handshake advertises to the other side what version and options this
@@ -1409,9 +1451,31 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 	return &themID, helloRequest.NaClPub, nil
 }
 
-// readBlob locks the connection and reads a size and the associated blob into
-// a slice and returns that. It is locked for the duration to prevent
-// interleaved reads.
+// readExact reads exactly n bytes from conn, handling partial reads.
+func readExact(conn net.Conn, n int) ([]byte, error) {
+	buf := make([]byte, n)
+	at := 0
+	for at < n {
+		nn, err := conn.Read(buf[at:])
+		if err != nil {
+			return nil, err
+		}
+		at += nn
+	}
+	return buf, nil
+}
+
+// readBlob reads one two-phase authenticated frame from the
+// connection and returns the phase-2 body (nonce_p + ciphertext).
+//
+// Phase 1: read exactly transportFrameHeaderSize (44) bytes.
+//
+//	Decrypt to get the authenticated body size.
+//
+// Phase 2: read exactly body_size bytes.
+//
+// No cleartext framing.  The body size is only trusted after
+// secretbox authentication.
 func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	t.mtx.Lock()
 	conn := t.conn
@@ -1427,44 +1491,29 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		}
 	}
 
-	// Blob size is 24 bits or 3 bytes encoded in big endian
-	var (
-		sizeRE [4]byte
-		at     int
-		sizeR  uint32
-	)
-	for {
-		n, err := conn.Read(sizeRE[1:4]) // read 3 bytes for the nonce+ciphertext
-		if err != nil {
-			return nil, err
-		}
-		at += n
-		// untested: partial 3-byte size read; net.Pipe and TCP deliver small reads atomically
-		if at < 3 {
-			continue
-		}
-		sizeR = binary.BigEndian.Uint32(sizeRE[:])
-		break
+	// Phase 1: read fixed-size encrypted header.
+	header, err := readExact(conn, transportFrameHeaderSize)
+	if err != nil {
+		return nil, err
 	}
-
-	// untested: 3-byte size field max (16MB) equals TransportMaxSize; unreachable with valid framing
-	if sizeR > TransportMaxSize {
+	bodySize, err := t.decryptFrameHeader(header)
+	if err != nil {
+		return nil, fmt.Errorf("frame header: %w", err)
+	}
+	if bodySize > TransportMaxSize {
 		return nil, ErrMessageTooLarge
 	}
-
-	blob := make([]byte, sizeR)
-	at = 0
-	for {
-		n, err := conn.Read(blob[at:])
-		if err != nil {
-			return nil, err
-		}
-		at += n
-		if at < len(blob) {
-			continue
-		}
-		return blob, nil
+	// Sanity: body must hold at least a nonce + 1 byte + overhead.
+	if bodySize < uint32(TransportNonceSize+1+secretbox.Overhead) {
+		return nil, ErrInvalidSecretboxLength
 	}
+
+	// Phase 2: read the authenticated body.
+	body, err := readExact(conn, int(bodySize))
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 // read reads the next encrypted blob from the connection stream.
