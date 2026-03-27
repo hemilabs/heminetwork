@@ -19,7 +19,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.16.8
 	github.com/go-test/deep v1.1.1
-	github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260318154558-0f75bda287fb
+	github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260326164355-810b47575317
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
@@ -41,7 +41,6 @@ require (
 	github.com/aead/siphash v1.0.1 // indirect
 	github.com/agl/ed25519 v0.0.0-20170116200512-5312a6153412 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/binance-chain/edwards25519 v0.0.0-20200305024217-f36fc4b53d43 // indirect
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/btcsuite/btclog v1.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
