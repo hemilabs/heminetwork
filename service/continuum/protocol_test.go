@@ -1907,16 +1907,11 @@ func BenchmarkSealBox(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	senderPriv, err := secret.NaClPrivateKey()
-	if err != nil {
-		b.Fatal(err)
-	}
 	plaintext := make([]byte, 256) // typical PingRequest size
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = SealBox(plaintext, recipientPub, senderPriv,
-			secret.Identity, PPingRequest)
+		_, _ = SealBox(plaintext, recipientPub, secret, PPingRequest)
 	}
 }
 
@@ -1934,28 +1929,19 @@ func BenchmarkOpenBox(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	senderPub, err := sender.NaClPublicKey()
-	if err != nil {
-		b.Fatal(err)
-	}
-	senderPriv, err := sender.NaClPrivateKey()
-	if err != nil {
-		b.Fatal(err)
-	}
 	recipientPriv, err := recipient.NaClPrivateKey()
 	if err != nil {
 		b.Fatal(err)
 	}
 	plaintext := make([]byte, 256)
-	ep, err := SealBox(plaintext, recipientPub, senderPriv,
-		sender.Identity, PPingRequest)
+	ep, err := SealBox(plaintext, recipientPub, sender, PPingRequest)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = OpenBox(ep, senderPub, recipientPriv)
+		_, _ = OpenBox(ep, recipientPriv)
 	}
 }
 
@@ -2635,25 +2621,23 @@ func TestChallengeHashDomainSeparation(t *testing.T) {
 // round trip to verify SealBox/OpenBox work correctly with domain-separated
 // changes (no functional change, but regression guard).
 func TestSealBoxOpenBoxRoundTrip(t *testing.T) {
-	senderPriv, err := ecdh.X25519().GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPriv, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	senderID := Identity{0x01, 0x02, 0x03}
-	plaintext := []byte("hello e2e encryption")
-
-	ep, err := SealBox(plaintext, recipientPriv.PublicKey().Bytes(),
-		senderPriv, senderID, PTSSMessage)
+	sender, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := OpenBox(ep, senderPriv.PublicKey().Bytes(), recipientPriv)
+	plaintext := []byte("hello e2e encryption")
+
+	ep, err := SealBox(plaintext, recipientPriv.PublicKey().Bytes(), sender, PTSSMessage)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := OpenBox(ep, recipientPriv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2661,10 +2645,17 @@ func TestSealBoxOpenBoxRoundTrip(t *testing.T) {
 		t.Fatal("OpenBox plaintext mismatch")
 	}
 
-	// Wrong sender key must fail.
+	// Verify sender signature.
+	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.Ciphertext)
+	_, err = Verify(hash, sender.Identity, ep.Signature)
+	if err != nil {
+		t.Fatalf("envelope signature verify failed: %v", err)
+	}
+
+	// Wrong recipient key must fail.
 	wrongPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
-	_, err = OpenBox(ep, wrongPriv.PublicKey().Bytes(), recipientPriv)
+	_, err = OpenBox(ep, wrongPriv)
 	if err == nil {
-		t.Fatal("OpenBox should fail with wrong sender key")
+		t.Fatal("OpenBox should fail with wrong recipient key")
 	}
 }

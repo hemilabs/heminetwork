@@ -367,15 +367,22 @@ type PeerListResponse struct {
 // clear; the payload is encrypted to the destination's X25519 public
 // key.  Intermediate routers can read the Header but not the Payload.
 //
-// Sender is self-asserted but implicitly authenticated: the recipient
-// uses Sender to look up the NaCl public key for box.Open, which will
-// fail if the actual sender's private key doesn't match.  A tampered
-// Sender field causes decryption failure, not impersonation.
+// The sender generates a fresh ephemeral X25519 keypair per message
+// and destroys the private key immediately after encryption.  Only
+// the recipient (who holds the static X25519 private key) can
+// decrypt.  This provides sender-side forward secrecy: compromising
+// the sender after the fact cannot recover the ephemeral key.
+//
+// Sender authentication is provided by a secp256k1 compact signature
+// over the envelope hash (EphemeralPub || Nonce || Ciphertext).  The
+// receiver verifies the signature against Sender before decrypting.
 type EncryptedPayload struct {
-	Nonce      [24]byte    `json:"nonce"`      // nacl box nonce
-	Ciphertext []byte      `json:"ciphertext"` // nacl box sealed
-	Sender     Identity    `json:"sender"`     // for recipient to look up sender's NaCl pub
-	InnerType  PayloadType `json:"inner_type"` // type hint for decoding after decryption
+	EphemeralPub [32]byte    `json:"ephemeral_pub"` // sender's ephemeral X25519 public key
+	Nonce        [24]byte    `json:"nonce"`         // nacl box nonce
+	Ciphertext   []byte      `json:"ciphertext"`    // nacl box sealed
+	Signature    []byte      `json:"signature"`     // secp256k1 compact sig over envelope hash
+	Sender       Identity    `json:"sender"`        // routing: who sent this
+	InnerType    PayloadType `json:"inner_type"`    // type hint for decoding after decryption
 }
 
 // KeygenRequest initiates a key generation ceremony.
@@ -835,12 +842,34 @@ func (s Secret) NaClPublicKey() ([]byte, error) {
 	return priv.PublicKey().Bytes(), nil
 }
 
+// hashEncryptedPayload computes a domain-separated hash of the
+// encrypted envelope fields for signing/verification.
+func hashEncryptedPayload(ephPub *[32]byte, nonce *[24]byte, ciphertext []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte("continuum-e2e-sig-v1"))
+	h.Write(ephPub[:])
+	h.Write(nonce[:])
+	h.Write(ciphertext)
+	return h.Sum(nil)
+}
+
 // SealBox encrypts plaintext to the recipient's X25519 public key
-// using the sender's X25519 private key.  Returns an EncryptedPayload
-// with a random nonce, the sender's identity, and the inner type hint.
-func SealBox(plaintext []byte, recipientPub []byte, senderPriv *ecdh.PrivateKey, senderID Identity, innerType PayloadType) (*EncryptedPayload, error) {
+// using a fresh ephemeral X25519 keypair.  The ephemeral private key
+// is destroyed immediately after encryption (MetaMask/libsodium
+// sealed-box pattern).  Only the recipient can decrypt.
+//
+// Sender authentication is provided by a secp256k1 compact signature
+// over the envelope hash, verified by the receiver before decrypting.
+func SealBox(plaintext []byte, recipientPub []byte, sender *Secret, innerType PayloadType) (*EncryptedPayload, error) {
 	if len(recipientPub) != NaClPubSize {
 		return nil, fmt.Errorf("recipient %w: len %d", ErrInvalidNaClPub, len(recipientPub))
+	}
+
+	// Generate ephemeral X25519 keypair.
+	ephemeral, err := ecdh.X25519().GenerateKey(rand.Reader)
+	// untested: GenerateKey wraps rand.Read; fails only on OS entropy exhaustion
+	if err != nil {
+		return nil, fmt.Errorf("generate ephemeral key: %w", err)
 	}
 
 	var nonce [24]byte
@@ -851,29 +880,46 @@ func SealBox(plaintext []byte, recipientPub []byte, senderPriv *ecdh.PrivateKey,
 
 	var pub, priv [32]byte
 	copy(pub[:], recipientPub)
-	copy(priv[:], senderPriv.Bytes())
+	copy(priv[:], ephemeral.Bytes())
 
 	sealed := box.Seal(nil, plaintext, &nonce, &pub, &priv)
+
+	// Destroy ephemeral private key.  We zero the local [32]byte
+	// copy; the ecdh.PrivateKey object's internal state cannot be
+	// wiped via the public API and relies on GC.
+	for i := range priv {
+		priv[i] = 0
+	}
+
+	var ephPub [32]byte
+	copy(ephPub[:], ephemeral.PublicKey().Bytes())
+
+	// Sign the envelope.
+	hash := hashEncryptedPayload(&ephPub, &nonce, sealed)
+	sig := sender.Sign(hash)
+
 	return &EncryptedPayload{
-		Nonce:      nonce,
-		Ciphertext: sealed,
-		Sender:     senderID,
-		InnerType:  innerType,
+		EphemeralPub: ephPub,
+		Nonce:        nonce,
+		Ciphertext:   sealed,
+		Signature:    sig,
+		Sender:       sender.Identity,
+		InnerType:    innerType,
 	}, nil
 }
 
 // OpenBox decrypts an EncryptedPayload using the recipient's X25519
-// private key and the sender's X25519 public key.
-func OpenBox(ep *EncryptedPayload, senderPub []byte, recipientPriv *ecdh.PrivateKey) ([]byte, error) {
-	if len(senderPub) != NaClPubSize {
-		return nil, fmt.Errorf("sender %w: len %d", ErrInvalidNaClPub, len(senderPub))
-	}
-
-	var pub, priv [32]byte
-	copy(pub[:], senderPub)
+// private key and the sender's ephemeral public key (carried in the
+// payload).  Callers should verify the envelope signature before
+// calling OpenBox.
+func OpenBox(ep *EncryptedPayload, recipientPriv *ecdh.PrivateKey) ([]byte, error) {
+	var priv [32]byte
 	copy(priv[:], recipientPriv.Bytes())
 
-	plaintext, ok := box.Open(nil, ep.Ciphertext, &ep.Nonce, &pub, &priv)
+	plaintext, ok := box.Open(nil, ep.Ciphertext, &ep.Nonce, &ep.EphemeralPub, &priv)
+	for i := range priv {
+		priv[i] = 0
+	}
 	if !ok {
 		return nil, errors.New("nacl box open failed")
 	}
