@@ -1591,10 +1591,6 @@ func TestSealBoxBadKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	priv, err := secret.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	tests := []struct {
 		name string
@@ -1607,8 +1603,7 @@ func TestSealBoxBadKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := SealBox([]byte("hello"), tt.key, priv,
-				secret.Identity, PPingRequest)
+			_, err := SealBox([]byte("hello"), tt.key, secret, PPingRequest)
 			if !errors.Is(err, ErrInvalidNaClPub) {
 				t.Fatalf("want ErrInvalidNaClPub, got: %v", err)
 			}
@@ -1616,19 +1611,19 @@ func TestSealBoxBadKey(t *testing.T) {
 	}
 }
 
-// TestOpenBoxWrongKey verifies OpenBox fails when the sender's public
-// key doesn't match the actual sender (authentication property of
-// nacl box).
-func TestOpenBoxWrongKey(t *testing.T) {
-	sender, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
+// TestOpenBoxWrongRecipientKey verifies OpenBox fails when the
+// recipient's private key doesn't match the public key the message
+// was encrypted to.
+func TestOpenBoxWrongRecipientKey(t *testing.T) {
 	recipient, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
 	}
-	imposter, err := NewSecret()
+	wrongRecipient, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1637,36 +1632,33 @@ func TestOpenBoxWrongKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	senderPriv, err := sender.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ep, err := SealBox([]byte("secret"), recipientPub, senderPriv,
-		sender.Identity, PPingRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Decrypt with imposter's public key — should fail.
-	imposterPub, err := imposter.NaClPublicKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPriv, err := recipient.NaClPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	_, err = OpenBox(ep, imposterPub, recipientPriv)
-	if err == nil {
-		t.Fatal("OpenBox with wrong sender key should fail")
+	wrongPriv, err := wrongRecipient.NaClPrivateKey()
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Decrypt with bad-length key.
-	_, err = OpenBox(ep, []byte("short"), recipientPriv)
-	if !errors.Is(err, ErrInvalidNaClPub) {
-		t.Fatalf("want ErrInvalidNaClPub, got: %v", err)
+	ep, err := SealBox([]byte("secret"), recipientPub, sender, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Correct recipient can decrypt.
+	plain, err := OpenBox(ep, recipientPriv)
+	if err != nil {
+		t.Fatalf("correct recipient failed: %v", err)
+	}
+	if string(plain) != "secret" {
+		t.Fatalf("got %q, want %q", plain, "secret")
+	}
+
+	// Wrong recipient cannot decrypt.
+	_, err = OpenBox(ep, wrongPriv)
+	if err == nil {
+		t.Fatal("OpenBox with wrong recipient key should fail")
 	}
 }
 
@@ -2397,15 +2389,7 @@ func TestDecryptPayloadErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	senderPub, err := senderSecret.NaClPublicKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPub, err := recipientSecret.NaClPublicKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	senderPriv, err := senderSecret.NaClPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2414,23 +2398,45 @@ func TestDecryptPayloadErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validEP, err := SealBox(validPayload, recipientPub, senderPriv,
-		senderSecret.Identity, PPingRequest)
+	unknownTypeEP, err := SealBox(validPayload, recipientPub, senderSecret, "bogus_type")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	unknownTypeEP, err := SealBox(validPayload, recipientPub, senderPriv,
-		senderSecret.Identity, "bogus_type")
+	garbageEP, err := SealBox([]byte("{not json!!!"), recipientPub, senderSecret, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	garbageEP, err := SealBox([]byte("{not json!!!"), recipientPub,
-		senderPriv, senderSecret.Identity, PPingRequest)
+	// wrongEP is encrypted to a different recipient — will fail OpenBox.
+	wrongRecipient, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
 	}
+	wrongPub, err := wrongRecipient.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongEP, err := SealBox(validPayload, wrongPub, senderSecret, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// forgedSigEP has a valid box but the signature bytes are tampered.
+	forgedSigEP, err := SealBox(validPayload, recipientPub, senderSecret, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgedSigEP.Signature[0] ^= 0xff
+
+	// wrongSenderEP was signed by senderSecret but claims to be from
+	// a different identity.  Verify will recover the real signer's
+	// pubkey and reject the identity mismatch.
+	wrongSenderEP, err := SealBox(validPayload, recipientPub, senderSecret, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongSenderEP.Sender = Identity{0xDE, 0xAD}
 
 	tests := []struct {
 		name    string
@@ -2439,55 +2445,32 @@ func TestDecryptPayloadErrors(t *testing.T) {
 		wantSub string // substring of error message
 	}{
 		{
-			name:    "unknown sender",
+			name:    "forged envelope signature",
 			peers:   map[Identity]*PeerRecord{},
-			ep:      validEP,
-			wantSub: "unknown sender",
+			ep:      forgedSigEP,
+			wantSub: "envelope signature",
 		},
 		{
-			name: "sender has no NaCl key",
-			peers: map[Identity]*PeerRecord{
-				senderSecret.Identity: {
-					Identity: senderSecret.Identity,
-					Version:  ProtocolVersion,
-				},
-			},
-			ep:      validEP,
-			wantSub: "has no NaCl public key",
+			name:    "wrong sender identity",
+			peers:   map[Identity]*PeerRecord{},
+			ep:      wrongSenderEP,
+			wantSub: "envelope signature",
 		},
 		{
-			name: "OpenBox failure wrong key",
-			peers: map[Identity]*PeerRecord{
-				senderSecret.Identity: {
-					Identity: senderSecret.Identity,
-					Version:  ProtocolVersion,
-					NaClPub:  make([]byte, NaClPubSize),
-				},
-			},
-			ep:      validEP,
+			name:    "OpenBox failure wrong recipient",
+			peers:   map[Identity]*PeerRecord{},
+			ep:      wrongEP,
 			wantSub: "nacl box open failed",
 		},
 		{
-			name: "unknown inner type",
-			peers: map[Identity]*PeerRecord{
-				senderSecret.Identity: {
-					Identity: senderSecret.Identity,
-					Version:  ProtocolVersion,
-					NaClPub:  senderPub,
-				},
-			},
+			name:    "unknown inner type",
+			peers:   map[Identity]*PeerRecord{},
 			ep:      unknownTypeEP,
 			wantSub: "unknown inner type",
 		},
 		{
-			name: "unmarshal failure",
-			peers: map[Identity]*PeerRecord{
-				senderSecret.Identity: {
-					Identity: senderSecret.Identity,
-					Version:  ProtocolVersion,
-					NaClPub:  senderPub,
-				},
-			},
+			name:    "unmarshal failure",
+			peers:   map[Identity]*PeerRecord{},
 			ep:      garbageEP,
 			wantSub: "unmarshal inner",
 		},
@@ -2537,17 +2520,12 @@ func TestDecryptPayloadSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	payload, err := json.Marshal(PingRequest{OriginTimestamp: 99})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep, err := SealBox(payload, recipientPub, senderPriv,
-		senderSecret.Identity, PPingRequest)
+	ep, err := SealBox(payload, recipientPub, senderSecret, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2637,30 +2615,33 @@ func FuzzOpenBox(f *testing.F) {
 
 	// Seed with a valid sealed box.
 	plain := []byte("hello")
-	ep, err := SealBox(plain, pub, priv, secret.Identity, PPingRequest)
+	ep, err := SealBox(plain, pub, secret, PPingRequest)
 	if err != nil {
 		f.Fatal(err)
 	}
-	f.Add(ep.Nonce[:], ep.Ciphertext, pub)
+	f.Add(ep.Nonce[:], ep.EphemeralPub[:], ep.Ciphertext)
 
 	// Seed with degenerate inputs.
-	f.Add(make([]byte, 24), []byte{}, make([]byte, 32))
-	f.Add(make([]byte, 24), []byte{0xff}, make([]byte, 32))
+	f.Add(make([]byte, 24), make([]byte, 32), []byte{})
+	f.Add(make([]byte, 24), make([]byte, 32), []byte{0xff})
 
-	f.Fuzz(func(t *testing.T, nonce, ciphertext, senderPub []byte) {
-		if len(nonce) != 24 {
+	f.Fuzz(func(t *testing.T, nonce []byte, ephPub []byte, ciphertext []byte) {
+		if len(nonce) != 24 || len(ephPub) != 32 {
 			return
 		}
 		var n [24]byte
+		var eph [32]byte
 		copy(n[:], nonce)
+		copy(eph[:], ephPub)
 		ep := &EncryptedPayload{
-			Nonce:      n,
-			Ciphertext: ciphertext,
-			Sender:     Identity{},
-			InnerType:  PPingRequest,
+			EphemeralPub: eph,
+			Nonce:        n,
+			Ciphertext:   ciphertext,
+			Sender:       Identity{},
+			InnerType:    PPingRequest,
 		}
 		// Must not panic regardless of input.
-		_, _ = OpenBox(ep, senderPub, priv)
+		_, _ = OpenBox(ep, priv)
 	})
 }
 
@@ -2683,10 +2664,6 @@ func FuzzDecryptPayload(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		f.Fatal(err)
-	}
 	recipientPub, err := recipientSecret.NaClPublicKey()
 	if err != nil {
 		f.Fatal(err)
@@ -2697,8 +2674,7 @@ func FuzzDecryptPayload(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	ep, err := SealBox(payload, recipientPub, senderPriv,
-		senderSecret.Identity, PPingRequest)
+	ep, err := SealBox(payload, recipientPub, senderSecret, PPingRequest)
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -2735,6 +2711,53 @@ func FuzzDecryptPayload(f *testing.F) {
 		}
 		// Must not panic regardless of input.
 		_, _ = s.decryptPayload(ep)
+	})
+}
+
+// FuzzTransportFraming ensures the two-phase secretbox framing never
+// panics on arbitrary input.  Seeds with a valid encrypted frame,
+// then fuzzes random corruptions.
+func FuzzTransportFraming(f *testing.F) {
+	// Set up a transport with known keys.
+	var key [32]byte
+	for i := range key {
+		key[i] = byte(i)
+	}
+	tr := &Transport{
+		encryptKey: &key,
+		decryptKey: &key,
+		nonce:      &Nonce{},
+	}
+
+	// Seed with valid encrypted frame.
+	valid, err := tr.encrypt([]byte(`{"payloadtype":"PingRequest"}`))
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(valid)
+
+	// Seed with degenerate inputs.
+	f.Add(make([]byte, transportFrameHeaderSize))
+	f.Add(bytes.Repeat([]byte{0xff}, transportFrameHeaderSize+100))
+	f.Add([]byte("short"))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// Phase 1: try to parse the header.
+		if len(data) < transportFrameHeaderSize {
+			_, _ = tr.decryptFrameHeader(data)
+			return
+		}
+		bodySize, err := tr.decryptFrameHeader(data[:transportFrameHeaderSize])
+		if err != nil {
+			return
+		}
+
+		// Phase 2: try to decrypt the body.
+		body := data[transportFrameHeaderSize:]
+		if uint32(len(body)) < bodySize {
+			return
+		}
+		_, _ = tr.decrypt(body[:bodySize])
 	})
 }
 
@@ -2897,10 +2920,6 @@ func BenchmarkDecryptPayload(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		b.Fatal(err)
-	}
 
 	payload, err := json.Marshal(PingRequest{OriginTimestamp: 42})
 	if err != nil {
@@ -2922,8 +2941,7 @@ func BenchmarkDecryptPayload(b *testing.B) {
 	// Pre-generate encrypted payloads (each has unique nonce).
 	eps := make([]*EncryptedPayload, b.N)
 	for i := range eps {
-		ep, err := SealBox(payload, recipientPub, senderPriv,
-			senderSecret.Identity, PPingRequest)
+		ep, err := SealBox(payload, recipientPub, senderSecret, PPingRequest)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -5308,16 +5326,17 @@ func TestIdentityBytes(t *testing.T) {
 	}
 }
 
-// TestOpenBoxBadSenderKey covers OpenBox with invalid sender public key length.
-func TestOpenBoxBadSenderKey(t *testing.T) {
+// TestOpenBoxBadEphemeralPub verifies OpenBox fails when the
+// ephemeral public key is zeroed out (no valid ECDH).
+func TestOpenBoxBadEphemeralPub(t *testing.T) {
 	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := &EncryptedPayload{}
-	_, err = OpenBox(ep, []byte("short"), priv)
-	if !errors.Is(err, ErrInvalidNaClPub) {
-		t.Fatalf("expected ErrInvalidNaClPub, got: %v", err)
+	ep := &EncryptedPayload{} // zero EphemeralPub, empty ciphertext
+	_, err = OpenBox(ep, priv)
+	if err == nil {
+		t.Fatal("expected error for zero ephemeral pub")
 	}
 }
 
@@ -5832,24 +5851,24 @@ func TestHandleDefaultUnhandledType(t *testing.T) {
 }
 
 // TestHandleEncryptedPayloadDecryptError covers the EncryptedPayload
-// case where decryptPayload fails (unknown sender). handle() should
-// log the error and continue (not crash or exit).
+// case where decryptPayload fails (wrong recipient key). handle()
+// should log the error and continue (not crash or exit).
 func TestHandleEncryptedPayloadDecryptError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	s, cliTr, _ := handleTestServer(t, ctx)
 
-	// Create an EncryptedPayload from a sender whose NaCl key is
-	// NOT in the server's peer map. decryptPayload will fail.
-	unknownSecret, err := NewSecret()
+	// Create an EncryptedPayload encrypted to a DIFFERENT recipient.
+	// decryptPayload will fail because the server's key can't open it.
+	wrongRecipient, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
 	}
-	unknownPriv, err := unknownSecret.NaClPrivateKey()
+	wrongPub, err := wrongRecipient.NaClPublicKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipientPub, err := s.secret.NaClPublicKey()
+	sender, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5857,8 +5876,7 @@ func TestHandleEncryptedPayloadDecryptError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep, err := SealBox(payload, recipientPub, unknownPriv,
-		unknownSecret.Identity, PPingRequest)
+	ep, err := SealBox(payload, wrongPub, sender, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5892,6 +5910,48 @@ func TestHandleEncryptedPayloadDecryptError(t *testing.T) {
 
 	cancel()
 	cliTr.conn.Close()
+	s.wg.Wait()
+}
+
+// TestHandleForgedEnvelopeSignature covers the EncryptedPayload case
+// where the envelope signature is tampered.  decryptPayload should
+// reject before opening the box, and handle() should survive.
+func TestHandleForgedEnvelopeSignature(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	s, peerConn, _ := handleTestServer(t, ctx)
+
+	sender, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipientPub, err := s.secret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(PingRequest{OriginTimestamp: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, err := SealBox(payload, recipientPub, sender, PPingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Tamper with the signature.
+	ep.Signature[0] ^= 0xff
+
+	errCh := pipeWrite(func() error {
+		return peerConn.Write(Identity{0xEE}, *ep)
+	})
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+
+	verifyHandleSurvived(t, peerConn, 901)
+
+	cancel()
+	peerConn.Close()
 	s.wg.Wait()
 }
 
@@ -5978,10 +6038,6 @@ func TestHandleEncryptedPingRequest(t *testing.T) {
 	s, cliTr, _ := handleTestServerWithNaCl(t, ctx, senderSecret)
 
 	// Build EncryptedPayload with inner PingRequest.
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPub, err := s.secret.NaClPublicKey()
 	if err != nil {
 		t.Fatal(err)
@@ -5990,8 +6046,7 @@ func TestHandleEncryptedPingRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep, err := SealBox(payload, recipientPub, senderPriv,
-		senderSecret.Identity, PPingRequest)
+	ep, err := SealBox(payload, recipientPub, senderSecret, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6038,10 +6093,6 @@ func TestHandleEncryptedUnknownInner(t *testing.T) {
 	// Build EncryptedPayload with inner PeerNotify.  With the
 	// dispatch map, this is now handled normally.  Count=0 so
 	// the handler does not write a PeerListRequest (0 > 0 is false).
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPub, err := s.secret.NaClPublicKey()
 	if err != nil {
 		t.Fatal(err)
@@ -6050,8 +6101,7 @@ func TestHandleEncryptedUnknownInner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep, err := SealBox(payload, recipientPub, senderPriv,
-		senderSecret.Identity, PPeerNotify)
+	ep, err := SealBox(payload, recipientPub, senderSecret, PPeerNotify)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6298,10 +6348,6 @@ func TestHandleEncryptedTSSMessage(t *testing.T) {
 	s, cliTr, _ := handleTestServerWithNaCl(t, ctx, senderSecret)
 
 	// Build EncryptedPayload with inner TSSMessage (bad signature).
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPub, err := s.secret.NaClPublicKey()
 	if err != nil {
 		t.Fatal(err)
@@ -6314,8 +6360,7 @@ func TestHandleEncryptedTSSMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep, err := SealBox(inner, recipientPub, senderPriv,
-		senderSecret.Identity, PTSSMessage)
+	ep, err := SealBox(inner, recipientPub, senderSecret, PTSSMessage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6334,9 +6379,9 @@ func TestHandleEncryptedTSSMessage(t *testing.T) {
 	s.wg.Wait()
 }
 
-// TestDecryptPayloadNoNaClPub covers the decryptPayload error path
-// where the sender is in the peer map but has no NaCl public key.
-func TestDecryptPayloadNoNaClPub(t *testing.T) {
+// TestDecryptPayloadWrongRecipient covers the decryptPayload error
+// path where the payload is encrypted to a different recipient.
+func TestDecryptPayloadWrongRecipient(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
@@ -6397,12 +6442,12 @@ func TestDecryptPayloadNoNaClPub(t *testing.T) {
 		}
 	}
 
-	// Build EncryptedPayload from sender.
-	senderPriv, err := senderSecret.NaClPrivateKey()
+	// Build EncryptedPayload encrypted to a WRONG recipient.
+	wrongRecipient, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipientPub, err := s.secret.NaClPublicKey()
+	wrongPub, err := wrongRecipient.NaClPublicKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6410,13 +6455,12 @@ func TestDecryptPayloadNoNaClPub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep, err := SealBox(payload, recipientPub, senderPriv,
-		senderSecret.Identity, PPingRequest)
+	ep, err := SealBox(payload, wrongPub, senderSecret, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Send — decryptPayload will fail "no NaCl public key".
+	// Send — decryptPayload will fail "nacl box open failed".
 	errCh := pipeWrite(func() error {
 		return cliTr.Write(Identity{0xEE}, *ep)
 	})
@@ -6443,10 +6487,6 @@ func TestDecryptPayloadUnknownInnerType(t *testing.T) {
 	}
 	s, cliTr, _ := handleTestServerWithNaCl(t, ctx, senderSecret)
 
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPub, err := s.secret.NaClPublicKey()
 	if err != nil {
 		t.Fatal(err)
@@ -6456,8 +6496,7 @@ func TestDecryptPayloadUnknownInnerType(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Use a bogus InnerType that str2pt doesn't know.
-	ep, err := SealBox(payload, recipientPub, senderPriv,
-		senderSecret.Identity, PayloadType("bogus-type"))
+	ep, err := SealBox(payload, recipientPub, senderSecret, PayloadType("bogus-type"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6488,17 +6527,12 @@ func TestDecryptPayloadBadInnerJSON(t *testing.T) {
 	}
 	s, cliTr, _ := handleTestServerWithNaCl(t, ctx, senderSecret)
 
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPub, err := s.secret.NaClPublicKey()
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Encrypt garbage that is not valid JSON, with a real InnerType.
-	ep, err := SealBox([]byte("{{{not json"), recipientPub, senderPriv,
-		senderSecret.Identity, PPingRequest)
+	ep, err := SealBox([]byte("{{{not json"), recipientPub, senderSecret, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6657,6 +6691,123 @@ func TestSendEncryptedHappyPath(t *testing.T) {
 	}
 }
 
+// TestSendEncryptedRoundTrip exercises the full production e2e path:
+// SendEncrypted → transport → handle() → verify signature → decrypt
+// → dispatch inner PingRequest → PingResponse back to sender.
+func TestSendEncryptedRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Receiver: runs handle() loop.
+	receiverSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peersTTL, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pings, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recvTr, peerTr := connectedTransports(t)
+
+	senderNaClPub, err := senderSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peerID := senderSecret.Identity
+	di := newDebugInitiator()
+	receiver := &Server{
+		seen:     seen,
+		peersTTL: peersTTL,
+		pings:    pings,
+		secret:   receiverSecret,
+		sessions: map[Identity]*Transport{peerID: recvTr},
+		peers: map[Identity]*PeerRecord{
+			peerID: {
+				Identity: peerID,
+				Version:  ProtocolVersion,
+				NaClPub:  senderNaClPub,
+			},
+		},
+		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+		initiator:  di,
+		debugInit:  di,
+		cfg: &Config{
+			PingInterval: time.Hour,
+			PeersWanted:  8,
+		},
+	}
+
+	receiver.wg.Add(1)
+	go receiver.handle(ctx, &peerID, recvTr)
+
+	// Drain initial PeerNotify + PeerListRequest + PingRequest.
+	for i := 0; i < 3; i++ {
+		_, _, _, err := peerTr.ReadEnvelope()
+		if err != nil {
+			t.Fatalf("drain initial message %d: %v", i, err)
+		}
+	}
+
+	// Sender: uses SendEncrypted to write through the pipe.
+	receiverNaClPub, err := receiverSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := &Server{
+		secret:   senderSecret,
+		sessions: map[Identity]*Transport{receiverSecret.Identity: peerTr},
+		peers: map[Identity]*PeerRecord{
+			receiverSecret.Identity: {
+				Identity: receiverSecret.Identity,
+				NaClPub:  receiverNaClPub,
+			},
+		},
+	}
+
+	// Send encrypted PingRequest through the full e2e path.
+	errCh := pipeWrite(func() error {
+		return sender.SendEncrypted(receiverSecret.Identity,
+			PingRequest{OriginTimestamp: 777})
+	})
+
+	// Read PingResponse — proves handle() decrypted, verified
+	// the sender signature, dispatched the inner PingRequest,
+	// and wrote back a PingResponse.
+	_, cmd, err := peerTr.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	pr, ok := cmd.(*PingResponse)
+	if !ok {
+		t.Fatalf("expected *PingResponse, got %T", cmd)
+	}
+	if pr.OriginTimestamp != 777 {
+		t.Fatalf("expected 777, got %d", pr.OriginTimestamp)
+	}
+
+	cancel()
+	peerTr.Close()
+	receiver.wg.Wait()
+}
+
 // TestSendEncryptedUnknownPeer covers SendEncrypted when the
 // destination is not in the peer map.
 func TestSendEncryptedUnknownPeer(t *testing.T) {
@@ -6761,10 +6912,6 @@ func TestHandleEncryptedPingWriteError(t *testing.T) {
 	s, cliTr, _ := handleTestServerWithNaCl(t, ctx, senderSecret)
 
 	// Build EncryptedPayload with inner PingRequest.
-	senderPriv, err := senderSecret.NaClPrivateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	recipientPub, err := s.secret.NaClPublicKey()
 	if err != nil {
 		t.Fatal(err)
@@ -6773,8 +6920,7 @@ func TestHandleEncryptedPingWriteError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep, err := SealBox(payload, recipientPub, senderPriv,
-		senderSecret.Identity, PPingRequest)
+	ep, err := SealBox(payload, recipientPub, senderSecret, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10354,39 +10500,18 @@ func TestPartiesToIdentitiesBadPartyID(t *testing.T) {
 	}
 }
 
-func TestDecryptPayloadUnknownSenderPath(t *testing.T) {
-	s, _ := NewServer(testConfig())
-	secret, _ := NewSecret()
-	s.secret = secret
-	_, err := s.decryptPayload(&EncryptedPayload{Sender: Identity{}})
-	if err == nil || !strings.Contains(err.Error(), "unknown sender") {
-		t.Fatalf("want unknown sender, got %v", err)
-	}
-}
+// TestDecryptPayloadUnknownSenderPath removed: decryptPayload
+// no longer looks up the sender's peer record (SOW9).
 
-func TestDecryptPayloadEmptyNaClPubPath(t *testing.T) {
-	s, _ := NewServer(testConfig())
-	secret, _ := NewSecret()
-	s.secret = secret
-	sender, _ := NewSecret()
-	s.mtx.Lock()
-	s.peers[sender.Identity] = &PeerRecord{Identity: sender.Identity}
-	s.mtx.Unlock()
-	_, err := s.decryptPayload(&EncryptedPayload{Sender: sender.Identity})
-	if err == nil || !strings.Contains(err.Error(), "no NaCl public key") {
-		t.Fatalf("want NaCl pub error, got %v", err)
-	}
-}
+// TestDecryptPayloadEmptyNaClPubPath removed: decryptPayload
+// no longer looks up the sender's peer record (SOW9).
 
 func TestDecryptPayloadBadInnerTypePath(t *testing.T) {
 	sender, _ := NewSecret()
 	recipient, _ := NewSecret()
 	recipientNaClPub, _ := recipient.NaClPublicKey()
-	senderNaClPriv, _ := sender.NaClPrivateKey()
-	senderNaClPub, _ := sender.NaClPublicKey()
 
-	ep, err := SealBox([]byte(`{}`), recipientNaClPub, senderNaClPriv,
-		sender.Identity, PPingRequest) // valid type for sealing
+	ep, err := SealBox([]byte(`{}`), recipientNaClPub, sender, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10394,12 +10519,6 @@ func TestDecryptPayloadBadInnerTypePath(t *testing.T) {
 
 	s, _ := NewServer(testConfig())
 	s.secret = recipient
-	s.mtx.Lock()
-	s.peers[sender.Identity] = &PeerRecord{
-		Identity: sender.Identity,
-		NaClPub:  senderNaClPub,
-	}
-	s.mtx.Unlock()
 	_, err = s.decryptPayload(ep)
 	if err == nil || !strings.Contains(err.Error(), "unknown inner type") {
 		t.Fatalf("want unknown inner type, got %v", err)
@@ -10410,18 +10529,15 @@ func TestOpenBoxCorruptedCiphertext(t *testing.T) {
 	sender, _ := NewSecret()
 	recipient, _ := NewSecret()
 	recipientNaClPub, _ := recipient.NaClPublicKey()
-	senderNaClPriv, _ := sender.NaClPrivateKey()
 
-	ep, err := SealBox([]byte("test"), recipientNaClPub, senderNaClPriv,
-		sender.Identity, PPingRequest)
+	ep, err := SealBox([]byte("test"), recipientNaClPub, sender, PPingRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ep.Ciphertext[len(ep.Ciphertext)-1] ^= 0xff
 
-	senderNaClPub, _ := sender.NaClPublicKey()
 	recipientNaClPriv, _ := recipient.NaClPrivateKey()
-	_, err = OpenBox(ep, senderNaClPub, recipientNaClPriv)
+	_, err = OpenBox(ep, recipientNaClPriv)
 	if err == nil {
 		t.Fatal("expected error for corrupted ciphertext")
 	}
