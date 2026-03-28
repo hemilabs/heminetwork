@@ -1380,16 +1380,9 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 		return fmt.Errorf("marshal inner: %w", err)
 	}
 
-	// Derive our NaCl private key.
-	senderPriv, err := s.secret.NaClPrivateKey()
-	// untested: NaClPrivateKey derives curve25519 from valid secp256k1; cannot fail with valid secret
-	if err != nil {
-		return fmt.Errorf("nacl private key: %w", err)
-	}
-
-	// Encrypt.
-	ep, err := SealBox(plaintext, pr.NaClPub, senderPriv, s.secret.Identity, innerType)
-	// untested: SealBox wraps rand.Read + secretbox.Seal; fails only on OS entropy exhaustion
+	// Encrypt with ephemeral sender key.
+	ep, err := SealBox(plaintext, pr.NaClPub, s.secret, innerType)
+	// untested: SealBox wraps rand.Read + box.Seal; fails only on OS entropy exhaustion
 	if err != nil {
 		return fmt.Errorf("seal: %w", err)
 	}
@@ -1398,20 +1391,16 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 }
 
 // decryptPayload decrypts an EncryptedPayload received at this node.
-// Looks up the sender's NaCl public key from the peer map, derives
-// our private key, opens the nacl box, and decodes using InnerType.
-// The nacl box authenticates the sender implicitly — if Sender is
-// tampered, the wrong public key is used and Open fails.
+// Verifies the sender's secp256k1 signature over the envelope hash,
+// then opens the nacl box using the ephemeral public key carried in
+// the payload.
 func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 	log.Tracef("decryptPayload sender %v type %v", ep.Sender, ep.InnerType)
-	s.mtx.RLock()
-	senderPR, ok := s.peers[ep.Sender]
-	s.mtx.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("unknown sender: %v", ep.Sender)
-	}
-	if len(senderPR.NaClPub) == 0 {
-		return nil, fmt.Errorf("sender %v has no NaCl public key", ep.Sender)
+
+	// Verify sender signature before touching the box.
+	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.Ciphertext)
+	if _, err := Verify(hash, ep.Sender, ep.Signature); err != nil {
+		return nil, fmt.Errorf("envelope signature: %w", err)
 	}
 
 	recipientPriv, err := s.secret.NaClPrivateKey()
@@ -1420,7 +1409,7 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 		return nil, fmt.Errorf("nacl private key: %w", err)
 	}
 
-	plaintext, err := OpenBox(ep, senderPR.NaClPub, recipientPriv)
+	plaintext, err := OpenBox(ep, recipientPriv)
 	if err != nil {
 		return nil, err
 	}
