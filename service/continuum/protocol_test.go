@@ -49,11 +49,13 @@ func TestEncryptDecrypt(t *testing.T) {
 		}
 
 		// Perform actual key exchange
-		s2cKeyServer, c2sKeyServer, err := KeyExchange(server.us, client.us.PublicKey())
+		s2cKeyServer, c2sKeyServer, err := KeyExchange(server.us, client.us.PublicKey(),
+			server.us.PublicKey().Bytes(), client.us.PublicKey().Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
-		s2cKeyClient, c2sKeyClient, err := KeyExchange(client.us, server.us.PublicKey())
+		s2cKeyClient, c2sKeyClient, err := KeyExchange(client.us, server.us.PublicKey(),
+			server.us.PublicKey().Bytes(), client.us.PublicKey().Bytes())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,11 +134,13 @@ func TestDirectionalKeys(t *testing.T) {
 	}
 
 	// Derive directional keys.
-	s2cKey, c2sKey, err := KeyExchange(server.us, client.us.PublicKey())
+	s2cKey, c2sKey, err := KeyExchange(server.us, client.us.PublicKey(),
+		server.us.PublicKey().Bytes(), client.us.PublicKey().Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2cKey2, c2sKey2, err := KeyExchange(client.us, server.us.PublicKey())
+	s2cKey2, c2sKey2, err := KeyExchange(client.us, server.us.PublicKey(),
+		server.us.PublicKey().Bytes(), client.us.PublicKey().Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -890,12 +894,16 @@ func TestKeyExchange(t *testing.T) {
 
 	// Server derives directional keys
 	s2cServer, c2sServer, err := KeyExchange(serverTransport.us,
-		clientTransport.us.PublicKey())
+		clientTransport.us.PublicKey(),
+		serverTransport.us.PublicKey().Bytes(),
+		clientTransport.us.PublicKey().Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
 	s2cClient, c2sClient, err := KeyExchange(clientTransport.us,
-		serverTransport.us.PublicKey())
+		serverTransport.us.PublicKey(),
+		serverTransport.us.PublicKey().Bytes(),
+		clientTransport.us.PublicKey().Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -908,6 +916,88 @@ func TestKeyExchange(t *testing.T) {
 	}
 	if bytes.Equal(s2cServer[:], c2sServer[:]) {
 		t.Fatal("directional keys must differ")
+	}
+}
+
+// TestKeyExchangeBadPubLength verifies KeyExchange rejects
+// serverPub/clientPub with wrong lengths.
+func TestKeyExchangeBadPubLength(t *testing.T) {
+	server, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name      string
+		serverPub []byte
+		clientPub []byte
+	}{
+		{"nil server pub", nil, client.us.PublicKey().Bytes()},
+		{"empty server pub", []byte{}, client.us.PublicKey().Bytes()},
+		{"short server pub", make([]byte, 16), client.us.PublicKey().Bytes()},
+		{"long server pub", make([]byte, 64), client.us.PublicKey().Bytes()},
+		{"nil client pub", server.us.PublicKey().Bytes(), nil},
+		{"short client pub", server.us.PublicKey().Bytes(), make([]byte, 5)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := KeyExchange(server.us, client.us.PublicKey(),
+				tt.serverPub, tt.clientPub)
+			if !errors.Is(err, ErrInvalidNaClPub) {
+				t.Fatalf("want ErrInvalidNaClPub, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestKeyExchangeZeroPubs verifies KeyExchange succeeds with all-zero
+// public keys in the salt.  HKDF handles any salt value; zeros are
+// valid.  The derived keys must still be deterministic and directional.
+func TestKeyExchangeZeroPubs(t *testing.T) {
+	server, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewTransportFromCurve(ecdh.X25519())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	zeroPub := make([]byte, NaClPubSize)
+
+	// Both sides use the same zero pubs — keys must match.
+	s2c1, c2s1, err := KeyExchange(server.us, client.us.PublicKey(),
+		zeroPub, zeroPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2c2, c2s2, err := KeyExchange(client.us, server.us.PublicKey(),
+		zeroPub, zeroPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(s2c1[:], s2c2[:]) {
+		t.Fatal("s2c keys differ with zero pubs")
+	}
+	if !bytes.Equal(c2s1[:], c2s2[:]) {
+		t.Fatal("c2s keys differ with zero pubs")
+	}
+	if bytes.Equal(s2c1[:], c2s1[:]) {
+		t.Fatal("directional keys must differ even with zero pubs")
+	}
+
+	// Zero-pub keys must differ from real-pub keys.
+	s2cReal, _, err := KeyExchange(server.us, client.us.PublicKey(),
+		server.us.PublicKey().Bytes(), client.us.PublicKey().Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(s2c1[:], s2cReal[:]) {
+		t.Fatal("zero-pub salt must produce different keys than real-pub salt")
 	}
 }
 
@@ -2535,7 +2625,8 @@ func TestTransportCloseZerosKeys(t *testing.T) {
 	}
 
 	// Perform key exchange to populate keys.
-	s2c, c2s, err := KeyExchange(server.us, client.us.PublicKey())
+	s2c, c2s, err := KeyExchange(server.us, client.us.PublicKey(),
+		server.us.PublicKey().Bytes(), client.us.PublicKey().Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
