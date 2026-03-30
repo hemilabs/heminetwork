@@ -11,7 +11,7 @@ require (
 	github.com/go-test/deep v1.1.1
 	github.com/hemilabs/heminetwork/v2 v2.0.0-rc.1.0.20260210123146-3d9f4a8d6010
 	github.com/juju/loggo/v2 v2.2.0
-	github.com/slack-go/slack v0.19.0
+	github.com/slack-go/slack v0.20.0
 	github.com/testcontainers/testcontainers-go v0.41.0
 )
 
