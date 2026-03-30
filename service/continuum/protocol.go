@@ -89,11 +89,12 @@ import (
 //	4. Both sides calculate the shared transport secret using Elliptic
 //	Curve Diffie-Hellman (ECDH). Next they derive two directional
 //	shared transport encryption keys using an HMAC-based key derivation
-//	function (HKDF). The hash used is SHA256, salt is
-//	"continuum-hkdf-salt-v1" and the info strings are
-//	"continuum-s2c-v1" (server-to-client) and "continuum-c2s-v1"
-//	(client-to-server). This ensures that each direction uses a
-//	unique key, containing the blast radius if a nonce ever repeats.
+//	function (HKDF). The hash used is SHA256, salt is session-specific
+//	("continuum-hkdf-salt-v2" || serverPub || clientPub) and the info
+//	strings are "continuum-s2c-v1" (server-to-client) and
+//	"continuum-c2s-v1" (client-to-server). This ensures that each
+//	direction uses a unique key, containing the blast radius if a
+//	nonce ever repeats.
 //
 // At this point, both sides have directional keys which they use to encrypt
 // all packets going forward using NaCl's secretbox. The server encrypts with
@@ -1157,9 +1158,20 @@ func (t *Transport) RemoteAddr() net.Addr {
 
 // KeyExchange returns directional encryption keys for the provided private and
 // public keys. The keys are derived from the shared ECDH secret using HKDF
-// with SHA256, a protocol-specific salt, and directional info strings.
+// with SHA256, a session-specific salt (domain || serverPub || clientPub),
+// and directional info strings.
 // Returns (serverToClientKey, clientToServerKey, error).
-func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, *[32]byte, error) {
+func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey, serverPub, clientPub []byte) (*[32]byte, *[32]byte, error) {
+	// Validate pub key lengths against the curve's actual key size.
+	// X25519 = 32, P-256 = 65, P-384 = 97, P-521 = 133.
+	keyLen := len(us.PublicKey().Bytes())
+	if len(serverPub) != keyLen {
+		return nil, nil, fmt.Errorf("server %w: len %d, want %d", ErrInvalidNaClPub, len(serverPub), keyLen)
+	}
+	if len(clientPub) != keyLen {
+		return nil, nil, fmt.Errorf("client %w: len %d, want %d", ErrInvalidNaClPub, len(clientPub), keyLen)
+	}
+
 	// Shared secret seed.
 	shared, err := us.ECDH(them)
 	// untested: ECDH cannot fail with two valid keys from the same curve
@@ -1167,7 +1179,12 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, *[32]byt
 		return nil, nil, err
 	}
 
-	hkdfSalt := []byte("continuum-hkdf-salt-v1")
+	// Session-specific salt: domain || serverPub || clientPub.
+	// Public keys are fixed-length per curve — unambiguous.
+	hkdfSalt := make([]byte, 0, len("continuum-hkdf-salt-v2")+len(serverPub)+len(clientPub))
+	hkdfSalt = append(hkdfSalt, []byte("continuum-hkdf-salt-v2")...)
+	hkdfSalt = append(hkdfSalt, serverPub...)
+	hkdfSalt = append(hkdfSalt, clientPub...)
 
 	// Derive server-to-client key.
 	var s2cKey [32]byte
@@ -1183,6 +1200,14 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, *[32]byt
 	// untested: HKDF is a PRF with no I/O; io.ReadFull on it cannot fail
 	if _, err := io.ReadFull(c2s, c2sKey[:]); err != nil {
 		return nil, nil, err
+	}
+
+	// Zero ECDH shared secret.  Go's ecdh.ECDH returns a []byte
+	// backed by a heap allocation; we can zero the slice contents
+	// but not guarantee the GC won't have copied the backing array.
+	// Go 1.26 runtime.ZeroMemory will provide a proper guarantee.
+	for i := range shared {
+		shared[i] = 0
 	}
 
 	return &s2cKey, &c2sKey, nil
@@ -1290,7 +1315,18 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	s2cKey, c2sKey, err := KeyExchange(t.us, them)
+
+	// Build session-specific HKDF salt with both pubs in
+	// canonical order (server first, client second).
+	ourPub := t.us.PublicKey().Bytes()
+	theirPub := them.Bytes()
+	var serverPub, clientPub []byte
+	if t.isServer {
+		serverPub, clientPub = ourPub, theirPub
+	} else {
+		serverPub, clientPub = theirPub, ourPub
+	}
+	s2cKey, c2sKey, err := KeyExchange(t.us, them, serverPub, clientPub)
 	// untested: KeyExchange wraps ECDH; cannot fail with valid curve keys
 	if err != nil {
 		return err
