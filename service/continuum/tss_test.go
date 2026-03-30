@@ -9,11 +9,14 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +24,7 @@ import (
 
 	"github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
 	"github.com/hemilabs/x/tss-lib/v3/tss"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 // TSSNetwork connects multiple TSS instances for testing
@@ -254,7 +258,7 @@ func TestDecryptEdgeCases(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := fs.decrypt(tt.ciphertext)
+			_, err := fs.decrypt([]byte("test"), tt.ciphertext)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("decrypt(%d bytes): got %v, want %v",
 					len(tt.ciphertext), err, tt.wantErr)
@@ -275,15 +279,17 @@ func TestEncryptDecryptEmpty(t *testing.T) {
 	fs := store.(*fileStore)
 
 	// Empty plaintext must round-trip.
-	ciphertext, err := fs.encrypt([]byte{})
+	keyID := []byte("empty-test")
+	ciphertext, err := fs.encrypt(keyID, []byte{})
 	if err != nil {
 		t.Fatalf("encrypt empty: %v", err)
 	}
-	// 24-byte nonce + 16-byte Poly1305 tag + 0-byte payload.
-	if len(ciphertext) != 40 {
-		t.Fatalf("encrypt empty: got %d bytes, want 40", len(ciphertext))
+	// 24-byte nonce + 16-byte tag + 4-byte keyID len + keyID + 0-byte payload.
+	wantLen := 24 + secretbox.Overhead + 4 + len(keyID)
+	if len(ciphertext) != wantLen {
+		t.Fatalf("encrypt empty: got %d bytes, want %d", len(ciphertext), wantLen)
 	}
-	plaintext, err := fs.decrypt(ciphertext)
+	plaintext, err := fs.decrypt(keyID, ciphertext)
 	if err != nil {
 		t.Fatalf("decrypt empty: %v", err)
 	}
@@ -1428,5 +1434,385 @@ func TestStoreCloseZerosEncKey(t *testing.T) {
 	}
 	if fs.preParams != nil {
 		t.Fatal("preParams not nil after Close")
+	}
+}
+
+// TestStoreOperationsAfterClose verifies every store operation
+// returns ErrStoreClosed after Close().
+func TestStoreOperationsAfterClose(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Save something first so we have a file to load.
+	keyID := []byte("close-test")
+	if err := store.SaveKeyShare(keyID, []byte("data")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("SaveKeyShare", func(t *testing.T) {
+		err := store.SaveKeyShare(keyID, []byte("new"))
+		if !errors.Is(err, ErrStoreClosed) {
+			t.Fatalf("want ErrStoreClosed, got: %v", err)
+		}
+	})
+	t.Run("LoadKeyShare", func(t *testing.T) {
+		_, err := store.LoadKeyShare(keyID)
+		if !errors.Is(err, ErrStoreClosed) {
+			t.Fatalf("want ErrStoreClosed, got: %v", err)
+		}
+	})
+	t.Run("SaveKeyMetadata", func(t *testing.T) {
+		err := store.SaveKeyMetadata(keyID, &KeyMetadata{})
+		if !errors.Is(err, ErrStoreClosed) {
+			t.Fatalf("want ErrStoreClosed, got: %v", err)
+		}
+	})
+	t.Run("LoadKeyMetadata", func(t *testing.T) {
+		_, err := store.LoadKeyMetadata(keyID)
+		if !errors.Is(err, ErrStoreClosed) {
+			t.Fatalf("want ErrStoreClosed, got: %v", err)
+		}
+	})
+	t.Run("DeleteKeyShare", func(t *testing.T) {
+		err := store.DeleteKeyShare(keyID)
+		if !errors.Is(err, ErrStoreClosed) {
+			t.Fatalf("want ErrStoreClosed, got: %v", err)
+		}
+	})
+	t.Run("ListKeys", func(t *testing.T) {
+		_, err := store.(*fileStore).ListKeys()
+		if !errors.Is(err, ErrStoreClosed) {
+			t.Fatalf("want ErrStoreClosed, got: %v", err)
+		}
+	})
+	t.Run("GetPreParams", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, err := store.GetPreParams(ctx)
+		if !errors.Is(err, ErrStoreClosed) {
+			t.Fatalf("want ErrStoreClosed, got: %v", err)
+		}
+	})
+}
+
+// TestStoreKeyIDBinding verifies that file-swap attacks are
+// detected.  Encrypting with keyID A and decrypting with keyID B
+// must fail even though the ciphertext is valid secretbox.
+func TestStoreKeyIDBinding(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyA := []byte("key-alpha")
+	keyB := []byte("key-bravo")
+	dataA := []byte("share data for alpha")
+	dataB := []byte("share data for bravo")
+
+	if err := store.SaveKeyShare(keyA, dataA); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveKeyShare(keyB, dataB); err != nil {
+		t.Fatal(err)
+	}
+
+	// Normal load works.
+	got, err := store.LoadKeyShare(keyA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, dataA) {
+		t.Fatal("data mismatch on normal load")
+	}
+
+	// Swap files: copy A's ciphertext to B's path.
+	aData, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("%x.key", keyA)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bPath := filepath.Join(dir, fmt.Sprintf("%x.key", keyB))
+	if err := os.WriteFile(bPath, aData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Loading B should fail — ciphertext was bound to keyID A.
+	_, err = store.LoadKeyShare(keyB)
+	if err == nil {
+		t.Fatal("expected error loading swapped key file")
+	}
+	if !strings.Contains(err.Error(), "key ID mismatch") {
+		t.Fatalf("expected 'key ID mismatch', got: %v", err)
+	}
+}
+
+// TestStoreTamperedCiphertext verifies that flipping bits in a
+// stored key file causes LoadKeyShare to fail with a decryption
+// error.
+func TestStoreTamperedCiphertext(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyID := []byte("tamper-test")
+	if err := store.SaveKeyShare(keyID, []byte("sensitive key share")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Tamper with the stored file.
+	path := filepath.Join(dir, fmt.Sprintf("%x.key", keyID))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Flip a byte near the end (in the ciphertext body).
+	data[len(data)-1] ^= 0xff
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.LoadKeyShare(keyID)
+	if !errors.Is(err, errDecryptionFailed) {
+		t.Fatalf("expected errDecryptionFailed, got: %v", err)
+	}
+}
+
+// TestStoreEmptyKeyID verifies that nil and empty keyIDs are
+// rejected early with ErrEmptyKeyID.
+func TestStoreEmptyKeyID(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name  string
+		keyID []byte
+	}{
+		{"nil", nil},
+		{"empty", []byte{}},
+	}
+	for _, tt := range tests {
+		t.Run("Save_"+tt.name, func(t *testing.T) {
+			err := store.SaveKeyShare(tt.keyID, []byte("data"))
+			if !errors.Is(err, ErrEmptyKeyID) {
+				t.Fatalf("want ErrEmptyKeyID, got: %v", err)
+			}
+		})
+		t.Run("Load_"+tt.name, func(t *testing.T) {
+			_, err := store.LoadKeyShare(tt.keyID)
+			if !errors.Is(err, ErrEmptyKeyID) {
+				t.Fatalf("want ErrEmptyKeyID, got: %v", err)
+			}
+		})
+		t.Run("Delete_"+tt.name, func(t *testing.T) {
+			err := store.DeleteKeyShare(tt.keyID)
+			if !errors.Is(err, ErrEmptyKeyID) {
+				t.Fatalf("want ErrEmptyKeyID, got: %v", err)
+			}
+		})
+		t.Run("SaveMeta_"+tt.name, func(t *testing.T) {
+			err := store.SaveKeyMetadata(tt.keyID, &KeyMetadata{})
+			if !errors.Is(err, ErrEmptyKeyID) {
+				t.Fatalf("want ErrEmptyKeyID, got: %v", err)
+			}
+		})
+		t.Run("LoadMeta_"+tt.name, func(t *testing.T) {
+			_, err := store.LoadKeyMetadata(tt.keyID)
+			if !errors.Is(err, ErrEmptyKeyID) {
+				t.Fatalf("want ErrEmptyKeyID, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestStoreAtomicWriteNoLingering verifies that writeAtomic
+// doesn't leave temp files on success.
+func TestStoreAtomicWriteNoLingering(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 10; i++ {
+		keyID := []byte(fmt.Sprintf("atomic-%02d", i))
+		if err := store.SaveKeyShare(keyID, []byte("data")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// No temp files should remain.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Fatalf("lingering temp file: %s", e.Name())
+		}
+	}
+}
+
+// TestStoreConcurrentAccess verifies that concurrent Save/Load
+// operations don't race or corrupt data.
+func TestStoreConcurrentAccess(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 20
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			keyID := []byte(fmt.Sprintf("concurrent-%02d", idx))
+			data := []byte(fmt.Sprintf("share-data-%02d", idx))
+
+			if err := store.SaveKeyShare(keyID, data); err != nil {
+				errs[idx] = err
+				return
+			}
+			got, err := store.LoadKeyShare(keyID)
+			if err != nil {
+				errs[idx] = err
+				return
+			}
+			if !bytes.Equal(got, data) {
+				errs[idx] = fmt.Errorf("data mismatch for key %d", idx)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: %v", i, err)
+		}
+	}
+}
+
+// TestStoreKeyIDBindingMetadata verifies that metadata file-swap
+// attacks are also detected.
+func TestStoreKeyIDBindingMetadata(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	store, err := NewTSSStore(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyA := []byte("meta-alpha")
+	keyB := []byte("meta-bravo")
+
+	metaA := &KeyMetadata{Threshold: 2, KeyID: keyA}
+	if err := store.SaveKeyMetadata(keyA, metaA); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveKeyMetadata(keyB, &KeyMetadata{Threshold: 3, KeyID: keyB}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Swap: copy A's ciphertext to B's path.
+	aPath := filepath.Join(dir, fmt.Sprintf("%x.meta", keyA))
+	bPath := filepath.Join(dir, fmt.Sprintf("%x.meta", keyB))
+	aData, err := os.ReadFile(aPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bPath, aData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.LoadKeyMetadata(keyB)
+	if err == nil {
+		t.Fatal("expected error loading swapped metadata file")
+	}
+	if !strings.Contains(err.Error(), "key ID mismatch") {
+		t.Fatalf("expected 'key ID mismatch', got: %v", err)
+	}
+}
+
+// TestDecryptTruncatedBinding exercises decrypt's keyID binding
+// validation when a valid secretbox decrypts to data that is too
+// short to contain the keyID length prefix or keyID itself.
+func TestDecryptTruncatedBinding(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTSSStore(t.TempDir(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := store.(*fileStore)
+
+	// Craft valid secretbox with short plaintext (no keyID binding).
+	tests := []struct {
+		name      string
+		plaintext []byte
+	}{
+		{"empty", []byte{}},
+		{"one byte", []byte{0x01}},
+		{"three bytes", []byte{0x01, 0x02, 0x03}},
+		{"length says 100 but only 4 bytes total", func() []byte {
+			// 4-byte length prefix claiming 100 bytes, but no actual keyID.
+			var b [4]byte
+			binary.BigEndian.PutUint32(b[:], 100)
+			return b[:]
+		}()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var nonce [24]byte
+			if _, err := rand.Read(nonce[:]); err != nil {
+				t.Fatal(err)
+			}
+			ct := secretbox.Seal(nonce[:], tt.plaintext, &nonce, &fs.encKey)
+			_, err := fs.decrypt([]byte("any-key"), ct)
+			if !errors.Is(err, errInvalidCiphertext) {
+				t.Fatalf("want errInvalidCiphertext, got: %v", err)
+			}
+		})
 	}
 }
