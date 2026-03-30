@@ -5,9 +5,11 @@
 package continuum
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -84,24 +86,74 @@ type KeyMetadata struct {
 var (
 	errInvalidCiphertext = errors.New("invalid ciphertext")
 	errDecryptionFailed  = errors.New("decryption failed")
+
+	// ErrStoreClosed is returned by all store operations after Close.
+	ErrStoreClosed = errors.New("store closed")
+
+	// ErrEmptyKeyID is returned when a nil or empty keyID is passed
+	// to Save, Load, or Delete operations.
+	ErrEmptyKeyID = errors.New("empty key ID")
 )
 
 type fileStore struct {
 	dir       string
 	encKey    [32]byte
 	preParams *keygen.LocalPreParams
+	closed    bool
 	mu        sync.Mutex
 }
 
-// Close zeros the encryption key to limit exposure in swap files
-// and core dumps.
+// Close zeros the encryption key and marks the store as closed.
+// All subsequent operations return ErrStoreClosed.
 func (s *fileStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.closed = true
 	for i := range s.encKey {
 		s.encKey[i] = 0
 	}
 	s.preParams = nil
+	return nil
+}
+
+// writeAtomic writes data to a temporary file, fsyncs it, then
+// renames to the target path.  The rename is atomic on POSIX —
+// a crash at any point leaves either the old file or the new
+// file, never a partial write.
+func writeAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	// Clean up on any error path.
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	// untested: Write/Sync/Close/Chmod errors require filesystem failure injection
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("fsync temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("rename temp: %w", err)
+	}
+	tmpName = "" // disarm cleanup
 	return nil
 }
 
@@ -110,11 +162,13 @@ func NewTSSStore(dir string, secret *Secret) (TSSStore, error) {
 		return nil, err
 	}
 	// Derive encryption key from the signing key using HKDF with
-	// domain separation.  The salt matches the transport layer
-	// constant; the info string is unique to the store.
+	// domain separation.  The salt is static (no session context
+	// for at-rest encryption); the info string "continuum-store-v1"
+	// is unique to the store, distinct from transport key derivation.
 	var encKey [32]byte
 	r := hkdf.New(sha256.New, secret.privateKey.Serialize(),
 		[]byte("continuum-hkdf-salt-v1"), []byte("continuum-store-v1"))
+	// untested: HKDF is a PRF with no I/O; io.ReadFull on it cannot fail
 	if _, err := io.ReadFull(r, encKey[:]); err != nil {
 		return nil, fmt.Errorf("derive store key: %w", err)
 	}
@@ -125,53 +179,143 @@ func (s *fileStore) keyPath(keyID []byte) string {
 	return filepath.Join(s.dir, fmt.Sprintf("%x.key", keyID))
 }
 
-func (s *fileStore) encrypt(plaintext []byte) ([]byte, error) {
+// encrypt seals plaintext with keyID binding.  The keyID is
+// prepended to the plaintext before encryption so that decrypt
+// can verify the ciphertext belongs to the expected key.  This
+// prevents file-swap attacks where an attacker with filesystem
+// access renames key files.
+func (s *fileStore) encrypt(keyID, plaintext []byte) ([]byte, error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, ErrStoreClosed
+	}
+	var keyCopy [32]byte
+	copy(keyCopy[:], s.encKey[:])
+	s.mu.Unlock()
+
 	var nonce [24]byte
+	// untested: rand.Read fails only on OS entropy exhaustion
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, fmt.Errorf("generate nonce: %w", err)
 	}
-	// Seal appends ciphertext to nonce[:].  The slice has len=24,
-	// cap=24, so Go allocates a fresh backing array for the output.
-	// The &nonce pointer still references the stack array for the
-	// actual encryption.  No aliasing — but do not pre-grow nonce's
-	// capacity or the output overwrites the nonce in-place.
-	return secretbox.Seal(nonce[:], plaintext, &nonce, &s.encKey), nil
+
+	// Bind keyID: [4-byte keyID len][keyID][plaintext].
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(keyID)))
+	bound := make([]byte, 0, 4+len(keyID)+len(plaintext))
+	bound = append(bound, lenBuf[:]...)
+	bound = append(bound, keyID...)
+	bound = append(bound, plaintext...)
+
+	sealed := secretbox.Seal(nonce[:], bound, &nonce, &keyCopy)
+	for i := range keyCopy {
+		keyCopy[i] = 0
+	}
+	for i := range bound {
+		bound[i] = 0
+	}
+	return sealed, nil
 }
 
-func (s *fileStore) decrypt(ciphertext []byte) ([]byte, error) {
-	// Minimum: 24-byte nonce + secretbox.Overhead (16-byte Poly1305 tag).
+// decrypt opens ciphertext and verifies the keyID binding.
+func (s *fileStore) decrypt(keyID, ciphertext []byte) ([]byte, error) {
 	if len(ciphertext) < 24+secretbox.Overhead {
 		return nil, errInvalidCiphertext
 	}
+
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, ErrStoreClosed
+	}
+	var keyCopy [32]byte
+	copy(keyCopy[:], s.encKey[:])
+	s.mu.Unlock()
+
 	var nonce [24]byte
 	copy(nonce[:], ciphertext[:24])
-	decrypted, ok := secretbox.Open(nil, ciphertext[24:], &nonce, &s.encKey)
+	decrypted, ok := secretbox.Open(nil, ciphertext[24:], &nonce, &keyCopy)
+	for i := range keyCopy {
+		keyCopy[i] = 0
+	}
 	if !ok {
 		return nil, errDecryptionFailed
 	}
-	return decrypted, nil
+
+	// Verify keyID binding: [4-byte keyID len][keyID][plaintext].
+	// Zero decrypted on error — it contains key share material.
+	if len(decrypted) < 4 {
+		for i := range decrypted {
+			decrypted[i] = 0
+		}
+		return nil, errInvalidCiphertext
+	}
+	kidLen := binary.BigEndian.Uint32(decrypted[:4])
+	if uint32(len(decrypted)-4) < kidLen {
+		for i := range decrypted {
+			decrypted[i] = 0
+		}
+		return nil, errInvalidCiphertext
+	}
+	gotID := decrypted[4 : 4+kidLen]
+	if !bytes.Equal(gotID, keyID) {
+		for i := range decrypted {
+			decrypted[i] = 0
+		}
+		return nil, fmt.Errorf("key ID mismatch: got %x, want %x", gotID, keyID)
+	}
+	return decrypted[4+kidLen:], nil
 }
 
 func (s *fileStore) SaveKeyShare(keyID []byte, share []byte) error {
 	log.Tracef("SaveKeyShare %x", keyID)
-	encrypted, err := s.encrypt(share)
-	if err != nil {
-		return err
+	if len(keyID) == 0 {
+		return ErrEmptyKeyID
 	}
-	return os.WriteFile(s.keyPath(keyID), encrypted, 0o600)
+	encrypted, err := s.encrypt(keyID, share)
+	if err != nil {
+		return fmt.Errorf("save key share %x: %w", keyID, err)
+	}
+	if err := writeAtomic(s.keyPath(keyID), encrypted, 0o600); err != nil {
+		return fmt.Errorf("save key share %x: %w", keyID, err)
+	}
+	return nil
 }
 
 func (s *fileStore) LoadKeyShare(keyID []byte) ([]byte, error) {
 	log.Tracef("LoadKeyShare %x", keyID)
+	if len(keyID) == 0 {
+		return nil, ErrEmptyKeyID
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, ErrStoreClosed
+	}
+	s.mu.Unlock()
 	encrypted, err := os.ReadFile(s.keyPath(keyID))
 	if err != nil {
 		return nil, err
 	}
-	return s.decrypt(encrypted)
+	plaintext, err := s.decrypt(keyID, encrypted)
+	if err != nil {
+		return nil, fmt.Errorf("load key share %x: %w", keyID, err)
+	}
+	return plaintext, nil
 }
 
 func (s *fileStore) DeleteKeyShare(keyID []byte) error {
 	log.Tracef("DeleteKeyShare %x", keyID)
+	if len(keyID) == 0 {
+		return ErrEmptyKeyID
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ErrStoreClosed
+	}
+	s.mu.Unlock()
 	return os.Remove(s.keyPath(keyID))
 }
 
@@ -183,28 +327,44 @@ func (s *fileStore) metaPath(keyID []byte) string {
 // the key share file.
 func (s *fileStore) SaveKeyMetadata(keyID []byte, meta *KeyMetadata) error {
 	log.Tracef("SaveKeyMetadata %x", keyID)
+	if len(keyID) == 0 {
+		return ErrEmptyKeyID
+	}
+	// untested: json.Marshal of KeyMetadata (simple struct) cannot fail
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
-	encrypted, err := s.encrypt(data)
+	encrypted, err := s.encrypt(keyID, data)
 	if err != nil {
-		return err
+		return fmt.Errorf("save metadata %x: %w", keyID, err)
 	}
-	return os.WriteFile(s.metaPath(keyID), encrypted, 0o600)
+	if err := writeAtomic(s.metaPath(keyID), encrypted, 0o600); err != nil {
+		return fmt.Errorf("save metadata %x: %w", keyID, err)
+	}
+	return nil
 }
 
 // LoadKeyMetadata decrypts and returns key metadata for the given
 // keyID.  Returns os.ErrNotExist if no metadata file exists.
 func (s *fileStore) LoadKeyMetadata(keyID []byte) (*KeyMetadata, error) {
 	log.Tracef("LoadKeyMetadata %x", keyID)
+	if len(keyID) == 0 {
+		return nil, ErrEmptyKeyID
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, ErrStoreClosed
+	}
+	s.mu.Unlock()
 	encrypted, err := os.ReadFile(s.metaPath(keyID))
 	if err != nil {
 		return nil, err
 	}
-	data, err := s.decrypt(encrypted)
+	data, err := s.decrypt(keyID, encrypted)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load metadata %x: %w", keyID, err)
 	}
 	var meta KeyMetadata
 	if err := json.Unmarshal(data, &meta); err != nil {
@@ -217,6 +377,12 @@ func (s *fileStore) LoadKeyMetadata(keyID []byte) (*KeyMetadata, error) {
 // returns their keyIDs.
 func (s *fileStore) ListKeys() ([][]byte, error) {
 	log.Tracef("ListKeys")
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, ErrStoreClosed
+	}
+	s.mu.Unlock()
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, err
@@ -248,6 +414,9 @@ func (s *fileStore) GetPreParams(ctx context.Context) (*keygen.LocalPreParams, e
 	defer log.Tracef("GetPreParams exit")
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
 	if s.preParams != nil {
 		return s.preParams, nil
 	}
@@ -264,7 +433,9 @@ func (s *fileStore) GetPreParams(ctx context.Context) (*keygen.LocalPreParams, e
 // GetPreParams returns immediately without generating fresh ones.
 func (s *fileStore) SetPreParams(pp *keygen.LocalPreParams) {
 	s.mu.Lock()
-	s.preParams = pp
+	if !s.closed {
+		s.preParams = pp
+	}
 	s.mu.Unlock()
 }
 
