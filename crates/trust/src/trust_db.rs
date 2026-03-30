@@ -23,7 +23,7 @@ pub enum TrustDBError {
 
 pub type Result<T> = std::result::Result<T, TrustDBError>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct BlockHeader {
     hash: bitcoin::BlockHash,
     height: u64,
@@ -34,29 +34,12 @@ pub struct BlockHeader {
 impl BlockHeader {
     // height + header + difficulty; hash is db key
     const SIZE: usize = 8 + 80 + 32;
+}
 
-    fn encode_block_header(height: u64, header: Header, diff: U256) -> [u8; BlockHeader::SIZE] {
-        let mut enc = [0u8; BlockHeader::SIZE];
+type EncodedHeader = [u8; BlockHeader::SIZE];
 
-        // encode height
-        let hb = height.to_be_bytes();
-        enc[..8].copy_from_slice(&hb);
-
-        // encode block header
-        let mut hdrb: [u8; 80] = [0u8; 80];
-        header
-            .consensus_encode(&mut &mut hdrb[..])
-            .expect("[u8] encoding should never fail");
-        enc[8..88].copy_from_slice(&hdrb);
-
-        // encode diff
-        let diffb = diff.to_big_endian();
-        enc[88..].copy_from_slice(&diffb);
-
-        enc
-    }
-
-    fn decode_block_header(enc: &[u8; BlockHeader::SIZE]) -> Self {
+impl From<&EncodedHeader> for BlockHeader {
+    fn from(enc: &EncodedHeader) -> Self {
         let header =
             Header::consensus_decode(&mut &enc[8..88]).expect("encoded header should be decodable");
         let height = u64::from_be_bytes(enc[..8].try_into().unwrap());
@@ -67,6 +50,30 @@ impl BlockHeader {
             header,
             difficulty,
         }
+    }
+}
+
+impl From<&BlockHeader> for EncodedHeader {
+    fn from(value: &BlockHeader) -> EncodedHeader {
+        let mut enc = [0u8; BlockHeader::SIZE];
+
+        // encode height
+        let hb = value.height.to_be_bytes();
+        enc[..8].copy_from_slice(&hb);
+
+        // encode block header
+        let mut hdrb: [u8; 80] = [0u8; 80];
+        value
+            .header
+            .consensus_encode(&mut &mut hdrb[..])
+            .expect("[u8] encoding should never fail");
+        enc[8..88].copy_from_slice(&hdrb);
+
+        // encode diff
+        let diffb = value.difficulty.to_big_endian();
+        enc[88..].copy_from_slice(&diffb);
+
+        enc
     }
 }
 
@@ -173,12 +180,17 @@ impl TrustDB {
         (height, hash)
     }
 
-    pub fn block_header_genesis_insert(&self, bh: Header, height: u64, diff: U256) -> Result<()> {
-        let bhash = bh.block_hash();
+    pub fn block_header_genesis_insert(
+        &self,
+        header: Header,
+        height: u64,
+        diff: U256,
+    ) -> Result<()> {
+        let bhash = header.block_hash();
         if self.has(&HeadersCF, bhash) {
             return Err(TrustDBError::Duplicate(bhash.to_string()));
         }
-        let mut cdiff = U256::from_big_endian(&bh.work().to_be_bytes());
+        let mut cdiff = U256::from_big_endian(&header.work().to_be_bytes());
         if !diff.is_zero() {
             cdiff = diff;
         }
@@ -187,7 +199,14 @@ impl TrustDB {
         let hh_key = TrustDB::height_hash_to_key(height, bhash);
         bh_batch.put_cf(self.get_cf(&HeightHashCF), hh_key, [])?;
 
-        let ebh = BlockHeader::encode_block_header(height, bh, cdiff);
+        let ebh = &BlockHeader {
+            hash: header.block_hash(),
+            difficulty: cdiff,
+            header,
+            height,
+        };
+
+        let ebh: EncodedHeader = ebh.into();
         bh_batch.put_cf(self.get_cf(&HeadersCF), bhash, ebh)?;
         bh_batch.put_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY, ebh)?;
 
@@ -200,14 +219,14 @@ impl TrustDB {
         let bhb: [u8; BlockHeader::SIZE] = bhb
             .try_into()
             .expect("canonical tip data should be valid size");
-        Ok(BlockHeader::decode_block_header(&bhb))
+        Ok(BlockHeader::from(&bhb))
     }
 
     pub fn block_header_by_hash(&self, hash: bitcoin::BlockHash) -> Result<BlockHeader> {
         let bhb = self.get(&HeadersCF, hash)?;
         let bhb: [u8; BlockHeader::SIZE] =
             bhb.try_into().expect("header data should be valid size");
-        Ok(BlockHeader::decode_block_header(&bhb))
+        Ok(BlockHeader::from(&bhb))
     }
 
     pub fn block_headers_by_height(&self, height: u64) -> Result<Vec<BlockHeader>> {
@@ -325,15 +344,19 @@ mod tests {
 
     #[test]
     fn test_encode_block_header() {
-        let height = 99999;
         let header = create_test_header(1);
-        let diff = U256::from(12345);
+        let bh = &BlockHeader {
+            hash: header.block_hash(),
+            height: 99999,
+            difficulty: U256::from(12345),
+            header,
+        };
 
-        let enc = BlockHeader::encode_block_header(height, header, diff);
+        let enc: EncodedHeader = bh.into();
         assert_eq!(enc.len(), BlockHeader::SIZE);
 
         // check height encoding
-        assert_eq!(&enc[..8], height.to_be_bytes());
+        assert_eq!(&enc[..8], bh.height.to_be_bytes());
 
         // check that header encoding
         let mut expected_header = [0u8; 80];
@@ -343,7 +366,7 @@ mod tests {
         assert_eq!(&enc[8..88], &expected_header);
 
         // check diff encoding
-        let expected_diff = diff.to_big_endian();
+        let expected_diff = bh.difficulty.to_big_endian();
         assert_eq!(&enc[88..], &expected_diff);
     }
 
@@ -356,13 +379,16 @@ mod tests {
         ];
 
         let header = create_test_header(1);
-        for (height, diff) in test_table {
-            let enc = BlockHeader::encode_block_header(height, header, diff);
-            let dec = BlockHeader::decode_block_header(&enc);
-            assert_eq!(dec.height, height);
-            assert_eq!(dec.header, header);
-            assert_eq!(dec.difficulty, diff);
-            assert_eq!(dec.hash, header.block_hash());
+        for (height, difficulty) in test_table {
+            let bh = &BlockHeader {
+                hash: header.block_hash(),
+                height,
+                difficulty,
+                header,
+            };
+            let enc: EncodedHeader = bh.into();
+            let dec = BlockHeader::from(&enc);
+            assert_eq!(dec, *bh);
         }
     }
 
@@ -447,7 +473,7 @@ mod tests {
         // check if stored header has the correct difficulty
         let stored = stored.unwrap();
         let stored_array: [u8; BlockHeader::SIZE] = stored.try_into().unwrap();
-        let dec = BlockHeader::decode_block_header(&stored_array);
+        let dec = BlockHeader::from(&stored_array);
         let work = U256::from_big_endian(&header.work().to_be_bytes());
         assert_ne!(work, diff);
         assert_eq!(dec.difficulty, work);
