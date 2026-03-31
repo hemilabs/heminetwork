@@ -3022,7 +3022,7 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 	}
 
 	s.wg.Add(1)
-	go s.handle(ctx, &peerID, srvTr)
+	go s.handle(ctx, &peerID, srvTr, false)
 
 	// Drain the initial messages handle() sends: PeerNotify,
 	// PeerListRequest, and liveness PingRequest.  Without draining,
@@ -4977,13 +4977,16 @@ func TestServerTSSTransportSendErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("no session for peer", func(t *testing.T) {
+	t.Run("no session or peer record", func(t *testing.T) {
 		stt.registerCeremony(cid, CeremonyKeygen)
 		defer stt.unregisterCeremony(cid)
 
+		// With the SendEncrypted fallback, a missing session falls
+		// through to SendEncrypted which fails with "unknown peer"
+		// because the zero Identity has no peer record.
 		err := stt.Send(target, cid, []byte{0x00, 0x01})
-		if err == nil || !strings.Contains(err.Error(), "no session for peer") {
-			t.Fatalf("expected 'no session for peer', got: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "unknown peer") {
+			t.Fatalf("expected 'unknown peer', got: %v", err)
 		}
 	})
 
@@ -6011,7 +6014,7 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 	}
 
 	s.wg.Add(1)
-	go s.handle(ctx, &peerID, srvTr)
+	go s.handle(ctx, &peerID, srvTr, false)
 
 	// Drain initial PeerNotify + PeerListRequest + liveness PingRequest.
 	for i := 0; i < 3; i++ {
@@ -6432,7 +6435,7 @@ func TestDecryptPayloadWrongRecipient(t *testing.T) {
 	}
 
 	s.wg.Add(1)
-	go s.handle(ctx, &peerID, srvTr)
+	go s.handle(ctx, &peerID, srvTr, false)
 
 	// Drain initial PeerNotify + PeerListRequest + liveness PingRequest.
 	for i := 0; i < 3; i++ {
@@ -6753,7 +6756,7 @@ func TestSendEncryptedRoundTrip(t *testing.T) {
 	}
 
 	receiver.wg.Add(1)
-	go receiver.handle(ctx, &peerID, recvTr)
+	go receiver.handle(ctx, &peerID, recvTr, false)
 
 	// Drain initial PeerNotify + PeerListRequest + PingRequest.
 	for i := 0; i < 3; i++ {
@@ -7759,7 +7762,7 @@ func TestHandleInitialWriteErrors(t *testing.T) {
 	}
 
 	s.wg.Add(1)
-	go s.handle(ctx, &peerID, srvTr)
+	go s.handle(ctx, &peerID, srvTr, false)
 
 	// handle() will fail on initial writes, then fail on ReadEnvelope,
 	// and return.

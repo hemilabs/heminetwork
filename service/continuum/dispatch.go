@@ -146,6 +146,10 @@ func handlePeerListResponse(dc *dispatchCtx, payload any) bool {
 	if learned > 0 {
 		dc.s.notifyAllPeers(dc.ctx)
 	}
+
+	// Rebuild routing table from updated gossip topology.
+	dc.s.rebuildRoutes()
+
 	return false
 }
 
