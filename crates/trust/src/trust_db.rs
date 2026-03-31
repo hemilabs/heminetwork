@@ -6,6 +6,7 @@ use hex::encode;
 use primitive_types::U256;
 use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, OptimisticTransactionDB, Options};
 use std::path::Path;
+use std::slice::Iter;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -92,7 +93,7 @@ impl TrustDBTable {
         }
     }
 
-    pub fn iterator() -> std::slice::Iter<'static, TrustDBTable> {
+    pub fn iterator() -> Iter<'static, TrustDBTable> {
         static TABLES: [TrustDBTable; 3] = [HeadersCF, MetadataCF, HeightHashCF];
         TABLES.iter()
     }
