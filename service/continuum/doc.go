@@ -85,8 +85,74 @@
 // scale.  Only CeremonyResult and CeremonyAbort use broadcast; all
 // other traffic is either one-hop (ping, gossip) or routed point-to-
 // point (TSS round messages, ceremony requests).  TSS round messages
-// are the heaviest traffic but use direct transport writes between
-// committee members — no mesh routing, no broadcast, no amplification.
+// are the heaviest traffic.  Between directly connected committee
+// members they use transport-level writes; between non-adjacent
+// members they are sealed in NaCl box envelopes and routed through
+// the mesh via the link-state routing table (see # Routing below).
+//
+// # Routing
+//
+// Point-to-point message delivery uses a three-tier strategy:
+//
+//  1. Direct session: the destination is a connected peer.  The
+//     message is written directly to its Transport.  One hop, no
+//     routing overhead.
+//
+//  2. Link-state route: every node gossips its session list via
+//     PeerRecord.Sessions.  Each node builds a BFS routing table
+//     mapping every known identity to the next-hop identity on the
+//     shortest path.  When no direct session exists, SendTo sends
+//     the message to the computed next hop, which forwards it
+//     toward the destination.  The table is rebuilt on every gossip
+//     update and every local session add/remove.
+//
+//  3. Flood fallback: if the routing table is stale or has no entry
+//     for the destination, the message is sent to ALL connected
+//     peers.  Each intermediate node forwards using the same three-
+//     tier strategy.  The dedup cache prevents forwarding loops.
+//     This is the path of last resort — correct but wasteful.
+//
+// All three tiers are transparent to callers.  SendTo picks the
+// best available path automatically.  The routing table provides
+// O(1) next-hop lookup with zero per-message overhead when accurate.
+// Staleness window is one gossip round (~67s at default peerTTL);
+// during that window, dropped sessions may produce stale routes
+// that fail on write and fall through to the flood path.
+//
+// # TSS Message Delivery
+//
+// TSS round messages between committee members follow this path:
+//
+//  1. serverTSSTransport.Send() checks for a direct session with
+//     the destination.  If found, the TSSMessage is written directly
+//     (transport-encrypted, no NaCl envelope).
+//
+//  2. If no direct session exists (common in sparse meshes where
+//     PeersWanted < committee size), the TSSMessage is sealed in a
+//     NaCl box envelope (SealBox: ephemeral X25519 keypair, encrypt
+//     to recipient's NaCl pub, secp256k1 sender signature) and
+//     delivered via SendTo through the mesh.
+//
+//  3. At the destination, handleEncryptedPayload decrypts the
+//     envelope (verify sender sig, OpenBox with static X25519 key),
+//     recovers the inner TSSMessage, and re-dispatches it through
+//     the handler map to dispatchTSSMessage.
+//
+// Intermediate nodes see only the EncryptedPayload blob — they
+// forward it based on the destination header without decrypting.
+// This provides end-to-end confidentiality for TSS round data
+// even when messages traverse untrusted intermediaries.
+//
+// # Admin Listener
+//
+// The admin listener (AdminListenAddress) runs on a separate TCP
+// port from the peer listener.  Admin connections perform the same
+// KX + handshake for authentication but bypass PeersWanted capacity
+// limits, do not participate in gossip or the ping/pong lifecycle,
+// and are not registered in the session map.  They exist solely to
+// inject ceremony commands (keygen, sign, reshare) and query status.
+// Routed messages from admin are forwarded into the mesh via the
+// standard forward() path.
 //
 // # Broadcast Cost at 100 Nodes
 //
