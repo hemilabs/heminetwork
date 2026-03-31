@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +29,7 @@ import (
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/time/rate"
 
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
@@ -57,7 +60,7 @@ const (
 
 	// pingInterval is how often each session sends a heartbeat.
 	// Prime to avoid resonance with other periodic timers.
-	pingInterval = 41 * time.Second
+	pingInterval = 29 * time.Second
 
 	// pingTimeout is how long to wait for a pong before closing
 	// the transport.  Prime, well under pingInterval.
@@ -73,8 +76,28 @@ const (
 	seenTTL = 67 * time.Second
 
 	// seenCapacity is the maximum number of entries in the message
-	// dedup cache.
-	seenCapacity = 1024
+	// dedup cache.  Scaled for rate-limited traffic: with
+	// PeersWanted=8 connections at 100 msgs/sec over a 67s
+	// window, the theoretical max is ~53K unique hashes.
+	seenCapacity = 1 << 16 // 65536
+
+	// messageRate is the sustained per-session message rate
+	// limit.  Excess messages are dropped after transport
+	// decrypt (to keep the stream in sync) but before dispatch.
+	messageRate  = 97  // msgs/sec
+	messageBurst = 199 // burst allowance
+
+	// connCooldownTTL is the per-IP cooldown after a
+	// BusyResponse.  Prevents rapid reconnection cycling
+	// that monopolizes the handshake semaphore.
+	connCooldownTTL = 31 * time.Second
+
+	// envelopeRateLimit caps the number of EncryptedPayload
+	// messages accepted from a single sender identity per
+	// minute.  Prevents signature verification amplification
+	// attacks where an attacker floods unique envelopes.
+	envelopeRateLimit = 199
+	envelopeRateTTL   = 61 * time.Second
 
 	// defaultPreParamsTimeout is the default timeout for Paillier
 	// safe prime generation.  Sufficient for modern hardware;
@@ -85,15 +108,15 @@ const (
 	// after connecting.  Fired immediately post-KX — real peers
 	// reply in milliseconds; ephemeral clients (hemictl) never
 	// pong and get reaped.  Short fuse, no settling.
-	initialPingTimeout = 5 * time.Second
+	initialPingTimeout = 7 * time.Second
 
 	// dialTimeout bounds how long a connectPeer or seed-dial waits
 	// for the TCP handshake.
-	dialTimeout = 10 * time.Second
+	dialTimeout = 11 * time.Second
 
 	// promPollInterval is how often the Prometheus scrape loop
 	// refreshes ceremony/peer gauges.
-	promPollInterval = 5 * time.Second
+	promPollInterval = 3 * time.Second
 )
 
 var log = loggo.GetLogger(appName)
@@ -123,6 +146,7 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	Seeds                   []string // DNS seed hostnames, format host:port
+	AdminListenAddress      string   // empty = no admin listener
 }
 
 // CeremonyInfo tracks the state of an active TSS ceremony.
@@ -170,8 +194,17 @@ type Server struct {
 	debugInit *debugInitiator // non-nil only in continuum_debug builds
 
 	// Listener
-	listenConfig  *net.ListenConfig
-	listenAddress string // Actual bound address after Listen()
+	listenConfig    *net.ListenConfig
+	listenAddress   string // Actual bound address after Listen()
+	adminListenAddr string // Actual bound admin address
+
+	// Link-state routing table derived from gossip topology.
+	// Maps destination Identity to next-hop Identity.
+	// Rebuilt lazily via generation counter — see route.go.
+	routeTable    map[Identity]Identity
+	routeMtx      sync.RWMutex
+	routeGen      atomic.Uint64 // bumped on topology change
+	routeBuiltGen uint64        // gen when table was last built
 
 	// handshakeSem limits concurrent handshake goroutines to
 	// PeersWanted.  Acquired in the accept loop before spawning
@@ -184,6 +217,11 @@ type Server struct {
 	// mock resolver pointing at an in-process DNS server.
 	resolver *net.Resolver
 
+	// connCooldown rate-limits reconnections per remote IP.
+	// Set after BusyResponse to prevent an attacker from
+	// cycling connections to monopolize handshake slots.
+	connCooldown *ttl.TTL
+
 	// dnsLookups rate-limits DNS verification per remote IP.
 	// Prevents attackers from forcing unbounded TXT queries by
 	// repeatedly connecting.  Keyed by IP string, TTL of 60s.
@@ -194,6 +232,11 @@ type Server struct {
 	peersTTL *ttl.TTL                 // expiry for known peers
 	pings    *ttl.TTL                 // unanswered ping timeout
 
+	// Per-sender envelope rate counter — limits how many
+	// EncryptedPayload messages are accepted from one sender
+	// before signature verification is skipped.
+	envelopeRates *ttl.TTL
+
 	// Message deduplication — prevents forwarding loops in
 	// non-tree topologies.
 	seen *ttl.TTL
@@ -203,6 +246,9 @@ type Server struct {
 	forwarded      atomic.Int64 // messages forwarded to next hop
 	dedupDropped   atomic.Int64 // messages dropped by dedup cache
 	broadcastsSent atomic.Int64 // broadcast originations (not forwards)
+	rateDropped    atomic.Int64 // messages dropped by rate limiter
+	cooldownDrops  atomic.Int64 // connections dropped by IP cooldown
+	envRateDrops   atomic.Int64 // envelopes dropped by sender rate limit
 	startedAt      time.Time    // set in Run() for uptime gauge
 
 	// Ceremony counters — updated every promPoll tick so prom
@@ -278,6 +324,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		handshakeSem: make(chan struct{}, cfg.PeersWanted),
 		initiator:    init,
 		debugInit:    di,
+		routeTable:   make(map[Identity]Identity),
 		tssCtx:       context.Background(), // replaced by Run() with lifecycle context
 	}, nil
 }
@@ -291,6 +338,10 @@ func (s *Server) newSession(id *Identity, t *Transport) error {
 	}
 	s.sessions[*id] = t
 
+	// Mark routing table stale.  Caller rebuilds after
+	// releasing s.mtx.
+	s.invalidateRoutes()
+
 	return nil
 }
 
@@ -303,6 +354,10 @@ func (s *Server) deleteSession(id *Identity) error {
 		return fmt.Errorf("no session: %v", id)
 	}
 	delete(s.sessions, *id)
+
+	// Mark routing table stale.  Caller rebuilds after
+	// releasing s.mtx.
+	s.invalidateRoutes()
 	if s.ponged != nil {
 		delete(s.ponged, *id)
 	}
@@ -404,10 +459,10 @@ const defaultTTL = 8
 
 // ceremonyMaxAge is how long completed/failed ceremonies remain in the
 // tracking map before eviction.  Running ceremonies are never evicted.
-const ceremonyMaxAge = 30 * time.Minute
+const ceremonyMaxAge = 29 * time.Minute
 
 // ceremonyEvictInterval is the tick period for the eviction goroutine.
-const ceremonyEvictInterval = 5 * time.Minute
+const ceremonyEvictInterval = 11 * time.Minute
 
 // tcpKeepAlivePeriod is the TCP keepalive probe interval.  With Linux
 // default 9 retries, worst-case dead-peer detection is ~153s.
@@ -450,7 +505,23 @@ func (s *Server) forward(header *Header, payload any, from *Identity) {
 		return
 	}
 
-	// Flood: send to all connected peers except the source.
+	// Route via gossip topology table.
+	if hop, ok := s.routeNextHop(dest); ok {
+		if from == nil || hop != *from {
+			if t, ok := s.sessions[hop]; ok {
+				if err := t.WriteHeader(fwd, payload); err != nil {
+					log.Debugf("routed forward to %v: %v", hop, err)
+				} else {
+					log.Debugf("forward routed %v -> %v via %v TTL %d",
+						header.Origin, dest, hop, fwd.TTL)
+					s.forwarded.Add(1)
+					return
+				}
+			}
+		}
+	}
+
+	// Flood fallback: send to all connected peers except source.
 	var sent int
 	for id, t := range s.sessions {
 		if from != nil && id == *from {
@@ -570,7 +641,7 @@ func (s *Server) broadcastWithTTL(cmd any, ttl uint8) error {
 	return nil
 }
 
-func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
+func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin bool) {
 	// Per-session context: cancelled when handle() exits (read
 	// error, shutdown, etc.), which also stops the pingLoop.
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
@@ -582,11 +653,18 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 	defer s.wg.Done()
 	defer sessionCancel()
 	defer func() {
-		// Disarm any pending ping timeout so pingExpired does
-		// not fire on an already-closing transport.
-		_, _ = s.pings.Delete(*id)
-		if err := s.deleteSession(id); err != nil {
-			log.Debugf("delete session %v: %v", id, err)
+		if admin {
+			if err := t.Close(); err != nil {
+				log.Debugf("admin close %v: %v", id, err)
+			}
+		} else {
+			// Disarm any pending ping timeout so pingExpired
+			// does not fire on an already-closing transport.
+			_, _ = s.pings.Delete(*id)
+			if err := s.deleteSession(id); err != nil {
+				log.Debugf("delete session %v: %v", id, err)
+			}
+			s.rebuildRoutes()
 		}
 	}()
 
@@ -601,43 +679,41 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 		t.Close()
 	}()
 
-	log.Debugf("handle: %v", id)
+	log.Debugf("handle: %v admin=%v", id, admin)
 	defer log.Debugf("handle exit: %v", id)
 
-	// Start heartbeat goroutine.  It exits when sessionCtx is
-	// cancelled or when a ping write fails.
-	s.wg.Add(1)
-	go s.pingLoop(sessionCtx, id, t)
+	// Admin sessions skip gossip, ping, and rate limiting.
+	// They exist only for ceremony injection and status queries.
+	var limiter *rate.Limiter
+	if !admin {
+		s.wg.Add(1)
+		go s.pingLoop(sessionCtx, id, t)
 
-	// Announce our peer count and request their list.  On initial
-	// session we always exchange; the count comparison in the
-	// PeerNotify handler is for ongoing gossip only.
-	if err := t.Write(s.secret.Identity, PeerNotify{
-		Count: s.PeerCount(),
-	}); err != nil {
-		log.Warningf("initial peer notify %v: %v", id, err)
-	}
-	if err := t.Write(s.secret.Identity,
-		PeerListRequest{}); err != nil {
-		log.Warningf("initial peer list request %v: %v", id, err)
-	}
-
-	// Liveness ping — fired immediately, short fuse.  Real peers
-	// pong in milliseconds; ephemeral clients (hemictl) never
-	// pong and get reaped when the timeout fires pingExpired.
-	// The regular pingLoop takes over after its first tick.
-	// Write failure is not fatal — the pingLoop will retry.
-	if err := t.Write(s.secret.Identity, PingRequest{
-		OriginTimestamp: time.Now().Unix(),
-	}); err != nil {
-		log.Warningf("initial ping %v: %v", id, err)
-	} else {
-		ipt := s.cfg.InitialPingTimeout
-		if ipt == 0 {
-			ipt = initialPingTimeout
+		if err := t.Write(s.secret.Identity, PeerNotify{
+			Count: s.PeerCount(),
+		}); err != nil {
+			log.Warningf("initial peer notify %v: %v", id, err)
 		}
-		s.pings.Put(sessionCtx, ipt, *id, t, s.pingExpired, nil)
+		if err := t.Write(s.secret.Identity,
+			PeerListRequest{}); err != nil {
+			log.Warningf("initial peer list request %v: %v", id, err)
+		}
+
+		if err := t.Write(s.secret.Identity, PingRequest{
+			OriginTimestamp: time.Now().Unix(),
+		}); err != nil {
+			log.Warningf("initial ping %v: %v", id, err)
+		} else {
+			ipt := s.cfg.InitialPingTimeout
+			if ipt == 0 {
+				ipt = initialPingTimeout
+			}
+			s.pings.Put(sessionCtx, ipt, *id, t, s.pingExpired, nil)
+		}
+
+		limiter = rate.NewLimiter(messageRate, messageBurst)
 	}
+
 
 	for {
 		header, payload, _, err := t.ReadEnvelope()
@@ -646,6 +722,12 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport) {
 			// teardown (transport close breaks ReadEnvelope).
 			log.Debugf("read %v: %v", id, err)
 			return
+		}
+
+		if limiter != nil && !limiter.Allow() {
+			s.rateDropped.Add(1)
+			log.Debugf("rate limited %v: dropping message", id)
+			continue
 		}
 
 		// Dedup: drop messages we have already seen.
@@ -934,7 +1016,7 @@ func (s *Server) dnsRateLimited(remoteAddr net.Addr) bool {
 	// outlive the caller's request context.  If we used the caller's
 	// ctx, canceling the request would cancel the TTL entry and
 	// defeat the rate limit.
-	s.dnsLookups.Put(context.Background(), 60*time.Second,
+	s.dnsLookups.Put(context.Background(), 59*time.Second,
 		host, struct{}{}, nil, nil)
 	return false
 }
@@ -1172,6 +1254,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		log.Warningf("connectPeer session %v: %v", them, err)
 		return
 	}
+	s.rebuildRoutes()
 
 	s.addPeer(ctx, PeerRecord{
 		Identity: *them,
@@ -1186,7 +1269,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 
 	greatSuccess = true
 	s.wg.Add(1)
-	s.handle(ctx, them, transport)
+	s.handle(ctx, them, transport, false)
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -1263,6 +1346,21 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "ceremonies_failed_total",
 				Help:      "Total ceremonies that failed",
 			}, s.promCeremoniesFailed),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "messages_rate_dropped_total",
+				Help:      "Messages dropped by per-session rate limiter",
+			}, s.promRateDropped),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "connections_cooldown_dropped_total",
+				Help:      "Connections rejected by per-IP cooldown",
+			}, s.promCooldownDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "envelopes_rate_dropped_total",
+				Help:      "Envelopes dropped by per-sender rate gate",
+			}, s.promEnvRateDrops),
 		}
 	}
 	return s.promCollectors
@@ -1335,13 +1433,30 @@ func (s *Server) SendTo(dest Identity, cmd any) error {
 		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
 	}
 
-	// No direct session: send via first available peer for
-	// multi-hop routing.  The recipient will forward based on
-	// the destination header.
-	for _, t := range s.sessions {
-		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+	// Route via gossip topology table: send to the computed
+	// next hop on the shortest path to dest.
+	if hop, ok := s.routeNextHop(dest); ok {
+		if t, ok := s.sessions[hop]; ok {
+			log.Debugf("SendTo %v via route hop %v", dest, hop)
+			return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+		}
 	}
-	return errors.New("no route to destination")
+
+	// Flood fallback: routing table is stale or incomplete.
+	// Send to all peers and let dedup + TTL handle convergence.
+	var sent int
+	for id, t := range s.sessions {
+		if err := t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd); err != nil {
+			log.Debugf("SendTo flood %v via %v: %v", dest, id, err)
+		} else {
+			sent++
+		}
+	}
+	if sent == 0 {
+		return errors.New("no route to destination")
+	}
+	log.Debugf("SendTo %v: flooded to %d peer(s) (no route)", dest, sent)
+	return nil
 }
 
 // SendEncrypted encrypts cmd with nacl box to the destination's X25519
@@ -1396,6 +1511,26 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 // the payload.
 func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 	log.Tracef("decryptPayload sender %v type %v", ep.Sender, ep.InnerType)
+
+	// Per-sender envelope rate gate (F3): limit how many
+	// envelopes we accept from one sender before paying the
+	// secp256k1 Verify cost (~200μs).  Prevents signature
+	// verification amplification via forged envelopes.
+	if s.envelopeRates != nil {
+		key := ep.Sender.String()
+		if v, _, err := s.envelopeRates.Get(key); err == nil {
+			count := v.(*atomic.Int64)
+			if count.Add(1) > int64(envelopeRateLimit) {
+				s.envRateDrops.Add(1)
+				return nil, fmt.Errorf("envelope rate limited: %v", ep.Sender)
+			}
+		} else {
+			counter := new(atomic.Int64)
+			counter.Store(1)
+			s.envelopeRates.Put(context.Background(), envelopeRateTTL,
+				key, counter, nil, nil)
+		}
+	}
 
 	// Verify sender signature before touching the box.
 	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.Ciphertext)
@@ -1823,26 +1958,32 @@ func (s *Server) knownPeerList(exclude Identity) []PeerRecord {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 
+	// Snapshot current session identities for self's record.
+	selfSessions := make([]Identity, 0, len(s.sessions))
+	for id := range s.sessions {
+		selfSessions = append(selfSessions, id)
+	}
+
 	records := make([]PeerRecord, 0, len(s.peers))
 	for id, pr := range s.peers {
 		if id == exclude {
 			continue
 		}
-		records = append(records, *pr)
+		rec := *pr
+		if id == s.secret.Identity {
+			rec.Sessions = selfSessions
+		}
+		records = append(records, rec)
 	}
 	return records
 }
 
 // notifyAllPeers sends a PeerNotify to all active sessions.
 // Each write is bounded by the transport's 4s write deadline so
-// a hung peer cannot block others.  Goroutines are intentionally
-// orphaned (not tracked by s.wg) — if the write fails, we close
-// the transport to aggressively cull dead sessions.
-//
-// NOTE: if a transport is closed here while a TSS keygen, reshare,
-// or sign is in flight on that session, the TSS operation will fail.
-// The ceremony coordinator handles this by detecting session loss
-// and allowing the blockchain to re-issue the ceremony.
+// a hung peer cannot block others.  Write failures are logged but
+// do NOT close the transport — dead sessions are reaped by
+// pingExpired instead.  Closing on write failure raced with active
+// TSS ceremony traffic and caused message loss in sparse meshes.
 func (s *Server) notifyAllPeers(ctx context.Context) {
 	log.Tracef("notifyAllPeers")
 
@@ -1868,10 +2009,12 @@ func (s *Server) notifyAllPeers(ctx context.Context) {
 	for _, d := range targets {
 		go func(d dest) {
 			if err := d.t.Write(s.secret.Identity, notify); err != nil {
-				log.Warningf("peer notify %v: %v, closing", d.id, err)
-				if cerr := d.t.Close(); cerr != nil {
-					log.Errorf("peer notify close %v: %v", d.id, cerr)
-				}
+				// Log but do NOT close the transport.  Closing
+				// here races with active TSS message delivery —
+				// a temporary write timeout (TCP buffer full)
+				// would kill a session carrying ceremony traffic.
+				// Dead sessions are reaped by pingExpired instead.
+				log.Debugf("peer notify %v: %v", d.id, err)
 			}
 		}(d)
 	}
@@ -2032,6 +2175,18 @@ func (s *Server) promCeremoniesFailed() float64 {
 	return float64(s.ceremoniesFailed.Load())
 }
 
+func (s *Server) promRateDropped() float64 {
+	return float64(s.rateDropped.Load())
+}
+
+func (s *Server) promCooldownDrops() float64 {
+	return float64(s.cooldownDrops.Load())
+}
+
+func (s *Server) promEnvRateDrops() float64 {
+	return float64(s.envRateDrops.Load())
+}
+
 // isHealthy reports whether the server is ready to participate in the
 // mesh.  A node is healthy when it is listening for connections and
 // has at least one active peer session.  A node with zero sessions
@@ -2141,6 +2296,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		log.Errorf("connect session %v: %v", them, err)
 		return
 	}
+	s.rebuildRoutes()
 
 	// Register the peer we connected to.  We know their listen
 	// address (c) — the listen side will learn ours via gossip.
@@ -2157,7 +2313,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 
 	greatSuccess = true
 	s.wg.Add(1)
-	s.handle(ctx, them, transport)
+	s.handle(ctx, them, transport, false)
 }
 
 func (s *Server) connectAll(ctx context.Context, errC chan error) {
@@ -2204,6 +2360,19 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 		if err != nil {
 			log.Errorf("accept: %v", err)
 			continue
+		}
+
+		// Per-IP cooldown (F5): reject immediately if this IP
+		// was recently sent a BusyResponse.
+		if s.connCooldown != nil {
+			if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+				ip := addr.IP.String()
+				if _, _, err := s.connCooldown.Get(ip); err == nil {
+					conn.Close()
+					s.cooldownDrops.Add(1)
+					continue
+				}
+			}
 		}
 
 		// Limit concurrent handshakes to PeersWanted.  If the
@@ -2338,6 +2507,20 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	s.dnsLookups = dnsLookups
 
+	// Per-IP reconnection cooldown (F5).
+	connCooldown, err := ttl.New(s.cfg.PeersWanted*4, true)
+	if err != nil {
+		return fmt.Errorf("conn cooldown ttl: %w", err)
+	}
+	s.connCooldown = connCooldown
+
+	// Per-sender envelope rate limiter (F3).
+	envelopeRates, err := ttl.New(s.cfg.PeersWanted*4, true)
+	if err != nil {
+		return fmt.Errorf("envelope rate ttl: %w", err)
+	}
+	s.envelopeRates = envelopeRates
+
 	// Read or generate Paillier primes.
 	err = s.initPaillierPrimes(ctx)
 	if err != nil {
@@ -2411,6 +2594,11 @@ func (s *Server) Run(pctx context.Context) error {
 	if s.cfg.ListenAddress != "" {
 		s.wg.Add(1)
 		go s.listen(ctx, errC)
+	}
+
+	if s.cfg.AdminListenAddress != "" {
+		s.wg.Add(1)
+		go s.listenAdmin(ctx, errC)
 	}
 
 	if len(s.cfg.Connect) != 0 {
@@ -2498,10 +2686,16 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 	s.mtx.RUnlock()
 	if full {
 		log.Debugf("server full, sending busy to %v", id)
-		// Best-effort: peer is being rejected, write failure is harmless.
 		_ = transport.Write(s.secret.Identity, BusyResponse{})
-		// Best-effort: transport is being discarded.
 		transport.Close()
+		// Set per-IP cooldown so this IP doesn't immediately
+		// retry and monopolize the handshake semaphore.
+		if s.connCooldown != nil {
+			if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+				s.connCooldown.Put(ctx, connCooldownTTL, addr.IP.String(),
+					struct{}{}, nil, nil)
+			}
+		}
 		return
 	}
 
@@ -2510,6 +2704,7 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 		log.Errorf("session %v: %v", conn.RemoteAddr(), err)
 		return
 	}
+	s.rebuildRoutes()
 
 	// Register peer with NaCl public key.  Address is empty
 	// because we don't know their listen address — they'll
@@ -2530,5 +2725,44 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 	log.Infof("connected %v: %v", conn.RemoteAddr(), id)
 
 	// handle connection
-	s.handle(ctx, id, transport)
+	s.handle(ctx, id, transport, false)
+}
+
+// CeremonyStatus returns a snapshot of the ceremony status by ID,
+// or nil if the ceremony is not registered on this node.  The
+// returned struct is a copy — mutations do not affect server state.
+func (s *Server) CeremonyStatus(cid CeremonyID) *CeremonyInfo {
+	s.mtx.RLock()
+	ci := s.ceremonies[cid]
+	s.mtx.RUnlock()
+	if ci == nil {
+		return nil
+	}
+	cp := *ci
+	cp.ctx = nil
+	cp.cancel = nil
+	if ci.Committee != nil {
+		cp.Committee = make([]Identity, len(ci.Committee))
+		copy(cp.Committee, ci.Committee)
+	}
+	if ci.KeyID != nil {
+		cp.KeyID = make([]byte, len(ci.KeyID))
+		copy(cp.KeyID, ci.KeyID)
+	}
+	return &cp
+}
+
+// ListKeyIDs returns all key share IDs stored in this node's TSS
+// store by scanning for .key files in the store directory.
+func (s *Server) ListKeyIDs() [][]byte {
+	tssDir := filepath.Join(s.data, "tss")
+	matches, _ := filepath.Glob(filepath.Join(tssDir, "*.key"))
+	var ids [][]byte
+	for _, m := range matches {
+		hexID := strings.TrimSuffix(filepath.Base(m), ".key")
+		if id, err := hex.DecodeString(hexID); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
