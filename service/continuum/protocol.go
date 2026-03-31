@@ -342,11 +342,12 @@ type PingResponse struct {
 
 // PeerRecord describes a known peer for gossip exchange.
 type PeerRecord struct {
-	Identity Identity `json:"identity"`
-	Address  string   `json:"address"`            // host:port
-	NaClPub  []byte   `json:"nacl_pub,omitempty"` // X25519 public key for e2e encryption
-	Version  uint32   `json:"version"`            // ProtocolVersion at time of discovery
-	LastSeen int64    `json:"last_seen"`          // unix timestamp
+	Identity Identity   `json:"identity"`
+	Address  string     `json:"address"`            // host:port
+	NaClPub  []byte     `json:"nacl_pub,omitempty"` // X25519 public key for e2e encryption
+	Version  uint32     `json:"version"`            // ProtocolVersion at time of discovery
+	LastSeen int64      `json:"last_seen"`          // unix timestamp
+	Sessions []Identity `json:"sessions,omitempty"` // direct session neighbors (gossip topology)
 }
 
 // PeerNotify announces that the sender has new peer information.
@@ -1002,8 +1003,16 @@ var (
 	ErrUnknownCeremony        = errors.New("unknown ceremony")
 
 	// placeholders until we decide on timeout handling
-	readTimeout  time.Duration = 4 * time.Second
-	writeTimeout time.Duration = 4 * time.Second
+	readTimeout time.Duration = 4 * time.Second
+
+	// messageReadTimeout bounds each message read on an
+	// established session.  Prevents slowloris attacks where
+	// an attacker sends one byte per second to tie up the
+	// handle goroutine indefinitely.  Must be > pingInterval
+	// (29s) so idle-but-alive sessions survive between pings.
+	// 37s gives 8s of headroom for the pong round-trip.
+	messageReadTimeout time.Duration = 37 * time.Second
+	writeTimeout       time.Duration = 4 * time.Second
 
 	// handshakeTimeout bounds the X25519 key exchange.  The
 	// deadline is set on the net.Conn directly because the KX
@@ -1651,7 +1660,7 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, []byte, error) {
 // Read reads and decrypts the next command from the connection stream. It
 // returns the header and command.
 func (t *Transport) Read() (*Header, any, error) {
-	h, cmd, _, err := t.read(0 * time.Second) // blocks; ping TTL handles idle
+	h, cmd, _, err := t.read(messageReadTimeout)
 	return h, cmd, err
 }
 
@@ -1659,7 +1668,7 @@ func (t *Transport) Read() (*Header, any, error) {
 // bytes (transport-decrypted but not yet parsed).  Used by handle() for
 // message deduplication and forwarding.
 func (t *Transport) ReadEnvelope() (*Header, any, []byte, error) {
-	return t.read(0 * time.Second) // blocks; ping TTL handles idle
+	return t.read(messageReadTimeout)
 }
 
 // write encrypts the passed in cleartext and writes it to the connection
@@ -1837,4 +1846,12 @@ func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr
 		return false, fmt.Errorf("dns invalid identity: %w", err)
 	}
 	return subtle.ConstantTimeCompare(id[:], remoteDNSID[:]) == 1, nil
+}
+
+// PrivateKeyHex is intentionally neutered — it returns a redacted
+// placeholder.  Key material must never be accessible through a
+// method that returns a printable string.  Use DebugPrivateKeyHex
+// (debug builds only) for test infrastructure.
+func (s Secret) PrivateKeyHex() string {
+	return "*****"
 }

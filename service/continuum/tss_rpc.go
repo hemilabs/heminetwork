@@ -129,14 +129,18 @@ func (st *serverTSSTransport) Send(to Identity, ceremonyID CeremonyID, data []by
 		Signature:  sig,
 	}
 
+	// Prefer direct session for lower latency.  If no direct
+	// session exists (sparse mesh), fall back to sealed-box
+	// e2e encryption with multi-hop delivery through the mesh.
 	st.server.mtx.RLock()
 	tr := st.server.sessions[to]
 	st.server.mtx.RUnlock()
 
-	if tr == nil {
-		return fmt.Errorf("no session for peer %s", to)
+	if tr != nil {
+		return tr.Write(st.server.secret.Identity, msg)
 	}
-	return tr.Write(st.server.secret.Identity, msg)
+	log.Debugf("tss send %s: no direct session, using encrypted envelope", to)
+	return st.server.SendEncrypted(to, msg)
 }
 
 // =============================================================================
