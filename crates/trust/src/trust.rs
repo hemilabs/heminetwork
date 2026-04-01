@@ -13,6 +13,8 @@ pub enum TrustError {
     InvalidNetwork(String),
     #[error("Not found: {0}")]
     NotFound(String),
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
 }
 
 pub type Result<T> = std::result::Result<T, TrustError>;
@@ -83,11 +85,57 @@ impl Trust {
             None => panic!("could not return upstream_state_id as a 32 byte array"),
         }
     }
+
+    /// Sets up external header mode by inserting genesis. The value of genesis
+    /// to insert can be overwritten using the tuple (Header, Height, Difficulty).
+    /// Pass None for default chain genesis block.
+    pub fn external_header_setup(
+        &self,
+        genesis_override: Option<(&bitcoin::block::Header, u64, primitive_types::U256)>,
+        upstream_state_id: &[u8; 32],
+    ) -> Result<()> {
+        let mut genesis = &bitcoin::blockdata::constants::genesis_block(self.network).header;
+        let mut height = u64::MIN;
+        let mut diff = primitive_types::U256::zero();
+        if let Some(o) = genesis_override {
+            (genesis, height, diff) = o
+        }
+
+        match self.db.block_header_best() {
+            Err(e) => match e {
+                TrustDBError::NotFound(_) => {
+                    self.set_upstream_state_id(upstream_state_id);
+                    self.db.block_header_genesis_insert(genesis, height, diff)?;
+                    self.db.block_header_best()?;
+                }
+                _ => return Err(TrustError::TrustDB(e)),
+            },
+            Ok(_) => {
+                let gb = self.db.block_headers_by_height(height)?;
+                if gb.len() > 1 {
+                    return Err(TrustError::InvalidState(format!(
+                        "have {} effective genesis blocks",
+                        gb.len()
+                    )));
+                }
+                if genesis.block_hash() != gb[0].hash {
+                    return Err(TrustError::InvalidState(format!(
+                        "effective genesis block hash mismatch, 
+                        db has {} but genesis should be {}",
+                        gb[0].hash,
+                        genesis.block_hash()
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitcoin::hashes::Hash;
     use tempfile::tempdir;
 
     #[test]
@@ -227,6 +275,111 @@ mod tests {
         {
             TrustError::NotFound(_) => (),
             other_err => panic!("unexpected error {other_err}"),
+        }
+    }
+
+    #[test]
+    fn test_external_header_setup() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        let usi = b"this_is_a_test_for_this_test_yes";
+
+        let res = trust.external_header_setup(None, usi);
+        assert!(res.is_ok());
+
+        match trust.get_upstream_state_id() {
+            Ok(v) => assert_eq!(v, *usi),
+            Err(e) => panic!("{e}"),
+        }
+
+        let best = trust
+            .db
+            .block_header_best()
+            .expect("best header should exist");
+        assert_eq!(
+            best.hash.as_byte_array(),
+            trust.network.chain_hash().as_bytes()
+        );
+    }
+
+    #[test]
+    fn test_external_header_setup_override() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        let usi = b"this_is_a_test_for_this_test_yes";
+
+        let header =
+            &bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Testnet).header;
+        let height = 12345;
+        let diff = primitive_types::U256::from(99999);
+
+        let genesis_override = Some((header, height, diff));
+
+        let res = trust.external_header_setup(genesis_override, usi);
+        assert!(res.is_ok());
+
+        match trust.get_upstream_state_id() {
+            Ok(v) => assert_eq!(v, *usi),
+            Err(e) => panic!("{e}"),
+        }
+
+        let hh = trust.db.block_headers_by_height(height).unwrap();
+        assert_eq!(hh.len(), 1);
+        assert_eq!(hh[0].hash, header.block_hash());
+    }
+
+    #[test]
+    fn test_external_header_setup_duplicate() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        let usi = b"this_is_a_test_for_this_test_yes";
+
+        for _ in 0..5 {
+            trust
+                .external_header_setup(None, usi)
+                .expect("should be able to setup with multiple identical calls");
+        }
+    }
+
+    #[test]
+    fn test_external_header_setup_genesis_hash_mismatch() {
+        let tmp = tempdir().expect("temp dir should have been created");
+        let tmp = tmp.path().to_str();
+        assert!(tmp.is_some());
+
+        let cfg = TrustConfig::new_default_config(tmp.unwrap());
+        let trust = Trust::new(cfg).unwrap();
+
+        let usi = b"this_is_a_test_for_this_test_yes";
+
+        let res = trust.external_header_setup(None, usi);
+        assert!(res.is_ok());
+
+        let genesis =
+            &bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Bitcoin).header;
+        let genesis_override = Some((genesis, 0, primitive_types::U256::zero()));
+
+        match trust.external_header_setup(genesis_override, usi) {
+            Err(e) => match e {
+                TrustError::InvalidState(_) => (),
+                _ => panic!("unexpected error: {e}"),
+            },
+            Ok(_) => panic!("setup should fail with mismatched hashes"),
         }
     }
 }

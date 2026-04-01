@@ -26,10 +26,10 @@ pub type Result<T> = std::result::Result<T, TrustDBError>;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct BlockHeader {
-    hash: bitcoin::BlockHash,
-    height: u64,
-    header: Header,
-    difficulty: U256,
+    pub hash: bitcoin::BlockHash,
+    pub height: u64,
+    pub header: Header,
+    pub difficulty: U256,
 }
 
 impl BlockHeader {
@@ -183,7 +183,7 @@ impl TrustDB {
 
     pub fn block_header_genesis_insert(
         &self,
-        header: Header,
+        header: &Header,
         height: u64,
         diff: U256,
     ) -> Result<()> {
@@ -202,8 +202,8 @@ impl TrustDB {
 
         let ebh = &BlockHeader {
             hash: header.block_hash(),
+            header: *header,
             difficulty: cdiff,
-            header,
             height,
         };
 
@@ -437,7 +437,7 @@ mod tests {
         let height = 0;
         let diff = U256::from(12345);
 
-        let mut res = db.block_header_genesis_insert(header, height, diff);
+        let mut res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
 
         let stored = db.get(&HeadersCF, header.block_hash());
@@ -451,7 +451,7 @@ mod tests {
         assert!(hh_stored.is_ok());
 
         // ensure duplicate fails
-        res = db.block_header_genesis_insert(header, height, diff);
+        res = db.block_header_genesis_insert(&header, height, diff);
         match res.unwrap_err() {
             TrustDBError::Duplicate(_) => (),
             _ => panic!("Expected Duplicate error"),
@@ -465,7 +465,7 @@ mod tests {
         let height = 0;
         let diff = U256::zero(); // should use header's work
 
-        let res = db.block_header_genesis_insert(header, height, diff);
+        let res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
 
         let stored = db.get(&HeadersCF, header.block_hash());
@@ -494,7 +494,7 @@ mod tests {
             _ => panic!("Expected NotFound error"),
         }
 
-        let res = db.block_header_genesis_insert(header, height, diff);
+        let res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
 
         best = db.block_header_best();
@@ -522,7 +522,7 @@ mod tests {
         }
 
         // insert header
-        let insert_result = db.block_header_genesis_insert(header, height, diff);
+        let insert_result = db.block_header_genesis_insert(&header, height, diff);
         assert!(insert_result.is_ok());
 
         res = db.block_header_by_hash(header.block_hash());
@@ -558,7 +558,7 @@ mod tests {
 
         // insert header
         let header = create_test_header(1);
-        let res = db.block_header_genesis_insert(header, height, diff);
+        let res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
 
         retrieved = db.block_headers_by_height(height);
@@ -591,10 +591,10 @@ mod tests {
         let header2 = create_test_header(2);
         let diff = U256::from(12345);
 
-        let mut insert = db.block_header_genesis_insert(header1, height1, diff);
+        let mut insert = db.block_header_genesis_insert(&header1, height1, diff);
         assert!(insert.is_ok());
 
-        insert = db.block_header_genesis_insert(header2, height2, diff);
+        insert = db.block_header_genesis_insert(&header2, height2, diff);
         assert!(insert.is_ok());
 
         let mut headers = db.block_headers_by_height(height1);
