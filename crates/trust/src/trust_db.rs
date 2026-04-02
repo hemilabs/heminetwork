@@ -1,10 +1,13 @@
+use self::InsertType::*;
 use self::TrustDBTable::*;
 use bitcoin::block::Header;
 use bitcoin::consensus::{Decodable, Encodable};
 use bitcoin::hashes::Hash;
+
 use hex::encode;
 use primitive_types::U256;
 use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, OptimisticTransactionDB, Options};
+use std::cmp::Ordering;
 use std::path::Path;
 use std::slice::Iter;
 use std::sync::Arc;
@@ -20,6 +23,8 @@ pub enum TrustDBError {
     NotFound(String),
     #[error("Duplicate key found: {0}")]
     Duplicate(String),
+    #[error("{0}")]
+    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, TrustDBError>;
@@ -78,6 +83,23 @@ impl From<&BlockHeader> for EncodedHeader {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum InsertType {
+    ITChainExtend, // Normal insert, does not require further action.
+    ITChainFork,   // Chain forked, unwind and rewind indexes.
+    ITForkExtend,  // Extended a fork, does not require further action.
+}
+
+impl InsertType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            ITChainExtend => "chain extended",
+            ITChainFork => "chain forked",
+            ITForkExtend => "fork extended",
+        }
+    }
+}
+
 pub enum TrustDBTable {
     HeadersCF,
     MetadataCF,
@@ -98,6 +120,8 @@ impl TrustDBTable {
         TABLES.iter()
     }
 }
+
+pub type BatchHook<'a> = (&'a TrustDBTable, &'a [u8], &'a [u8]);
 
 pub struct TrustDB {
     db: Arc<OptimisticTransactionDB>,
@@ -248,6 +272,151 @@ impl TrustDB {
         }
         Ok(bhs)
     }
+
+    /// block_headers_insert decodes and inserts the passed blockheaders into the
+    /// database. Additionally it updates the height/hash and missing blocks table as
+    /// well. On return it informs the caller about potential forking situations
+    /// and always returns the canonical and last inserted blockheader, which may be
+    /// the same. This call uses the database to prevent reentrancy.
+    /// The passed header chain MUST be contiguous.
+    pub fn block_headers_insert(
+        &self,
+        headers: &[Header],
+        hooks: &[BatchHook],
+    ) -> Result<(InsertType, BlockHeader, BlockHeader, usize)> {
+        if headers.is_empty() {
+            return Err(TrustDBError::Other(
+                "block headers insert: invalid".to_string(),
+            ));
+        }
+        let batch = self.db.transaction();
+
+        // Ensure we can connect these blockheaders. This also obtains the
+        // starting cumulative difficulty and height.
+        // Iterate over the block headers and skip block headers we already
+        // have in the database.
+        let mut x: usize = 0;
+        for rbh in headers {
+            let hash = rbh.block_hash();
+            if batch
+                .get_pinned_cf(self.get_cf(&HeadersCF), hash)?
+                .is_none()
+            {
+                break;
+            }
+            x += 1;
+        }
+
+        let headers = &headers[x..];
+        if headers.is_empty() {
+            return Err(TrustDBError::Other(
+                "block headers insert: duplicate".to_string(),
+            ));
+        }
+
+        // Ensure contiguity of new headers.
+        let mut prev_bhh = headers[0].prev_blockhash;
+        for (i, rbh) in headers.iter().enumerate() {
+            let hash = rbh.block_hash();
+            if rbh.prev_blockhash != prev_bhh {
+                return Err(TrustDBError::Other(format!(
+                    "header with hash {} at index {} does not connect to \
+					previous header with hash {} at index {}",
+                    hash,
+                    x + i,
+                    prev_bhh,
+                    x + i - 1
+                )));
+            }
+            prev_bhh = hash
+        }
+
+        let mut wbh = &headers[0];
+        let pbh = self.block_header_by_hash(wbh.prev_blockhash)?;
+
+        let bbh: EncodedHeader = batch
+            .get_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY)?
+            .ok_or(TrustDBError::NotFound("best block header".to_string()))?
+            .try_into()
+            .expect("canonical tip data should be valid size");
+
+        let best_bh = BlockHeader::from(&bbh);
+        let fork = wbh.prev_blockhash != best_bh.hash;
+
+        let mut cdiff = pbh.difficulty;
+        let mut height = pbh.height;
+        let mut lbh = best_bh;
+        let mut ebh = bbh;
+
+        for bh in headers {
+            // The first element is skipped, as it is pre-decoded.
+            wbh = bh;
+            let bhash = wbh.block_hash();
+
+            // pre set values because we start with previous value
+            height += 1;
+            cdiff = cdiff
+                .checked_add(U256::from_big_endian(&wbh.work().to_be_bytes()))
+                .ok_or(TrustDBError::Other(
+                    "work accumulation overflow".to_string(),
+                ))?;
+
+            // Store height_hash for future reference
+            let hh_key = TrustDB::height_hash_to_key(height, bhash);
+            if batch
+                .get_pinned_cf(self.get_cf(&HeightHashCF), hh_key)?
+                .is_none()
+            {
+                batch.put_cf(self.get_cf(&HeightHashCF), hh_key, [])?;
+            }
+
+            lbh = BlockHeader {
+                hash: bhash,
+                difficulty: cdiff,
+                header: *bh,
+                height,
+            };
+
+            ebh = (&lbh).into();
+            batch.put_cf(self.get_cf(&HeadersCF), bhash, ebh)?;
+        }
+
+        let mut cbh = &lbh;
+
+        let it: InsertType;
+        if fork {
+            // Insert last height into block headers if the new cumulative
+            // difficulty exceeds the prior difficulty.
+            match cdiff.cmp(&best_bh.difficulty) {
+                Ordering::Less | Ordering::Equal => {
+                    // Extend fork, fork did not overcome difficulty
+                    it = ITForkExtend;
+                    cbh = &best_bh;
+                }
+                Ordering::Greater => {
+                    // pick the right return value based on ancestor
+                    it = ITChainFork;
+                    batch.put_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY, ebh)?;
+                }
+            }
+        } else {
+            // Extend current best tip
+            it = ITChainExtend;
+            batch.put_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY, ebh)?;
+        }
+
+        for hook in hooks {
+            batch.put_cf(self.get_cf(hook.0), hook.1, hook.2)?;
+        }
+
+        batch.commit()?;
+        Ok((it, *cbh, lbh, headers.len()))
+    }
+
+    // TODOs
+    // Caching
+    // Other Tables (missing blocks)
+    // Debug logging
 }
 
 impl Clone for TrustDB {
@@ -262,6 +431,7 @@ impl Clone for TrustDB {
 mod tests {
     use super::*;
     use bitcoin::hashes::Hash;
+    use bitcoin::BlockHash;
     use tempfile::tempdir;
 
     fn new_test_db() -> TrustDB {
@@ -269,20 +439,28 @@ mod tests {
         TrustDB::open(tmp.path()).expect("database should open")
     }
 
-    fn create_test_header(nonce: u32) -> Header {
+    fn create_test_header(parent_hash: BlockHash, nonce: u32) -> Header {
         Header {
             version: bitcoin::blockdata::block::Version::ONE,
-            prev_blockhash: bitcoin::BlockHash::all_zeros(),
+            prev_blockhash: parent_hash,
             merkle_root: bitcoin::TxMerkleNode::all_zeros(),
             time: 12345,
-            bits: bitcoin::CompactTarget::from_consensus(0xd3adb33f),
+            bits: bitcoin::CompactTarget::from_consensus(0x1d00ffff),
             nonce,
         }
     }
 
-    #[test]
-    fn test_open_db() {
-        new_test_db();
+    // Changing the bits can cause an overflow with invalid data, so
+    // this function guarantees you only change them if necessary.
+    fn create_test_header_with_bits(parent_hash: BlockHash, nonce: u32, bits: u32) -> Header {
+        Header {
+            version: bitcoin::blockdata::block::Version::ONE,
+            prev_blockhash: parent_hash,
+            merkle_root: bitcoin::TxMerkleNode::all_zeros(),
+            time: 12345,
+            bits: bitcoin::CompactTarget::from_consensus(bits),
+            nonce,
+        }
     }
 
     #[test]
@@ -345,7 +523,7 @@ mod tests {
 
     #[test]
     fn test_encode_block_header() {
-        let header = create_test_header(1);
+        let header = create_test_header(BlockHash::all_zeros(), 1);
         let bh = &BlockHeader {
             hash: header.block_hash(),
             height: 99999,
@@ -379,7 +557,7 @@ mod tests {
             (99999, U256::from(12345)),
         ];
 
-        let header = create_test_header(1);
+        let header = create_test_header(BlockHash::all_zeros(), 1);
         for (height, difficulty) in test_table {
             let bh = &BlockHeader {
                 hash: header.block_hash(),
@@ -397,9 +575,12 @@ mod tests {
     fn test_height_hash_to_key() {
         // Test with different values
         let test_table = vec![
-            (0, bitcoin::BlockHash::all_zeros()),
-            (u64::MAX, bitcoin::BlockHash::all_zeros()),
-            (12345, create_test_header(1).block_hash()),
+            (0, BlockHash::all_zeros()),
+            (u64::MAX, BlockHash::all_zeros()),
+            (
+                12345,
+                create_test_header(BlockHash::all_zeros(), 1).block_hash(),
+            ),
         ];
 
         for (height, hash) in test_table {
@@ -417,9 +598,12 @@ mod tests {
     #[test]
     fn test_key_to_height_hash() {
         let test_table = vec![
-            (0, bitcoin::BlockHash::all_zeros()),
-            (u64::MAX, bitcoin::BlockHash::all_zeros()),
-            (99999, create_test_header(1).block_hash()),
+            (0, BlockHash::all_zeros()),
+            (u64::MAX, BlockHash::all_zeros()),
+            (
+                99999,
+                create_test_header(BlockHash::all_zeros(), 1).block_hash(),
+            ),
         ];
 
         for (height, hash) in test_table {
@@ -433,7 +617,7 @@ mod tests {
     #[test]
     fn test_block_header_genesis_insert() {
         let db = new_test_db();
-        let header = create_test_header(1);
+        let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 0;
         let diff = U256::from(12345);
 
@@ -461,7 +645,7 @@ mod tests {
     #[test]
     fn test_block_header_genesis_insert_zero_diff() {
         let db = new_test_db();
-        let header = create_test_header(1);
+        let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 0;
         let diff = U256::zero(); // should use header's work
 
@@ -483,7 +667,7 @@ mod tests {
     #[test]
     fn test_block_header_best() {
         let db = new_test_db();
-        let header = create_test_header(1);
+        let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 99999;
         let diff = U256::from(12345);
 
@@ -510,7 +694,7 @@ mod tests {
     #[test]
     fn test_block_header_by_hash() {
         let db = new_test_db();
-        let header = create_test_header(1);
+        let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 99999;
         let diff = U256::from(12345);
 
@@ -535,7 +719,7 @@ mod tests {
         assert_eq!(retrieved_header.hash, header.block_hash());
 
         // check fake hash
-        let fake_hash = bitcoin::BlockHash::hash(&[40u8; 32]);
+        let fake_hash = BlockHash::hash(&[40u8; 32]);
         res = db.block_header_by_hash(fake_hash);
         match res.unwrap_err() {
             TrustDBError::NotFound(_) => (),
@@ -557,7 +741,7 @@ mod tests {
         }
 
         // insert header
-        let header = create_test_header(1);
+        let header = create_test_header(BlockHash::all_zeros(), 1);
         let res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
 
@@ -587,8 +771,8 @@ mod tests {
         let height1 = 500;
         let height2 = 501;
 
-        let header1 = create_test_header(1);
-        let header2 = create_test_header(2);
+        let header1 = create_test_header(BlockHash::all_zeros(), 1);
+        let header2 = create_test_header(BlockHash::all_zeros(), 2);
         let diff = U256::from(12345);
 
         let mut insert = db.block_header_genesis_insert(&header1, height1, diff);
@@ -604,5 +788,245 @@ mod tests {
         headers = db.block_headers_by_height(height2);
         res = headers.unwrap();
         assert_eq!(res.first().unwrap().hash, header2.block_hash());
+    }
+
+    fn insert_block_header(
+        db: &TrustDB,
+        prev_hash: BlockHash,
+        height: u64,
+        nonce: u32,
+    ) -> Result<(BlockHeader, InsertType)> {
+        let header = create_test_header(prev_hash, nonce);
+        let difficulty = U256::from(nonce);
+
+        if prev_hash == BlockHash::all_zeros() {
+            db.block_header_genesis_insert(&header, height, difficulty)?;
+            let block_header = BlockHeader {
+                hash: header.block_hash(),
+                height,
+                header,
+                difficulty,
+            };
+            Ok((block_header, ITChainExtend))
+        } else {
+            let headers = [header];
+            let (insert_type, _, last_inserted, _) = db.block_headers_insert(&headers, &[])?;
+
+            // Return the last inserted header
+            Ok((last_inserted, insert_type))
+        }
+    }
+
+    #[test]
+    fn test_block_headers_insert() {
+        let db = new_test_db();
+        let mut hashes = vec![BlockHash::all_zeros()];
+
+        for i in 0..2 {
+            let (bh, it) = insert_block_header(&db, hashes[i], i as u64, i as u32).unwrap();
+            assert_eq!(
+                it,
+                ITChainExtend,
+                "expected chain extend, got {}",
+                it.as_str()
+            );
+            hashes.push(bh.hash);
+        }
+
+        let (fork_bh, it) = insert_block_header(&db, hashes[1], 1, 100).unwrap();
+        assert_eq!(
+            it,
+            ITForkExtend,
+            "expected fork extend, got {}",
+            it.as_str()
+        );
+
+        let best = db.block_header_best().unwrap();
+        assert_eq!(
+            best.hash, hashes[2],
+            "best hash should be original chain tip"
+        );
+
+        // Make fork canonical
+        let (fork_bh2, it) = insert_block_header(&db, fork_bh.hash, 2, 101).unwrap();
+        assert_eq!(it, ITChainFork, "expected chain fork, got {}", it.as_str());
+
+        let best = db.block_header_best().unwrap();
+        assert_eq!(
+            best.hash, fork_bh2.hash,
+            "best hash should be fork chain tip"
+        );
+    }
+
+    #[test]
+    fn test_block_headers_insert_empty() {
+        let db = new_test_db();
+
+        let headers = [];
+        let res = db.block_headers_insert(&headers, &[]);
+        assert!(res.is_err(), "Expected error for empty headers");
+    }
+
+    #[test]
+    fn test_block_headers_insert_duplicate() {
+        let db = new_test_db();
+
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let headers = [genesis];
+        let res = db.block_headers_insert(&headers, &[]);
+        assert!(res.is_err(), "Expected error for duplicate headers");
+    }
+
+    #[test]
+    fn test_block_headers_insert_missing_parent() {
+        let db = new_test_db();
+
+        let header = create_test_header(bitcoin::hashes::Hash::hash(&[1u8; 32]), 1);
+        let headers = [header];
+        let res = db.block_headers_insert(&headers, &[]);
+        match res {
+            Err(TrustDBError::NotFound(_)) => (),
+            _ => panic!("Expected NotFound error for missing parent"),
+        }
+    }
+
+    #[test]
+    fn test_block_headers_insert_multiple() {
+        let db = new_test_db();
+
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+        let h3 = create_test_header(h2.block_hash(), 3);
+
+        let headers = [h1, h2, h3];
+        let (it, canonical, last, count) = db.block_headers_insert(&headers, &[]).unwrap();
+
+        assert_eq!(it, ITChainExtend);
+        assert_eq!(count, 3);
+        assert_eq!(last.height, 3);
+        assert_eq!(last.hash, h3.block_hash());
+        assert_eq!(canonical.hash, h3.block_hash());
+
+        let best = db.block_header_best().unwrap();
+        assert_eq!(best.hash, h3.block_hash());
+    }
+
+    #[test]
+    fn test_block_headers_insert_fork() {
+        const HEADER_COUNT: usize = 3;
+
+        // Forks from genesis
+        // (headers to add, bits for difficulty control, expected insert type)
+        let test_table = vec![
+            (2, 0x1d010000, ITForkExtend), // lower cumdiff fork
+            (2, 0x1d00ffff, ITForkExtend), // equal cumdiff fork
+            (1, 0x1c00ffff, ITChainFork),  // single header, higher cumdiff
+            (3, 0x1c00ffff, ITChainFork),  // higher cumdiff
+        ];
+
+        for (icount, bits, expected) in test_table {
+            let db = new_test_db();
+
+            // Insert canonical chain with standard difficulty
+            let mut hashes = vec![BlockHash::all_zeros()];
+            for i in 0..HEADER_COUNT {
+                let (bh, _) = insert_block_header(&db, hashes[i], i as u64, 10 + i as u32).unwrap();
+                hashes.push(bh.hash);
+            }
+
+            // Insert fork chain
+            let mut new_hashes = vec![hashes[1]];
+            let mut headers = vec![];
+            for i in 0..icount {
+                let fork = create_test_header_with_bits(new_hashes[i], 1000 + i as u32, bits);
+                new_hashes.push(fork.block_hash());
+                headers.push(fork);
+            }
+
+            let (it, canonical, last, count) = db.block_headers_insert(&headers, &[]).unwrap();
+            assert_eq!(it, expected);
+            assert_eq!(count, icount);
+            assert_eq!(last.hash, *new_hashes.last().unwrap());
+
+            let best = db.block_header_best().unwrap();
+            assert_eq!(canonical.hash, best.hash);
+            match it {
+                ITChainFork => assert_eq!(best.hash, last.hash),
+                ITForkExtend => assert_eq!(best.hash, *hashes.last().unwrap()),
+                _ => panic!("unexpected insert type"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_block_headers_insert_hooks() {
+        let db = new_test_db();
+
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let headers = [h1];
+        let key = b"test_key";
+        let value = b"test_value";
+        let hooks = [(&MetadataCF, key.as_ref(), value.as_ref())];
+
+        let res = db.block_headers_insert(&headers, &hooks);
+        assert!(res.is_ok());
+
+        // Verify hook was applied
+        let retrieved = db.get(&MetadataCF, key);
+        assert!(retrieved.is_ok());
+        assert_eq!(retrieved.unwrap(), value);
+    }
+
+    #[test]
+    fn test_block_headers_insert_partial() {
+        let db = new_test_db();
+
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let headers = [h1];
+        let hooks = vec![];
+        db.block_headers_insert(&headers, &hooks).unwrap();
+
+        let h2 = create_test_header(h1.block_hash(), 2);
+        let headers = [h1, h2];
+
+        let res = db.block_headers_insert(&headers, &hooks);
+        assert!(res.is_ok());
+
+        let (it, _, last, count) = res.unwrap();
+        assert_eq!(it, ITChainExtend);
+        assert_eq!(count, 1);
+        assert_eq!(last.height, 2);
+        assert_eq!(last.hash, h2.block_hash());
+    }
+
+    #[test]
+    fn test_block_headers_insert_non_contiguous() {
+        let db = new_test_db();
+
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let fake_hash = bitcoin::hashes::Hash::hash(&[42u8; 32]);
+        let h2 = create_test_header(fake_hash, 2);
+        let headers = [h1, h2];
+        let res = db.block_headers_insert(&headers, &[]);
+        assert!(res.is_err(), "expected error")
     }
 }
