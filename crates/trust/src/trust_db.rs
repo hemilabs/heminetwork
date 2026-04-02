@@ -3,7 +3,6 @@ use self::TrustDBTable::*;
 use bitcoin::block::Header;
 use bitcoin::consensus::{Decodable, Encodable};
 use bitcoin::hashes::Hash;
-
 use hex::encode;
 use primitive_types::U256;
 use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, OptimisticTransactionDB, Options};
@@ -512,8 +511,8 @@ impl Clone for TrustDB {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcoin::hashes::Hash;
     use bitcoin::BlockHash;
+    use bitcoin::hashes::Hash;
     use tempfile::tempdir;
 
     fn new_test_db() -> TrustDB {
