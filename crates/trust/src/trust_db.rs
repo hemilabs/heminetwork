@@ -90,17 +90,17 @@ impl From<&BlockHeader> for EncodedHeader {
 
 #[derive(Debug, PartialEq)]
 pub enum InsertType {
-    ITChainExtend, // Normal insert, does not require further action.
-    ITChainFork,   // Chain forked, unwind and rewind indexes.
-    ITForkExtend,  // Extended a fork, does not require further action.
+    ChainExtend, // Normal insert, does not require further action.
+    ChainFork,   // Chain forked, unwind and rewind indexes.
+    ForkExtend,  // Extended a fork, does not require further action.
 }
 
 impl InsertType {
     pub fn as_str(&self) -> &str {
         match self {
-            ITChainExtend => "chain extended",
-            ITChainFork => "chain forked",
-            ITForkExtend => "fork extended",
+            ChainExtend => "chain extended",
+            ChainFork => "chain forked",
+            ForkExtend => "fork extended",
         }
     }
 }
@@ -378,10 +378,10 @@ impl TrustDB {
         let mut x: usize = 0;
         for rbh in headers {
             let hash = rbh.block_hash();
-            if batch
+            let missing_hash = batch
                 .get_pinned_cf(self.get_cf(&HeadersCF), hash)?
-                .is_none()
-            {
+                .is_none();
+            if missing_hash {
                 break;
             }
             x += 1;
@@ -443,10 +443,10 @@ impl TrustDB {
 
             // Store height_hash for future reference
             let hh_key = TrustDB::height_hash_to_key(height, bhash);
-            if batch
+            let missing_hh = batch
                 .get_pinned_cf(self.get_cf(&HeightHashCF), hh_key)?
-                .is_none()
-            {
+                .is_none();
+            if missing_hh {
                 batch.put_cf(self.get_cf(&HeightHashCF), hh_key, [])?;
             }
 
@@ -470,18 +470,18 @@ impl TrustDB {
             match cdiff.cmp(&best_bh.difficulty) {
                 Ordering::Less | Ordering::Equal => {
                     // Extend fork, fork did not overcome difficulty
-                    it = ITForkExtend;
+                    it = ForkExtend;
                     cbh = &best_bh;
                 }
                 Ordering::Greater => {
                     // pick the right return value based on ancestor
-                    it = ITChainFork;
+                    it = ChainFork;
                     batch.put_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY, ebh)?;
                 }
             }
         } else {
             // Extend current best tip
-            it = ITChainExtend;
+            it = ChainExtend;
             batch.put_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY, ebh)?;
         }
 
@@ -972,7 +972,7 @@ mod tests {
                 header,
                 difficulty,
             };
-            Ok((block_header, ITChainExtend))
+            Ok((block_header, ChainExtend))
         } else {
             let headers = [header];
             let (insert_type, _, last_inserted, _) = db.block_headers_insert(&headers, &[])?;
@@ -991,7 +991,7 @@ mod tests {
             let (bh, it) = insert_block_header(&db, hashes[i], i as u64, i as u32).unwrap();
             assert_eq!(
                 it,
-                ITChainExtend,
+                ChainExtend,
                 "expected chain extend, got {}",
                 it.as_str()
             );
@@ -999,12 +999,7 @@ mod tests {
         }
 
         let (fork_bh, it) = insert_block_header(&db, hashes[1], 1, 100).unwrap();
-        assert_eq!(
-            it,
-            ITForkExtend,
-            "expected fork extend, got {}",
-            it.as_str()
-        );
+        assert_eq!(it, ForkExtend, "expected fork extend, got {}", it.as_str());
 
         let best = db.block_header_best().unwrap();
         assert_eq!(
@@ -1014,7 +1009,7 @@ mod tests {
 
         // Make fork canonical
         let (fork_bh2, it) = insert_block_header(&db, fork_bh.hash, 2, 101).unwrap();
-        assert_eq!(it, ITChainFork, "expected chain fork, got {}", it.as_str());
+        assert_eq!(it, ChainFork, "expected chain fork, got {}", it.as_str());
 
         let best = db.block_header_best().unwrap();
         assert_eq!(
@@ -1073,7 +1068,7 @@ mod tests {
         let headers = [h1, h2, h3];
         let (it, canonical, last, count) = db.block_headers_insert(&headers, &[]).unwrap();
 
-        assert_eq!(it, ITChainExtend);
+        assert_eq!(it, ChainExtend);
         assert_eq!(count, 3);
         assert_eq!(last.height, 3);
         assert_eq!(last.hash, h3.block_hash());
@@ -1090,10 +1085,10 @@ mod tests {
         // Forks from genesis
         // (headers to add, bits for difficulty control, expected insert type)
         let test_table = vec![
-            (2, 0x1d010000, ITForkExtend), // lower cumdiff fork
-            (2, 0x1d00ffff, ITForkExtend), // equal cumdiff fork
-            (1, 0x1c00ffff, ITChainFork),  // single header, higher cumdiff
-            (3, 0x1c00ffff, ITChainFork),  // higher cumdiff
+            (2, 0x1d010000, ForkExtend), // lower cumdiff fork
+            (2, 0x1d00ffff, ForkExtend), // equal cumdiff fork
+            (1, 0x1c00ffff, ChainFork),  // single header, higher cumdiff
+            (3, 0x1c00ffff, ChainFork),  // higher cumdiff
         ];
 
         for (icount, bits, expected) in test_table {
@@ -1123,8 +1118,8 @@ mod tests {
             let best = db.block_header_best().unwrap();
             assert_eq!(canonical.hash, best.hash);
             match it {
-                ITChainFork => assert_eq!(best.hash, last.hash),
-                ITForkExtend => assert_eq!(best.hash, *hashes.last().unwrap()),
+                ChainFork => assert_eq!(best.hash, last.hash),
+                ForkExtend => assert_eq!(best.hash, *hashes.last().unwrap()),
                 _ => panic!("unexpected insert type"),
             }
         }
@@ -1173,7 +1168,7 @@ mod tests {
         assert!(res.is_ok());
 
         let (it, _, last, count) = res.unwrap();
-        assert_eq!(it, ITChainExtend);
+        assert_eq!(it, ChainExtend);
         assert_eq!(count, 1);
         assert_eq!(last.height, 2);
         assert_eq!(last.hash, h2.block_hash());
