@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix bug that led to early exit during Daemon configuration parsing ([#885](https://github.com/hemilabs/heminetwork/pull/885))
 
+- Fix bug that allowed invalid headers to be indexed ([#950](https://github.com/hemilabs/heminetwork/pull/950))
+
 ## [v2.0.0]
 
 ### Breaking Changes
