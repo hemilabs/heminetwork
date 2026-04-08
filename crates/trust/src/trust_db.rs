@@ -8,9 +8,11 @@ use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, OptimisticTransactionDB, 
 use std::path::Path;
 use std::slice::Iter;
 use std::sync::Arc;
+use std::sync::Mutex;
 use thiserror::Error;
 
 const BHS_CANONICAL_TIP_KEY: &str = "canonicaltip";
+const BHS_GENESIS_KEY: &str = "genesis";
 
 #[derive(Error, Debug)]
 pub enum TrustDBError {
@@ -20,6 +22,10 @@ pub enum TrustDBError {
     NotFound(String),
     #[error("Duplicate key found: {0}")]
     Duplicate(String),
+    #[error("Not a genesis block, prev block hash: {0}")]
+    NotAGenesisBlockHeader(String),
+    #[error("Genesis already exists with block hash: {0}")]
+    GenesisExists(String),
 }
 
 pub type Result<T> = std::result::Result<T, TrustDBError>;
@@ -101,6 +107,7 @@ impl TrustDBTable {
 
 pub struct TrustDB {
     db: Arc<OptimisticTransactionDB>,
+    genesis_block_mtx: Mutex<bitcoin::BlockHash>,
 }
 
 impl TrustDB {
@@ -123,7 +130,10 @@ impl TrustDB {
             cfs.push(ColumnFamilyDescriptor::new(b.as_str(), cf_opts));
         }
         let db = OptimisticTransactionDB::open_cf_descriptors(&opts, path, cfs)?;
-        Ok(Self { db: Arc::new(db) })
+        Ok(Self {
+            db: Arc::new(db),
+            genesis_block_mtx: Mutex::new(bitcoin::BlockHash::all_zeros()),
+        })
     }
 
     fn get_cf(&self, cf: &TrustDBTable) -> ColumnFamilyRef<'_> {
@@ -187,14 +197,79 @@ impl TrustDB {
         height: u64,
         diff: U256,
     ) -> Result<()> {
+        // ensure that the header being inserted is indeed a genesis block;
+        // ensure that it has no parent
+        if header.prev_blockhash != bitcoin::BlockHash::all_zeros() {
+            return Err(TrustDBError::NotAGenesisBlockHeader(
+                header.prev_blockhash.to_string(),
+            ));
+        }
+
+        // since we read, check validity, then write we have to protect against
+        // a race condition here.  these are our steps that are not thread-safe:
+        // 1. check if a genesis block exists
+        // 2. if not, write a new genesis block to the db
+        //
+        // if two threads were to perform these steps at the same time we may
+        // get: 1 1 2 2.  if this is the case then we would insert two genesis
+        // blocks
+        let mut locked_genesis_block_hash = self.genesis_block_mtx.lock().unwrap();
+
         let bhash = header.block_hash();
         if self.has(&HeadersCF, bhash) {
             return Err(TrustDBError::Duplicate(bhash.to_string()));
         }
+
+        // ensure that a different genesis block does not exist in the db
+        // with a few strategies
+
+        // 1. if we have the existing genesis block hash stored in the mutex,
+        // then we know we have an existing genesis block inserted
+        if *locked_genesis_block_hash != bitcoin::BlockHash::all_zeros() {
+            return Err(TrustDBError::GenesisExists(
+                locked_genesis_block_hash.to_string(),
+            ));
+        }
+
+        // 2. this may be our first time entering this function, so the mutex
+        // would not have a block hash stored within it, check the database
+        let existing_genesis = self.get(&HeadersCF, BHS_GENESIS_KEY);
+        match existing_genesis {
+            Err(err) => match err {
+                // if we could not find a genesis block, we're ok to continue
+                // and insert one
+                TrustDBError::NotFound(_) => {
+                    // no-op
+                }
+
+                // any other error should cause a return
+                err => return Err(err),
+            },
+            Ok(eg) => {
+                // we found an existing genesis block, prepare it to be returned
+                // in a descriptive error
+                let existing_genesis_block_header_encoded: EncodedHeader = eg
+                    .try_into()
+                    .expect("genesis block header unexpected size/format");
+
+                let existing_genesis_block_header =
+                    BlockHeader::from(&existing_genesis_block_header_encoded);
+
+                // since we found an existing genesis, store its hash in the
+                // mutex for future calls if needed
+                *locked_genesis_block_hash = existing_genesis_block_header.hash;
+
+                return Err(TrustDBError::GenesisExists(
+                    existing_genesis_block_header.hash.to_string(),
+                ));
+            }
+        }
+
         let mut cdiff = U256::from_big_endian(&header.work().to_be_bytes());
         if !diff.is_zero() {
             cdiff = diff;
         }
+
         let bh_batch = self.db.transaction();
 
         let hh_key = TrustDB::height_hash_to_key(height, bhash);
@@ -210,8 +285,14 @@ impl TrustDB {
         let ebh: EncodedHeader = ebh.into();
         bh_batch.put_cf(self.get_cf(&HeadersCF), bhash, ebh)?;
         bh_batch.put_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY, ebh)?;
+        bh_batch.put_cf(self.get_cf(&HeadersCF), BHS_GENESIS_KEY, ebh)?;
 
         bh_batch.commit()?;
+
+        // if we have successfully inserted a genesis block, store it in the
+        // mutex
+        *locked_genesis_block_hash = header.block_hash();
+
         Ok(())
     }
 
@@ -254,6 +335,7 @@ impl Clone for TrustDB {
     fn clone(&self) -> Self {
         TrustDB {
             db: Arc::clone(&self.db),
+            genesis_block_mtx: Mutex::new(bitcoin::BlockHash::all_zeros()),
         }
     }
 }
@@ -588,14 +670,25 @@ mod tests {
         let height2 = 501;
 
         let header1 = create_test_header(1);
-        let header2 = create_test_header(2);
+        let mut header2 = create_test_header(2);
+        header2.prev_blockhash = header1.block_hash();
         let diff = U256::from(12345);
 
-        let mut insert = db.block_header_genesis_insert(&header1, height1, diff);
+        let insert = db.block_header_genesis_insert(&header1, height1, diff);
         assert!(insert.is_ok());
 
-        insert = db.block_header_genesis_insert(&header2, height2, diff);
-        assert!(insert.is_ok());
+        let header2_to_encode = &BlockHeader {
+            hash: header2.block_hash(),
+            header: header2,
+            difficulty: diff,
+            height: height2,
+        };
+
+        let hh_key = TrustDB::height_hash_to_key(height2, header2.block_hash());
+        let ebh: EncodedHeader = header2_to_encode.into();
+
+        db.put(&HeightHashCF, hh_key, []).unwrap();
+        db.put(&HeadersCF, header2_to_encode.hash, ebh).unwrap();
 
         let mut headers = db.block_headers_by_height(height1);
         let mut res = headers.unwrap();
@@ -604,5 +697,78 @@ mod tests {
         headers = db.block_headers_by_height(height2);
         res = headers.unwrap();
         assert_eq!(res.first().unwrap().hash, header2.block_hash());
+    }
+
+    #[test]
+    fn test_block_headers_insert_multiple_different_genesis_blocks() {
+        let db = new_test_db();
+
+        let correct_genesis = create_test_header(0);
+        db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
+            .unwrap();
+
+        let incorrect_genesis = create_test_header(2);
+        let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
+
+        match res {
+            Err(TrustDBError::GenesisExists(val)) => {
+                assert_eq!(val, correct_genesis.block_hash().to_string());
+            }
+            Err(e) => {
+                panic!("unexpected error: {}", e)
+            }
+            _ => panic!("expected an error"),
+        }
+    }
+
+    #[test]
+    fn test_block_headers_insert_multiple_different_genesis_blocks_skip_mtx() {
+        let db = new_test_db();
+
+        let correct_genesis = create_test_header(0);
+        db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
+            .unwrap();
+
+        {
+            // unset mutex to ensure that we hit db, do this in its own scope
+            // to unset the mutex before we call block_header_genesis_insert
+            // again
+            let mut locked = db.genesis_block_mtx.lock().unwrap();
+            if *locked == bitcoin::BlockHash::all_zeros() {
+                panic!("mtx value should have been set");
+            }
+            *locked = bitcoin::BlockHash::all_zeros();
+        }
+
+        let incorrect_genesis = create_test_header(2);
+        let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
+
+        match res {
+            Err(TrustDBError::GenesisExists(val)) => {
+                assert_eq!(val, correct_genesis.block_hash().to_string());
+            }
+            Err(e) => {
+                panic!("unexpected error: {}", e)
+            }
+            _ => panic!("expected an error"),
+        }
+    }
+
+    #[test]
+    fn test_block_headers_insert_genesis_that_is_not_a_genesis_block() {
+        let db = new_test_db();
+
+        let mut genesis = create_test_header(0);
+        genesis.prev_blockhash = bitcoin::BlockHash::hash(&[1, 2, 3]);
+        let res = db.block_header_genesis_insert(&genesis, 0, U256::from(1));
+        match res {
+            Err(TrustDBError::NotAGenesisBlockHeader(hash)) => {
+                assert_eq!(hash, genesis.prev_blockhash.to_string());
+            }
+            Err(e) => {
+                panic!("unexpected error: {}", e)
+            }
+            _ => panic!("expected an error"),
+        }
     }
 }
