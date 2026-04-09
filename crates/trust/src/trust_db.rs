@@ -24,8 +24,6 @@ pub enum TrustDBError {
     NotFound(String),
     #[error("Duplicate key found: {0}")]
     Duplicate(String),
-    #[error("Not a genesis block, prev block hash: {0}")]
-    NotAGenesisBlockHeader(String),
     #[error("Genesis already exists with block hash: {0}")]
     GenesisExists(String),
     #[error("{0}")]
@@ -220,14 +218,6 @@ impl TrustDB {
         height: u64,
         diff: U256,
     ) -> Result<()> {
-        // ensure that the header being inserted is indeed a genesis block;
-        // ensure that it has no parent
-        if header.prev_blockhash != bitcoin::BlockHash::all_zeros() {
-            return Err(TrustDBError::NotAGenesisBlockHeader(
-                header.prev_blockhash.to_string(),
-            ));
-        }
-
         // since we read, check validity, then write we have to protect against
         // a race condition here.  these are our steps that are not thread-safe:
         // 1. check if a genesis block exists
@@ -938,21 +928,24 @@ mod tests {
     }
 
     #[test]
-    fn test_block_headers_insert_genesis_that_is_not_a_genesis_block() {
+    fn test_block_headers_insert_effective_genesis_block() {
         let db = new_test_db();
 
         let mut genesis = create_test_header(BlockHash::all_zeros(), 0);
         genesis.prev_blockhash = bitcoin::BlockHash::hash(&[1, 2, 3]);
-        let res = db.block_header_genesis_insert(&genesis, 0, U256::from(1));
-        match res {
-            Err(TrustDBError::NotAGenesisBlockHeader(hash)) => {
-                assert_eq!(hash, genesis.prev_blockhash.to_string());
-            }
-            Err(e) => {
-                panic!("unexpected error: {}", e)
-            }
-            _ => panic!("expected an error"),
-        }
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let res = db.block_header_by_hash(genesis.block_hash()).unwrap();
+
+        let genesis_block_header = BlockHeader {
+            hash: genesis.block_hash(),
+            height: 0,
+            difficulty: U256::from(1),
+            header: genesis,
+        };
+
+        assert_eq!(res, genesis_block_header);
     }
 
     fn insert_block_header(
