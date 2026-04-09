@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork/v2
 
 go 1.26
 
-toolchain go1.26.1
+toolchain go1.26.2
 
 require (
 	codeberg.org/miekg/dns v0.5.26
@@ -23,7 +23,6 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
 	github.com/prometheus/client_golang v1.23.2
-	github.com/sethvargo/go-retry v0.3.0
 	github.com/shirou/gopsutil/v4 v4.26.2
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.41.0
