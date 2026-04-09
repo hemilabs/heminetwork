@@ -520,27 +520,27 @@ mod tests {
         TrustDB::open(tmp.path()).expect("database should open")
     }
 
-    fn create_test_header(parent_hash: BlockHash, nonce: u32) -> Header {
+    fn create_test_header(parent_hash: BlockHash, n: u32) -> Header {
         Header {
             version: bitcoin::blockdata::block::Version::ONE,
             prev_blockhash: parent_hash,
             merkle_root: bitcoin::TxMerkleNode::all_zeros(),
             time: 12345,
             bits: bitcoin::CompactTarget::from_consensus(0x1d00ffff),
-            nonce,
+            nonce: n,
         }
     }
 
     // Changing the bits can cause an overflow with invalid data, so
     // this function guarantees you only change them if necessary.
-    fn create_test_header_with_bits(parent_hash: BlockHash, nonce: u32, bits: u32) -> Header {
+    fn create_test_header_with_bits(parent_hash: BlockHash, n: u32, bits: u32) -> Header {
         Header {
             version: bitcoin::blockdata::block::Version::ONE,
             prev_blockhash: parent_hash,
             merkle_root: bitcoin::TxMerkleNode::all_zeros(),
             time: 12345,
             bits: bitcoin::CompactTarget::from_consensus(bits),
-            nonce,
+            nonce: n,
         }
     }
 
@@ -959,10 +959,10 @@ mod tests {
         db: &TrustDB,
         prev_hash: BlockHash,
         height: u64,
-        nonce: u32,
+        n: u32,
     ) -> Result<(BlockHeader, InsertType)> {
-        let header = create_test_header(prev_hash, nonce);
-        let difficulty = U256::from(nonce);
+        let header = create_test_header(prev_hash, n);
+        let difficulty = U256::from(n);
 
         if prev_hash == BlockHash::all_zeros() {
             db.block_header_genesis_insert(&header, height, difficulty)?;
