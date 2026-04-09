@@ -24,12 +24,12 @@ pub enum TrustDBError {
     NotFound(String),
     #[error("Duplicate key found: {0}")]
     Duplicate(String),
-    #[error("{0}")]
-    Other(String),
     #[error("Not a genesis block, prev block hash: {0}")]
     NotAGenesisBlockHeader(String),
     #[error("Genesis already exists with block hash: {0}")]
     GenesisExists(String),
+    #[error("{0}")]
+    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, TrustDBError>;
@@ -852,8 +852,8 @@ mod tests {
         let height1 = 500;
         let height2 = 501;
 
-        let header1 = create_test_header(1);
-        let mut header2 = create_test_header(2);
+        let header1 = create_test_header(BlockHash::all_zeros(), 1);
+        let mut header2 = create_test_header(BlockHash::all_zeros(), 2);
         header2.prev_blockhash = header1.block_hash();
         let diff = U256::from(12345);
 
@@ -886,11 +886,11 @@ mod tests {
     fn test_block_headers_insert_multiple_different_genesis_blocks() {
         let db = new_test_db();
 
-        let correct_genesis = create_test_header(0);
+        let correct_genesis = create_test_header(BlockHash::all_zeros(),0);
         db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
             .unwrap();
 
-        let incorrect_genesis = create_test_header(2);
+        let incorrect_genesis = create_test_header(BlockHash::all_zeros(),2);
         let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
 
         match res {
@@ -908,7 +908,7 @@ mod tests {
     fn test_block_headers_insert_multiple_different_genesis_blocks_skip_mtx() {
         let db = new_test_db();
 
-        let correct_genesis = create_test_header(0);
+        let correct_genesis = create_test_header(BlockHash::all_zeros(),0);
         db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
             .unwrap();
 
@@ -923,7 +923,7 @@ mod tests {
             *locked = bitcoin::BlockHash::all_zeros();
         }
 
-        let incorrect_genesis = create_test_header(2);
+        let incorrect_genesis = create_test_header(BlockHash::all_zeros(),2);
         let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
 
         match res {
@@ -941,7 +941,7 @@ mod tests {
     fn test_block_headers_insert_genesis_that_is_not_a_genesis_block() {
         let db = new_test_db();
 
-        let mut genesis = create_test_header(0);
+        let mut genesis = create_test_header(BlockHash::all_zeros(),0);
         genesis.prev_blockhash = bitcoin::BlockHash::hash(&[1, 2, 3]);
         let res = db.block_header_genesis_insert(&genesis, 0, U256::from(1));
         match res {
