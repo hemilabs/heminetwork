@@ -1691,7 +1691,11 @@ mod tests {
         db.put(&HeightHashCF, hh_key, []).unwrap();
 
         let result = db.block_headers_remove(&[orphan], &genesis, &[]);
-        assert!(result.is_err(), "expected error");
+        match result {
+            Err(TrustDBError::NotFound(_)) => (),
+            Err(e) => panic!("unexpected error {e}"),
+            _ => panic!("expected error"),
+        }
     }
 
     #[test]
