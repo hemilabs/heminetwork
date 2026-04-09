@@ -886,11 +886,11 @@ mod tests {
     fn test_block_headers_insert_multiple_different_genesis_blocks() {
         let db = new_test_db();
 
-        let correct_genesis = create_test_header(BlockHash::all_zeros(),0);
+        let correct_genesis = create_test_header(BlockHash::all_zeros(), 0);
         db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
             .unwrap();
 
-        let incorrect_genesis = create_test_header(BlockHash::all_zeros(),2);
+        let incorrect_genesis = create_test_header(BlockHash::all_zeros(), 2);
         let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
 
         match res {
@@ -908,7 +908,7 @@ mod tests {
     fn test_block_headers_insert_multiple_different_genesis_blocks_skip_mtx() {
         let db = new_test_db();
 
-        let correct_genesis = create_test_header(BlockHash::all_zeros(),0);
+        let correct_genesis = create_test_header(BlockHash::all_zeros(), 0);
         db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
             .unwrap();
 
@@ -923,7 +923,7 @@ mod tests {
             *locked = bitcoin::BlockHash::all_zeros();
         }
 
-        let incorrect_genesis = create_test_header(BlockHash::all_zeros(),2);
+        let incorrect_genesis = create_test_header(BlockHash::all_zeros(), 2);
         let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
 
         match res {
@@ -941,7 +941,7 @@ mod tests {
     fn test_block_headers_insert_genesis_that_is_not_a_genesis_block() {
         let db = new_test_db();
 
-        let mut genesis = create_test_header(BlockHash::all_zeros(),0);
+        let mut genesis = create_test_header(BlockHash::all_zeros(), 0);
         genesis.prev_blockhash = bitcoin::BlockHash::hash(&[1, 2, 3]);
         let res = db.block_header_genesis_insert(&genesis, 0, U256::from(1));
         match res {
