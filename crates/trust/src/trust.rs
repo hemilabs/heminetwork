@@ -1,9 +1,9 @@
-use crate::trust_db::{TrustDB, TrustDBError, TrustDBTable::MetadataCF};
+use crate::trust_db::{
+    DB_METADATA_KEY_UPSTREAM_STATE_ID, TrustDB, TrustDBError, TrustDBTable::MetadataCF,
+};
 use bitcoin::Network;
 use std::path::Path;
 use thiserror::Error;
-
-static DB_METADATA_KEY_UPSTREAM_STATE_ID: &str = "upstream_state_id";
 
 #[derive(Error, Debug)]
 pub enum TrustError {
@@ -62,13 +62,7 @@ impl Trust {
     }
 
     pub fn set_upstream_state_id(&self, upstream_state_id: &[u8; 32]) {
-        self.db
-            .put(
-                &MetadataCF,
-                DB_METADATA_KEY_UPSTREAM_STATE_ID,
-                upstream_state_id,
-            )
-            .expect("could not insert into metadata table: {e}")
+        self.db.set_upstream_state_id(upstream_state_id);
     }
 
     pub fn get_upstream_state_id(&self) -> Result<[u8; 32]> {
@@ -212,14 +206,7 @@ mod tests {
         let cfg = TrustConfig::new_default_config(tmp.unwrap());
         let trust = Trust::new(cfg).unwrap();
 
-        trust
-            .db
-            .put(
-                &MetadataCF,
-                DB_METADATA_KEY_UPSTREAM_STATE_ID,
-                b"this_is_a_test_for_this_test_yes",
-            )
-            .unwrap();
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test_yes");
 
         match trust.get_upstream_state_id() {
             Ok(u) => assert_eq!(u, *b"this_is_a_test_for_this_test_yes"),
@@ -236,23 +223,9 @@ mod tests {
         let cfg = TrustConfig::new_default_config(tmp.unwrap());
         let trust = Trust::new(cfg).unwrap();
 
-        trust
-            .db
-            .put(
-                &MetadataCF,
-                DB_METADATA_KEY_UPSTREAM_STATE_ID,
-                b"this_is_a_test_for_this_test_yes",
-            )
-            .unwrap();
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test_yes");
 
-        trust
-            .db
-            .put(
-                &MetadataCF,
-                DB_METADATA_KEY_UPSTREAM_STATE_ID,
-                b"this_is_a_test_for_this_test____",
-            )
-            .unwrap();
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test____");
 
         match trust.get_upstream_state_id() {
             Ok(u) => assert_eq!(u, *b"this_is_a_test_for_this_test____"),

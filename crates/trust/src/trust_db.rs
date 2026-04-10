@@ -16,6 +16,7 @@ use thiserror::Error;
 
 const BHS_CANONICAL_TIP_KEY: &str = "canonicaltip";
 const BHS_GENESIS_KEY: &str = "genesis";
+pub static DB_METADATA_KEY_UPSTREAM_STATE_ID: &str = "upstream_state_id";
 
 #[derive(Error, Debug)]
 pub enum TrustDBError {
@@ -152,7 +153,6 @@ pub type BatchHook<'a> = (&'a TrustDBTable, &'a [u8], &'a [u8]);
 
 pub struct TrustDB {
     db: Arc<OptimisticTransactionDB>,
-    genesis_block_mtx: Mutex<bitcoin::BlockHash>,
     update_mtx: Arc<Mutex<()>>,
 }
 
@@ -178,7 +178,6 @@ impl TrustDB {
         let db = OptimisticTransactionDB::open_cf_descriptors(&opts, path, cfs)?;
         Ok(Self {
             db: Arc::new(db),
-            genesis_block_mtx: Mutex::new(bitcoin::BlockHash::all_zeros()),
             update_mtx: Arc::new(Mutex::new(())),
         })
     }
@@ -189,7 +188,7 @@ impl TrustDB {
             .unwrap_or_else(|| panic!("CF '{}' must exist after successful open", cf.as_str()))
     }
 
-    pub fn put<K, V>(&self, cf: &TrustDBTable, key: K, value: V) -> Result<()>
+    fn put<K, V>(&self, cf: &TrustDBTable, key: K, value: V) -> Result<()>
     where
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
@@ -207,7 +206,11 @@ impl TrustDB {
         Err(TrustDBError::NotFound(encode(key_ref)))
     }
 
-    pub fn del<K: AsRef<[u8]>>(&self, cf: &TrustDBTable, key: K) -> Result<()> {
+    // we use this function only in tests at the time of writing this,
+    // so rust thinks it's "unused".  allow it to be "unused" (even though
+    // it is used) for now
+    #[allow(unused)]
+    fn del<K: AsRef<[u8]>>(&self, cf: &TrustDBTable, key: K) -> Result<()> {
         self.db.delete_cf(self.get_cf(cf), key.as_ref())?;
         Ok(())
     }
@@ -238,6 +241,17 @@ impl TrustDB {
         (height, hash)
     }
 
+    pub fn set_upstream_state_id(&self, upstream_state_id: &[u8; 32]) {
+        let _lock = self.update_mtx.lock().unwrap();
+
+        self.put(
+            &MetadataCF,
+            DB_METADATA_KEY_UPSTREAM_STATE_ID,
+            upstream_state_id,
+        )
+        .expect("could not insert into metadata table: {e}")
+    }
+
     pub fn block_header_genesis_insert(
         &self,
         header: &Header,
@@ -252,25 +266,14 @@ impl TrustDB {
         // if two threads were to perform these steps at the same time we may
         // get: 1 1 2 2.  if this is the case then we would insert two genesis
         // blocks
-        let mut locked_genesis_block_hash = self.genesis_block_mtx.lock().unwrap();
+        let _lock = self.update_mtx.lock().unwrap();
 
         let bhash = header.block_hash();
         if self.has(&HeadersCF, bhash) {
             return Err(TrustDBError::Duplicate(bhash.to_string()));
         }
 
-        // ensure that a different genesis block does not exist in the db
-        // with a few strategies
-
-        // 1. if we have the existing genesis block hash stored in the mutex,
-        // then we know we have an existing genesis block inserted
-        if *locked_genesis_block_hash != bitcoin::BlockHash::all_zeros() {
-            return Err(TrustDBError::GenesisExists(
-                locked_genesis_block_hash.to_string(),
-            ));
-        }
-
-        // 2. this may be our first time entering this function, so the mutex
+        // this may be our first time entering this function, so the mutex
         // would not have a block hash stored within it, check the database
         let existing_genesis = self.get(&HeadersCF, BHS_GENESIS_KEY);
         match existing_genesis {
@@ -293,10 +296,6 @@ impl TrustDB {
 
                 let existing_genesis_block_header =
                     BlockHeader::from(&existing_genesis_block_header_encoded);
-
-                // since we found an existing genesis, store its hash in the
-                // mutex for future calls if needed
-                *locked_genesis_block_hash = existing_genesis_block_header.hash;
 
                 return Err(TrustDBError::GenesisExists(
                     existing_genesis_block_header.hash.to_string(),
@@ -327,10 +326,6 @@ impl TrustDB {
         bh_batch.put_cf(self.get_cf(&HeadersCF), BHS_GENESIS_KEY, ebh)?;
 
         bh_batch.commit()?;
-
-        // if we have successfully inserted a genesis block, store it in the
-        // mutex
-        *locked_genesis_block_hash = header.block_hash();
 
         Ok(())
     }
@@ -922,7 +917,6 @@ impl Clone for TrustDB {
     fn clone(&self) -> Self {
         TrustDB {
             db: Arc::clone(&self.db),
-            genesis_block_mtx: Mutex::new(bitcoin::BlockHash::all_zeros()),
             update_mtx: Arc::clone(&self.update_mtx),
         }
     }
@@ -1311,39 +1305,6 @@ mod tests {
         let correct_genesis = create_test_header(BlockHash::all_zeros(), 0);
         db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
             .unwrap();
-
-        let incorrect_genesis = create_test_header(BlockHash::all_zeros(), 2);
-        let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
-
-        match res {
-            Err(TrustDBError::GenesisExists(val)) => {
-                assert_eq!(val, correct_genesis.block_hash().to_string());
-            }
-            Err(e) => {
-                panic!("unexpected error: {}", e)
-            }
-            _ => panic!("expected an error"),
-        }
-    }
-
-    #[test]
-    fn test_block_headers_insert_multiple_different_genesis_blocks_skip_mtx() {
-        let db = new_test_db();
-
-        let correct_genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
-            .unwrap();
-
-        {
-            // unset mutex to ensure that we hit db, do this in its own scope
-            // to unset the mutex before we call block_header_genesis_insert
-            // again
-            let mut locked = db.genesis_block_mtx.lock().unwrap();
-            if *locked == bitcoin::BlockHash::all_zeros() {
-                panic!("mtx value should have been set");
-            }
-            *locked = bitcoin::BlockHash::all_zeros();
-        }
 
         let incorrect_genesis = create_test_header(BlockHash::all_zeros(), 2);
         let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
