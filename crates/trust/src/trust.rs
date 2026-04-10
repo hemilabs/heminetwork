@@ -3,6 +3,7 @@ use crate::trust_db::{
 };
 use bitcoin::Network;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -40,7 +41,7 @@ impl TrustConfig {
 // XXX remove when fields are used
 #[allow(dead_code)]
 pub struct Trust {
-    db: TrustDB,
+    db: Arc<TrustDB>,
     cfg: TrustConfig,
     network: Network,
 }

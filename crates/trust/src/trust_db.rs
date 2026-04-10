@@ -10,8 +10,7 @@ use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, OptimisticTransactionDB, 
 use std::cmp::Ordering;
 use std::path::Path;
 use std::slice::Iter;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 const BHS_CANONICAL_TIP_KEY: &str = "canonicaltip";
@@ -152,12 +151,12 @@ impl TrustDBTable {
 pub type BatchHook<'a> = (&'a TrustDBTable, &'a [u8], &'a [u8]);
 
 pub struct TrustDB {
-    db: Arc<OptimisticTransactionDB>,
-    update_mtx: Arc<Mutex<()>>,
+    db: OptimisticTransactionDB,
+    update_mtx: Mutex<()>,
 }
 
 impl TrustDB {
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Arc<Self>> {
         let path = path.as_ref();
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -176,10 +175,10 @@ impl TrustDB {
             cfs.push(ColumnFamilyDescriptor::new(b.as_str(), cf_opts));
         }
         let db = OptimisticTransactionDB::open_cf_descriptors(&opts, path, cfs)?;
-        Ok(Self {
-            db: Arc::new(db),
-            update_mtx: Arc::new(Mutex::new(())),
-        })
+        Ok(Arc::new(Self {
+            db,
+            update_mtx: Mutex::new(()),
+        }))
     }
 
     fn get_cf(&self, cf: &TrustDBTable) -> ColumnFamilyRef<'_> {
@@ -842,7 +841,7 @@ impl TrustDB {
                     if to_check.header.prev_blockhash == tip_after_removal_hash {
                         // Expected tip has children, so cannot be the actual tip.
                         return Err(TrustDBError::InvalidTip(
-                            "block headers remove: passed in 
+                            "block headers remove: passed in \
                             tip after removal has children"
                                 .to_string(),
                         ));
@@ -913,15 +912,6 @@ impl TrustDB {
     // Debug logging
 }
 
-impl Clone for TrustDB {
-    fn clone(&self) -> Self {
-        TrustDB {
-            db: Arc::clone(&self.db),
-            update_mtx: Arc::clone(&self.update_mtx),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::vec;
@@ -931,7 +921,7 @@ mod tests {
     use bitcoin::hashes::Hash;
     use tempfile::tempdir;
 
-    fn new_test_db() -> TrustDB {
+    fn new_test_db() -> Arc<TrustDB> {
         let tmp = tempdir().expect("temp dir should have been created");
         TrustDB::open(tmp.path()).expect("database should open")
     }
@@ -1849,7 +1839,7 @@ mod tests {
 
         const NUM_THREADS: usize = 8;
 
-        let db = Arc::new(new_test_db());
+        let db = new_test_db();
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
         db.block_header_genesis_insert(&genesis, 0, U256::from(1))
             .unwrap();
@@ -1902,7 +1892,7 @@ mod tests {
 
         const NUM_THREADS: usize = 8;
 
-        let db = Arc::new(new_test_db());
+        let db = new_test_db();
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
         db.block_header_genesis_insert(&genesis, 0, U256::from(1))
             .unwrap();
@@ -1954,7 +1944,7 @@ mod tests {
         use std::sync::{Arc, Barrier};
         use std::thread;
 
-        let db = Arc::new(new_test_db());
+        let db = new_test_db();
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
         db.block_header_genesis_insert(&genesis, 0, U256::from(1))
             .unwrap();
@@ -1977,7 +1967,7 @@ mod tests {
 
         let remove = thread::spawn(move || {
             bc_remove.wait();
-            db_remove.block_headers_remove(&[h2], &genesis, &[])
+            db_remove.block_headers_remove(&[h2], &h1, &[])
         });
 
         // Insertion
@@ -1996,16 +1986,31 @@ mod tests {
             match insert_res {
                 Ok(_) => panic!("expected failed insertion"),
                 Err(TrustDBError::NotFound(_)) => (),
-                Err(e) => panic!("unexpected insertion error {e}"),
+                Err(e) => panic!("unexpected insertion error: {e}"),
             }
         } else if insert_res.is_ok() {
             match remove_res {
                 Ok(_) => panic!("expected failed removal"),
                 Err(TrustDBError::DanglingChild(_)) => (),
-                Err(e) => panic!("unexpected removal error {e}"),
+                Err(e) => panic!("unexpected removal error: {e}"),
             }
         } else {
             panic!("insertion and deletion both failed")
         }
+    }
+
+    #[test]
+    fn test_clone_trust_db() {
+        let db = new_test_db();
+        let cloned_db = Arc::clone(&db);
+
+        assert_eq!(std::ptr::addr_of!(db.db), std::ptr::addr_of!(cloned_db.db));
+        assert!(std::ptr::eq(&db.db, &cloned_db.db));
+
+        assert_eq!(
+            std::ptr::addr_of!(db.update_mtx),
+            std::ptr::addr_of!(cloned_db.update_mtx)
+        );
+        assert!(std::ptr::eq(&db.update_mtx, &cloned_db.update_mtx));
     }
 }
