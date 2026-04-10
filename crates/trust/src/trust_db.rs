@@ -153,6 +153,7 @@ pub type BatchHook<'a> = (&'a TrustDBTable, &'a [u8], &'a [u8]);
 pub struct TrustDB {
     db: Arc<OptimisticTransactionDB>,
     genesis_block_mtx: Mutex<bitcoin::BlockHash>,
+    update_mtx: Arc<Mutex<()>>
 }
 
 impl TrustDB {
@@ -178,6 +179,7 @@ impl TrustDB {
         Ok(Self {
             db: Arc::new(db),
             genesis_block_mtx: Mutex::new(bitcoin::BlockHash::all_zeros()),
+            update_mtx: Arc::new(Mutex::new(())),
         })
     }
 
@@ -440,6 +442,11 @@ impl TrustDB {
                 "block headers insert: empty header set".to_string(),
             ));
         }
+
+        // Prevent other calls that change the inner state of the DB
+        // from running concurrently. 
+        let _guard = self.update_mtx.lock().unwrap();
+
         let batch = self.db.transaction();
 
         // Ensure we can connect these blockheaders. This also obtains the
@@ -693,6 +700,10 @@ impl TrustDB {
             prev_bhh = hash
         }
 
+        // Prevent other calls that change the inner state of the DB
+        // from running concurrently. 
+        let _guard = self.update_mtx.lock().unwrap();
+
         let batch = self.db.transaction();
 
         // Get current canonical tip for later use
@@ -912,6 +923,7 @@ impl Clone for TrustDB {
         TrustDB {
             db: Arc::clone(&self.db),
             genesis_block_mtx: Mutex::new(bitcoin::BlockHash::all_zeros()),
+            update_mtx: Arc::clone(&self.update_mtx),
         }
     }
 }
