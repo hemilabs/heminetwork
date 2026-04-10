@@ -27,10 +27,10 @@ pub enum TrustDBError {
     Duplicate(String),
     #[error("Genesis already exists with block hash: {0}")]
     GenesisExists(String),
-    #[error("Invalid DB state: {0}")]
-    InvalidState(String),
     #[error("Invalid parameters: {0}")]
     InvalidParams(String),
+    #[error("Invalid tip: {0}")]
+    InvalidTip(String),
     #[error("Dangling header: {0}")]
     DanglingChild(String),
     #[error("{0}")]
@@ -363,9 +363,7 @@ impl TrustDB {
             let res = self.block_header_by_hash(hash);
             match res {
                 Err(TrustDBError::NotFound(_)) => {
-                    return Err(TrustDBError::InvalidState(format!(
-                        "height hash key with hash {hash} not in headers table"
-                    )));
+                    panic!("height hash key with hash {hash} not in headers table");
                 }
                 Err(e) => return Err(e),
                 Ok(v) => bhs.push(v),
@@ -414,9 +412,7 @@ impl TrustDB {
             let res = self.block_header_by_hash(hash);
             match res {
                 Err(TrustDBError::NotFound(_)) => {
-                    return Err(TrustDBError::InvalidState(format!(
-                        "height hash key with hash {hash} not in headers table"
-                    )));
+                    panic!("height hash key with hash {hash} not in headers table");
                 }
                 Err(e) => return Err(e),
                 Ok(v) => bhs.push(v),
@@ -805,14 +801,14 @@ impl TrustDB {
             // header we expected to move as an additional sanity check.
             let expected_hash = headers_parsed[i].block_hash();
             if expected_hash != rbh.header.block_hash() {
-                return Err(TrustDBError::InvalidState(format!(
+                panic!(
                     "block headers remove: unexpected internal error, header with hash \
                     {} at position {} in headers to remove does not match header with \
                     hash {} retrieved from db",
                     expected_hash,
                     i,
                     rbh.header.block_hash()
-                )));
+                );
             }
         }
 
@@ -828,6 +824,26 @@ impl TrustDB {
             let hh_key = TrustDB::height_hash_to_key(fh.height, bhash);
             batch.delete_cf(self.get_cf(&HeightHashCF), hh_key)?;
         }
+
+        // Check if proposed tip after removal has children.
+        let next_height = tip_after_removal_from_db.height + 1;
+        let res = self.block_headers_by_height_tx(&batch, next_height);
+        match res {
+            Err(TrustDBError::NotFound(_)) => (),
+            Err(e) => return Err(e),
+            Ok(potential_children) => {
+                for to_check in potential_children {
+                    if to_check.header.prev_blockhash == tip_after_removal_hash {
+                        // Expected tip has children, so cannot be the actual tip.
+                        return Err(TrustDBError::InvalidTip(
+                            "block headers remove: passed in 
+                            tip after removal has children"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+        };
 
         // Insert updated canonical tip after removal of the provided block headers
         let tip = BlockHeader {
@@ -1694,6 +1710,31 @@ mod tests {
         match result {
             Err(TrustDBError::NotFound(_)) => (),
             Err(e) => panic!("unexpected error {e}"),
+            _ => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn test_block_headers_remove_invalid_tip() {
+        let db = new_test_db();
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 20);
+        let h3 = create_test_header(h2.block_hash(), 30);
+        let headers = [h1, h2, h3];
+        db.block_headers_insert(&headers, &[]).unwrap();
+
+        let fork1 = create_test_header(h1.block_hash(), 2);
+        let headers = [fork1];
+        db.block_headers_insert(&headers, &[]).unwrap();
+
+        let res = db.block_headers_remove(&[h2, h3], &h1, &[]);
+        match res {
+            Err(TrustDBError::InvalidTip(_)) => (),
+            Err(e) => panic!("unexpected error: {e}"),
             _ => panic!("expected error"),
         }
     }
