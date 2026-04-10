@@ -153,7 +153,7 @@ pub type BatchHook<'a> = (&'a TrustDBTable, &'a [u8], &'a [u8]);
 pub struct TrustDB {
     db: Arc<OptimisticTransactionDB>,
     genesis_block_mtx: Mutex<bitcoin::BlockHash>,
-    update_mtx: Arc<Mutex<()>>
+    update_mtx: Arc<Mutex<()>>,
 }
 
 impl TrustDB {
@@ -444,7 +444,7 @@ impl TrustDB {
         }
 
         // Prevent other calls that change the inner state of the DB
-        // from running concurrently. 
+        // from running concurrently.
         let _guard = self.update_mtx.lock().unwrap();
 
         let batch = self.db.transaction();
@@ -701,7 +701,7 @@ impl TrustDB {
         }
 
         // Prevent other calls that change the inner state of the DB
-        // from running concurrently. 
+        // from running concurrently.
         let _guard = self.update_mtx.lock().unwrap();
 
         let batch = self.db.transaction();
@@ -1879,5 +1879,172 @@ mod tests {
 
         let retrieved = db.get(&MetadataCF, key).unwrap();
         assert_eq!(retrieved, value);
+    }
+
+    #[test]
+    fn test_headers_insert_race() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        const NUM_THREADS: usize = 8;
+
+        let db = Arc::new(new_test_db());
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+
+        let barrier = Arc::new(Barrier::new(NUM_THREADS));
+        let mut handles = Vec::new();
+
+        for _ in 0..NUM_THREADS {
+            let db_clone = Arc::clone(&db);
+            let bc = Arc::clone(&barrier);
+
+            let handle = thread::spawn(move || {
+                bc.wait();
+                db_clone.block_headers_insert(&[h1, h2], &[])
+            });
+
+            handles.push(handle);
+        }
+
+        let mut results = Vec::new();
+        for handle in handles {
+            results.push(handle.join().unwrap());
+        }
+
+        let mut found = false;
+        for res in results {
+            match res {
+                Ok(_) => {
+                    if found {
+                        panic!("multiple threads succeeded")
+                    }
+                    found = true;
+                }
+                Err(TrustDBError::Duplicate(_)) => (),
+                Err(e) => panic!("unexpected error {e}"),
+            }
+        }
+        if !found {
+            panic!("expected one success")
+        }
+    }
+
+    #[test]
+    fn test_headers_remove_race() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        const NUM_THREADS: usize = 8;
+
+        let db = Arc::new(new_test_db());
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+        db.block_headers_insert(&[h1, h2], &[]).unwrap();
+
+        let barrier = Arc::new(Barrier::new(NUM_THREADS));
+        let mut handles = Vec::new();
+
+        for _ in 0..NUM_THREADS {
+            let db_clone = Arc::clone(&db);
+            let bc = Arc::clone(&barrier);
+
+            let handle = thread::spawn(move || {
+                bc.wait();
+                db_clone.block_headers_remove(&[h1, h2], &genesis, &[])
+            });
+
+            handles.push(handle);
+        }
+
+        let mut results = Vec::new();
+        for handle in handles {
+            results.push(handle.join().unwrap());
+        }
+
+        let mut found = false;
+        for res in results {
+            match res {
+                Ok(_) => {
+                    if found {
+                        panic!("multiple threads succeeded")
+                    }
+                    found = true;
+                }
+                Err(TrustDBError::NotFound(_)) => (),
+                Err(e) => panic!("unexpected error {e}"),
+            }
+        }
+        if !found {
+            panic!("expected one success")
+        }
+    }
+
+    #[test]
+    fn test_update_headers_race() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let db = Arc::new(new_test_db());
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+        db.block_headers_insert(&[h1, h2], &[]).unwrap();
+
+        let h3 = create_test_header(h2.block_hash(), 3);
+
+        // Test inserting and removing at the same time, for the chain:
+        // g -> h1 -> h2
+        // try and insert h3 and remove h2 concurrently
+
+        let barrier = Arc::new(Barrier::new(2));
+
+        // Removal
+        let db_remove = Arc::clone(&db);
+        let bc_remove = Arc::clone(&barrier);
+
+        let remove = thread::spawn(move || {
+            bc_remove.wait();
+            db_remove.block_headers_remove(&[h2], &genesis, &[])
+        });
+
+        // Insertion
+        let db_insert = Arc::clone(&db);
+        let bc_insert = Arc::clone(&barrier);
+
+        let insert = thread::spawn(move || {
+            bc_insert.wait();
+            db_insert.block_headers_insert(&[h3], &[])
+        });
+
+        let remove_res = remove.join().unwrap();
+        let insert_res = insert.join().unwrap();
+
+        if remove_res.is_ok() {
+            match insert_res {
+                Ok(_) => panic!("expected failed insertion"),
+                Err(TrustDBError::NotFound(_)) => (),
+                Err(e) => panic!("unexpected insertion error {e}"),
+            }
+        } else if insert_res.is_ok() {
+            match remove_res {
+                Ok(_) => panic!("expected failed removal"),
+                Err(TrustDBError::DanglingChild(_)) => (),
+                Err(e) => panic!("unexpected removal error {e}"),
+            }
+        } else {
+            panic!("insertion and deletion both failed")
+        }
     }
 }
