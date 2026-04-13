@@ -1554,8 +1554,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 			return fmt.Errorf("cannot connect %v index %v",
 				msg.Headers[k].PrevBlock, k)
 		}
-		bh := msg.Headers[k].BlockHash()
-		pbhHash = &bh
+		pbhHash = new(msg.Headers[k].BlockHash())
 	}
 
 	// When running in normal (not External Header) mode, do not set
