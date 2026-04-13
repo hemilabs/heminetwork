@@ -4,8 +4,8 @@ use bitcoin::block::Header;
 use bitcoin::consensus::{Decodable, Encodable};
 use bitcoin::hashes::Hash;
 
+use ethnum::U256;
 use hex::encode;
-use primitive_types::U256;
 use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, OptimisticTransactionDB, Options};
 use std::cmp::Ordering;
 use std::path::Path;
@@ -59,7 +59,7 @@ impl From<&EncodedHeader> for BlockHeader {
         let header =
             Header::consensus_decode(&mut &enc[8..88]).expect("encoded header should be decodable");
         let height = u64::from_be_bytes(enc[..8].try_into().unwrap());
-        let difficulty = U256::from_big_endian(&enc[88..]);
+        let difficulty = U256::from_be_bytes(enc[88..].try_into().unwrap());
         Self {
             hash: header.block_hash(),
             height,
@@ -86,7 +86,7 @@ impl From<&BlockHeader> for EncodedHeader {
         enc[8..88].copy_from_slice(&hdrb);
 
         // encode diff
-        let diffb = value.difficulty.to_big_endian();
+        let diffb = value.difficulty.to_be_bytes();
         enc[88..].copy_from_slice(&diffb);
 
         enc
@@ -302,8 +302,8 @@ impl TrustDB {
             }
         }
 
-        let mut cdiff = U256::from_big_endian(&header.work().to_be_bytes());
-        if !diff.is_zero() {
+        let mut cdiff = U256::from_be_bytes(header.work().to_be_bytes());
+        if diff != U256::ZERO {
             cdiff = diff;
         }
 
@@ -506,7 +506,7 @@ impl TrustDB {
             // pre set values because we start with previous value
             height += 1;
             cdiff = cdiff
-                .checked_add(U256::from_big_endian(&wbh.work().to_be_bytes()))
+                .checked_add(U256::from_be_bytes(wbh.work().to_be_bytes()))
                 .ok_or(TrustDBError::Other(
                     "work accumulation overflow".to_string(),
                 ))?;
@@ -1014,7 +1014,7 @@ mod tests {
         let bh = &BlockHeader {
             hash: header.block_hash(),
             height: 99999,
-            difficulty: U256::from(12345),
+            difficulty: U256::from(12345_u32),
             header,
         };
 
@@ -1032,16 +1032,16 @@ mod tests {
         assert_eq!(&enc[8..88], &expected_header);
 
         // check diff encoding
-        let expected_diff = bh.difficulty.to_big_endian();
+        let expected_diff = bh.difficulty.to_be_bytes();
         assert_eq!(&enc[88..], &expected_diff);
     }
 
     #[test]
     fn test_decode_block_header() {
         let test_table = vec![
-            (0, U256::zero()),
+            (0, U256::ZERO),
             (u64::MAX, U256::MAX),
-            (99999, U256::from(12345)),
+            (99999, U256::from(12345_u32)),
         ];
 
         let header = create_test_header(BlockHash::all_zeros(), 1);
@@ -1106,7 +1106,7 @@ mod tests {
         let db = new_test_db();
         let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 0;
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         let mut res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
@@ -1134,7 +1134,7 @@ mod tests {
         let db = new_test_db();
         let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 0;
-        let diff = U256::zero(); // should use header's work
+        let diff = U256::ZERO; // should use header's work
 
         let res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
@@ -1146,7 +1146,7 @@ mod tests {
         let stored = stored.unwrap();
         let stored_array: [u8; BlockHeader::SIZE] = stored.try_into().unwrap();
         let dec = BlockHeader::from(&stored_array);
-        let work = U256::from_big_endian(&header.work().to_be_bytes());
+        let work = U256::from_be_bytes(header.work().to_be_bytes());
         assert_ne!(work, diff);
         assert_eq!(dec.difficulty, work);
     }
@@ -1156,7 +1156,7 @@ mod tests {
         let db = new_test_db();
         let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 99999;
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         // check if fails before insert
         let mut best = db.block_header_best();
@@ -1183,7 +1183,7 @@ mod tests {
         let db = new_test_db();
         let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 99999;
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         // check if fails before insert
         let mut res = db.block_header_by_hash(header.block_hash());
@@ -1218,7 +1218,7 @@ mod tests {
     fn test_block_headers_by_height() {
         let db = new_test_db();
         let height = 99999;
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         // check if fails before insert
         let mut retrieved = db.block_headers_by_height(height);
@@ -1261,7 +1261,7 @@ mod tests {
         let header1 = create_test_header(BlockHash::all_zeros(), 1);
         let mut header2 = create_test_header(BlockHash::all_zeros(), 2);
         header2.prev_blockhash = header1.block_hash();
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         let insert = db.block_header_genesis_insert(&header1, height1, diff);
         assert!(insert.is_ok());
@@ -1293,11 +1293,11 @@ mod tests {
         let db = new_test_db();
 
         let correct_genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let incorrect_genesis = create_test_header(BlockHash::all_zeros(), 2);
-        let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
+        let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2_u32));
 
         match res {
             Err(TrustDBError::GenesisExists(val)) => {
@@ -1316,7 +1316,7 @@ mod tests {
 
         let mut genesis = create_test_header(BlockHash::all_zeros(), 0);
         genesis.prev_blockhash = bitcoin::BlockHash::hash(&[1, 2, 3]);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let res = db.block_header_by_hash(genesis.block_hash()).unwrap();
@@ -1324,7 +1324,7 @@ mod tests {
         let genesis_block_header = BlockHeader {
             hash: genesis.block_hash(),
             height: 0,
-            difficulty: U256::from(1),
+            difficulty: U256::from(1_u32),
             header: genesis,
         };
 
@@ -1408,7 +1408,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let headers = [genesis];
@@ -1434,7 +1434,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1506,7 +1506,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1529,7 +1529,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1555,7 +1555,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1629,7 +1629,7 @@ mod tests {
 
         for t in test_cases {
             let db = new_test_db();
-            db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
                 .unwrap();
 
             if !t.pre_insert.is_empty() {
@@ -1651,7 +1651,7 @@ mod tests {
     fn test_block_headers_remove_orphan() {
         let db = new_test_db();
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let fake_parent = bitcoin::hashes::Hash::hash(&[88u8; 32]);
@@ -1661,7 +1661,7 @@ mod tests {
             hash: orphan.block_hash(),
             height: 1,
             header: orphan,
-            difficulty: U256::from(1),
+            difficulty: U256::from(1_u32),
         };
         let enc: EncodedHeader = (&orphan_bh).into();
         db.put(&HeadersCF, orphan.block_hash(), enc).unwrap();
@@ -1681,7 +1681,7 @@ mod tests {
     fn test_block_headers_remove_invalid_tip() {
         let db = new_test_db();
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1751,7 +1751,7 @@ mod tests {
 
         for t in test_cases {
             let db = new_test_db();
-            db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+            db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
                 .unwrap();
 
             if !t.pre_insert_first.is_empty() {
@@ -1797,7 +1797,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1841,7 +1841,7 @@ mod tests {
 
         let db = new_test_db();
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1894,7 +1894,7 @@ mod tests {
 
         let db = new_test_db();
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1946,7 +1946,7 @@ mod tests {
 
         let db = new_test_db();
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);

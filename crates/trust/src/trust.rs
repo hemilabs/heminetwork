@@ -86,12 +86,12 @@ impl Trust {
     /// Pass None for default chain genesis block.
     pub fn external_header_setup(
         &self,
-        genesis_override: Option<(&bitcoin::block::Header, u64, primitive_types::U256)>,
+        genesis_override: Option<(&bitcoin::block::Header, u64, ethnum::U256)>,
         upstream_state_id: &[u8; 32],
     ) -> Result<()> {
         let mut genesis = &bitcoin::blockdata::constants::genesis_block(self.network).header;
         let mut height = u64::MIN;
-        let mut diff = primitive_types::U256::zero();
+        let mut diff = ethnum::U256::ZERO;
         if let Some(o) = genesis_override {
             (genesis, height, diff) = o
         }
@@ -295,7 +295,7 @@ mod tests {
         let header =
             &bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Testnet).header;
         let height = 12345;
-        let diff = primitive_types::U256::from(99999);
+        let diff = ethnum::U256::from(99999_u32);
 
         let genesis_override = Some((header, height, diff));
 
@@ -346,7 +346,7 @@ mod tests {
 
         let genesis =
             &bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Bitcoin).header;
-        let genesis_override = Some((genesis, 0, primitive_types::U256::zero()));
+        let genesis_override = Some((genesis, 0, ethnum::U256::ZERO));
 
         match trust.external_header_setup(genesis_override, usi) {
             Err(e) => match e {
