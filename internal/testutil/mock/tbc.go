@@ -261,7 +261,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {
-		f.mtx.Lock()
+		f.mtx.Unlock()
 		panic(fmt.Errorf("failed to accept websocket connection for %s: %w",
 			r.RemoteAddr, err))
 	}
@@ -274,7 +274,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 
 	wsConn := protocol.NewWSConn(conn)
 	if err = tbcapi.Write(r.Context(), wsConn, "0", ping); err != nil {
-		f.mtx.Lock()
+		f.mtx.Unlock()
 		panic(fmt.Errorf("write ping: %w", err))
 	}
 
