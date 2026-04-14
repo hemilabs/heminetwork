@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -296,14 +296,29 @@ func (t *tbcGozer) handleTBCWebsocketCall(pctx context.Context, conn *protocol.C
 
 	log.Tracef("handleTBCWebsocketCall")
 	defer log.Tracef("handleTBCWebsocketCall exit")
+
+	// Limit the number of concurrent in-flight Call goroutines.
+	// Each Call goroutine acquires a write lock on the conn's
+	// RWMutex, while the reader goroutine in handleTBCWebsocketRead
+	// acquires a read lock to dispatch responses. With too many
+	// concurrent writers, the reader may become starved.
+	sem := make(chan struct{}, DefaultCommandQueueDepth)
+
 	for {
 		select {
 		case <-pctx.Done():
 			return
 		case c := <-t.cmdCh:
+			select {
+			case <-pctx.Done():
+				return
+			case sem <- struct{}{}:
+			}
 			// Parallelize calls. There is no reason to do them
 			// in order and wait for potentially slow completion.
 			go func(bc tbcCmd) {
+				defer func() { <-sem }()
+
 				if bc.timeout == 0 {
 					bc.timeout = DefaultRequestTimeout
 				}
