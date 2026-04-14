@@ -1128,13 +1128,19 @@ func (t *Transport) setTransportFromPublicKey(publicKey []byte) error {
 
 // Close closes the underlying connection and zeros key material to
 // limit exposure in swap files and core dumps.
+//
+// The connection is closed first so that any in-flight readers blocked
+// in readExact unblock with an I/O error before we zero the keys they
+// would use in decrypt/decryptFrameHeader.
 func (t *Transport) Close() error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	if t.conn == nil {
 		return ErrNoConn
 	}
-	// Zero key material.
+	// Close conn first to unblock in-flight I/O.
+	err := t.conn.Close()
+	// Zero key material regardless of close error.
 	if t.encryptKey != nil {
 		for i := range t.encryptKey {
 			t.encryptKey[i] = 0
@@ -1151,7 +1157,7 @@ func (t *Transport) Close() error {
 		}
 	}
 	t.us = nil
-	return t.conn.Close()
+	return err
 }
 
 // RemoteAddr returns the remote network address of the underlying
@@ -1672,16 +1678,20 @@ func (t *Transport) ReadEnvelope() (*Header, any, []byte, error) {
 }
 
 // write encrypts the passed in cleartext and writes it to the connection
-// stream. This function takes the lock to prevent interleaving writes.
+// stream. The lock is held for the entire encrypt+write sequence to
+// prevent interleaving and to synchronize with Close() zeroing keys.
 func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	if t.conn == nil {
+		return ErrNoConn
+	}
+
 	request, err := t.encrypt(cleartext)
 	if err != nil {
 		return fmt.Errorf("encrypt: %w", err)
 	}
-
-	// Don't interleave writes
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
 
 	// Timeout
 	if timeout != 0 {
