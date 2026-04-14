@@ -714,7 +714,6 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 		limiter = rate.NewLimiter(messageRate, messageBurst)
 	}
 
-
 	for {
 		header, payload, _, err := t.ReadEnvelope()
 		if err != nil {
