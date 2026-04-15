@@ -1550,11 +1550,11 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	// expensive calls so we just eat it.
 	var pbhHash *chainhash.Hash
 	for k := range msg.Headers {
-		if pbhHash != nil && pbhHash.IsEqual(&msg.Headers[k].PrevBlock) {
+		if pbhHash != nil && !pbhHash.IsEqual(&msg.Headers[k].PrevBlock) {
 			return fmt.Errorf("cannot connect %v index %v",
 				msg.Headers[k].PrevBlock, k)
 		}
-		pbhHash = &msg.Headers[k].PrevBlock
+		pbhHash = new(msg.Headers[k].BlockHash())
 	}
 
 	// When running in normal (not External Header) mode, do not set

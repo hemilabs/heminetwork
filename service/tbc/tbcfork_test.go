@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -357,6 +358,7 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 
 	nmh := wire.NewMsgHeaders()
 	height := from.Height() + 1
+	var prevHash *chainhash.Hash
 	b.logf("start from %v", height)
 	for range 2000 {
 		bs, ok := b.blocksAtHeight[height]
@@ -375,12 +377,21 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 		if parentBlock == nil {
 			return nil, fmt.Errorf("no parent at: %v", height)
 		}
+
+		// If next requested header is non-contiguous, send what we have
+		grandparent := &parentBlock.MsgBlock().Header.PrevBlock
+		if prevHash != nil && !prevHash.IsEqual(grandparent) {
+			break
+		}
+
 		err := nmh.AddBlockHeader(&parentBlock.MsgBlock().Header)
 		if err != nil {
 			return nil, fmt.Errorf("add header: %w", err)
 		}
 
 		b.logf("%v: %v", height, parentBlock.MsgBlock().Header.BlockHash())
+		ph := parentBlock.MsgBlock().Header.BlockHash()
+		prevHash = &ph
 		height++
 	}
 
@@ -1080,6 +1091,51 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 func (b *btcNode) MineAndSendEmpty(ctx context.Context) error {
 	b.t.Logf("send empty headers message")
 	return b.p.Write(defaultCmdTimeout, wire.NewMsgHeaders())
+}
+
+func createFakeBlock(prevHash *chainhash.Hash, nonce int64) *btcutil.Block {
+	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
+	bh.Timestamp = time.Unix(nonce, 0)
+	bh.Bits = 0x1d00ffff
+	block := wire.NewMsgBlock(bh)
+	btcBlock := btcutil.NewBlock(block)
+	return btcBlock
+}
+
+func createTestMsgHeaders(headers []*tbcd.BlockHeader) *wire.MsgHeaders {
+	msgHeaders := wire.NewMsgHeaders()
+	for _, bh := range headers {
+		wbh, err := bh.Wire()
+		if err != nil {
+			panic(err)
+		}
+		if err = msgHeaders.AddBlockHeader(wbh); err != nil {
+			panic(err)
+		}
+	}
+	return msgHeaders
+}
+
+func (b *btcNode) MineAndSendFake(ctx context.Context, prevHash *chainhash.Hash, count uint32) ([]*tbcd.BlockHeader, error) {
+	bhs := make([]*tbcd.BlockHeader, 0, count)
+	for i := range count {
+		prev := prevHash
+		if i > 0 {
+			prev = testutil.RandomHash()
+		}
+		blk := createFakeBlock(prev, int64(i))
+		bh := &tbcd.BlockHeader{
+			Hash:       *blk.Hash(),
+			Height:     uint64(i),
+			Header:     h2b(&blk.MsgBlock().Header),
+			Difficulty: *big.NewInt(1),
+		}
+		bhs = append(bhs, bh)
+	}
+
+	msgh := createTestMsgHeaders(bhs)
+	b.t.Logf("send %d fake headers", count)
+	return bhs, b.p.Write(defaultCmdTimeout, msgh)
 }
 
 func (b *btcNode) Run(ctx context.Context) error {
@@ -4034,6 +4090,119 @@ func TestZKIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, utxos)
+	}
+}
+
+func TestIndexFakeHeaders(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 17*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	notifCtx, notifCancel := context.WithCancel(ctx)
+	defer notifCancel()
+
+	// Upon sending non-contiguous headers, TBC should error out and reset
+	// its connection with the peer. This cancels the context for the
+	// listener waiting to fail upon receiving a "header inserted" msg,
+	// and triggers a final check to see if any headers were inserted.
+	go func() {
+		// This is just for readability
+		isInvalidErr := func(err error) bool {
+			isNotOneOf := !testutil.ErrorIsOneOf(err,
+				[]error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn},
+			)
+			return isNotOneOf && !strings.Contains(err.Error(), "connection reset by peer")
+		}
+		if err := n.Run(ctx); isInvalidErr(err) {
+			panic(err)
+		}
+		notifCancel()
+	}()
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		LevelDBHome:          t.TempDir(),
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(notifCtx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	// create a chain with non-contiguous headers
+	genesis := chaincfg.RegressionNetParams.GenesisHash
+	headers, err := n.MineAndSendFake(ctx, genesis, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all headers
+	for {
+		msg, err := l.Listen(notifCtx)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+			break
+		}
+		if msg.Is(NotificationBlockheader(chainhash.Hash{})) {
+			t.Fatalf("block header was inserted: %s", msg.ID)
+		}
+	}
+	l.Unsubscribe()
+
+	// sanity check if the headers were inserted
+	for _, h := range headers {
+		_, err := s.g.db.BlockHeaderByHash(ctx, *h.BlockHash())
+		if !errors.Is(err, database.ErrNotFound) {
+			t.Fatalf("expected NotFound error, got %v", err)
+		}
+		t.Logf("fake header (%s) was not found", h)
 	}
 }
 
