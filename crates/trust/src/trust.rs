@@ -1,9 +1,10 @@
-use crate::trust_db::{TrustDB, TrustDBError, TrustDBTable::MetadataCF};
+use crate::trust_db::{
+    DB_METADATA_KEY_UPSTREAM_STATE_ID, TrustDB, TrustDBError, TrustDBTable::MetadataCF,
+};
 use bitcoin::Network;
 use std::path::Path;
+use std::sync::Arc;
 use thiserror::Error;
-
-static DB_METADATA_KEY_UPSTREAM_STATE_ID: &str = "upstream_state_id";
 
 #[derive(Error, Debug)]
 pub enum TrustError {
@@ -40,7 +41,7 @@ impl TrustConfig {
 // XXX remove when fields are used
 #[allow(dead_code)]
 pub struct Trust {
-    db: TrustDB,
+    db: Arc<TrustDB>,
     cfg: TrustConfig,
     network: Network,
 }
@@ -62,13 +63,7 @@ impl Trust {
     }
 
     pub fn set_upstream_state_id(&self, upstream_state_id: &[u8; 32]) {
-        self.db
-            .put(
-                &MetadataCF,
-                DB_METADATA_KEY_UPSTREAM_STATE_ID,
-                upstream_state_id,
-            )
-            .expect("could not insert into metadata table: {e}")
+        self.db.set_upstream_state_id(upstream_state_id);
     }
 
     pub fn get_upstream_state_id(&self) -> Result<[u8; 32]> {
@@ -91,12 +86,12 @@ impl Trust {
     /// Pass None for default chain genesis block.
     pub fn external_header_setup(
         &self,
-        genesis_override: Option<(&bitcoin::block::Header, u64, primitive_types::U256)>,
+        genesis_override: Option<(&bitcoin::block::Header, u64, ethnum::U256)>,
         upstream_state_id: &[u8; 32],
     ) -> Result<()> {
         let mut genesis = &bitcoin::blockdata::constants::genesis_block(self.network).header;
         let mut height = u64::MIN;
-        let mut diff = primitive_types::U256::zero();
+        let mut diff = ethnum::U256::ZERO;
         if let Some(o) = genesis_override {
             (genesis, height, diff) = o
         }
@@ -212,14 +207,7 @@ mod tests {
         let cfg = TrustConfig::new_default_config(tmp.unwrap());
         let trust = Trust::new(cfg).unwrap();
 
-        trust
-            .db
-            .put(
-                &MetadataCF,
-                DB_METADATA_KEY_UPSTREAM_STATE_ID,
-                b"this_is_a_test_for_this_test_yes",
-            )
-            .unwrap();
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test_yes");
 
         match trust.get_upstream_state_id() {
             Ok(u) => assert_eq!(u, *b"this_is_a_test_for_this_test_yes"),
@@ -236,23 +224,9 @@ mod tests {
         let cfg = TrustConfig::new_default_config(tmp.unwrap());
         let trust = Trust::new(cfg).unwrap();
 
-        trust
-            .db
-            .put(
-                &MetadataCF,
-                DB_METADATA_KEY_UPSTREAM_STATE_ID,
-                b"this_is_a_test_for_this_test_yes",
-            )
-            .unwrap();
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test_yes");
 
-        trust
-            .db
-            .put(
-                &MetadataCF,
-                DB_METADATA_KEY_UPSTREAM_STATE_ID,
-                b"this_is_a_test_for_this_test____",
-            )
-            .unwrap();
+        trust.set_upstream_state_id(b"this_is_a_test_for_this_test____");
 
         match trust.get_upstream_state_id() {
             Ok(u) => assert_eq!(u, *b"this_is_a_test_for_this_test____"),
@@ -321,7 +295,7 @@ mod tests {
         let header =
             &bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Testnet).header;
         let height = 12345;
-        let diff = primitive_types::U256::from(99999);
+        let diff = ethnum::U256::from(99999_u32);
 
         let genesis_override = Some((header, height, diff));
 
@@ -372,7 +346,7 @@ mod tests {
 
         let genesis =
             &bitcoin::blockdata::constants::genesis_block(bitcoin::Network::Bitcoin).header;
-        let genesis_override = Some((genesis, 0, primitive_types::U256::zero()));
+        let genesis_override = Some((genesis, 0, ethnum::U256::ZERO));
 
         match trust.external_header_setup(genesis_override, usi) {
             Err(e) => match e {

@@ -3,18 +3,19 @@ use self::TrustDBTable::*;
 use bitcoin::block::Header;
 use bitcoin::consensus::{Decodable, Encodable};
 use bitcoin::hashes::Hash;
+
+use ethnum::U256;
 use hex::encode;
-use primitive_types::U256;
 use rocksdb::{ColumnFamilyDescriptor, ColumnFamilyRef, OptimisticTransactionDB, Options};
 use std::cmp::Ordering;
 use std::path::Path;
 use std::slice::Iter;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 const BHS_CANONICAL_TIP_KEY: &str = "canonicaltip";
 const BHS_GENESIS_KEY: &str = "genesis";
+pub static DB_METADATA_KEY_UPSTREAM_STATE_ID: &str = "upstream_state_id";
 
 #[derive(Error, Debug)]
 pub enum TrustDBError {
@@ -26,6 +27,12 @@ pub enum TrustDBError {
     Duplicate(String),
     #[error("Genesis already exists with block hash: {0}")]
     GenesisExists(String),
+    #[error("Invalid parameters: {0}")]
+    InvalidParams(String),
+    #[error("Invalid tip: {0}")]
+    InvalidTip(String),
+    #[error("Dangling header: {0}")]
+    DanglingChild(String),
     #[error("{0}")]
     Other(String),
 }
@@ -52,7 +59,7 @@ impl From<&EncodedHeader> for BlockHeader {
         let header =
             Header::consensus_decode(&mut &enc[8..88]).expect("encoded header should be decodable");
         let height = u64::from_be_bytes(enc[..8].try_into().unwrap());
-        let difficulty = U256::from_big_endian(&enc[88..]);
+        let difficulty = U256::from_be_bytes(enc[88..].try_into().unwrap());
         Self {
             hash: header.block_hash(),
             height,
@@ -79,7 +86,7 @@ impl From<&BlockHeader> for EncodedHeader {
         enc[8..88].copy_from_slice(&hdrb);
 
         // encode diff
-        let diffb = value.difficulty.to_big_endian();
+        let diffb = value.difficulty.to_be_bytes();
         enc[88..].copy_from_slice(&diffb);
 
         enc
@@ -99,6 +106,23 @@ impl InsertType {
             ChainExtend => "chain extended",
             ChainFork => "chain forked",
             ForkExtend => "fork extended",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RemoveType {
+    ChainDescend, // Removal walked the canonical chain backwards, but existing chain is still canonical
+    ChainFork, // Removal walked canonical chain backwards far enough that another chain is now canonical
+    ForkDescend, // Removal walked a non-canonical chain backwards, no change to canonical chain remaining canonical
+}
+
+impl RemoveType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            RemoveType::ChainDescend => "canonical chain descend",
+            RemoveType::ChainFork => "canonical descend changed canonical",
+            RemoveType::ForkDescend => "fork chain descend",
         }
     }
 }
@@ -127,12 +151,12 @@ impl TrustDBTable {
 pub type BatchHook<'a> = (&'a TrustDBTable, &'a [u8], &'a [u8]);
 
 pub struct TrustDB {
-    db: Arc<OptimisticTransactionDB>,
-    genesis_block_mtx: Mutex<bitcoin::BlockHash>,
+    db: OptimisticTransactionDB,
+    update_mtx: Mutex<()>,
 }
 
 impl TrustDB {
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Arc<Self>> {
         let path = path.as_ref();
         let mut opts = Options::default();
         opts.create_if_missing(true);
@@ -151,10 +175,10 @@ impl TrustDB {
             cfs.push(ColumnFamilyDescriptor::new(b.as_str(), cf_opts));
         }
         let db = OptimisticTransactionDB::open_cf_descriptors(&opts, path, cfs)?;
-        Ok(Self {
-            db: Arc::new(db),
-            genesis_block_mtx: Mutex::new(bitcoin::BlockHash::all_zeros()),
-        })
+        Ok(Arc::new(Self {
+            db,
+            update_mtx: Mutex::new(()),
+        }))
     }
 
     fn get_cf(&self, cf: &TrustDBTable) -> ColumnFamilyRef<'_> {
@@ -163,7 +187,7 @@ impl TrustDB {
             .unwrap_or_else(|| panic!("CF '{}' must exist after successful open", cf.as_str()))
     }
 
-    pub fn put<K, V>(&self, cf: &TrustDBTable, key: K, value: V) -> Result<()>
+    fn put<K, V>(&self, cf: &TrustDBTable, key: K, value: V) -> Result<()>
     where
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
@@ -181,7 +205,11 @@ impl TrustDB {
         Err(TrustDBError::NotFound(encode(key_ref)))
     }
 
-    pub fn del<K: AsRef<[u8]>>(&self, cf: &TrustDBTable, key: K) -> Result<()> {
+    // we use this function only in tests at the time of writing this,
+    // so rust thinks it's "unused".  allow it to be "unused" (even though
+    // it is used) for now
+    #[allow(unused)]
+    fn del<K: AsRef<[u8]>>(&self, cf: &TrustDBTable, key: K) -> Result<()> {
         self.db.delete_cf(self.get_cf(cf), key.as_ref())?;
         Ok(())
     }
@@ -212,6 +240,17 @@ impl TrustDB {
         (height, hash)
     }
 
+    pub fn set_upstream_state_id(&self, upstream_state_id: &[u8; 32]) {
+        let _lock = self.update_mtx.lock().unwrap();
+
+        self.put(
+            &MetadataCF,
+            DB_METADATA_KEY_UPSTREAM_STATE_ID,
+            upstream_state_id,
+        )
+        .expect("could not insert into metadata table: {e}")
+    }
+
     pub fn block_header_genesis_insert(
         &self,
         header: &Header,
@@ -226,25 +265,14 @@ impl TrustDB {
         // if two threads were to perform these steps at the same time we may
         // get: 1 1 2 2.  if this is the case then we would insert two genesis
         // blocks
-        let mut locked_genesis_block_hash = self.genesis_block_mtx.lock().unwrap();
+        let _lock = self.update_mtx.lock().unwrap();
 
         let bhash = header.block_hash();
         if self.has(&HeadersCF, bhash) {
             return Err(TrustDBError::Duplicate(bhash.to_string()));
         }
 
-        // ensure that a different genesis block does not exist in the db
-        // with a few strategies
-
-        // 1. if we have the existing genesis block hash stored in the mutex,
-        // then we know we have an existing genesis block inserted
-        if *locked_genesis_block_hash != bitcoin::BlockHash::all_zeros() {
-            return Err(TrustDBError::GenesisExists(
-                locked_genesis_block_hash.to_string(),
-            ));
-        }
-
-        // 2. this may be our first time entering this function, so the mutex
+        // this may be our first time entering this function, so the mutex
         // would not have a block hash stored within it, check the database
         let existing_genesis = self.get(&HeadersCF, BHS_GENESIS_KEY);
         match existing_genesis {
@@ -268,18 +296,14 @@ impl TrustDB {
                 let existing_genesis_block_header =
                     BlockHeader::from(&existing_genesis_block_header_encoded);
 
-                // since we found an existing genesis, store its hash in the
-                // mutex for future calls if needed
-                *locked_genesis_block_hash = existing_genesis_block_header.hash;
-
                 return Err(TrustDBError::GenesisExists(
                     existing_genesis_block_header.hash.to_string(),
                 ));
             }
         }
 
-        let mut cdiff = U256::from_big_endian(&header.work().to_be_bytes());
-        if !diff.is_zero() {
+        let mut cdiff = U256::from_be_bytes(header.work().to_be_bytes());
+        if diff != U256::ZERO {
             cdiff = diff;
         }
 
@@ -301,10 +325,6 @@ impl TrustDB {
         bh_batch.put_cf(self.get_cf(&HeadersCF), BHS_GENESIS_KEY, ebh)?;
 
         bh_batch.commit()?;
-
-        // if we have successfully inserted a genesis block, store it in the
-        // mutex
-        *locked_genesis_block_hash = header.block_hash();
 
         Ok(())
     }
@@ -334,8 +354,65 @@ impl TrustDB {
                 .as_ref()
                 .try_into()
                 .expect("heighthash key should be valid size");
+
             let (_, hash) = TrustDB::key_to_height_hash(&enc);
-            bhs.push(self.block_header_by_hash(hash)?);
+            let res = self.block_header_by_hash(hash);
+            match res {
+                Err(TrustDBError::NotFound(_)) => {
+                    panic!("height hash key with hash {hash} not in headers table");
+                }
+                Err(e) => return Err(e),
+                Ok(v) => bhs.push(v),
+            }
+        }
+        if bhs.is_empty() {
+            return Err(TrustDBError::NotFound(height.to_string()));
+        }
+        Ok(bhs)
+    }
+
+    /// `block_header_by_hash_tx` emulates the behavior of `block_header_by_hash`
+    /// within a transaction's snapshot view of the database.
+    fn block_header_by_hash_tx(
+        &self,
+        tx: &rocksdb::Transaction<rocksdb::OptimisticTransactionDB>,
+        hash: bitcoin::BlockHash,
+    ) -> Result<BlockHeader> {
+        let full_header = tx.get_cf(self.get_cf(&HeadersCF), hash)?;
+        let bhb = match full_header {
+            Some(val) => val.try_into().expect("header data should be valid size"),
+            None => return Err(TrustDBError::NotFound(hash.to_string())),
+        };
+        Ok(BlockHeader::from(&bhb))
+    }
+
+    /// `block_headers_by_height_tx` emulates the behavior of
+    /// `block_headers_by_height` within a transaction's
+    /// snapshot view of the database.
+    fn block_headers_by_height_tx(
+        &self,
+        tx: &rocksdb::Transaction<rocksdb::OptimisticTransactionDB>,
+        height: u64,
+    ) -> Result<Vec<BlockHeader>> {
+        let h = height.to_be_bytes();
+        let it = tx.prefix_iterator_cf(self.get_cf(&HeightHashCF), h);
+        let mut bhs: Vec<BlockHeader> = Vec::new();
+        for item in it {
+            let (hh, _) = item?;
+            let enc: [u8; Self::HH_KEY_SIZE] = hh
+                .as_ref()
+                .try_into()
+                .expect("heighthash key should be valid size");
+
+            let (_, hash) = TrustDB::key_to_height_hash(&enc);
+            let res = self.block_header_by_hash(hash);
+            match res {
+                Err(TrustDBError::NotFound(_)) => {
+                    panic!("height hash key with hash {hash} not in headers table");
+                }
+                Err(e) => return Err(e),
+                Ok(v) => bhs.push(v),
+            }
         }
         if bhs.is_empty() {
             return Err(TrustDBError::NotFound(height.to_string()));
@@ -355,10 +432,15 @@ impl TrustDB {
         hooks: &[BatchHook],
     ) -> Result<(InsertType, BlockHeader, BlockHeader, usize)> {
         if headers.is_empty() {
-            return Err(TrustDBError::Other(
-                "block headers insert: invalid".to_string(),
+            return Err(TrustDBError::InvalidParams(
+                "block headers insert: empty header set".to_string(),
             ));
         }
+
+        // Prevent other calls that change the inner state of the DB
+        // from running concurrently.
+        let _guard = self.update_mtx.lock().unwrap();
+
         let batch = self.db.transaction();
 
         // Ensure we can connect these blockheaders. This also obtains the
@@ -379,9 +461,7 @@ impl TrustDB {
 
         let headers = &headers[x..];
         if headers.is_empty() {
-            return Err(TrustDBError::Other(
-                "block headers insert: duplicate".to_string(),
-            ));
+            return Err(TrustDBError::Duplicate("headers set".to_string()));
         }
 
         // Ensure contiguity of new headers.
@@ -389,7 +469,7 @@ impl TrustDB {
         for (i, rbh) in headers.iter().enumerate() {
             let hash = rbh.block_hash();
             if rbh.prev_blockhash != prev_bhh {
-                return Err(TrustDBError::Other(format!(
+                return Err(TrustDBError::InvalidParams(format!(
                     "header with hash {} at index {} does not connect to \
 					previous header with hash {} at index {}",
                     hash,
@@ -402,7 +482,7 @@ impl TrustDB {
         }
 
         let mut wbh = &headers[0];
-        let pbh = self.block_header_by_hash(wbh.prev_blockhash)?;
+        let pbh = self.block_header_by_hash_tx(&batch, wbh.prev_blockhash)?;
 
         let bbh: EncodedHeader = batch
             .get_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY)?
@@ -426,7 +506,7 @@ impl TrustDB {
             // pre set values because we start with previous value
             height += 1;
             cdiff = cdiff
-                .checked_add(U256::from_big_endian(&wbh.work().to_be_bytes()))
+                .checked_add(U256::from_be_bytes(wbh.work().to_be_bytes()))
                 .ok_or(TrustDBError::Other(
                     "work accumulation overflow".to_string(),
                 ))?;
@@ -483,29 +563,365 @@ impl TrustDB {
         Ok((it, *cbh, lbh, headers.len()))
     }
 
+    /// BlockHeadersRemove decodes and removes the passed blockheaders into the
+    /// database. Additionally it updates the canonical height/hash.
+    /// On return it informs the caller about the removal type which is self-evident
+    /// from the headers and post-removal canonical tip passed in as a convenience,
+    /// as well as the header the batch of headers was removed from which is now
+    /// the tip of that particular chain.
+    ///
+    /// The caller of this function must pass in the tipAfterRemoval which they
+    /// *know* to be the correct canonical tip after removal of the passed-in blocks.
+    /// This is critical to ensure that an operator of a TBC instance in External
+    /// Header mode can set a specific header as canonical in the event that removal
+    /// of header(s) results in a split tip where two or more headers are all at
+    /// the highest cumulative difficulty and TBC would otherwise have to choose one
+    /// without knowing what the upstream consumer considered canonical.
+    ///
+    /// This function is only intended to be used on a database which is used by
+    /// an instance of TBC running in External Header mode, where the header consensus
+    /// view needs to be walked back to account for information no longer being
+    /// known by an upstream consumer. For example, an L2 reorg could remove Bitcoin
+    /// consensus information from the L2 protocol's knowledge, so the External Header
+    /// mode TBC instance needs to represent Bitcoin consensus knowledge of the L2
+    /// protocol at the older tip height so that the full indexed TBC instance can
+    /// be moved to the correct indexed state to return queries that are consistent
+    /// with the L2's view of Bitcoin at that previous L2 block, otherwise L2 nodes
+    /// that processed the reorg versus L2 nodes that were always on the reorged-onto
+    /// chain could have a state divergence since queries against TBC would not be
+    /// deterministic between both types of nodes.
+    ///
+    /// All of the headers passed to the remove function must exist in the database.
+    ///
+    /// Headers must be ordered from lowest height to highest and must be contiguous,
+    /// meaning if header 0 is at height H, header N-1 must be at height H+N and for
+    /// each header N its previous block hash must be the hash of header N-1.
+    ///
+    /// The last header in the array must be the current tip of its chain (whether
+    /// canonical or fork); in other words the database must not have knowledge of
+    /// any headers who reference the last header as their previous block as this removal
+    /// would result in a dangling orphan chain segment in the database. A block can have
+    /// multiple children and calling this function with non-contiguous (non-linear)
+    /// blocks is not allowed, but this is correct behavior as removing chunks of
+    /// headers in the reverse order they were originally added will ensure that
+    /// a header being removed only has a maximum of one child (which must be included
+    /// in the headers passed to this function).
+    ///
+    /// For example given a chain:
+    ///
+    /// _______/-[2a]-[3a]-[4a]
+    ///
+    /// [ G]-[ 1]-[2b]-[3b]-[4b]-[5b]
+    ///
+    /// ____________\-[3c]-[4c]-[5c]-[6c]
+    ///
+    /// Where the tip is [6c], the next removal could for example be:
+    ///
+    /// [3a]-[4a]
+    /// [3b]-[4b]-[5b]
+    /// [5c]-[6c] (and pass in tipAfterRemoval=[5b])
+    ///
+    /// But the next removal could not for example be:
+    ///
+    /// [2a]-[3a] // Leaves [4a] dangling
+    /// [2b]-[3b]-[4b]-[5b] // Leaves "c" fork dangling
+    ///
+    /// The upstream user of a TBC instance in External Header mode is expected
+    /// to always remove chunks of headers in the opposite order they were
+    /// originally added. While this is not checked explicitly, failure to do so
+    /// can result in these types of dangling chain scenarios. In the above example,
+    /// block [2b] must have been added at or before the time of adding [3b] and [3c].
+    ///
+    /// It could have either been:
+    /// Update #1: ADD [2b]-[3b]-[4b]-[5b]
+    /// Update #2: ADD [3c]-[4c]-[5c]-[6c]
+    /// OR
+    /// Update #1: ADD [2b]-[3c]-[4c]-[5c]-[6c]
+    /// Update #2: ADD [3b]-[4b]-[5b]
+    /// (Or some similar order where some of the higher b/c blocks were added back
+    /// and forth between the chains or split into multiple smaller updates.)
+    ///
+    /// Assuming the upstream caller needs to remove the entire b and c chains:
+    ///
+    /// If it was the first order, then we would expect upstream caller to first
+    /// remove [3c]-...-[6c] (undo update #2), and then remove [2b]-...-[5b] (undo
+    /// update #1), which would never leave a chain dangling.
+    ///
+    /// Similarly, if it was the second order, then we would expect upstream caller
+    /// to first remove [3b]-...-[5b] (undo update #2), and then remove [2b]-...-[6c]
+    /// (undo update #1) which would also never leave a chain dangling.
+    ///
+    /// If the upstream caller removed [2b]-...-[5b] first, then they did not
+    /// remove headers in the same order that they added them, because it would
+    /// have been impossible to originally add [2b] after adding [3c].
+    ///
+    /// Calling this function with the incorrect tipAfterRemoval WILL FAIL as that
+    /// indicates incorrect upstream behavior.
+    ///
+    /// If any of the above requirements are not true, this function will return
+    /// an error. If this function returns an error, no changes have been made to
+    /// the underlying database state as all validity checks are done before db
+    /// modifications are applied.
+    ///
+    /// If an upstreamCursor is provided, it is updated atomically in the database
+    /// along with the state transition of removing the block headers.
+    pub fn block_headers_remove(
+        &self,
+        headers: &[Header],
+        tip_after_removal: &Header,
+        hooks: &[BatchHook],
+    ) -> Result<(RemoveType, BlockHeader)> {
+        if headers.is_empty() {
+            return Err(TrustDBError::InvalidParams(
+                "block headers remove: empty header set".to_string(),
+            ));
+        }
+
+        // Ensure contiguity of headers.
+        let mut prev_bhh = headers[0].prev_blockhash;
+        for (i, rbh) in headers.iter().enumerate() {
+            let hash = rbh.block_hash();
+            if rbh.prev_blockhash != prev_bhh {
+                return Err(TrustDBError::InvalidParams(format!(
+                    "block headers remove: header with hash {} at index {} does \
+                    not connect to previous header with hash {} at index {}",
+                    hash,
+                    i,
+                    prev_bhh,
+                    i - 1
+                )));
+            }
+            prev_bhh = hash
+        }
+
+        // Prevent other calls that change the inner state of the DB
+        // from running concurrently.
+        let _guard = self.update_mtx.lock().unwrap();
+
+        let batch = self.db.transaction();
+
+        // Get current canonical tip for later use
+        let origin_tip = batch.get_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY)?;
+        let bhb = match origin_tip {
+            Some(val) => val
+                .try_into()
+                .expect("canonical tip data should be valid size"),
+            None => return Err(TrustDBError::NotFound("canonical tip".to_string())),
+        };
+        let origin_tip = BlockHeader::from(&bhb);
+
+        let headers_parsed = headers;
+
+        // Looking up each full header (with height and cumulative difficulty)
+        // in the next check; store so that later we have the data to create deletion
+        // keys.
+        let mut full_headers: Vec<BlockHeader> = vec![];
+        // Check that each header exists in the database, and that no header
+        // to remove has a child unless that child is also going to be removed;
+        // no dangling chains will be left. Also check that none of the blocks
+        // to be removed match the tip the caller wants to be canonical after
+        // the removal.
+        let tip_after_removal_hash = tip_after_removal.block_hash();
+        for (i, header_to_check) in headers_parsed.iter().enumerate() {
+            let hash = header_to_check.block_hash();
+
+            // Ensure that the header which should be canonical after removal is not one
+            // of the blocks to remove
+            if tip_after_removal_hash == hash {
+                return Err(TrustDBError::InvalidParams(format!(
+                    "block headers remove: cannot remove \
+                    header with hash {hash} when that is \
+                    supposed to be the tip after removal"
+                )));
+            }
+
+            // Get full header that has height in it for the block to remove we are checking
+            let full_header = self.block_header_by_hash_tx(&batch, hash)?;
+
+            // Save the full header from database (with height and cumulative difficulty)
+            full_headers.push(full_header);
+            let next_height = full_header.height + 1;
+
+            // Get all headers from the database that could possibly be children
+            let res = self.block_headers_by_height_tx(&batch, next_height);
+            let potential_children = match res {
+                Err(TrustDBError::NotFound(_)) => continue,
+                Err(e) => return Err(e),
+                Ok(v) => v,
+            };
+
+            // Check all potential children. If one has our header to remove's hash as their
+            // previous block, then make sure it is in the removal list. Two or more cannot
+            // be in our removal list because they would have failed contiguous check prior.
+            for to_check in potential_children {
+                if to_check.header.prev_blockhash != hash {
+                    // Not a child of header to remove
+                    continue;
+                }
+
+                // This is a child of the header we are going to remove, make sure it is
+                // also going to be removed.
+                if i == (headers_parsed.len() - 1) {
+                    // We do not have another header in our removal list, meaning it would
+                    // be left dangling.
+                    return Err(TrustDBError::DanglingChild(format!(
+                        "want to remove header with hash {} but it is the last \
+                        header in our removal list, and database has a child \
+                        header with hash {}",
+                        hash, to_check.hash
+                    )));
+                }
+
+                // This check will always fail if there are two children which claim the
+                // current header as a child, as one of them will not match the next
+                // header to remove, which is the only block which could be the removed
+                // child.
+                let next = headers_parsed[i + 1].block_hash();
+                if next != to_check.hash {
+                    // The header of the confirmed child does not match the next header to
+                    // remove, meaning it would be left dangling.
+                    return Err(TrustDBError::DanglingChild(format!(
+                        "want to remove header with hash {}, but database has a \
+                        child header with hash {}",
+                        hash, to_check.hash
+                    )));
+                }
+            }
+        }
+
+        // Ensure that the tip which the caller claims should be canonical after the
+        // removal is a valid block in the database.
+        let tip_after_removal_from_db = self
+            .block_header_by_hash_tx(&batch, tip_after_removal_hash)
+            .map_err(|e| {
+                TrustDBError::NotFound(format!(
+                    "block headers remove: cannot find tip after removal header \
+                    with hash {} in database: {}",
+                    tip_after_removal_hash, e
+                ))
+            })?;
+
+        for (i, rbh) in full_headers.iter().enumerate() {
+            // Check that the raw header we retrieved from the database matches the
+            // header we expected to move as an additional sanity check.
+            let expected_hash = headers_parsed[i].block_hash();
+            if expected_hash != rbh.header.block_hash() {
+                panic!(
+                    "block headers remove: unexpected internal error, header with hash \
+                    {} at position {} in headers to remove does not match header with \
+                    hash {} retrieved from db",
+                    expected_hash,
+                    i,
+                    rbh.header.block_hash()
+                );
+            }
+        }
+
+        // Insert each block header deletion into the batch (for header itself and
+        // height-header association)
+        for (i, rbh) in headers_parsed.iter().enumerate() {
+            // Delete header i
+            let bhash = rbh.block_hash();
+            let fh = full_headers[i];
+            batch.delete_cf(self.get_cf(&HeadersCF), bhash)?;
+
+            // Delete height mapping for header i
+            let hh_key = TrustDB::height_hash_to_key(fh.height, bhash);
+            batch.delete_cf(self.get_cf(&HeightHashCF), hh_key)?;
+        }
+
+        // Check if proposed tip after removal has children.
+        let next_height = tip_after_removal_from_db.height + 1;
+        let res = self.block_headers_by_height_tx(&batch, next_height);
+        match res {
+            Err(TrustDBError::NotFound(_)) => (),
+            Err(e) => return Err(e),
+            Ok(potential_children) => {
+                for to_check in potential_children {
+                    if to_check.header.prev_blockhash == tip_after_removal_hash {
+                        // Expected tip has children, so cannot be the actual tip.
+                        return Err(TrustDBError::InvalidTip(
+                            "block headers remove: passed in \
+                            tip after removal has children"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+        };
+
+        // Insert updated canonical tip after removal of the provided block headers
+        let tip = BlockHeader {
+            hash: tip_after_removal_from_db.hash,
+            difficulty: tip_after_removal_from_db.difficulty,
+            header: *tip_after_removal,
+            height: tip_after_removal_from_db.height,
+        };
+        let tip_enc: EncodedHeader = (&tip).into();
+        batch.put_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY, tip_enc)?;
+
+        // Get parent block from database
+        let ggp = headers_parsed[0].prev_blockhash;
+        let res = self.block_header_by_hash_tx(&batch, ggp);
+        let parent_to_removal_set = res.map_err(|e| {
+            TrustDBError::NotFound(format!(
+                "block headers remove: cannot find previous header \
+                (with hash {}) to lowest header removed (with hash {}) \
+                in database: {}",
+                ggp,
+                headers_parsed[0].block_hash(),
+                e
+            ))
+        })?;
+
+        let origin_tip_hash = origin_tip.hash;
+        let heaviest_removed_hash = headers_parsed[headers_parsed.len() - 1].block_hash();
+
+        let removal_type: RemoveType;
+        if tip_after_removal_hash == parent_to_removal_set.hash {
+            // Canonical tip set by caller is the parent to the blocks removed
+            removal_type = RemoveType::ChainDescend;
+        } else if tip_after_removal_hash == origin_tip_hash {
+            // Canonical tip did not change, meaning blocks we removed were on a non-canonical chain
+            removal_type = RemoveType::ForkDescend;
+        } else if origin_tip_hash == heaviest_removed_hash {
+            // The original canonical tip was a block we removed, but parent to removal set is
+            // not the new canonical per first condition, therefore we descended the canonical
+            // chain far enough that a previous fork is now canonical
+            removal_type = RemoveType::ChainFork;
+        } else {
+            // This should never happen, one of the above three conditions must be true.
+            // Do this before the end of function so we don't apply database changes.
+            return Err(TrustDBError::Other(
+                "none of the chain geometry checks applies to this removal".to_string(),
+            ));
+        }
+
+        // Call post hooks if set.
+        for hook in hooks {
+            batch.put_cf(self.get_cf(hook.0), hook.1, hook.2)?;
+        }
+
+        batch.commit()?;
+        Ok((removal_type, parent_to_removal_set))
+    }
+
     // TODOs
     // Caching
     // Other Tables (missing blocks)
     // Debug logging
 }
 
-impl Clone for TrustDB {
-    fn clone(&self) -> Self {
-        TrustDB {
-            db: Arc::clone(&self.db),
-            genesis_block_mtx: Mutex::new(bitcoin::BlockHash::all_zeros()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
     use bitcoin::BlockHash;
     use bitcoin::hashes::Hash;
     use tempfile::tempdir;
 
-    fn new_test_db() -> TrustDB {
+    fn new_test_db() -> Arc<TrustDB> {
         let tmp = tempdir().expect("temp dir should have been created");
         TrustDB::open(tmp.path()).expect("database should open")
     }
@@ -598,7 +1014,7 @@ mod tests {
         let bh = &BlockHeader {
             hash: header.block_hash(),
             height: 99999,
-            difficulty: U256::from(12345),
+            difficulty: U256::from(12345_u32),
             header,
         };
 
@@ -616,16 +1032,16 @@ mod tests {
         assert_eq!(&enc[8..88], &expected_header);
 
         // check diff encoding
-        let expected_diff = bh.difficulty.to_big_endian();
+        let expected_diff = bh.difficulty.to_be_bytes();
         assert_eq!(&enc[88..], &expected_diff);
     }
 
     #[test]
     fn test_decode_block_header() {
         let test_table = vec![
-            (0, U256::zero()),
+            (0, U256::ZERO),
             (u64::MAX, U256::MAX),
-            (99999, U256::from(12345)),
+            (99999, U256::from(12345_u32)),
         ];
 
         let header = create_test_header(BlockHash::all_zeros(), 1);
@@ -690,7 +1106,7 @@ mod tests {
         let db = new_test_db();
         let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 0;
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         let mut res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
@@ -718,7 +1134,7 @@ mod tests {
         let db = new_test_db();
         let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 0;
-        let diff = U256::zero(); // should use header's work
+        let diff = U256::ZERO; // should use header's work
 
         let res = db.block_header_genesis_insert(&header, height, diff);
         assert!(res.is_ok());
@@ -730,7 +1146,7 @@ mod tests {
         let stored = stored.unwrap();
         let stored_array: [u8; BlockHeader::SIZE] = stored.try_into().unwrap();
         let dec = BlockHeader::from(&stored_array);
-        let work = U256::from_big_endian(&header.work().to_be_bytes());
+        let work = U256::from_be_bytes(header.work().to_be_bytes());
         assert_ne!(work, diff);
         assert_eq!(dec.difficulty, work);
     }
@@ -740,7 +1156,7 @@ mod tests {
         let db = new_test_db();
         let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 99999;
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         // check if fails before insert
         let mut best = db.block_header_best();
@@ -767,7 +1183,7 @@ mod tests {
         let db = new_test_db();
         let header = create_test_header(BlockHash::all_zeros(), 1);
         let height = 99999;
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         // check if fails before insert
         let mut res = db.block_header_by_hash(header.block_hash());
@@ -802,7 +1218,7 @@ mod tests {
     fn test_block_headers_by_height() {
         let db = new_test_db();
         let height = 99999;
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         // check if fails before insert
         let mut retrieved = db.block_headers_by_height(height);
@@ -845,7 +1261,7 @@ mod tests {
         let header1 = create_test_header(BlockHash::all_zeros(), 1);
         let mut header2 = create_test_header(BlockHash::all_zeros(), 2);
         header2.prev_blockhash = header1.block_hash();
-        let diff = U256::from(12345);
+        let diff = U256::from(12345_u32);
 
         let insert = db.block_header_genesis_insert(&header1, height1, diff);
         assert!(insert.is_ok());
@@ -877,44 +1293,11 @@ mod tests {
         let db = new_test_db();
 
         let correct_genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let incorrect_genesis = create_test_header(BlockHash::all_zeros(), 2);
-        let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
-
-        match res {
-            Err(TrustDBError::GenesisExists(val)) => {
-                assert_eq!(val, correct_genesis.block_hash().to_string());
-            }
-            Err(e) => {
-                panic!("unexpected error: {}", e)
-            }
-            _ => panic!("expected an error"),
-        }
-    }
-
-    #[test]
-    fn test_block_headers_insert_multiple_different_genesis_blocks_skip_mtx() {
-        let db = new_test_db();
-
-        let correct_genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&correct_genesis, 0, U256::from(1))
-            .unwrap();
-
-        {
-            // unset mutex to ensure that we hit db, do this in its own scope
-            // to unset the mutex before we call block_header_genesis_insert
-            // again
-            let mut locked = db.genesis_block_mtx.lock().unwrap();
-            if *locked == bitcoin::BlockHash::all_zeros() {
-                panic!("mtx value should have been set");
-            }
-            *locked = bitcoin::BlockHash::all_zeros();
-        }
-
-        let incorrect_genesis = create_test_header(BlockHash::all_zeros(), 2);
-        let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2));
+        let res = db.block_header_genesis_insert(&incorrect_genesis, 0, U256::from(2_u32));
 
         match res {
             Err(TrustDBError::GenesisExists(val)) => {
@@ -933,7 +1316,7 @@ mod tests {
 
         let mut genesis = create_test_header(BlockHash::all_zeros(), 0);
         genesis.prev_blockhash = bitcoin::BlockHash::hash(&[1, 2, 3]);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let res = db.block_header_by_hash(genesis.block_hash()).unwrap();
@@ -941,7 +1324,7 @@ mod tests {
         let genesis_block_header = BlockHeader {
             hash: genesis.block_hash(),
             height: 0,
-            difficulty: U256::from(1),
+            difficulty: U256::from(1_u32),
             header: genesis,
         };
 
@@ -1025,7 +1408,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let headers = [genesis];
@@ -1051,7 +1434,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1123,7 +1506,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1146,7 +1529,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1172,7 +1555,7 @@ mod tests {
         let db = new_test_db();
 
         let genesis = create_test_header(BlockHash::all_zeros(), 0);
-        db.block_header_genesis_insert(&genesis, 0, U256::from(1))
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
             .unwrap();
 
         let h1 = create_test_header(genesis.block_hash(), 1);
@@ -1181,5 +1564,453 @@ mod tests {
         let headers = [h1, h2];
         let res = db.block_headers_insert(&headers, &[]);
         assert!(res.is_err(), "expected error")
+    }
+
+    #[test]
+    fn test_block_headers_remove_errors() {
+        struct Test {
+            name: &'static str,
+            pre_insert: Vec<Header>,
+            to_remove: Vec<Header>,
+            post_tip: Header,
+            error_type: TrustDBError,
+        }
+
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+        let fake_hash = bitcoin::hashes::Hash::hash(&[42u8; 32]);
+        let fake_block = create_test_header(fake_hash, 2);
+
+        let test_cases = vec![
+            Test {
+                name: "empty set",
+                pre_insert: vec![],
+                to_remove: vec![],
+                post_tip: genesis,
+                error_type: TrustDBError::InvalidParams("".to_string()),
+            },
+            Test {
+                name: "non-contiguous set",
+                pre_insert: vec![],
+                to_remove: vec![h1, fake_block],
+                post_tip: genesis,
+                error_type: TrustDBError::InvalidParams("".to_string()),
+            },
+            Test {
+                name: "missing header",
+                pre_insert: vec![],
+                to_remove: vec![h1],
+                post_tip: genesis,
+                error_type: TrustDBError::NotFound("".to_string()),
+            },
+            Test {
+                name: "invalid tip",
+                pre_insert: vec![h1],
+                to_remove: vec![h1],
+                post_tip: fake_block,
+                error_type: TrustDBError::NotFound("".to_string()),
+            },
+            Test {
+                name: "tip in set",
+                pre_insert: vec![h1],
+                to_remove: vec![h1],
+                post_tip: h1,
+                error_type: TrustDBError::InvalidParams("".to_string()),
+            },
+            Test {
+                name: "dangling children",
+                pre_insert: vec![h1, h2],
+                to_remove: vec![h1],
+                post_tip: genesis,
+                error_type: TrustDBError::DanglingChild("".to_string()),
+            },
+        ];
+
+        for t in test_cases {
+            let db = new_test_db();
+            db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
+                .unwrap();
+
+            if !t.pre_insert.is_empty() {
+                db.block_headers_insert(&t.pre_insert, &[]).unwrap();
+            }
+
+            let result = db.block_headers_remove(&t.to_remove, &t.post_tip, &[]);
+            assert!(result.is_err(), "test '{}' should have failed", t.name);
+
+            let err = result.unwrap_err();
+
+            if std::mem::discriminant(&t.error_type) != std::mem::discriminant(&err) {
+                panic!("unexpected error: {}", err)
+            }
+        }
+    }
+
+    #[test]
+    fn test_block_headers_remove_orphan() {
+        let db = new_test_db();
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
+            .unwrap();
+
+        let fake_parent = bitcoin::hashes::Hash::hash(&[88u8; 32]);
+        let orphan = create_test_header(fake_parent, 1);
+
+        let orphan_bh = BlockHeader {
+            hash: orphan.block_hash(),
+            height: 1,
+            header: orphan,
+            difficulty: U256::from(1_u32),
+        };
+        let enc: EncodedHeader = (&orphan_bh).into();
+        db.put(&HeadersCF, orphan.block_hash(), enc).unwrap();
+
+        let hh_key = TrustDB::height_hash_to_key(1, orphan.block_hash());
+        db.put(&HeightHashCF, hh_key, []).unwrap();
+
+        let result = db.block_headers_remove(&[orphan], &genesis, &[]);
+        match result {
+            Err(TrustDBError::NotFound(_)) => (),
+            Err(e) => panic!("unexpected error {e}"),
+            _ => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn test_block_headers_remove_invalid_tip() {
+        let db = new_test_db();
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 20);
+        let h3 = create_test_header(h2.block_hash(), 30);
+        let headers = [h1, h2, h3];
+        db.block_headers_insert(&headers, &[]).unwrap();
+
+        let fork1 = create_test_header(h1.block_hash(), 2);
+        let headers = [fork1];
+        db.block_headers_insert(&headers, &[]).unwrap();
+
+        let res = db.block_headers_remove(&[h2, h3], &h1, &[]);
+        match res {
+            Err(TrustDBError::InvalidTip(_)) => (),
+            Err(e) => panic!("unexpected error: {e}"),
+            _ => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn test_block_headers_remove_types() {
+        use self::RemoveType::*;
+
+        struct Test {
+            name: &'static str,
+            pre_insert_first: Vec<Header>,
+            pre_insert_second: Vec<Header>,
+            to_remove: Vec<Header>,
+            post_tip: Header,
+            expected_type: RemoveType,
+        }
+
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+        let h3 = create_test_header(h2.block_hash(), 3);
+        let fork1 = create_test_header_with_bits(h1.block_hash(), 100, 0x1d010000);
+        let fork2 = create_test_header_with_bits(fork1.block_hash(), 101, 0x1d010000);
+
+        let test_cases = vec![
+            Test {
+                name: "chain descend",
+                pre_insert_first: vec![h1, h2],
+                pre_insert_second: vec![],
+                to_remove: vec![h2],
+                post_tip: h1,
+                expected_type: ChainDescend,
+            },
+            Test {
+                name: "chain fork",
+                pre_insert_first: vec![h1, h2, h3],
+                pre_insert_second: vec![fork1, fork2],
+                to_remove: vec![h2, h3],
+                post_tip: fork2,
+                expected_type: ChainFork,
+            },
+            Test {
+                name: "fork descend",
+                pre_insert_first: vec![h1, h2],
+                pre_insert_second: vec![fork1],
+                to_remove: vec![fork1],
+                post_tip: h2,
+                expected_type: ForkDescend,
+            },
+        ];
+
+        for t in test_cases {
+            let db = new_test_db();
+            db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
+                .unwrap();
+
+            if !t.pre_insert_first.is_empty() {
+                db.block_headers_insert(&t.pre_insert_first, &[]).unwrap();
+            }
+
+            if !t.pre_insert_second.is_empty() {
+                db.block_headers_insert(&t.pre_insert_second, &[]).unwrap();
+            }
+
+            let result = db.block_headers_remove(&t.to_remove, &t.post_tip, &[]);
+            assert!(result.is_ok(), "test '{}' fail: {:?}", t.name, result.err());
+
+            let (rt, _) = result.unwrap();
+            assert_eq!(
+                rt, t.expected_type,
+                "test '{}': expected {:?}, got {:?}",
+                t.name, t.expected_type, rt
+            );
+
+            let best = db.block_header_best().unwrap();
+            assert_eq!(
+                best.hash,
+                t.post_tip.block_hash(),
+                "test '{}': invalid canonical tip",
+                t.name
+            );
+
+            for header in t.to_remove {
+                let result = db.block_header_by_hash(header.block_hash());
+                assert!(
+                    result.is_err(),
+                    "test '{}': removed header {} still in database",
+                    t.name,
+                    header.block_hash()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_block_headers_remove_integration() {
+        let db = new_test_db();
+
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+        let h3 = create_test_header(h2.block_hash(), 3);
+        let h4 = create_test_header(h3.block_hash(), 4);
+        let headers = [h1, h2, h3, h4];
+        db.block_headers_insert(&headers, &[]).unwrap();
+
+        let (remove_type, parent_header) = db.block_headers_remove(&[h3, h4], &h2, &[]).unwrap();
+
+        assert_eq!(remove_type, RemoveType::ChainDescend);
+        assert_eq!(parent_header.hash, h2.block_hash());
+
+        let best = db.block_header_best().unwrap();
+        assert_eq!(best.hash, h2.block_hash());
+
+        for header in &[h3, h4] {
+            assert!(db.block_header_by_hash(header.block_hash()).is_err());
+        }
+
+        // Test hooks
+        let key = b"test_key";
+        let value = b"test_value";
+        let hooks = vec![(&MetadataCF, key.as_ref(), value.as_ref())];
+
+        let h5 = create_test_header(h2.block_hash(), 3);
+        db.block_headers_insert(&[h5], &[]).unwrap();
+        db.block_headers_remove(&[h5], &h2, &hooks).unwrap();
+
+        let retrieved = db.get(&MetadataCF, key).unwrap();
+        assert_eq!(retrieved, value);
+    }
+
+    #[test]
+    fn test_headers_insert_race() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        const NUM_THREADS: usize = 8;
+
+        let db = new_test_db();
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+
+        let barrier = Arc::new(Barrier::new(NUM_THREADS));
+        let mut handles = Vec::new();
+
+        for _ in 0..NUM_THREADS {
+            let db_clone = Arc::clone(&db);
+            let bc = Arc::clone(&barrier);
+
+            let handle = thread::spawn(move || {
+                bc.wait();
+                db_clone.block_headers_insert(&[h1, h2], &[])
+            });
+
+            handles.push(handle);
+        }
+
+        let mut results = Vec::new();
+        for handle in handles {
+            results.push(handle.join().unwrap());
+        }
+
+        let mut found = false;
+        for res in results {
+            match res {
+                Ok(_) => {
+                    if found {
+                        panic!("multiple threads succeeded")
+                    }
+                    found = true;
+                }
+                Err(TrustDBError::Duplicate(_)) => (),
+                Err(e) => panic!("unexpected error {e}"),
+            }
+        }
+        if !found {
+            panic!("expected one success")
+        }
+    }
+
+    #[test]
+    fn test_headers_remove_race() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        const NUM_THREADS: usize = 8;
+
+        let db = new_test_db();
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+        db.block_headers_insert(&[h1, h2], &[]).unwrap();
+
+        let barrier = Arc::new(Barrier::new(NUM_THREADS));
+        let mut handles = Vec::new();
+
+        for _ in 0..NUM_THREADS {
+            let db_clone = Arc::clone(&db);
+            let bc = Arc::clone(&barrier);
+
+            let handle = thread::spawn(move || {
+                bc.wait();
+                db_clone.block_headers_remove(&[h1, h2], &genesis, &[])
+            });
+
+            handles.push(handle);
+        }
+
+        let mut results = Vec::new();
+        for handle in handles {
+            results.push(handle.join().unwrap());
+        }
+
+        let mut found = false;
+        for res in results {
+            match res {
+                Ok(_) => {
+                    if found {
+                        panic!("multiple threads succeeded")
+                    }
+                    found = true;
+                }
+                Err(TrustDBError::NotFound(_)) => (),
+                Err(e) => panic!("unexpected error {e}"),
+            }
+        }
+        if !found {
+            panic!("expected one success")
+        }
+    }
+
+    #[test]
+    fn test_update_headers_race() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let db = new_test_db();
+        let genesis = create_test_header(BlockHash::all_zeros(), 0);
+        db.block_header_genesis_insert(&genesis, 0, U256::from(1_u32))
+            .unwrap();
+
+        let h1 = create_test_header(genesis.block_hash(), 1);
+        let h2 = create_test_header(h1.block_hash(), 2);
+        db.block_headers_insert(&[h1, h2], &[]).unwrap();
+
+        let h3 = create_test_header(h2.block_hash(), 3);
+
+        // Test inserting and removing at the same time, for the chain:
+        // g -> h1 -> h2
+        // try and insert h3 and remove h2 concurrently
+
+        let barrier = Arc::new(Barrier::new(2));
+
+        // Removal
+        let db_remove = Arc::clone(&db);
+        let bc_remove = Arc::clone(&barrier);
+
+        let remove = thread::spawn(move || {
+            bc_remove.wait();
+            db_remove.block_headers_remove(&[h2], &h1, &[])
+        });
+
+        // Insertion
+        let db_insert = Arc::clone(&db);
+        let bc_insert = Arc::clone(&barrier);
+
+        let insert = thread::spawn(move || {
+            bc_insert.wait();
+            db_insert.block_headers_insert(&[h3], &[])
+        });
+
+        let remove_res = remove.join().unwrap();
+        let insert_res = insert.join().unwrap();
+
+        if remove_res.is_ok() {
+            match insert_res {
+                Ok(_) => panic!("expected failed insertion"),
+                Err(TrustDBError::NotFound(_)) => (),
+                Err(e) => panic!("unexpected insertion error: {e}"),
+            }
+        } else if insert_res.is_ok() {
+            match remove_res {
+                Ok(_) => panic!("expected failed removal"),
+                Err(TrustDBError::DanglingChild(_)) => (),
+                Err(e) => panic!("unexpected removal error: {e}"),
+            }
+        } else {
+            panic!("insertion and deletion both failed")
+        }
+    }
+
+    #[test]
+    fn test_clone_trust_db() {
+        let db = new_test_db();
+        let cloned_db = Arc::clone(&db);
+
+        assert_eq!(std::ptr::addr_of!(db.db), std::ptr::addr_of!(cloned_db.db));
+        assert!(std::ptr::eq(&db.db, &cloned_db.db));
+
+        assert_eq!(
+            std::ptr::addr_of!(db.update_mtx),
+            std::ptr::addr_of!(cloned_db.update_mtx)
+        );
+        assert!(std::ptr::eq(&db.update_mtx, &cloned_db.update_mtx));
     }
 }

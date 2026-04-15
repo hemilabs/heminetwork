@@ -6,8 +6,8 @@ license = "MIT"
 
 [dependencies]
 bitcoin = "=0.32.8"
+ethnum = "=1.5.2"
 hex = "=0.4.3"
-primitive-types = "=0.14.0"
 rocksdb = "=0.24.0"
 thiserror = "=2.0.18"
 
