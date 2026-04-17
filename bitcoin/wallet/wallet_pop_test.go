@@ -191,8 +191,7 @@ func TestPoPTransactionSignValidates(t *testing.T) {
 			len(popTx.TxIn[0].Witness))
 	}
 
-	prev := prevOuts[f.outpoint.String()]
-	if err := verifyInput(popTx, 0, prev); err != nil {
+	if err := verifyInput(popTx, 0, prevOuts); err != nil {
 		t.Fatalf("script engine rejected signed PoP input: %v", err)
 	}
 }
@@ -250,8 +249,7 @@ func TestPoPSighashCacheSafeOnLegacyOnly(t *testing.T) {
 			t.Fatalf("iteration %d: TransactionSign: %v", i, err)
 		}
 
-		prev := prevOuts[f.outpoint.String()]
-		if err := verifyInput(popTx, 0, prev); err != nil {
+		if err := verifyInput(popTx, 0, prevOuts); err != nil {
 			t.Fatalf("iteration %d: engine rejected signed input: %v", i, err)
 		}
 	}

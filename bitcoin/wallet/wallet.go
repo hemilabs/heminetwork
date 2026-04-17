@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/mempool"
@@ -166,8 +167,10 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 // TransactionSign signs every input of tx using keys looked up in z.
 // Inputs are dispatched by the script class of their previous output:
 // legacy (P2PKH, P2SH, etc.) inputs produce a SignatureScript via the
-// standard txscript.SignTxOutput path; native segwit v0 (P2WPKH) inputs
-// produce a witness via BIP-143 sighash.  All signatures use SigHashAll.
+// standard txscript.SignTxOutput path with SigHashAll; native segwit
+// v0 (P2WPKH) inputs produce a witness via BIP-143 sighash with
+// SigHashAll; taproot v1 (P2TR) inputs produce a witness via BIP-341
+// key-path sighash with SigHashDefault.
 func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevOuts PrevOuts) error {
 	// Validate every input has a matching prev-out before any
 	// sighash computation.  Without this pre-check a caller-
@@ -193,19 +196,60 @@ func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevO
 			if err := signP2WPKH(params, z, tx, i, prev, sigHashes); err != nil {
 				return fmt.Errorf("sign p2wpkh input %d: %w", i, err)
 			}
-
-		default:
-			sigScript, err := txscript.SignTxOutput(params, tx, i,
-				prev.PkScript, txscript.SigHashAll,
-				txscript.KeyClosure(z.LookupKeyByAddr), nil, nil)
-			if err != nil {
-				return err
+		case txscript.WitnessV1TaprootTy:
+			if err := signP2TRKeyPath(params, z, tx, i, prev, sigHashes); err != nil {
+				return fmt.Errorf("sign p2tr input %d: %w", i, err)
 			}
-			tx.TxIn[i].SignatureScript = sigScript
+		default:
+			if err := signLegacy(params, z, tx, i, prev); err != nil {
+				return fmt.Errorf("sign legacy input %d: %w", i, err)
+			}
 		}
 	}
 
 	return nil
+}
+
+// signLegacy signs a legacy (P2PKH, P2SH, etc.) input via the
+// classic txscript.SignTxOutput path with SigHashAll.  Extracted
+// from TransactionSign to keep each dispatch arm at a single line
+// and each signing strategy in its own named function.
+func signLegacy(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx int, prev *wire.TxOut) error {
+	sigScript, err := txscript.SignTxOutput(params, tx, idx,
+		prev.PkScript, txscript.SigHashAll,
+		txscript.KeyClosure(z.LookupKeyByAddr), nil, nil)
+	if err != nil {
+		return fmt.Errorf("sign tx output: %w", err)
+	}
+	tx.TxIn[idx].SignatureScript = sigScript
+	return nil
+}
+
+// resolveInputSigningKey extracts the single address from pkScript via
+// the configured network params and looks up its private key in z.
+// Shared by signP2WPKH and signP2TRKeyPath: both script classes
+// encode exactly one address that derives directly from the signer's
+// public key, so the address-extract + zuul-lookup dance is identical.
+//
+// Returns the key on success.  Errors on pkScript that does not
+// resolve to exactly one address, lookup failures, and missing keys
+// — each with the failing address in context for debugging.
+func resolveInputSigningKey(params *chaincfg.Params, z zuul.Zuul, pkScript []byte) (*btcec.PrivateKey, error) {
+	_, addrs, _, err := txscript.ExtractPkScriptAddrs(pkScript, params)
+	if err != nil {
+		return nil, fmt.Errorf("extract address: %w", err)
+	}
+	if len(addrs) != 1 {
+		return nil, fmt.Errorf("pkScript extracted %d addresses, expected 1", len(addrs))
+	}
+	priv, ok, err := z.LookupKeyByAddr(addrs[0])
+	if err != nil {
+		return nil, fmt.Errorf("lookup key for %s: %w", addrs[0], err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("lookup key for %s: %w", addrs[0], zuul.ErrKeyDoesntExist)
+	}
+	return priv, nil
 }
 
 // signP2WPKH signs a witness v0 pubkey hash input.  The witness program
@@ -213,22 +257,42 @@ func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevO
 // the P2PKH-equivalent script per BIP-143.  The caller's zuul must
 // hold the key for the address derived from the witness program.
 func signP2WPKH(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx int, prev *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(prev.PkScript, params)
-	if err != nil || len(addrs) != 1 {
-		return fmt.Errorf("extract p2wpkh address: %w", err)
+	priv, err := resolveInputSigningKey(params, z, prev.PkScript)
+	if err != nil {
+		return err
 	}
-
-	priv, ok, err := z.LookupKeyByAddr(addrs[0])
-	if err != nil || !ok {
-		return fmt.Errorf("lookup key for %s: %w", addrs[0], err)
-	}
-
 	witness, err := txscript.WitnessSignature(tx, sigHashes, idx,
 		prev.Value, prev.PkScript, txscript.SigHashAll, priv, true)
 	if err != nil {
 		return fmt.Errorf("witness signature: %w", err)
 	}
 	tx.TxIn[idx].Witness = witness
+	return nil
+}
+
+// signP2TRKeyPath signs a witness v1 taproot input using the BIP-86
+// key-path spend.  The stored private key is the untweaked internal
+// key with no script commitment; RawTxInTaprootSignature applies the
+// BIP-341 tweak internally, so callers must pass the untweaked key.
+//
+// Script-path spends (tapscript with an envelope or other committed
+// script) are not handled here — they require the caller to provide
+// the leaf script and control block, which the wallet does not carry.
+// Callers with script-path inputs must sign those inputs before
+// calling TransactionSign, or use a dedicated script-path entry point.
+func signP2TRKeyPath(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx int, prev *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	priv, err := resolveInputSigningKey(params, z, prev.PkScript)
+	if err != nil {
+		return err
+	}
+	// Pass the untweaked key; RawTxInTaprootSignature applies the
+	// BIP-341 tweak with the provided script root (nil for BIP-86).
+	sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, idx,
+		prev.Value, prev.PkScript, nil, txscript.SigHashDefault, priv)
+	if err != nil {
+		return fmt.Errorf("taproot signature: %w", err)
+	}
+	tx.TxIn[idx].Witness = wire.TxWitness{sig}
 	return nil
 }
 
