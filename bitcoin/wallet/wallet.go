@@ -154,21 +154,93 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	return tx, prevOuts, nil
 }
 
+// TransactionSign signs every input of tx using keys looked up in z.
+// Inputs are dispatched by the script class of their previous output:
+// legacy (P2PKH, P2SH, etc.) inputs produce a SignatureScript via the
+// standard txscript.SignTxOutput path; native segwit v0 (P2WPKH) inputs
+// produce a witness via BIP-143 sighash.  All signatures use SigHashAll.
 func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevOuts PrevOuts) error {
+	// Validate every input has a matching prev-out before any
+	// sighash computation.  Without this pre-check a caller-
+	// supplied incomplete PrevOuts would surface as a nil-deref
+	// panic deep inside NewTxSigHashes when it tries to fetch
+	// the missing amount for witness sighash midstate.
 	for i, txIn := range tx.TxIn {
-		prev, ok := prevOuts[txIn.PreviousOutPoint.String()]
-		if !ok {
-			return fmt.Errorf("previous out not found: %v",
-				txIn.PreviousOutPoint)
+		if _, ok := prevOuts[txIn.PreviousOutPoint.String()]; !ok {
+			return fmt.Errorf("previous out not found: input %d outpoint %v",
+				i, txIn.PreviousOutPoint)
 		}
-		sigScript, err := txscript.SignTxOutput(params, tx, i,
-			prev.PkScript, txscript.SigHashAll,
-			txscript.KeyClosure(z.LookupKeyByAddr), nil, nil)
-		if err != nil {
-			return err
+	}
+
+	// BIP-143 sighash midstate is reused across all witness inputs in
+	// the tx.  Compute once.
+	sigHashes := txscript.NewTxSigHashes(tx, prevOutsFetcher(prevOuts))
+
+	for i, txIn := range tx.TxIn {
+		prev := prevOuts[txIn.PreviousOutPoint.String()]
+
+		switch txscript.GetScriptClass(prev.PkScript) {
+		case txscript.WitnessV0PubKeyHashTy:
+			if err := signP2WPKH(params, z, tx, i, prev, sigHashes); err != nil {
+				return fmt.Errorf("sign p2wpkh input %d: %w", i, err)
+			}
+
+		default:
+			sigScript, err := txscript.SignTxOutput(params, tx, i,
+				prev.PkScript, txscript.SigHashAll,
+				txscript.KeyClosure(z.LookupKeyByAddr), nil, nil)
+			if err != nil {
+				return err
+			}
+			tx.TxIn[i].SignatureScript = sigScript
 		}
-		tx.TxIn[i].SignatureScript = sigScript
 	}
 
 	return nil
+}
+
+// signP2WPKH signs a witness v0 pubkey hash input.  The witness program
+// is the 20-byte HASH160 of the pubkey; the sighash is computed over
+// the P2PKH-equivalent script per BIP-143.  The caller's zuul must
+// hold the key for the address derived from the witness program.
+func signP2WPKH(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx int, prev *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	_, addrs, _, err := txscript.ExtractPkScriptAddrs(prev.PkScript, params)
+	if err != nil || len(addrs) != 1 {
+		return fmt.Errorf("extract p2wpkh address: %w", err)
+	}
+
+	priv, ok, err := z.LookupKeyByAddr(addrs[0])
+	if err != nil || !ok {
+		return fmt.Errorf("lookup key for %s: %w", addrs[0], err)
+	}
+
+	witness, err := txscript.WitnessSignature(tx, sigHashes, idx,
+		prev.Value, prev.PkScript, txscript.SigHashAll, priv, true)
+	if err != nil {
+		return fmt.Errorf("witness signature: %w", err)
+	}
+	tx.TxIn[idx].Witness = witness
+	return nil
+}
+
+// prevOutsFetcher adapts PrevOuts to txscript.PrevOutputFetcher as
+// required by NewTxSigHashes for segwit and taproot sighash calculation.
+//
+// PrevOuts keys are produced by wire.OutPoint.String; parsing back via
+// wire.NewOutPointFromString is a lossless round-trip for well-formed
+// keys.  A parse failure means the caller constructed PrevOuts with a
+// manually-forged key that does not match any real outpoint, which
+// would cause NewTxSigHashes to dereference a nil TxOut downstream.
+// Panic with the offending key rather than silently dropping the
+// entry and producing a corrupt sighash midstate.
+func prevOutsFetcher(p PrevOuts) txscript.PrevOutputFetcher {
+	m := make(map[wire.OutPoint]*wire.TxOut, len(p))
+	for k, v := range p {
+		op, err := wire.NewOutPointFromString(k)
+		if err != nil {
+			panic(fmt.Sprintf("prevOutsFetcher: malformed outpoint key %q: %v", k, err))
+		}
+		m[*op] = v
+	}
+	return txscript.NewMultiPrevOutFetcher(m)
 }
