@@ -72,6 +72,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
 - Add multiple RPC commands to regular and authenticated TBC routes ([#1026](https://github.com/hemilabs/heminetwork/pull/1026)).
 - Add maximum fee configuration to `popmd` ([#1037](https://github.com/hemilabs/heminetwork/pull/1037)).
+- Add external ECDSA and schnorr signature injection to `bitcoin/wallet`,
+  enabling threshold signature committees, hardware wallets, and PSBT flows
+  to produce signatures out of band and hand them to the wallet for
+  witness/sigScript assembly.  Includes `TransactionApplyECDSA`,
+  `TransactionApplySchnorr`, `ECDSASigFromRS` DER helper, and
+  `VerifyECDSA`/`VerifySchnorr` pre-broadcast gates.
+- Add `bitcoin/zuul.TSSNamedKey` storage for keys controlled by an external
+  threshold signature scheme, alongside symmetrical `PutTSSKey` /
+  `GetTSSKey` / `PurgeTSSKey` / `LookupTSSKeyByAddr` interface methods.
 
 ### Changed
 
