@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add RPC request method whitelist to hproxy ([#691](https://github.com/hemilabs/heminetwork/pull/691)).
 - Add TBC notification system ([#725](https://github.com/hemilabs/heminetwork/pull/725)).
 - Add Continuum Transfuctioner protocol and daemon to handle threshold signatures ([#752](https://github.com/hemilabs/heminetwork/pull/752)).
+- Add Trust, rust version of TBC Headers only mode ([#970](https://github.com/hemilabs/heminetwork/pull/970))
 
 ### Changed
 
