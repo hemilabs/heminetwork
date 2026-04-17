@@ -5,6 +5,8 @@
 package wallet
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -19,18 +21,33 @@ import (
 )
 
 // verifyInput runs the script engine on a single input and returns the
-// result.  For witness inputs the engine walks both the witness and
-// the prev pkScript and applies BIP-143 sighash verification.
-func verifyInput(tx *wire.MsgTx, idx int, prev *wire.TxOut) error {
-	flags := txscript.StandardVerifyFlags
-	fetcher := txscript.NewCannedPrevOutputFetcher(prev.PkScript, prev.Value)
+// result.  The supplied prevOuts must cover every input of tx, not just
+// idx: taproot sighash (BIP-341) commits to all prev scripts and
+// amounts, so a single-input fetcher would produce a sighash mismatch
+// on mixed-input transactions.
+func verifyInput(tx *wire.MsgTx, idx int, prevOuts PrevOuts) error {
+	fetcher := prevOutsFetcher(prevOuts)
 	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
+
+	prev := prevOuts[tx.TxIn[idx].PreviousOutPoint.String()]
+	if prev == nil {
+		return fmt.Errorf("prevOuts missing entry for input %d", idx)
+	}
+
+	flags := txscript.StandardVerifyFlags
 	vm, err := txscript.NewEngine(prev.PkScript, tx, idx, flags, nil,
 		sigHashes, prev.Value, fetcher)
 	if err != nil {
-		return err
+		return fmt.Errorf("new engine: %w", err)
 	}
-	return vm.Execute()
+	if err := vm.Execute(); err != nil {
+		var se txscript.Error
+		if errors.As(err, &se) {
+			return fmt.Errorf("execute: code=%v desc=%q", se.ErrorCode, se.Description)
+		}
+		return fmt.Errorf("execute: %w", err)
+	}
+	return nil
 }
 
 // TestSignP2WPKHInput exercises witness v0 pubkey hash signing through
@@ -108,7 +125,7 @@ func TestSignP2WPKHInput(t *testing.T) {
 			len(tx.TxIn[0].SignatureScript))
 	}
 
-	err = verifyInput(tx, 0, prevOuts[fundOutpoint.String()])
+	err = verifyInput(tx, 0, prevOuts)
 	if err != nil {
 		t.Fatalf("script engine rejected signed P2WPKH input: %v", err)
 	}
@@ -216,10 +233,10 @@ func TestSignMixedP2PKHAndP2WPKH(t *testing.T) {
 			len(tx.TxIn[1].SignatureScript))
 	}
 
-	if err := verifyInput(tx, 0, prevOuts[op1.String()]); err != nil {
+	if err := verifyInput(tx, 0, prevOuts); err != nil {
 		t.Fatalf("engine rejected P2PKH input: %v", err)
 	}
-	if err := verifyInput(tx, 1, prevOuts[op2.String()]); err != nil {
+	if err := verifyInput(tx, 1, prevOuts); err != nil {
 		t.Fatalf("engine rejected P2WPKH input: %v", err)
 	}
 }
