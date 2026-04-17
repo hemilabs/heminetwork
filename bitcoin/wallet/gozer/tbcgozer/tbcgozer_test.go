@@ -68,6 +68,7 @@ func TestTBCGozerConnection(t *testing.T) {
 		}
 	}
 
+	DefaultRequestTimeout = 10 * time.Second // CI is slow as balls
 	b := New(fmt.Sprintf("http://%s/v1/ws", tbcAddr))
 	err = b.Run(ctx, nil)
 	if err != nil {
