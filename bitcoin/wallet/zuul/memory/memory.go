@@ -24,10 +24,16 @@ import (
 // public key, so LookupKeyByAddr succeeds regardless of which address
 // form a caller presents.  Currently indexes P2PKH, P2WPKH, and
 // BIP-86 P2TR addresses.
+//
+// TSS keys are tracked in a parallel map.  They share the same
+// address-keyspace as local keys (an address is either controlled by
+// a local private key or by a TSS committee, never both) but queries
+// dispatch to the right side via the typed lookup methods.
 type memoryZuul struct {
-	mtx    sync.Mutex
-	params *chaincfg.Params
-	keys   map[string]*zuul.NamedKey
+	mtx     sync.Mutex
+	params  *chaincfg.Params
+	keys    map[string]*zuul.NamedKey
+	tssKeys map[string]*zuul.TSSNamedKey
 }
 
 var _ zuul.Zuul = (*memoryZuul)(nil)
@@ -35,8 +41,9 @@ var _ zuul.Zuul = (*memoryZuul)(nil)
 // New returns a new [zuul.Zuul] implementation that stores data in-memory.
 func New(params *chaincfg.Params) (zuul.Zuul, error) {
 	m := &memoryZuul{
-		params: params,
-		keys:   make(map[string]*zuul.NamedKey, 10),
+		params:  params,
+		keys:    make(map[string]*zuul.NamedKey, 10),
+		tssKeys: make(map[string]*zuul.TSSNamedKey, 10),
 	}
 	return m, nil
 }
@@ -101,9 +108,14 @@ func (m *memoryZuul) PutKey(nk *zuul.NamedKey) error {
 	defer m.mtx.Unlock()
 
 	// All-or-nothing: if any address already points at a stored key,
-	// refuse the put without mutating.
+	// refuse the put without mutating.  Collisions are detected
+	// against both the local and TSS key indexes so the two cannot
+	// claim overlapping address space.
 	for _, a := range addrs {
 		if _, ok := m.keys[a]; ok {
+			return zuul.ErrKeyExists
+		}
+		if _, ok := m.tssKeys[a]; ok {
 			return zuul.ErrKeyExists
 		}
 	}
@@ -179,4 +191,119 @@ func (m *memoryZuul) LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, b
 		return nil, false, zuul.ErrKeyDoesntExist
 	}
 	return nk.PrivateKey, true, nil
+}
+
+// ecdsaAddressesForPubKey returns the set of addresses an ECDSA key
+// can sign for: P2PKH and P2WPKH.  Taproot (P2TR) key-path spends
+// require schnorr signatures, so ECDSA TSS keys cannot be used to
+// spend a P2TR output regardless of the aggregated pubkey.  This
+// helper is used for TSS key enrolment to restrict the address
+// surface accordingly.
+func ecdsaAddressesForPubKey(params *chaincfg.Params, pubCompressed []byte) ([]string, error) {
+	addrs := make([]string, 0, 2)
+
+	pkHash := btcutil.Hash160(pubCompressed)
+	p2pkh, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	if err != nil {
+		return nil, fmt.Errorf("p2pkh address: %w", err)
+	}
+	addrs = append(addrs, p2pkh.EncodeAddress())
+
+	p2wpkh, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	if err != nil {
+		return nil, fmt.Errorf("p2wpkh address: %w", err)
+	}
+	addrs = append(addrs, p2wpkh.EncodeAddress())
+
+	return addrs, nil
+}
+
+// PutTSSKey enrols a TSS-controlled public key.  The key is indexed
+// under the addresses an ECDSA signer can spend: P2PKH and P2WPKH.
+// Taproot is not supported because ECDSA signatures cannot satisfy
+// a BIP-341 key-path spend.
+//
+// Collisions are detected against both the local-key index and the
+// TSS-key index: an address pointing to either form of key refuses
+// the insert with ErrKeyExists.
+func (m *memoryZuul) PutTSSKey(tnk *zuul.TSSNamedKey) error {
+	if tnk == nil || tnk.PublicKey == nil {
+		return fmt.Errorf("tss key: public key required")
+	}
+	if len(tnk.KeyID) == 0 {
+		return fmt.Errorf("tss key: key id required")
+	}
+
+	pubBytes := tnk.PublicKey.SerializeCompressed()
+	addrs, err := ecdsaAddressesForPubKey(m.params, pubBytes)
+	if err != nil {
+		return err
+	}
+
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	for _, a := range addrs {
+		if _, ok := m.keys[a]; ok {
+			return zuul.ErrKeyExists
+		}
+		if _, ok := m.tssKeys[a]; ok {
+			return zuul.ErrKeyExists
+		}
+	}
+	for _, a := range addrs {
+		m.tssKeys[a] = tnk
+	}
+	return nil
+}
+
+// GetTSSKey returns the TSS key indexed under addr.  If addr maps to
+// a local private key (or nothing), ErrKeyDoesntExist is returned.
+func (m *memoryZuul) GetTSSKey(addr btcutil.Address) (*zuul.TSSNamedKey, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	tnk, ok := m.tssKeys[addr.String()]
+	if !ok {
+		return nil, zuul.ErrKeyDoesntExist
+	}
+	return tnk, nil
+}
+
+// PurgeTSSKey removes a TSS key.  Because PutTSSKey indexes under
+// multiple address forms, PurgeTSSKey recomputes all of them from
+// the stored public key and removes every entry.
+func (m *memoryZuul) PurgeTSSKey(addr btcutil.Address) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	tnk, ok := m.tssKeys[addr.String()]
+	if !ok {
+		return zuul.ErrKeyDoesntExist
+	}
+
+	pubBytes := tnk.PublicKey.SerializeCompressed()
+	addrs, err := ecdsaAddressesForPubKey(m.params, pubBytes)
+	if err != nil {
+		return fmt.Errorf("derive addresses: %w", err)
+	}
+	for _, a := range addrs {
+		delete(m.tssKeys, a)
+	}
+	return nil
+}
+
+// LookupTSSKeyByAddr is the TSS counterpart to LookupKeyByAddr.  It
+// returns the TSS key and true when addr is TSS-controlled, or false
+// with ErrKeyDoesntExist when addr is unknown or controlled by a
+// local private key.
+func (m *memoryZuul) LookupTSSKeyByAddr(addr btcutil.Address) (*zuul.TSSNamedKey, bool, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	tnk, ok := m.tssKeys[addr.String()]
+	if !ok {
+		return nil, false, zuul.ErrKeyDoesntExist
+	}
+	return tnk, true, nil
 }
