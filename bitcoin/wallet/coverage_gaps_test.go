@@ -233,3 +233,100 @@ func TestPrevOutsFetcherPanicsOnMalformedKey(t *testing.T) {
 
 	_ = prevOutsFetcher(bad)
 }
+
+// TestTransactionApplyECDSAP2WPKHWrongKey covers the P2WPKH branch
+// of pubKeyMatchesAddress — the sibling to
+// TestTransactionApplyECDSAWrongKey which exercises the P2PKH
+// branch.  Provides a pubkey whose HASH160 does not match the
+// witness program in the prev pkScript.
+func TestTransactionApplyECDSAP2WPKHWrongKey(t *testing.T) {
+	params := &chaincfg.TestNet3Params
+
+	owner, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pkScript is a P2WPKH locked to owner's key.
+	ownerHash := btcutil.Hash160(owner.PubKey().SerializeCompressed())
+	addr, err := btcutil.NewAddressWitnessPubKeyHash(ownerHash, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fundHash := chainhash.DoubleHashH([]byte("p2wpkh-wrong-key"))
+	outpoint := wire.NewOutPoint(&fundHash, 0)
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(wire.NewTxIn(outpoint, nil, nil))
+	prev := wire.NewTxOut(50_000, pkScript)
+
+	// Produce a well-formed sigDER so we get past the parse gate.
+	sigDER := signWithKeyToDER(wrongKey, chainhash.HashB([]byte("x")))
+
+	// Call with wrongKey's pubkey — must be rejected at the
+	// pubKeyMatchesAddress check.
+	err = TransactionApplyECDSA(params, tx, 0, prev, wrongKey.PubKey(),
+		sigDER, txscript.SigHashAll)
+	if err == nil {
+		t.Fatal("expected error for wrong pubkey on P2WPKH input")
+	}
+	if !strings.Contains(err.Error(), "p2wpkh") {
+		t.Fatalf("expected error to reference 'p2wpkh', got: %v", err)
+	}
+}
+
+// TestTransactionApplySchnorrNonDefaultSigHash verifies the witness
+// assembly for a taproot input signed with a non-SigHashDefault
+// sighash type.  BIP-341 specifies that the sighash byte is
+// appended to the 64-byte signature only when the type is not the
+// default; a 65-byte witness element is produced.
+func TestTransactionApplySchnorrNonDefaultSigHash(t *testing.T) {
+	params := &chaincfg.TestNet3Params
+
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
+	addr, err := btcutil.NewAddressTaproot(
+		outputKey.SerializeCompressed()[1:], params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fundHash := chainhash.DoubleHashH([]byte("schnorr-nondefault-sighash"))
+	outpoint := wire.NewOutPoint(&fundHash, 0)
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(wire.NewTxIn(outpoint, nil, nil))
+
+	prev := wire.NewTxOut(50_000, pkScript)
+	sig64 := make([]byte, 64)
+
+	err = TransactionApplySchnorr(params, tx, 0, prev, priv.PubKey(),
+		sig64, txscript.SigHashAll)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Witness element 0 must be 65 bytes: 64-byte sig + 1 hashtype.
+	if got := len(tx.TxIn[0].Witness[0]); got != 65 {
+		t.Fatalf("non-default sighash witness: got %d bytes, want 65",
+			got)
+	}
+	if tx.TxIn[0].Witness[0][64] != byte(txscript.SigHashAll) {
+		t.Fatalf("trailing sighash byte: got 0x%02x, want 0x%02x",
+			tx.TxIn[0].Witness[0][64], byte(txscript.SigHashAll))
+	}
+}
