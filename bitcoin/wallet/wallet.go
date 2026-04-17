@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -57,7 +57,13 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 	return nil, errors.New("no suitable utxo found")
 }
 
-func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float64, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+// PrevOuts maps an outpoint string to the TxOut that produced it, carrying
+// both the previous output's pkScript and its amount.  Witness sighash
+// algorithms (BIP-143 for segwit v0, BIP-341 for taproot) commit to the
+// spent amount, so the amount must be available at signing time.
+type PrevOuts map[string]*wire.TxOut
+
+func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float64, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
 	// Create TxOut
 	payToScript, err := txscript.PayToAddrScript(address)
 	if err != nil {
@@ -85,11 +91,11 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float
 	// Assemble transaction
 	tx := wire.NewMsgTx(2) // Latest supported version
 	tx.LockTime = locktime
-	prevOuts := make(map[string][]byte, len(utxoList))
+	prevOuts := make(PrevOuts, len(utxoList))
 	for _, utxo := range utxoList {
 		outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
 		tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
-		prevOuts[outpoint.String()] = script
+		prevOuts[outpoint.String()] = wire.NewTxOut(int64(utxo.Value), script)
 	}
 
 	// Change
@@ -104,7 +110,7 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float
 	return tx, prevOuts, nil
 }
 
-func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte float64, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte float64, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
 	// Create OP_RETURN
 	aks := hemi.L2KeystoneAbbreviate(*l2keystone)
 	popTx := pop.TransactionL2{L2Keystone: aks}
@@ -133,7 +139,7 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	// Return previous outs to caller so that they can be signed.
 	// This is a bit odd but in a real transaction we have to return all
 	// the scripts (and somehow obtain them). Think about this some more.
-	prevOuts := map[string][]byte{outpoint.String(): script}
+	prevOuts := PrevOuts{outpoint.String(): wire.NewTxOut(int64(utxo.Value), script)}
 
 	// Change
 	change := utxo.Value - fee
@@ -148,15 +154,15 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	return tx, prevOuts, nil
 }
 
-func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevOuts map[string][]byte) error {
+func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevOuts PrevOuts) error {
 	for i, txIn := range tx.TxIn {
-		prevPkScript, ok := prevOuts[txIn.PreviousOutPoint.String()]
+		prev, ok := prevOuts[txIn.PreviousOutPoint.String()]
 		if !ok {
 			return fmt.Errorf("previous out not found: %v",
 				txIn.PreviousOutPoint)
 		}
 		sigScript, err := txscript.SignTxOutput(params, tx, i,
-			prevPkScript, txscript.SigHashAll,
+			prev.PkScript, txscript.SigHashAll,
 			txscript.KeyClosure(z.LookupKeyByAddr), nil, nil)
 		if err != nil {
 			return err
