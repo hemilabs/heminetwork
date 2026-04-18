@@ -1011,7 +1011,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch chain
 	getData := wire.NewMsgGetData()
 	getData.InvList = append(getData.InvList,
 		&wire.InvVect{
-			Type: wire.InvTypeBlock,
+			Type: wire.InvTypeWitnessBlock,
 			Hash: ch,
 		})
 

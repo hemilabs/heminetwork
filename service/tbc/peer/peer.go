@@ -293,7 +293,12 @@ func (p *Peer) onInvHandler(ctx context.Context, msg wire.Message) error {
 	}
 
 	for _, v := range m.InvList {
-		id := tag(wire.CmdInv+"-"+v.Type.String(), v.Hash)
+		// Registrations in p.pending use the base (non-witness)
+		// InvType string so that a getdata asking for
+		// InvTypeWitnessBlock and the peer echoing that same
+		// type in a subsequent inv or notfound still pair up
+		// with the same pending key.  See GetData.
+		id := tag(wire.CmdInv+"-"+(v.Type&^wire.InvWitnessFlag).String(), v.Hash)
 		log.Tracef("onInvHandler: %v", id)
 		replyC, ok := p.pending[id]
 		if !ok {
@@ -326,7 +331,10 @@ func (p *Peer) onNotFoundHandler(ctx context.Context, msg wire.Message) error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	for _, v := range m.InvList {
-		id := tag(wire.CmdInv+"-"+v.Type.String(), v.Hash)
+		// See onInvHandler: canonicalise to base InvType so a
+		// notfound echoing a witness-flagged type still lands
+		// on the pending registration made by GetData.
+		id := tag(wire.CmdInv+"-"+(v.Type&^wire.InvWitnessFlag).String(), v.Hash)
 		log.Debugf("onInvHandler: %v", id)
 		replyC, ok := p.pending[id]
 		if !ok {
@@ -488,8 +496,19 @@ func (p *Peer) GetData(ctx context.Context, vector *wire.InvVect) (any, error) {
 		return nil, err
 	}
 
-	// Send message to peer and receive response
-	id := tag(wire.CmdInv+"-"+vector.Type.String(), vector.Hash)
+	// Send message to peer and receive response.
+	//
+	// The pending-reply map is keyed by the base (non-witness)
+	// InvType string so that GetData(InvTypeWitnessBlock, h) and
+	// GetData(InvTypeBlock, h) both pair with a MsgBlock reply
+	// delivered by onBlockHandler — which has no way to tell
+	// from the reply alone which variant was requested: the
+	// wire command is CmdBlock either way.  Stripping
+	// InvWitnessFlag here keeps request and reply keyed the
+	// same way regardless of whether the caller asked for
+	// witness-inclusive serialisation.
+	baseType := vector.Type &^ wire.InvWitnessFlag
+	id := tag(wire.CmdInv+"-"+baseType.String(), vector.Hash)
 	msg, err := p.call(ctx, id, gd)
 	if err != nil {
 		return nil, err
@@ -532,7 +551,7 @@ func (p *Peer) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.M
 	}
 
 	// Retrieve block.
-	blk, err := p.GetData(ctx, wire.NewInvVect(wire.InvTypeBlock, blockHash))
+	blk, err := p.GetData(ctx, wire.NewInvVect(wire.InvTypeWitnessBlock, blockHash))
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +567,7 @@ func (p *Peer) GetTx(ctx context.Context, txID *chainhash.Hash) (*wire.MsgTx, er
 	log.Tracef("GetTx %v", txID)
 	defer log.Tracef("GetTx %v exit", txID)
 
-	tx, err := p.GetData(ctx, wire.NewInvVect(wire.InvTypeTx, txID))
+	tx, err := p.GetData(ctx, wire.NewInvVect(wire.InvTypeWitnessTx, txID))
 	if err != nil {
 		return nil, err
 	}
