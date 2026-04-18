@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -622,5 +622,138 @@ func (l *ldb) v4(ctx context.Context) error {
 	// Write new version
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, 4)
+	return l.MetadataPut(ctx, versionKey, v)
+}
+
+// v5 upgrades the database from v4 to v5.
+//
+// Older tbcd versions requested blocks from peers with
+// wire.InvTypeBlock, which under BIP-144 instructs the remote to
+// strip witness data before serialising the reply. The stripped
+// bytes were what ended up on disk in the BlocksDB rawdb. Those
+// bytes cannot be reconstructed locally: the witness never arrived.
+//
+// This upgrade wipes the stored block bodies and marks every known
+// block as missing again, so the normal sync loop re-downloads them
+// with the witness-inclusive getdata that the fix introduced. Every
+// other database in the pool is witness-independent and is left
+// untouched:
+//
+//   - BlockHeadersDB  kept: 80-byte headers, no witness
+//   - HeightHashDB    kept: derived from headers
+//   - TransactionsDB  kept: txid maps over the non-witness tx
+//     serialisation; txid and spent-outpoint records do not
+//     observe the witness
+//   - OutputsDB       kept: utxo set is computed from TxIn and
+//     TxOut, both of which precede the witness section
+//   - KeystonesDB     kept: PoP commitments live in coinbase
+//     OP_RETURNs, witness-independent
+//   - metadata indexer tips kept: re-processing the re-downloaded
+//     blocks would produce identical output, so the tips can stay
+//
+// Changes:
+//   - BlocksDB rawdb: wipe both index and data files, then reopen
+//     to an empty state ready to receive blocks with witness.
+//   - BlocksMissingDB: wipe, then repopulate from every row in
+//     BlockHeadersDB. The next BlocksMissing call the sync loop
+//     makes returns the full set for download.
+//
+// First start after the upgrade triggers a full re-download of the
+// chain's block bodies. BlockByHash and TxById return NotFound for
+// any block that has not yet been re-fetched during that window.
+func (l *ldb) v5(ctx context.Context) error {
+	log.Tracef("v5")
+	defer log.Tracef("v5 exit")
+
+	log.Infof("Upgrading database from v4 to v5: " +
+		"wiping stripped block bodies and rebuilding blocksmissing")
+
+	// 1. Wipe the BlocksDB rawdb.  Close the handle, remove the
+	// on-disk directory tree, reopen to recreate an empty rawdb.
+	// rawdb.Open MkdirAlls the data dir and reopens leveldb for
+	// the index, so a single os.RemoveAll of the rawdb home is
+	// enough to clear both index and data sides at once.
+	bdb, ok := l.rawPool[level.BlocksDB]
+	if !ok || bdb == nil {
+		return fmt.Errorf("rawdb not found: %v", level.BlocksDB)
+	}
+	if err := bdb.Close(); err != nil {
+		return fmt.Errorf("close blocks rawdb: %w", err)
+	}
+	blocksHome := filepath.Join(l.cfg.Home, level.BlocksDB)
+	if err := os.RemoveAll(blocksHome); err != nil {
+		return fmt.Errorf("remove blocks rawdb tree: %w", err)
+	}
+	if err := bdb.Open(); err != nil {
+		return fmt.Errorf("reopen blocks rawdb: %w", err)
+	}
+
+	// 2. Clear BlocksMissingDB.  Iterate and batch-delete rather
+	// than removing the leveldb files; the pool still holds the
+	// open handle and we want it to stay usable in step 3.
+	bmDB, ok := l.pool[level.BlocksMissingDB]
+	if !ok || bmDB == nil {
+		return fmt.Errorf("db not found: %v", level.BlocksMissingDB)
+	}
+	clearBatch := new(leveldb.Batch)
+	clearIt := bmDB.NewIterator(nil, nil)
+	for clearIt.Next() {
+		// Copy the key because the iterator reuses its buffer
+		// across Next calls; leveldb.Batch stores a reference
+		// until Write.
+		k := append([]byte(nil), clearIt.Key()...)
+		clearBatch.Delete(k)
+	}
+	clearIt.Release()
+	if err := clearIt.Error(); err != nil {
+		return fmt.Errorf("blocksmissing iterator: %w", err)
+	}
+	if err := bmDB.Write(clearBatch, nil); err != nil {
+		return fmt.Errorf("blocksmissing clear: %w", err)
+	}
+
+	// 3. Repopulate BlocksMissingDB from BlockHeadersDB.  For
+	// every header row (key=hash[32], value starts with height
+	// in 8 BE bytes), insert a heightHashToKey entry exactly as
+	// BlockHeadersInsert would on first receipt.  BlocksMissing
+	// picks these up in ascending height order.
+	bhsDB, ok := l.pool[level.BlockHeadersDB]
+	if !ok || bhsDB == nil {
+		return fmt.Errorf("db not found: %v", level.BlockHeadersDB)
+	}
+	bmBatch := new(leveldb.Batch)
+	var records int
+	it := bhsDB.NewIterator(nil, nil)
+	for it.Next() {
+		key := it.Key()
+		val := it.Value()
+		// BlockHeadersDB also stores a canonical-tip sentinel
+		// under a non-hash key (bhsCanonicalTipKey); skip any
+		// row whose key is not a 32-byte hash.
+		if len(key) != chainhash.HashSize {
+			continue
+		}
+		if len(val) != blockheaderSize {
+			// Defensive: reject malformed rows rather than
+			// insert bogus entries into blocksmissing.
+			return fmt.Errorf("blockheader value size: got %v want %v",
+				len(val), blockheaderSize)
+		}
+		height := binary.BigEndian.Uint64(val[0:8])
+		bmBatch.Put(heightHashToKey(height, key), []byte{})
+		records++
+	}
+	it.Release()
+	if err := it.Error(); err != nil {
+		return fmt.Errorf("blockheaders iterator: %w", err)
+	}
+	if err := bmDB.Write(bmBatch, nil); err != nil {
+		return fmt.Errorf("blocksmissing repopulate: %w", err)
+	}
+	log.Infof("v5: marked %v blocks for re-download", records)
+
+	// 4. Bump version.
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 5)
 	return l.MetadataPut(ctx, versionKey, v)
 }
