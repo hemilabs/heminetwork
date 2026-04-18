@@ -153,6 +153,33 @@ func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.
 	return buResp.TxID, nil
 }
 
+// TxByID returns the transaction identified by txid from TBC.
+// TxByID fetches a transaction by its hash from the connected TBC
+// server.  Returns an error if txid is nil or the server is
+// unreachable.
+func (t *tbcGozer) TxByID(ctx context.Context, txid *chainhash.Hash) (*tbcapi.Tx, error) {
+	if txid == nil {
+		return nil, errors.New("txid is nil")
+	}
+	req := &tbcapi.TxByIdRequest{TxID: *txid}
+
+	res, err := t.callTBC(ctx, DefaultRequestTimeout, req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, ok := res.(*tbcapi.TxByIdResponse)
+	if !ok {
+		return nil, fmt.Errorf("not a TxByIdResponse: %T", res)
+	}
+
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+
+	return resp.Tx, nil
+}
+
 func (t *tbcGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
 	maxCount := uint(1000)
 	if count > maxCount {

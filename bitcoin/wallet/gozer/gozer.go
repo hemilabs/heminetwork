@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -33,6 +33,7 @@ type Gozer interface {
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) (*KeystonesByHeightResponse, error)
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 	BestHeightHashTime(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error)
+	TxByID(ctx context.Context, txid *chainhash.Hash) (*tbcapi.Tx, error)
 	Run(ctx context.Context, connected func()) error
 
 	Connected() bool // ready to use
