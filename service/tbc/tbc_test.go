@@ -180,8 +180,8 @@ func TestDbUpgradeFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Fatalf("expected version 4, got %v", version)
+	if version != 5 {
+		t.Fatalf("expected version 5, got %v", version)
 	}
 
 	// version 2 checks
@@ -440,8 +440,8 @@ func TestDbUpgradeV4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Fatalf("expected version 4, got %v", version)
+	if version != 5 {
+		t.Fatalf("expected version 5, got %v", version)
 	}
 
 	keystoneHashes := []string{

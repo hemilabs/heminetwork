@@ -847,6 +847,204 @@ func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
 	return eks[:]
 }
 
+// TestDbUpgradeV5 validates the v4 -> v5 upgrade that wipes
+// witness-stripped block bodies and rebuilds BlocksMissingDB from
+// the header chain.  The upgrade must:
+//
+//   - empty BlocksDB rawdb completely (both index and data);
+//   - populate BlocksMissingDB with one heightHashToKey entry per
+//     row in BlockHeadersDB (skipping the canonical-tip sentinel);
+//   - leave every other database untouched — specifically
+//     TransactionsDB, OutputsDB, KeystonesDB, BlockHeadersDB,
+//     HeightHashDB, and the indexer tips in MetadataDB — because
+//     those are all witness-independent;
+//   - bump the schema version from 4 to 5.
+func TestDbUpgradeV5(t *testing.T) {
+	const blkNum uint64 = 5
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+	cfg, err := NewConfig("upgradetest", home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 1: open in upgrade-skipping mode so the fresh-db
+	// version stamp can be overwritten with 4 before close.
+	// Build a short chain of headers + blocks, plant survivor
+	// rows in the tables v5 must not touch, then stamp the
+	// version down so reopen runs v5.
+	cfg.SetUpgradeOpen(true)
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hashes := make([]chainhash.Hash, 0, blkNum)
+	heights := make(map[chainhash.Hash]uint64, blkNum)
+	prevHash := &chainhash.Hash{}
+	for i := range blkNum {
+		bh, _, err := insertBlockHeader(ctx, db, prevHash, i, i)
+		if err != nil {
+			t.Fatalf("insertBlockHeader %v: %v", i, err)
+		}
+		if err := insertBlock(ctx, db, bh); err != nil {
+			t.Fatalf("insertBlock %v: %v", i, err)
+		}
+		h := bh.BlockHash()
+		hashes = append(hashes, *h)
+		heights[*h] = bh.Height
+		prevHash = h
+	}
+
+	// Survivor rows: arbitrary bytes written to tables whose
+	// contents v5 must not touch.  The keys are deliberately
+	// unique so a post-upgrade Get confirms exact preservation.
+	survivors := map[string][2][]byte{
+		level.TransactionsDB: {
+			[]byte("v5-test-tx-key"),
+			[]byte("v5-test-tx-value"),
+		},
+		level.OutputsDB: {
+			[]byte("v5-test-utxo-key"),
+			[]byte("v5-test-utxo-value"),
+		},
+		level.KeystonesDB: {
+			[]byte("v5-test-keystone-key"),
+			[]byte("v5-test-keystone-value"),
+		},
+	}
+	for table, kv := range survivors {
+		if err := db.insertTable(table, kv[0], kv[1]); err != nil {
+			t.Fatalf("seed %v: %v", table, err)
+		}
+	}
+
+	// Sanity: BlocksDB rawdb actually holds the seeded blocks
+	// before the upgrade runs.  v5's correctness story is "we
+	// wiped what was there"; without this check a silently
+	// empty pre-state would make the post-upgrade empty
+	// assertion vacuous.
+	preBdb := db.rawPool[level.BlocksDB]
+	preIt := preBdb.DB().NewIterator(nil, nil)
+	var preCount int
+	for preIt.Next() {
+		preCount++
+	}
+	preIt.Release()
+	if err := preIt.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if preCount != int(blkNum) {
+		t.Fatalf("pre-upgrade BlocksDB: got %v entries want %v",
+			preCount, blkNum)
+	}
+
+	v4 := make([]byte, 8)
+	binary.BigEndian.PutUint64(v4, 4)
+	if err := db.MetadataPut(ctx, versionKey, v4); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 2: reopen with the upgrade ladder enabled.  The
+	// stamped v4 triggers v5 end-to-end.
+	cfg.SetUpgradeOpen(false)
+	db2, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("reopen (runs v5): %v", err)
+	}
+	defer func() {
+		if err := db2.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Assertion 1: BlocksDB rawdb is empty after v5.
+	bdb := db2.rawPool[level.BlocksDB]
+	it := bdb.DB().NewIterator(nil, nil)
+	var bcount int
+	for it.Next() {
+		bcount++
+	}
+	it.Release()
+	if err := it.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if bcount != 0 {
+		t.Fatalf("BlocksDB not empty after v5: %v entries", bcount)
+	}
+
+	// Assertion 2: BlocksMissingDB has exactly one entry per
+	// header row, keyed by heightHashToKey(height, hash).
+	bmDB := db2.pool[level.BlocksMissingDB]
+	seen := make(map[chainhash.Hash]bool, len(hashes))
+	bmIt := bmDB.NewIterator(nil, nil)
+	for bmIt.Next() {
+		height, hash := keyToHeightHash(bmIt.Key())
+		expected, ok := heights[*hash]
+		if !ok {
+			t.Fatalf("blocksmissing has unexpected hash %v", hash)
+		}
+		if height != expected {
+			t.Fatalf("blocksmissing height mismatch for %v: got %v want %v",
+				hash, height, expected)
+		}
+		if seen[*hash] {
+			t.Fatalf("blocksmissing duplicate hash %v", hash)
+		}
+		seen[*hash] = true
+	}
+	bmIt.Release()
+	if err := bmIt.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != len(hashes) {
+		t.Fatalf("blocksmissing coverage: got %v entries want %v",
+			len(seen), len(hashes))
+	}
+
+	// Assertion 3: survivor rows are intact.
+	for table, kv := range survivors {
+		tdb := db2.pool[table]
+		got, err := tdb.Get(kv[0], nil)
+		if err != nil {
+			t.Fatalf("survivor get %v: %v", table, err)
+		}
+		if !bytes.Equal(got, kv[1]) {
+			t.Fatalf("survivor %v: got %q want %q", table, got, kv[1])
+		}
+	}
+
+	// Assertion 4: BlockHeadersDB and HeightHashDB are
+	// untouched.  Cheap way to confirm: every header hash we
+	// seeded is still retrievable and reports the same height.
+	for _, h := range hashes {
+		bh, err := db2.BlockHeaderByHash(ctx, h)
+		if err != nil {
+			t.Fatalf("blockheader %v: %v", h, err)
+		}
+		if bh.Height != heights[h] {
+			t.Fatalf("blockheader %v height: got %v want %v",
+				h, bh.Height, heights[h])
+		}
+	}
+
+	// Assertion 5: schema version is now 5.
+	got, err := db2.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 5 {
+		t.Fatalf("version after v5: got %v want 5", got)
+	}
+}
+
 func createTestBlock(prevHash *chainhash.Hash, nonce int64) *btcutil.Block {
 	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
 	bh.Timestamp = time.Unix(nonce, 0)
