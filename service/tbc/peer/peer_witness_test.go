@@ -58,6 +58,18 @@ func newLoopbackPeer(t *testing.T, ctx context.Context) (*Peer, *rawpeer.RawPeer
 	return p, serverRP
 }
 
+// srvReply writes a reply after a brief yield so call() in the
+// client goroutine enters its select before the handler's
+// non-blocking send fires.  net.Pipe is synchronous, so without
+// this the reply can arrive before the caller is ready.
+func srvReply(t *testing.T, srv *rawpeer.RawPeer, msg wire.Message) {
+	t.Helper()
+	time.Sleep(time.Millisecond)
+	if err := srv.Write(2*time.Second, msg); err != nil {
+		t.Fatalf("server write: %v", err)
+	}
+}
+
 // TestGetDataWitnessBlock verifies that GetData with
 // InvTypeWitnessBlock (a) sends the witness InvType on the wire
 // and (b) correctly pairs the reply via the base-form pending
@@ -103,9 +115,7 @@ func TestGetDataWitnessBlock(t *testing.T) {
 	}
 
 	// Reply with the block.
-	if err := srv.Write(2*time.Second, block); err != nil {
-		t.Fatalf("server write block: %v", err)
-	}
+	srvReply(t, srv, block)
 
 	r := <-resultC
 	if r.err != nil {
@@ -156,9 +166,7 @@ func TestGetDataWitnessTx(t *testing.T) {
 	}
 
 	// Reply with the tx.
-	if err := srv.Write(2*time.Second, tx); err != nil {
-		t.Fatalf("server write tx: %v", err)
-	}
+	srvReply(t, srv, tx)
 
 	r := <-resultC
 	if r.err != nil {
@@ -203,9 +211,7 @@ func TestGetDataBaseBlockStillWorks(t *testing.T) {
 		t.Fatalf("expected InvTypeBlock on wire, got %v", gd.InvList[0].Type)
 	}
 
-	if err := srv.Write(2*time.Second, block); err != nil {
-		t.Fatalf("server write: %v", err)
-	}
+	srvReply(t, srv, block)
 
 	r := <-resultC
 	if r.err != nil {
@@ -243,9 +249,7 @@ func TestGetDataNotFound(t *testing.T) {
 	if err := nf.AddInvVect(wire.NewInvVect(wire.InvTypeBlock, &hash)); err != nil {
 		t.Fatal(err)
 	}
-	if err := srv.Write(2*time.Second, nf); err != nil {
-		t.Fatalf("server write notfound: %v", err)
-	}
+	srvReply(t, srv, nf)
 
 	r := <-resultC
 	if r.err != nil {
@@ -253,5 +257,131 @@ func TestGetDataNotFound(t *testing.T) {
 	}
 	if _, ok := r.msg.(*wire.MsgNotFound); !ok {
 		t.Fatalf("expected *wire.MsgNotFound, got %T", r.msg)
+	}
+}
+
+// TestGetBlockWitness exercises the GetBlock wrapper end-to-end:
+// GetHeaders exchange followed by GetData with InvTypeWitnessBlock.
+func TestGetBlockWitness(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	p, srv := newLoopbackPeer(t, ctx)
+	// Also register the headers handler.
+	p.setHandler(wire.CmdHeaders, p.onHeadersHandler)
+
+	// Build a block.  GetBlock checks that
+	// headers.Headers[0].PrevBlock == blockHash, so we use the
+	// block's own hash as the "requested" hash and set up the
+	// header reply's PrevBlock to match.
+	prev := chainhash.DoubleHashH([]byte("getblock-prev"))
+	bh := wire.NewBlockHeader(0, &prev, &chainhash.Hash{}, 0, 0)
+	bh.Timestamp = time.Unix(0, 0)
+	block := wire.NewMsgBlock(bh)
+	blockHash := block.Header.BlockHash()
+
+	// The header we reply with must have PrevBlock == blockHash.
+	replyHdr := wire.NewBlockHeader(0, &blockHash, &chainhash.Hash{}, 0, 1)
+	replyHdr.Timestamp = time.Unix(1, 0)
+
+	type result struct {
+		blk *wire.MsgBlock
+		err error
+	}
+	resultC := make(chan result, 1)
+	go func() {
+		blk, err := p.GetBlock(ctx, &blockHash)
+		resultC <- result{blk, err}
+	}()
+
+	// Step 1: server reads MsgGetHeaders, replies with one header.
+	msg, _, err := srv.Read(2 * time.Second)
+	if err != nil {
+		t.Fatalf("read getheaders: %v", err)
+	}
+	if _, ok := msg.(*wire.MsgGetHeaders); !ok {
+		t.Fatalf("expected MsgGetHeaders, got %T", msg)
+	}
+	headers := wire.NewMsgHeaders()
+	if err := headers.AddBlockHeader(replyHdr); err != nil {
+		t.Fatal(err)
+	}
+	srvReply(t, srv, headers)
+
+	// Step 2: server reads MsgGetData, verify witness type.
+	msg, _, err = srv.Read(2 * time.Second)
+	if err != nil {
+		t.Fatalf("read getdata: %v", err)
+	}
+	gd, ok := msg.(*wire.MsgGetData)
+	if !ok {
+		t.Fatalf("expected MsgGetData, got %T", msg)
+	}
+	if gd.InvList[0].Type != wire.InvTypeWitnessBlock {
+		t.Fatalf("GetBlock should request InvTypeWitnessBlock, got %v",
+			gd.InvList[0].Type)
+	}
+
+	// Reply with the block.
+	srvReply(t, srv, block)
+
+	r := <-resultC
+	if r.err != nil {
+		t.Fatalf("GetBlock: %v", r.err)
+	}
+	got := r.blk.Header.BlockHash()
+	if !got.IsEqual(&blockHash) {
+		t.Fatalf("block hash mismatch: %v != %v", got, blockHash)
+	}
+}
+
+// TestGetTxWitness exercises the GetTx wrapper, confirming it
+// sends InvTypeWitnessTx on the wire.
+func TestGetTxWitness(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	p, srv := newLoopbackPeer(t, ctx)
+
+	tx := wire.NewMsgTx(2)
+	prevHash := chainhash.DoubleHashH([]byte("gettx-prev"))
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{Hash: prevHash, Index: 0},
+	})
+	tx.AddTxOut(&wire.TxOut{Value: 1000, PkScript: []byte{0x6a}})
+	txHash := tx.TxHash()
+
+	type result struct {
+		tx  *wire.MsgTx
+		err error
+	}
+	resultC := make(chan result, 1)
+	go func() {
+		got, err := p.GetTx(ctx, &txHash)
+		resultC <- result{got, err}
+	}()
+
+	msg, _, err := srv.Read(2 * time.Second)
+	if err != nil {
+		t.Fatalf("read getdata: %v", err)
+	}
+	gd, ok := msg.(*wire.MsgGetData)
+	if !ok {
+		t.Fatalf("expected MsgGetData, got %T", msg)
+	}
+	if gd.InvList[0].Type != wire.InvTypeWitnessTx {
+		t.Fatalf("GetTx should request InvTypeWitnessTx, got %v",
+			gd.InvList[0].Type)
+	}
+
+	srvReply(t, srv, tx)
+
+	r := <-resultC
+	if r.err != nil {
+		t.Fatalf("GetTx: %v", r.err)
+	}
+	got := r.tx.TxHash()
+	if !got.IsEqual(&txHash) {
+		t.Fatalf("tx hash mismatch")
 	}
 }
