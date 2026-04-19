@@ -180,8 +180,8 @@ func TestDbUpgradeFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Fatalf("expected version 4, got %v", version)
+	if version != 5 {
+		t.Fatalf("expected version 5, got %v", version)
 	}
 
 	// version 2 checks
@@ -228,6 +228,20 @@ func TestDbUpgradeFull(t *testing.T) {
 	}
 	if !keystonebh.Hash.IsEqual(hash) {
 		t.Fatal("unexpected keystone hash")
+	}
+
+	// v5 post-upgrade assertions: the ladder ran v4->v5 as part
+	// of service startup above, and v5's contract is to wipe
+	// BlocksDB rawdb and rebuild BlocksMissingDB from the
+	// header chain so the sync loop re-downloads every known
+	// block with full witness data.  BlocksMissing is the
+	// public surface for the rebuilt table.
+	bm, err := s.g.db.BlocksMissing(ctx, 1024)
+	if err != nil {
+		t.Fatalf("BlocksMissing: %v", err)
+	}
+	if len(bm) < 2 {
+		t.Fatalf("v5: BlocksMissingDB has %d entries, want >= 2", len(bm))
 	}
 }
 
@@ -440,8 +454,8 @@ func TestDbUpgradeV4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Fatalf("expected version 4, got %v", version)
+	if version != 5 {
+		t.Fatalf("expected version 5, got %v", version)
 	}
 
 	keystoneHashes := []string{

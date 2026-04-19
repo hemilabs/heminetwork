@@ -13,6 +13,7 @@ import (
 	"maps"
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -847,6 +848,204 @@ func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
 	return eks[:]
 }
 
+// TestDbUpgradeV5 validates the v4 -> v5 upgrade that wipes
+// witness-stripped block bodies and rebuilds BlocksMissingDB from
+// the header chain.  The upgrade must:
+//
+//   - empty BlocksDB rawdb completely (both index and data);
+//   - populate BlocksMissingDB with one heightHashToKey entry per
+//     row in BlockHeadersDB (skipping the canonical-tip sentinel);
+//   - leave every other database untouched — specifically
+//     TransactionsDB, OutputsDB, KeystonesDB, BlockHeadersDB,
+//     HeightHashDB, and the indexer tips in MetadataDB — because
+//     those are all witness-independent;
+//   - bump the schema version from 4 to 5.
+func TestDbUpgradeV5(t *testing.T) {
+	const blkNum uint64 = 5
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+	cfg, err := NewConfig("upgradetest", home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 1: open in upgrade-skipping mode so the fresh-db
+	// version stamp can be overwritten with 4 before close.
+	// Build a short chain of headers + blocks, plant survivor
+	// rows in the tables v5 must not touch, then stamp the
+	// version down so reopen runs v5.
+	cfg.SetUpgradeOpen(true)
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hashes := make([]chainhash.Hash, 0, blkNum)
+	heights := make(map[chainhash.Hash]uint64, blkNum)
+	prevHash := &chainhash.Hash{}
+	for i := range blkNum {
+		bh, _, err := insertBlockHeader(ctx, db, prevHash, i, i)
+		if err != nil {
+			t.Fatalf("insertBlockHeader %v: %v", i, err)
+		}
+		if err := insertBlock(ctx, db, bh); err != nil {
+			t.Fatalf("insertBlock %v: %v", i, err)
+		}
+		h := bh.BlockHash()
+		hashes = append(hashes, *h)
+		heights[*h] = bh.Height
+		prevHash = h
+	}
+
+	// Survivor rows: arbitrary bytes written to tables whose
+	// contents v5 must not touch.  The keys are deliberately
+	// unique so a post-upgrade Get confirms exact preservation.
+	survivors := map[string][2][]byte{
+		level.TransactionsDB: {
+			[]byte("v5-test-tx-key"),
+			[]byte("v5-test-tx-value"),
+		},
+		level.OutputsDB: {
+			[]byte("v5-test-utxo-key"),
+			[]byte("v5-test-utxo-value"),
+		},
+		level.KeystonesDB: {
+			[]byte("v5-test-keystone-key"),
+			[]byte("v5-test-keystone-value"),
+		},
+	}
+	for table, kv := range survivors {
+		if err := db.insertTable(table, kv[0], kv[1]); err != nil {
+			t.Fatalf("seed %v: %v", table, err)
+		}
+	}
+
+	// Sanity: BlocksDB rawdb actually holds the seeded blocks
+	// before the upgrade runs.  v5's correctness story is "we
+	// wiped what was there"; without this check a silently
+	// empty pre-state would make the post-upgrade empty
+	// assertion vacuous.
+	preBdb := db.rawPool[level.BlocksDB]
+	preIt := preBdb.DB().NewIterator(nil, nil)
+	var preCount int
+	for preIt.Next() {
+		preCount++
+	}
+	preIt.Release()
+	if err := preIt.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if preCount != int(blkNum) {
+		t.Fatalf("pre-upgrade BlocksDB: got %v entries want %v",
+			preCount, blkNum)
+	}
+
+	v4 := make([]byte, 8)
+	binary.BigEndian.PutUint64(v4, 4)
+	if err := db.MetadataPut(ctx, versionKey, v4); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 2: reopen with the upgrade ladder enabled.  The
+	// stamped v4 triggers v5 end-to-end.
+	cfg.SetUpgradeOpen(false)
+	db2, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("reopen (runs v5): %v", err)
+	}
+	defer func() {
+		if err := db2.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Assertion 1: BlocksDB rawdb is empty after v5.
+	bdb := db2.rawPool[level.BlocksDB]
+	it := bdb.DB().NewIterator(nil, nil)
+	var bcount int
+	for it.Next() {
+		bcount++
+	}
+	it.Release()
+	if err := it.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if bcount != 0 {
+		t.Fatalf("BlocksDB not empty after v5: %v entries", bcount)
+	}
+
+	// Assertion 2: BlocksMissingDB has exactly one entry per
+	// header row, keyed by heightHashToKey(height, hash).
+	bmDB := db2.pool[level.BlocksMissingDB]
+	seen := make(map[chainhash.Hash]bool, len(hashes))
+	bmIt := bmDB.NewIterator(nil, nil)
+	for bmIt.Next() {
+		height, hash := keyToHeightHash(bmIt.Key())
+		expected, ok := heights[*hash]
+		if !ok {
+			t.Fatalf("blocksmissing has unexpected hash %v", hash)
+		}
+		if height != expected {
+			t.Fatalf("blocksmissing height mismatch for %v: got %v want %v",
+				hash, height, expected)
+		}
+		if seen[*hash] {
+			t.Fatalf("blocksmissing duplicate hash %v", hash)
+		}
+		seen[*hash] = true
+	}
+	bmIt.Release()
+	if err := bmIt.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != len(hashes) {
+		t.Fatalf("blocksmissing coverage: got %v entries want %v",
+			len(seen), len(hashes))
+	}
+
+	// Assertion 3: survivor rows are intact.
+	for table, kv := range survivors {
+		tdb := db2.pool[table]
+		got, err := tdb.Get(kv[0], nil)
+		if err != nil {
+			t.Fatalf("survivor get %v: %v", table, err)
+		}
+		if !bytes.Equal(got, kv[1]) {
+			t.Fatalf("survivor %v: got %q want %q", table, got, kv[1])
+		}
+	}
+
+	// Assertion 4: BlockHeadersDB and HeightHashDB are
+	// untouched.  Cheap way to confirm: every header hash we
+	// seeded is still retrievable and reports the same height.
+	for _, h := range hashes {
+		bh, err := db2.BlockHeaderByHash(ctx, h)
+		if err != nil {
+			t.Fatalf("blockheader %v: %v", h, err)
+		}
+		if bh.Height != heights[h] {
+			t.Fatalf("blockheader %v height: got %v want %v",
+				h, bh.Height, heights[h])
+		}
+	}
+
+	// Assertion 5: schema version is now 5.
+	got, err := db2.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 5 {
+		t.Fatalf("version after v5: got %v want 5", got)
+	}
+}
+
 func createTestBlock(prevHash *chainhash.Hash, nonce int64) *btcutil.Block {
 	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
 	bh.Timestamp = time.Unix(nonce, 0)
@@ -1349,6 +1548,165 @@ func TestBlockHeadersRemove(t *testing.T) {
 						tti.removeType[i], rt)
 				}
 			}
+		})
+	}
+}
+
+// TestDbUpgradeV5Errors drives v5 against a v4 database whose
+// in-memory pool has been surgically damaged to force each of the
+// defensive error returns.  Each case opens a v4 database with
+// SetUpgradeOpen(true), mutates l.pool / l.rawPool / stored rows
+// to set up the specific failure, then calls v5 directly and
+// asserts the wrapped error prefix.  Calling v5 directly (not
+// through New's upgrade ladder) keeps each subtest focused on a
+// single branch.
+func TestDbUpgradeV5Errors(t *testing.T) {
+	type tc struct {
+		name      string
+		setup     func(t *testing.T, db *ldb)
+		wantErrIn string
+	}
+	cases := []tc{
+		{
+			name: "missing blocks rawdb handle",
+			setup: func(_ *testing.T, db *ldb) {
+				delete(db.rawPool, level.BlocksDB)
+			},
+			wantErrIn: "rawdb not found",
+		},
+		{
+			name: "closed blocks rawdb",
+			setup: func(t *testing.T, db *ldb) {
+				// Close the rawdb once; v5's Close call
+				// then hits leveldb.ErrClosed on the
+				// underlying index.
+				if err := db.rawPool[level.BlocksDB].Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErrIn: "close blocks rawdb",
+		},
+		{
+			name: "missing blocksmissing handle",
+			setup: func(_ *testing.T, db *ldb) {
+				delete(db.pool, level.BlocksMissingDB)
+			},
+			wantErrIn: "db not found: " + level.BlocksMissingDB,
+		},
+		{
+			name: "closed blocksmissing iterator",
+			setup: func(t *testing.T, db *ldb) {
+				// Close the leveldb handle behind
+				// BlocksMissingDB's back.  The iterator
+				// over a closed db surfaces the error
+				// through clearIt.Error() after the
+				// loop.
+				if err := db.pool[level.BlocksMissingDB].Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErrIn: "blocksmissing iterator",
+		},
+		{
+			name: "missing blockheaders handle",
+			setup: func(_ *testing.T, db *ldb) {
+				delete(db.pool, level.BlockHeadersDB)
+			},
+			wantErrIn: "db not found: " + level.BlockHeadersDB,
+		},
+		{
+			name: "malformed blockheader value size",
+			setup: func(t *testing.T, db *ldb) {
+				// Plant a row whose key looks like a
+				// 32-byte hash but whose value is
+				// shorter than blockheaderSize.
+				h := testutil.String2Hash(
+					"1111111111111111111111111111111111111111111111111111111111111111")
+				if err := db.insertTable(level.BlockHeadersDB,
+					h[:], []byte("short")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErrIn: "blockheader value size",
+		},
+		{
+			name: "closed blockheaders iterator",
+			setup: func(t *testing.T, db *ldb) {
+				// Step 3 of v5 iterates BlockHeadersDB.
+				// Closing the handle before v5 runs
+				// surfaces the error through
+				// it.Error() after the loop.
+				if err := db.pool[level.BlockHeadersDB].Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantErrIn: "blockheaders iterator",
+		},
+		{
+			name: "metadata put fails",
+			setup: func(t *testing.T, db *ldb) {
+				// Close the MetadataDB handle so the
+				// final MetadataPut(versionKey, 5) at
+				// end of v5 fails.
+				if err := db.pool[level.MetadataDB].Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+			// MetadataPut wraps through startTransaction
+			// which returns "unable to open db transaction"
+			// on a closed handle.
+			wantErrIn: "",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			home := t.TempDir()
+			cfg, err := NewConfig("upgradetest", home, "0mb", "0mb")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.SetUpgradeOpen(true)
+			db, err := New(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				// Best effort — several subtests close
+				// pool entries so a final Close may or
+				// may not succeed.
+				_ = db.Close()
+			}()
+
+			// Seed one header + one block so step 1 has
+			// something to wipe and step 3 has a row to
+			// rebuild from.  Skip for the malformed-value
+			// case, which plants its own bogus header.
+			if c.name != "malformed blockheader value size" {
+				bh, _, err := insertBlockHeader(ctx, db,
+					&chainhash.Hash{}, 0, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := insertBlock(ctx, db, bh); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			c.setup(t, db)
+
+			err = db.v5(ctx)
+			if err == nil {
+				t.Fatalf("expected v5 error, got nil")
+			}
+			if c.wantErrIn != "" && !strings.Contains(err.Error(), c.wantErrIn) {
+				t.Fatalf("v5 error %q does not contain %q",
+					err.Error(), c.wantErrIn)
+			}
+			t.Logf("v5 returned: %v", err)
 		})
 	}
 }

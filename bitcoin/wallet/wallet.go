@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/mempool"
@@ -57,7 +58,13 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 	return nil, errors.New("no suitable utxo found")
 }
 
-func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float64, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+// PrevOuts maps an outpoint string to the TxOut that produced it, carrying
+// both the previous output's pkScript and its amount.  Witness sighash
+// algorithms (BIP-143 for segwit v0, BIP-341 for taproot) commit to the
+// spent amount, so the amount must be available at signing time.
+type PrevOuts map[string]*wire.TxOut
+
+func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float64, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
 	// Create TxOut
 	payToScript, err := txscript.PayToAddrScript(address)
 	if err != nil {
@@ -85,11 +92,11 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float
 	// Assemble transaction
 	tx := wire.NewMsgTx(2) // Latest supported version
 	tx.LockTime = locktime
-	prevOuts := make(map[string][]byte, len(utxoList))
+	prevOuts := make(PrevOuts, len(utxoList))
 	for _, utxo := range utxoList {
 		outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
 		tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
-		prevOuts[outpoint.String()] = script
+		prevOuts[outpoint.String()] = wire.NewTxOut(int64(utxo.Value), script)
 	}
 
 	// Change
@@ -104,7 +111,7 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float
 	return tx, prevOuts, nil
 }
 
-func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte float64, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte float64, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
 	// Create OP_RETURN
 	aks := hemi.L2KeystoneAbbreviate(*l2keystone)
 	popTx := pop.TransactionL2{L2Keystone: aks}
@@ -133,7 +140,7 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	// Return previous outs to caller so that they can be signed.
 	// This is a bit odd but in a real transaction we have to return all
 	// the scripts (and somehow obtain them). Think about this some more.
-	prevOuts := map[string][]byte{outpoint.String(): script}
+	prevOuts := PrevOuts{outpoint.String(): wire.NewTxOut(int64(utxo.Value), script)}
 
 	// Change
 	change := utxo.Value - fee
@@ -148,21 +155,156 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	return tx, prevOuts, nil
 }
 
-func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevOuts map[string][]byte) error {
+// TransactionSign signs every input of tx using keys looked up in z.
+// Inputs are dispatched by the script class of their previous output:
+// legacy (P2PKH, P2SH, etc.) inputs produce a SignatureScript via the
+// standard txscript.SignTxOutput path with SigHashAll; native segwit
+// v0 (P2WPKH) inputs produce a witness via BIP-143 sighash with
+// SigHashAll; taproot v1 (P2TR) inputs produce a witness via BIP-341
+// key-path sighash with SigHashDefault.
+func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevOuts PrevOuts) error {
+	// Validate every input has a matching prev-out before any
+	// sighash computation.  Without this pre-check a caller-
+	// supplied incomplete PrevOuts would surface as a nil-deref
+	// panic deep inside NewTxSigHashes when it tries to fetch
+	// the missing amount for witness sighash midstate.
 	for i, txIn := range tx.TxIn {
-		prevPkScript, ok := prevOuts[txIn.PreviousOutPoint.String()]
-		if !ok {
-			return fmt.Errorf("previous out not found: %v",
-				txIn.PreviousOutPoint)
+		if _, ok := prevOuts[txIn.PreviousOutPoint.String()]; !ok {
+			return fmt.Errorf("previous out not found: input %d outpoint %v",
+				i, txIn.PreviousOutPoint)
 		}
-		sigScript, err := txscript.SignTxOutput(params, tx, i,
-			prevPkScript, txscript.SigHashAll,
-			txscript.KeyClosure(z.LookupKeyByAddr), nil, nil)
-		if err != nil {
-			return err
+	}
+
+	// BIP-143 sighash midstate is reused across all witness inputs in
+	// the tx.  Compute once.
+	sigHashes := txscript.NewTxSigHashes(tx, prevOutsFetcher(prevOuts))
+
+	for i, txIn := range tx.TxIn {
+		prev := prevOuts[txIn.PreviousOutPoint.String()]
+
+		switch txscript.GetScriptClass(prev.PkScript) {
+		case txscript.WitnessV0PubKeyHashTy:
+			if err := signP2WPKH(params, z, tx, i, prev, sigHashes); err != nil {
+				return fmt.Errorf("sign p2wpkh input %d: %w", i, err)
+			}
+		case txscript.WitnessV1TaprootTy:
+			if err := signP2TRKeyPath(params, z, tx, i, prev, sigHashes); err != nil {
+				return fmt.Errorf("sign p2tr input %d: %w", i, err)
+			}
+		default:
+			if err := signLegacy(params, z, tx, i, prev); err != nil {
+				return fmt.Errorf("sign legacy input %d: %w", i, err)
+			}
 		}
-		tx.TxIn[i].SignatureScript = sigScript
 	}
 
 	return nil
+}
+
+// signLegacy signs a legacy (P2PKH, P2SH, etc.) input via the
+// classic txscript.SignTxOutput path with SigHashAll.  Extracted
+// from TransactionSign to keep each dispatch arm at a single line
+// and each signing strategy in its own named function.
+func signLegacy(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx int, prev *wire.TxOut) error {
+	sigScript, err := txscript.SignTxOutput(params, tx, idx,
+		prev.PkScript, txscript.SigHashAll,
+		txscript.KeyClosure(z.LookupKeyByAddr), nil, nil)
+	if err != nil {
+		return fmt.Errorf("sign tx output: %w", err)
+	}
+	tx.TxIn[idx].SignatureScript = sigScript
+	return nil
+}
+
+// resolveInputSigningKey extracts the single address from pkScript via
+// the configured network params and looks up its private key in z.
+// Shared by signP2WPKH and signP2TRKeyPath: both script classes
+// encode exactly one address that derives directly from the signer's
+// public key, so the address-extract + zuul-lookup dance is identical.
+//
+// Returns the key on success.  Errors on pkScript that does not
+// resolve to exactly one address, lookup failures, and missing keys
+// — each with the failing address in context for debugging.
+func resolveInputSigningKey(params *chaincfg.Params, z zuul.Zuul, pkScript []byte) (*btcec.PrivateKey, error) {
+	_, addrs, _, err := txscript.ExtractPkScriptAddrs(pkScript, params)
+	if err != nil {
+		return nil, fmt.Errorf("extract address: %w", err)
+	}
+	if len(addrs) != 1 {
+		return nil, fmt.Errorf("pkScript extracted %d addresses, expected 1", len(addrs))
+	}
+	priv, ok, err := z.LookupKeyByAddr(addrs[0])
+	if err != nil {
+		return nil, fmt.Errorf("lookup key for %s: %w", addrs[0], err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("lookup key for %s: %w", addrs[0], zuul.ErrKeyDoesntExist)
+	}
+	return priv, nil
+}
+
+// signP2WPKH signs a witness v0 pubkey hash input.  The witness program
+// is the 20-byte HASH160 of the pubkey; the sighash is computed over
+// the P2PKH-equivalent script per BIP-143.  The caller's zuul must
+// hold the key for the address derived from the witness program.
+func signP2WPKH(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx int, prev *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	priv, err := resolveInputSigningKey(params, z, prev.PkScript)
+	if err != nil {
+		return err
+	}
+	witness, err := txscript.WitnessSignature(tx, sigHashes, idx,
+		prev.Value, prev.PkScript, txscript.SigHashAll, priv, true)
+	if err != nil {
+		return fmt.Errorf("witness signature: %w", err)
+	}
+	tx.TxIn[idx].Witness = witness
+	return nil
+}
+
+// signP2TRKeyPath signs a witness v1 taproot input using the BIP-86
+// key-path spend.  The stored private key is the untweaked internal
+// key with no script commitment; RawTxInTaprootSignature applies the
+// BIP-341 tweak internally, so callers must pass the untweaked key.
+//
+// Script-path spends (tapscript with an envelope or other committed
+// script) are not handled here — they require the caller to provide
+// the leaf script and control block, which the wallet does not carry.
+// Callers with script-path inputs must sign those inputs before
+// calling TransactionSign, or use a dedicated script-path entry point.
+func signP2TRKeyPath(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx int, prev *wire.TxOut, sigHashes *txscript.TxSigHashes) error {
+	priv, err := resolveInputSigningKey(params, z, prev.PkScript)
+	if err != nil {
+		return err
+	}
+	// Pass the untweaked key; RawTxInTaprootSignature applies the
+	// BIP-341 tweak with the provided script root (nil for BIP-86).
+	sig, err := txscript.RawTxInTaprootSignature(tx, sigHashes, idx,
+		prev.Value, prev.PkScript, nil, txscript.SigHashDefault, priv)
+	if err != nil {
+		return fmt.Errorf("taproot signature: %w", err)
+	}
+	tx.TxIn[idx].Witness = wire.TxWitness{sig}
+	return nil
+}
+
+// prevOutsFetcher adapts PrevOuts to txscript.PrevOutputFetcher as
+// required by NewTxSigHashes for segwit and taproot sighash calculation.
+//
+// PrevOuts keys are produced by wire.OutPoint.String; parsing back via
+// wire.NewOutPointFromString is a lossless round-trip for well-formed
+// keys.  A parse failure means the caller constructed PrevOuts with a
+// manually-forged key that does not match any real outpoint, which
+// would cause NewTxSigHashes to dereference a nil TxOut downstream.
+// Panic with the offending key rather than silently dropping the
+// entry and producing a corrupt sighash midstate.
+func prevOutsFetcher(p PrevOuts) txscript.PrevOutputFetcher {
+	m := make(map[wire.OutPoint]*wire.TxOut, len(p))
+	for k, v := range p {
+		op, err := wire.NewOutPointFromString(k)
+		if err != nil {
+			panic(fmt.Sprintf("prevOutsFetcher: malformed outpoint key %q: %v", k, err))
+		}
+		m[*op] = v
+	}
+	return txscript.NewMultiPrevOutFetcher(m)
 }

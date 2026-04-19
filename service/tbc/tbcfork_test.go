@@ -408,7 +408,11 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 	}
 
 	v := m.InvList[0]
-	if v.Type != wire.InvTypeBlock {
+	// Accept both base and witness-inclusive block-data requests.
+	// tbcd requests witness blocks post-BIP-144; the fake node
+	// stores full MsgBlocks either way, so returning the same
+	// block for both types matches what a real peer does.
+	if v.Type != wire.InvTypeBlock && v.Type != wire.InvTypeWitnessBlock {
 		return nil, fmt.Errorf("unsupported data type: %v", v.Type)
 	}
 
@@ -4124,7 +4128,21 @@ func TestIndexFakeHeaders(t *testing.T) {
 			isNotOneOf := !testutil.ErrorIsOneOf(err,
 				[]error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn},
 			)
-			return isNotOneOf && !strings.Contains(err.Error(), "connection reset by peer")
+			if !isNotOneOf {
+				return false
+			}
+			msg := err.Error()
+			// Either side of a TCP pair losing the peer
+			// mid-write surfaces as RST ("connection reset")
+			// or EPIPE ("broken pipe") depending on who
+			// closed first.  Both are expected here.
+			if strings.Contains(msg, "connection reset by peer") {
+				return false
+			}
+			if strings.Contains(msg, "broken pipe") {
+				return false
+			}
+			return true
 		}
 		if err := n.Run(ctx); isInvalidErr(err) {
 			panic(err)

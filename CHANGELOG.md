@@ -14,6 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add TBC notification system ([#725](https://github.com/hemilabs/heminetwork/pull/725)).
 - Add Continuum Transfuctioner protocol and daemon to handle threshold signatures ([#752](https://github.com/hemilabs/heminetwork/pull/752)).
 - Add Trust, rust version of TBC Headers only mode ([#970](https://github.com/hemilabs/heminetwork/pull/970))
+- Add external ECDSA and schnorr signature injection to `bitcoin/wallet`,
+  enabling threshold signature committees, hardware wallets, and PSBT flows
+  to produce signatures out of band and hand them to the wallet for
+  witness/sigScript assembly.  Includes `TransactionApplyECDSA`,
+  `TransactionApplySchnorr`, `ECDSASigFromRS` DER helper, and
+  `VerifyECDSA`/`VerifySchnorr` pre-broadcast gates
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Add native P2WPKH and BIP-86 P2TR key-path signing to
+  `wallet.TransactionSign`, with BIP-143/BIP-341 sighash handling
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Add `bitcoin/zuul.TSSNamedKey` storage for keys controlled by an external
+  threshold signature scheme, alongside symmetrical `PutTSSKey` /
+  `GetTSSKey` / `PurgeTSSKey` / `LookupTSSKeyByAddr` interface methods.
+  `memoryZuul` now indexes local keys under P2PKH, P2WPKH, and BIP-86 P2TR
+  addresses simultaneously
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
 
 ### Changed
 
@@ -32,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Improved signal handling in the daemons ([#763](https://github.com/hemilabs/heminetwork/pull/763)).
 
+- Bump tbcd database schema to v5; first start after upgrade
+  wipes the stored block bodies and re-downloads them with
+  witness data, triggered by the witness-download fix below.
+
+- `bitcoin/wallet.TransactionCreate` and `PoPTransactionCreate` now return
+  `wallet.PrevOuts` (map of outpoint string to `*wire.TxOut`) instead of
+  `map[string][]byte`, so previous-output amounts travel alongside pkScripts
+  for BIP-143/BIP-341 witness sighash computation.  External consumers must
+  update their type signatures; internal callers (`service/popm`) treat
+  prevOuts opaquely and are unaffected
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+
 ### Fixed
 
 - Fix typos across the codebase
@@ -43,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix bug that allowed invalid headers to be indexed ([#950](https://github.com/hemilabs/heminetwork/pull/950))
 
 - Fix bug that led to delayed request processing in tbcgozer ([#969](https://github.com/hemilabs/heminetwork/pull/969))
+
+- Fix tbcd requesting witness-stripped blocks and txs from
+  peers (BIP-144); on-disk blocks are now witness-inclusive
+  after a v5 upgrade plus resync.
 
 ## [v2.0.0]
 
