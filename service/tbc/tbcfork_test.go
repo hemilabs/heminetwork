@@ -4128,7 +4128,21 @@ func TestIndexFakeHeaders(t *testing.T) {
 			isNotOneOf := !testutil.ErrorIsOneOf(err,
 				[]error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn},
 			)
-			return isNotOneOf && !strings.Contains(err.Error(), "connection reset by peer")
+			if !isNotOneOf {
+				return false
+			}
+			msg := err.Error()
+			// Either side of a TCP pair losing the peer
+			// mid-write surfaces as RST ("connection reset")
+			// or EPIPE ("broken pipe") depending on who
+			// closed first.  Both are expected here.
+			if strings.Contains(msg, "connection reset by peer") {
+				return false
+			}
+			if strings.Contains(msg, "broken pipe") {
+				return false
+			}
+			return true
 		}
 		if err := n.Run(ctx); isInvalidErr(err) {
 			panic(err)
