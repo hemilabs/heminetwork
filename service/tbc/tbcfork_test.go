@@ -4126,7 +4126,7 @@ func TestIndexFakeHeaders(t *testing.T) {
 		// This is just for readability
 		isInvalidErr := func(err error) bool {
 			isNotOneOf := !testutil.ErrorIsOneOf(err,
-				[]error{context.Canceled, io.EOF, rawpeer.ErrNoConn},
+				[]error{net.ErrClosed, context.Canceled, io.EOF, rawpeer.ErrNoConn},
 			) && !errors.As(err, new(*net.OpError))
 
 			return isNotOneOf
