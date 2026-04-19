@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Improved signal handling in the daemons ([#763](https://github.com/hemilabs/heminetwork/pull/763)).
 
+- Bump tbcd database schema to v5; first start after upgrade
+  wipes the stored block bodies and re-downloads them with
+  witness data, triggered by the witness-download fix below.
+
 ### Fixed
 
 - Fix typos across the codebase
@@ -43,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix bug that allowed invalid headers to be indexed ([#950](https://github.com/hemilabs/heminetwork/pull/950))
 
 - Fix bug that led to delayed request processing in tbcgozer ([#969](https://github.com/hemilabs/heminetwork/pull/969))
+
+- Fix tbcd requesting witness-stripped blocks and txs from
+  peers (BIP-144); on-disk blocks are now witness-inclusive
+  after a v5 upgrade plus resync.
 
 ## [v2.0.0]
 
