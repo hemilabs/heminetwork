@@ -1555,11 +1555,9 @@ func TestBlockHeadersRemove(t *testing.T) {
 // TestDbUpgradeV5Errors drives v5 against a v4 database whose
 // in-memory pool has been surgically damaged to force each of the
 // defensive error returns.  Each case opens a v4 database with
-// SetUpgradeOpen(true), mutates l.pool / l.rawPool / stored rows
-// to set up the specific failure, then calls v5 directly and
-// asserts the wrapped error prefix.  Calling v5 directly (not
-// through New's upgrade ladder) keeps each subtest focused on a
-// single branch.
+// SetUpgradeOpen(true), mutates pool state or stored rows to set
+// up the specific failure, then calls v5 directly and asserts the
+// wrapped error prefix.
 func TestDbUpgradeV5Errors(t *testing.T) {
 	type tc struct {
 		name      string
@@ -1568,51 +1566,16 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 	}
 	cases := []tc{
 		{
-			name: "missing blocks rawdb handle",
-			setup: func(_ *testing.T, db *ldb) {
-				delete(db.rawPool, level.BlocksDB)
-			},
-			wantErrIn: "rawdb not found",
-		},
-		{
-			name: "closed blocks rawdb",
+			name: "close database fails",
 			setup: func(t *testing.T, db *ldb) {
-				// Close the rawdb once; v5's Close call
-				// then hits leveldb.ErrClosed on the
-				// underlying index.
-				if err := db.rawPool[level.BlocksDB].Close(); err != nil {
-					t.Fatal(err)
-				}
-			},
-			wantErrIn: "close blocks rawdb",
-		},
-		{
-			name: "missing blocksmissing handle",
-			setup: func(_ *testing.T, db *ldb) {
-				delete(db.pool, level.BlocksMissingDB)
-			},
-			wantErrIn: "db not found: " + level.BlocksMissingDB,
-		},
-		{
-			name: "closed blocksmissing iterator",
-			setup: func(t *testing.T, db *ldb) {
-				// Close the leveldb handle behind
-				// BlocksMissingDB's back.  The iterator
-				// over a closed db surfaces the error
-				// through clearIt.Error() after the
-				// loop.
+				// Pre-close a handle so that v5's
+				// initial l.Close() encounters a
+				// double-close error.
 				if err := db.pool[level.BlocksMissingDB].Close(); err != nil {
 					t.Fatal(err)
 				}
 			},
-			wantErrIn: "blocksmissing iterator",
-		},
-		{
-			name: "missing blockheaders handle",
-			setup: func(_ *testing.T, db *ldb) {
-				delete(db.pool, level.BlockHeadersDB)
-			},
-			wantErrIn: "db not found: " + level.BlockHeadersDB,
+			wantErrIn: "close database",
 		},
 		{
 			name: "malformed blockheader value size",
@@ -1628,34 +1591,6 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 				}
 			},
 			wantErrIn: "blockheader value size",
-		},
-		{
-			name: "closed blockheaders iterator",
-			setup: func(t *testing.T, db *ldb) {
-				// Step 3 of v5 iterates BlockHeadersDB.
-				// Closing the handle before v5 runs
-				// surfaces the error through
-				// it.Error() after the loop.
-				if err := db.pool[level.BlockHeadersDB].Close(); err != nil {
-					t.Fatal(err)
-				}
-			},
-			wantErrIn: "blockheaders iterator",
-		},
-		{
-			name: "metadata put fails",
-			setup: func(t *testing.T, db *ldb) {
-				// Close the MetadataDB handle so the
-				// final MetadataPut(versionKey, 5) at
-				// end of v5 fails.
-				if err := db.pool[level.MetadataDB].Close(); err != nil {
-					t.Fatal(err)
-				}
-			},
-			// MetadataPut wraps through startTransaction
-			// which returns "unable to open db transaction"
-			// on a closed handle.
-			wantErrIn: "",
 		},
 	}
 
@@ -1682,7 +1617,7 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 			}()
 
 			// Seed one header + one block so step 1 has
-			// something to wipe and step 3 has a row to
+			// something to wipe and step 2 has a row to
 			// rebuild from.  Skip for the malformed-value
 			// case, which plants its own bogus header.
 			if c.name != "malformed blockheader value size" {

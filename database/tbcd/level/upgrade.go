@@ -668,51 +668,36 @@ func (l *ldb) v5(ctx context.Context) error {
 	log.Infof("Upgrading database from v4 to v5: " +
 		"wiping stripped block bodies and rebuilding blocksmissing")
 
-	// 1. Wipe the BlocksDB rawdb.  Close the handle, remove the
-	// on-disk directory tree, reopen to recreate an empty rawdb.
-	// rawdb.Open MkdirAlls the data dir and reopens leveldb for
-	// the index, so a single os.RemoveAll of the rawdb home is
-	// enough to clear both index and data sides at once.
-	bdb, ok := l.rawPool[level.BlocksDB]
-	if !ok || bdb == nil {
-		return fmt.Errorf("rawdb not found: %v", level.BlocksDB)
+	// 1. Close all database handles, delete the BlocksDB rawdb
+	// and BlocksMissingDB trees, then reopen everything via
+	// level.New.  Tables whose directories still exist come
+	// back with their data; deleted directories are recreated
+	// empty.  This avoids iterating BlocksMissing to batch-
+	// delete every key and keeps both the Database and ldb
+	// pools pointing at the same handles.
+	if err := l.Close(); err != nil {
+		return fmt.Errorf("close database: %w", err)
 	}
-	if err := bdb.Close(); err != nil {
-		return fmt.Errorf("close blocks rawdb: %w", err)
+	for _, sub := range []string{level.BlocksDB, level.BlocksMissingDB} {
+		target := filepath.Join(l.cfg.Home, sub)
+		rel, err := filepath.Rel(l.cfg.Home, target)
+		if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) {
+			return fmt.Errorf("refusing to remove %v: not a child of %v",
+				target, l.cfg.Home)
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return fmt.Errorf("remove %v: %w", sub, err)
+		}
 	}
-	blocksHome := filepath.Join(l.cfg.Home, level.BlocksDB)
-	if err := os.RemoveAll(blocksHome); err != nil {
-		return fmt.Errorf("remove blocks rawdb tree: %w", err)
+	ld, err := level.New(ctx, level.NewDefaultConfig(l.cfg.Home))
+	if err != nil {
+		return fmt.Errorf("reopen database: %w", err)
 	}
-	if err := bdb.Open(); err != nil {
-		return fmt.Errorf("reopen blocks rawdb: %w", err)
-	}
+	l.Database = ld
+	l.pool = ld.DB()
+	l.rawPool = ld.RawDB()
 
-	// 2. Clear BlocksMissingDB.  Iterate and batch-delete rather
-	// than removing the leveldb files; the pool still holds the
-	// open handle and we want it to stay usable in step 3.
-	bmDB, ok := l.pool[level.BlocksMissingDB]
-	if !ok || bmDB == nil {
-		return fmt.Errorf("db not found: %v", level.BlocksMissingDB)
-	}
-	clearBatch := new(leveldb.Batch)
-	clearIt := bmDB.NewIterator(nil, nil)
-	for clearIt.Next() {
-		// Copy the key because the iterator reuses its buffer
-		// across Next calls; leveldb.Batch stores a reference
-		// until Write.
-		k := append([]byte(nil), clearIt.Key()...)
-		clearBatch.Delete(k)
-	}
-	clearIt.Release()
-	if err := clearIt.Error(); err != nil {
-		return fmt.Errorf("blocksmissing iterator: %w", err)
-	}
-	if err := bmDB.Write(clearBatch, nil); err != nil {
-		return fmt.Errorf("blocksmissing clear: %w", err)
-	}
-
-	// 3. Repopulate BlocksMissingDB from BlockHeadersDB.  For
+	// 2. Repopulate BlocksMissingDB from BlockHeadersDB.  For
 	// every header row (key=hash[32], value starts with height
 	// in 8 BE bytes), insert a heightHashToKey entry exactly as
 	// BlockHeadersInsert would on first receipt.  BlocksMissing
@@ -720,6 +705,10 @@ func (l *ldb) v5(ctx context.Context) error {
 	bhsDB, ok := l.pool[level.BlockHeadersDB]
 	if !ok || bhsDB == nil {
 		return fmt.Errorf("db not found: %v", level.BlockHeadersDB)
+	}
+	bmDB, ok := l.pool[level.BlocksMissingDB]
+	if !ok || bmDB == nil {
+		return fmt.Errorf("db not found: %v", level.BlocksMissingDB)
 	}
 	bmBatch := new(leveldb.Batch)
 	var records int
@@ -752,7 +741,7 @@ func (l *ldb) v5(ctx context.Context) error {
 	}
 	log.Infof("v5: marked %v blocks for re-download", records)
 
-	// 4. Bump version.
+	// 3. Bump version.
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, 5)
 	return l.MetadataPut(ctx, versionKey, v)
