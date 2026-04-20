@@ -10,10 +10,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -4122,9 +4122,13 @@ func TestIndexFakeHeaders(t *testing.T) {
 		// This is just for readability
 		isInvalidErr := func(err error) bool {
 			isNotOneOf := !testutil.ErrorIsOneOf(err,
-				[]error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn},
-			)
-			return isNotOneOf && !strings.Contains(err.Error(), "connection reset by peer")
+				[]error{
+					context.Canceled,
+					io.EOF,
+					rawpeer.ErrNoConn,
+				},
+			) && !errors.As(err, new(*net.OpError))
+			return isNotOneOf
 		}
 		if err := n.Run(ctx); isInvalidErr(err) {
 			panic(err)
