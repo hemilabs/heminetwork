@@ -7,7 +7,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 #[cfg(test)]
-mod trust_tests;
+mod trust_test;
 
 #[derive(Error, Debug)]
 pub enum TrustError {

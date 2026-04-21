@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 #[cfg(test)]
-mod trust_db_tests;
+mod trust_db_test;
 
 const BHS_CANONICAL_TIP_KEY: &str = "canonicaltip";
 const BHS_GENESIS_KEY: &str = "genesis";
