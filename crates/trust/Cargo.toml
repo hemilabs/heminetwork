@@ -9,6 +9,7 @@ bitcoin = "=0.32.8"
 ethnum = "=1.5.2"
 hex = "=0.4.3"
 rocksdb = "=0.24.0"
+tempfile = "=3.27.0"
 thiserror = "=2.0.18"
 
 [dev-dependencies]
