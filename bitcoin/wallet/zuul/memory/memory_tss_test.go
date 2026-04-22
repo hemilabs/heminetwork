@@ -175,8 +175,8 @@ func TestPutTSSKeyRequiresFields(t *testing.T) {
 
 // TestPutKeyVsPutTSSKeyCollision verifies that a local private key
 // and a TSS key cannot claim the same address: attempting to enrol
-// one when the other already holds that address must fail with
-// ErrKeyExists.
+// one when the other already holds that address must fail with a
+// specific cross-index error that wraps ErrKeyExists.
 func TestPutKeyVsPutTSSKeyCollision(t *testing.T) {
 	m, err := New(&chaincfg.TestNet3Params)
 	if err != nil {
@@ -198,8 +198,11 @@ func TestPutKeyVsPutTSSKeyCollision(t *testing.T) {
 		KeyID:     []byte("kid"),
 		PublicKey: priv.PubKey(),
 	})
-	if err == nil || !errors.Is(err, zuul.ErrKeyExists) {
-		t.Fatalf("expected ErrKeyExists for TSS after local, got %v", err)
+	if err == nil || !errors.Is(err, zuul.ErrLocalKeyOccupied) {
+		t.Fatalf("expected ErrLocalKeyOccupied for TSS after local, got %v", err)
+	}
+	if !errors.Is(err, zuul.ErrKeyExists) {
+		t.Fatalf("ErrLocalKeyOccupied must wrap ErrKeyExists, got %v", err)
 	}
 
 	// Reverse direction: fresh zuul, TSS first, local second.
@@ -220,8 +223,11 @@ func TestPutKeyVsPutTSSKeyCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m2.PutKey(&zuul.NamedKey{Name: "local", PrivateKey: priv2})
-	if err == nil || !errors.Is(err, zuul.ErrKeyExists) {
-		t.Fatalf("expected ErrKeyExists for local after TSS, got %v", err)
+	if err == nil || !errors.Is(err, zuul.ErrTSSKeyOccupied) {
+		t.Fatalf("expected ErrTSSKeyOccupied for local after TSS, got %v", err)
+	}
+	if !errors.Is(err, zuul.ErrKeyExists) {
+		t.Fatalf("ErrTSSKeyOccupied must wrap ErrKeyExists, got %v", err)
 	}
 }
 

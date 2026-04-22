@@ -11,6 +11,7 @@ package zuul
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
@@ -20,6 +21,12 @@ import (
 var (
 	ErrKeyExists      = errors.New("key exists")
 	ErrKeyDoesntExist = errors.New("key does not exist")
+
+	// Cross-index collision sentinels.  Both wrap ErrKeyExists so
+	// callers testing errors.Is(err, ErrKeyExists) continue to
+	// work, but the specific type of occupant is now visible.
+	ErrTSSKeyOccupied   = fmt.Errorf("address occupied by tss key: %w", ErrKeyExists)
+	ErrLocalKeyOccupied = fmt.Errorf("address occupied by local key: %w", ErrKeyExists)
 )
 
 // NamedKeyHD contains a private key with metadata.
