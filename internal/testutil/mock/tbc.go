@@ -214,22 +214,29 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 		if !ok {
 			panic(fmt.Errorf("unexpected payload format: %v", payload))
 		}
-		resp = &tbcapi.TxByIdResponse{
-			Tx: &tbcapi.Tx{
-				Version:  2,
-				LockTime: 0,
-				TxIn: []*tbcapi.TxIn{{
-					PreviousOutPoint: tbcapi.OutPoint{
-						Hash:  pl.TxID,
-						Index: 0,
-					},
-					Sequence: wire.MaxTxInSequenceNum,
-				}},
-				TxOut: []*tbcapi.TxOut{{
-					Value:    50000,
-					PkScript: []byte{0x00, 0x14, 0x01, 0x02, 0x03},
-				}},
-			},
+		// Zero hash signals "not found" for testing error paths.
+		if pl.TxID == (chainhash.Hash{}) {
+			resp = &tbcapi.TxByIdResponse{
+				Error: protocol.RequestErrorf("tx not found"),
+			}
+		} else {
+			resp = &tbcapi.TxByIdResponse{
+				Tx: &tbcapi.Tx{
+					Version:  2,
+					LockTime: 0,
+					TxIn: []*tbcapi.TxIn{{
+						PreviousOutPoint: tbcapi.OutPoint{
+							Hash:  pl.TxID,
+							Index: 0,
+						},
+						Sequence: wire.MaxTxInSequenceNum,
+					}},
+					TxOut: []*tbcapi.TxOut{{
+						Value:    50000,
+						PkScript: []byte{0x00, 0x14, 0x01, 0x02, 0x03},
+					}},
+				},
+			}
 		}
 	case tbcapi.CmdKeystonesByHeightRequest:
 		pl, ok := payload.(*tbcapi.KeystonesByHeightRequest)

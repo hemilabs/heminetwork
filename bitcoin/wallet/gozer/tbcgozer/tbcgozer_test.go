@@ -415,3 +415,125 @@ func TestTBCGozerTxByID(t *testing.T) {
 		t.Fatalf("cc %v != qd %v", cc, qd)
 	}
 }
+
+func TestTBCGozerTxByIDErrorResponse(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	kssMap, kssList := testutil.MakeSharedKeystones(10)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	mtbc := mock.NewMockTBC(ctx, nil, nil, kssMap, btcTip, 100)
+	defer mtbc.Shutdown()
+
+	DefaultRequestTimeout = 10 * time.Second
+	b := New("ws" + strings.TrimPrefix(mtbc.URL(), "http"))
+	if err := b.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tg := b.(*tbcGozer)
+	for !tg.Connected() {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.Tick(50 * time.Millisecond):
+		}
+	}
+
+	// Zero hash triggers error response from mock.
+	zeroHash := chainhash.Hash{}
+	_, err := b.TxByID(ctx, &zeroHash)
+	if err == nil {
+		t.Fatal("expected error for zero hash (not-found)")
+	}
+	if !strings.Contains(err.Error(), "tx not found") {
+		t.Fatalf("expected 'tx not found' in error, got: %v", err)
+	}
+}
+
+func TestTBCGozerTxByIDContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	kssMap, kssList := testutil.MakeSharedKeystones(10)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	mtbc := mock.NewMockTBC(ctx, nil, nil, kssMap, btcTip, 100)
+	defer mtbc.Shutdown()
+
+	DefaultRequestTimeout = 10 * time.Second
+	b := New("ws" + strings.TrimPrefix(mtbc.URL(), "http"))
+	if err := b.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tg := b.(*tbcGozer)
+	for !tg.Connected() {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.Tick(50 * time.Millisecond):
+		}
+	}
+
+	// Cancel context before calling TxByID.
+	cancelledCtx, cancelNow := context.WithCancel(ctx)
+	cancelNow()
+
+	txid := chainhash.Hash{0xde, 0xad}
+	_, err := b.TxByID(cancelledCtx, &txid)
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+}
+
+func FuzzTBCGozerTxByID(f *testing.F) {
+	f.Add(make([]byte, 32))         // zero hash
+	f.Add([]byte{0xaa, 0xbb, 0xcc}) // short
+	f.Add(make([]byte, 33))         // oversize
+	f.Add([]byte{})                 // empty
+	f.Add([]byte{
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	}) // all-ones
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+
+		kssMap, kssList := testutil.MakeSharedKeystones(2)
+		btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+		mtbc := mock.NewMockTBC(ctx, nil, nil, kssMap, btcTip, 1)
+		defer mtbc.Shutdown()
+
+		DefaultRequestTimeout = 5 * time.Second
+		b := New("ws" + strings.TrimPrefix(mtbc.URL(), "http"))
+		if err := b.Run(ctx, nil); err != nil {
+			t.Skip("failed to start gozer:", err)
+		}
+
+		tg := b.(*tbcGozer)
+		for !tg.Connected() {
+			select {
+			case <-ctx.Done():
+				t.Skip("timeout waiting for connection")
+			case <-time.Tick(50 * time.Millisecond):
+			}
+		}
+
+		// Pad or truncate to exactly 32 bytes.
+		var hashBytes [32]byte
+		copy(hashBytes[:], data)
+		txid := chainhash.Hash(hashBytes)
+
+		// Must not panic for any input.  Errors are acceptable.
+		_, _ = b.TxByID(ctx, &txid)
+	})
+}
