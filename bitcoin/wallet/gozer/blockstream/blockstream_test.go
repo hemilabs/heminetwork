@@ -132,3 +132,16 @@ func TestBlockstreamGozer(t *testing.T) {
 	}
 	t.Logf("BTC tip height: %v", height)
 }
+
+func TestBlockstreamGozerTxByIDNotSupported(t *testing.T) {
+	b := &blockstreamGozer{url: "http://localhost:0"}
+
+	txid := chainhash.Hash{0x01}
+	_, err := b.TxByID(t.Context(), &txid)
+	if err == nil {
+		t.Fatal("expected error for unsupported TxByID")
+	}
+	if err.Error() != "not supported yet" {
+		t.Fatalf("expected 'not supported yet', got: %v", err)
+	}
+}

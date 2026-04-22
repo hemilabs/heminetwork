@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -207,6 +207,28 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 				{Blocks: 8, SatsPerByte: 1},
 				{Blocks: 9, SatsPerByte: 1},
 				{Blocks: 10, SatsPerByte: 1},
+			},
+		}
+	case tbcapi.CmdTxByIdRequest:
+		pl, ok := payload.(*tbcapi.TxByIdRequest)
+		if !ok {
+			panic(fmt.Errorf("unexpected payload format: %v", payload))
+		}
+		resp = &tbcapi.TxByIdResponse{
+			Tx: &tbcapi.Tx{
+				Version:  2,
+				LockTime: 0,
+				TxIn: []*tbcapi.TxIn{{
+					PreviousOutPoint: tbcapi.OutPoint{
+						Hash:  pl.TxID,
+						Index: 0,
+					},
+					Sequence: wire.MaxTxInSequenceNum,
+				}},
+				TxOut: []*tbcapi.TxOut{{
+					Value:    50000,
+					PkScript: []byte{0x00, 0x14, 0x01, 0x02, 0x03},
+				}},
 			},
 		}
 	case tbcapi.CmdKeystonesByHeightRequest:

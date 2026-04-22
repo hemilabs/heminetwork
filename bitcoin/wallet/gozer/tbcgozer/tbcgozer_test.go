@@ -15,6 +15,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
@@ -264,6 +265,144 @@ func TestTBCGozerCalls(t *testing.T) {
 			if ks.BTCTipHeight != keystones.BTCTipHeight {
 				panic(fmt.Sprintf("got %v != wanted %v",
 					ks.BTCTipHeight, keystones.BTCTipHeight))
+			}
+			ccMtx.Lock()
+			cc++
+			ccMtx.Unlock()
+		})
+	}
+
+	wg.Wait()
+	if cc != qd {
+		t.Fatalf("cc %v != qd %v", cc, qd)
+	}
+}
+
+func TestTBCGozerTxByIDNilTxid(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	kssMap, kssList := testutil.MakeSharedKeystones(10)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	mtbc := mock.NewMockTBC(ctx, nil, nil, kssMap, btcTip, 100)
+	defer mtbc.Shutdown()
+
+	DefaultRequestTimeout = 10 * time.Second
+	b := New("ws" + strings.TrimPrefix(mtbc.URL(), "http"))
+	if err := b.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tg, ok := b.(*tbcGozer)
+	if !ok {
+		t.Fatal("expected gozer to be of type tbcGozer")
+	}
+
+	for !tg.Connected() {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.Tick(50 * time.Millisecond):
+		}
+	}
+
+	_, err := b.TxByID(ctx, nil)
+	if err == nil {
+		t.Fatal("expected error for nil txid")
+	}
+	if err.Error() != "txid is nil" {
+		t.Fatalf("expected 'txid is nil', got: %v", err)
+	}
+}
+
+func TestTBCGozerTxByIDNotConnected(t *testing.T) {
+	b := New("ws://127.0.0.1:0/v1/ws")
+	tg := b.(*tbcGozer)
+
+	if tg.Connected() {
+		t.Fatal("expected gozer to not be connected")
+	}
+
+	txid := chainhash.Hash{0x01}
+	_, err := b.TxByID(t.Context(), &txid)
+	if err == nil {
+		t.Fatal("expected error for not connected")
+	}
+	if err.Error() != "not connected to tbc" {
+		t.Fatalf("expected 'not connected to tbc', got: %v", err)
+	}
+}
+
+func TestTBCGozerTxByID(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+
+	kssMap, kssList := testutil.MakeSharedKeystones(10)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	mtbc := mock.NewMockTBC(ctx, nil, nil, kssMap, btcTip, 100)
+	defer mtbc.Shutdown()
+
+	DefaultRequestTimeout = 10 * time.Second
+	b := New("ws" + strings.TrimPrefix(mtbc.URL(), "http"))
+	if err := b.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tg, ok := b.(*tbcGozer)
+	if !ok {
+		t.Fatal("expected gozer to be of type tbcGozer")
+	}
+
+	for !tg.Connected() {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.Tick(50 * time.Millisecond):
+		}
+	}
+
+	txid := chainhash.Hash{0xaa, 0xbb, 0xcc}
+	tx, err := b.TxByID(ctx, &txid)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tx == nil {
+		t.Fatal("expected non-nil tx")
+	}
+	if tx.Version != 2 {
+		t.Fatalf("expected version 2, got %v", tx.Version)
+	}
+	if len(tx.TxIn) != 1 {
+		t.Fatalf("expected 1 txin, got %v", len(tx.TxIn))
+	}
+	if tx.TxIn[0].PreviousOutPoint.Hash != txid {
+		t.Fatalf("expected txin outpoint hash to match txid")
+	}
+	if len(tx.TxOut) != 1 {
+		t.Fatalf("expected 1 txout, got %v", len(tx.TxOut))
+	}
+	if tx.TxOut[0].Value != 50000 {
+		t.Fatalf("expected txout value 50000, got %v", tx.TxOut[0].Value)
+	}
+
+	// Repeat concurrently to exercise queue depth.
+	var (
+		wg    sync.WaitGroup
+		ccMtx sync.Mutex
+		cc    int
+	)
+	qd := DefaultCommandQueueDepth * 10
+	for range qd {
+		wg.Go(func() {
+			rtx, err := b.TxByID(ctx, &txid)
+			if err != nil {
+				panic(fmt.Sprintf("TxByID: %v", err))
+			}
+			if rtx.Version != tx.Version {
+				panic(fmt.Sprintf("version %v != %v",
+					rtx.Version, tx.Version))
 			}
 			ccMtx.Lock()
 			cc++
