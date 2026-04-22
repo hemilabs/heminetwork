@@ -93,10 +93,10 @@ func addressesForPubKey(params *chaincfg.Params, pubCompressed []byte) ([]string
 // of those addresses.
 //
 // All-or-nothing: if any of the derived addresses already maps to
-// a stored key (local or TSS-controlled), the call returns
-// ErrKeyExists without mutating state.  This prevents a single
-// PutKey from partially populating the index when a collision
-// exists on one address form but not others.
+// a stored local key the call returns ErrKeyExists; if mapped to a
+// TSS key it returns ErrTSSKeyOccupied.  Both wrap ErrKeyExists.
+// This prevents a single PutKey from partially populating the index
+// when a collision exists on one address form but not others.
 func (m *memoryZuul) PutKey(nk *zuul.NamedKey) error {
 	pubBytes := nk.PrivateKey.PubKey().SerializeCompressed()
 	addrs, err := addressesForPubKey(m.params, pubBytes)
@@ -116,7 +116,7 @@ func (m *memoryZuul) PutKey(nk *zuul.NamedKey) error {
 			return zuul.ErrKeyExists
 		}
 		if _, ok := m.tssKeys[a]; ok {
-			return zuul.ErrKeyExists
+			return zuul.ErrTSSKeyOccupied
 		}
 	}
 	for _, a := range addrs {
@@ -224,8 +224,9 @@ func ecdsaAddressesForPubKey(params *chaincfg.Params, pubCompressed []byte) ([]s
 // a BIP-341 key-path spend.
 //
 // Collisions are detected against both the local-key index and the
-// TSS-key index: an address pointing to either form of key refuses
-// the insert with ErrKeyExists.
+// TSS-key index: an address pointing to a local key refuses the
+// insert with ErrLocalKeyOccupied; a duplicate TSS key refuses with
+// ErrKeyExists.
 func (m *memoryZuul) PutTSSKey(tnk *zuul.TSSNamedKey) error {
 	if tnk == nil || tnk.PublicKey == nil {
 		return fmt.Errorf("tss key: public key required")
@@ -245,7 +246,7 @@ func (m *memoryZuul) PutTSSKey(tnk *zuul.TSSNamedKey) error {
 
 	for _, a := range addrs {
 		if _, ok := m.keys[a]; ok {
-			return zuul.ErrKeyExists
+			return zuul.ErrLocalKeyOccupied
 		}
 		if _, ok := m.tssKeys[a]; ok {
 			return zuul.ErrKeyExists
