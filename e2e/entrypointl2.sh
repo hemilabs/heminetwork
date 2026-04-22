@@ -27,7 +27,6 @@ BLOCKHEIGHT=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \
 
 BLOCKHEADER=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH, false]}" -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq -r '.result')
 
-echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
 
 filecontents=$(cat << EOF
 [Node.P2P]
@@ -48,6 +47,22 @@ echo "will use toml file contents: $filecontents"
 
 echo $filecontents > ./config.toml
 
+genesis_header_file=/shared-dir/genesis-header.txt
+if [ -f "$genesis_header_file" ]; then
+    BLOCKHEADER="$(cat $genesis_header_file)"
+else
+    echo $BLOCKHEADER > $genesis_header_file
+fi
+
+genesis_height_file=/shared-dir/genesis-height.txt
+if [ -f "$genesis_height_file" ]; then
+    BLOCKHEIGHT="$(cat $genesis_height_file)"
+else
+    echo $BLOCKHEIGHT > $genesis_height_file
+fi
+
+echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
+
 /bin/geth \
  --keystore \
  /tmp/keystore \
@@ -65,7 +80,6 @@ echo $filecontents > ./config.toml
  --ws.origins="*"  \
  --http.api=web3,debug,eth,txpool,net,engine,miner,kss \
  --ws.api=debug,eth,txpool,net,engine,miner,kss \
- --syncmode=full  \
  --nodiscover  \
  --maxpeers=50 \
  --networkid=901 \
