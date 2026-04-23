@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -1246,7 +1246,33 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 	if err != nil {
 		return fmt.Errorf("new mempool tx: %w", err)
 	}
-	return s.mempool.TxInsert(ctx, mptx)
+	if err := s.mempool.TxInsert(ctx, mptx); err != nil {
+		return err
+	}
+
+	s.notifyTxOutputs(ctx, msg, msg.TxHash(), NotificationTxMempool)
+
+	return nil
+}
+
+// notifyTxOutputs fires a notification for each TxOut in tx, using the
+// provided constructor function.  The constructor is either
+// NotificationTxMempool or a closure wrapping NotificationTxConfirmed.
+// Only fires if there are active listeners.
+func (s *Server) notifyTxOutputs(ctx context.Context, tx *wire.MsgTx, txid chainhash.Hash, mkNote func(chainhash.Hash, tbcd.ScriptHash) Notification) {
+	if !s.notifier.HasListeners() {
+		return
+	}
+	for _, txOut := range tx.TxOut {
+		if txscript.IsUnspendable(txOut.PkScript) {
+			continue
+		}
+		sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
+		if err := s.notifier.Notify(ctx, mkNote(txid, sh)); err != nil {
+			log.Debugf("notify tx output: %v", err)
+			return
+		}
+	}
 }
 
 func (s *Server) syncBlocks(ctx context.Context) {
@@ -1752,6 +1778,18 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 		}
 	}
 	s.mtx.Unlock()
+
+	// Notify listeners about confirmed transactions.
+	if s.notifier.HasListeners() {
+		blockHash := *block.Hash()
+		for _, tx := range msg.Transactions {
+			txid := tx.TxHash()
+			mkNote := func(id chainhash.Hash, sh tbcd.ScriptHash) Notification {
+				return NotificationTxConfirmed(id, blockHash, height, sh)
+			}
+			s.notifyTxOutputs(ctx, tx, txid, mkNote)
+		}
+	}
 
 	// Reap txs from mempool for blocks that are within defaultMempoolAge.
 	// Sync flag is always false here so don't check it, just remove tx's
@@ -2362,6 +2400,8 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 			log.Errorf("mempool tx: %w", err)
 		} else if err := s.mempool.TxInsert(ctx, mptx); err != nil {
 			log.Errorf("broadcast mempool tx: %w", err)
+		} else {
+			s.notifyTxOutputs(ctx, tx, txHash, NotificationTxMempool)
 		}
 	}
 

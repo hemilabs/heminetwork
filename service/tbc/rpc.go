@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -47,6 +47,9 @@ type tbcWs struct {
 	conn           *protocol.WSConn
 	sessionID      string
 	requestContext context.Context
+
+	listenerMtx sync.Mutex
+	listener    *Listener // created on first TxWatch, cancelled on disconnect
 }
 
 func (s *Server) getTBCAPICommandHandler(cmd protocol.Command, payload any) func(ctx context.Context) (any, error) {
@@ -193,9 +196,23 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 
 		handler := s.getTBCAPICommandHandler(cmd, payload)
 		if handler == nil {
-			log.Errorf("handleWebsocketRead %s %s %s: %v",
-				ws.addr, cmd, id, "unknown command")
-			return
+			// TxWatch and TxUnwatch need the websocket connection
+			// for listener management, so they bypass the handler
+			// table.
+			switch cmd {
+			case tbcapi.CmdTxWatchRequest:
+				handler = func(ctx context.Context) (any, error) {
+					return s.handleTxWatchRequest(ctx, ws, payload.(*tbcapi.TxWatchRequest))
+				}
+			case tbcapi.CmdTxUnwatchRequest:
+				handler = func(ctx context.Context) (any, error) {
+					return s.handleTxUnwatchRequest(ctx, ws, payload.(*tbcapi.TxUnwatchRequest))
+				}
+			default:
+				log.Errorf("handleWebsocketRead %s %s %s: %v",
+					ws.addr, cmd, id, "unknown command")
+				return
+			}
 		}
 
 		go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -1101,6 +1118,13 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	// Wait for termination
 	ws.wg.Wait()
 
+	// Clean up tx notification listener if one was created.
+	ws.listenerMtx.Lock()
+	if ws.listener != nil {
+		ws.listener.Unsubscribe()
+	}
+	ws.listenerMtx.Unlock()
+
 	log.Infof("RPC connection terminated from %v", r.RemoteAddr)
 }
 
@@ -1211,4 +1235,132 @@ func wireTxToTBC(w *wire.MsgTx) *tbcapi.Tx {
 	}
 
 	return tx
+}
+
+// ensureListener creates a Listener for the websocket session if one
+// does not already exist, and starts the notification push goroutine.
+// The listener is bound to the websocket session's lifetime context,
+// not the individual request context, so it survives beyond handler return.
+func (s *Server) ensureListener(_ context.Context, ws *tbcWs) (*Listener, error) {
+	ws.listenerMtx.Lock()
+	defer ws.listenerMtx.Unlock()
+
+	if ws.listener != nil {
+		return ws.listener, nil
+	}
+
+	// Use the session context (ws.requestContext), not the handler's
+	// request-scoped context.  The handler context has a 10-second
+	// timeout that would cancel the listener when the handler returns.
+	l, err := s.notifier.Subscribe(ws.requestContext, 128)
+	if err != nil {
+		return nil, fmt.Errorf("subscribe: %w", err)
+	}
+	ws.listener = l
+
+	// Push notifications to the websocket client.
+	ws.wg.Add(1)
+	go s.pushNotifications(ws.requestContext, ws, l)
+
+	return l, nil
+}
+
+// pushNotifications reads from the listener and writes unsolicited
+// notification messages to the websocket.
+func (s *Server) pushNotifications(ctx context.Context, ws *tbcWs, l *Listener) {
+	defer ws.wg.Done()
+
+	log.Tracef("pushNotifications: %v", ws.addr)
+	defer log.Tracef("pushNotifications exit: %v", ws.addr)
+
+	for {
+		n, err := l.Listen(ctx)
+		if err != nil {
+			return
+		}
+
+		ntfy := &tbcapi.TxNotification{
+			Type:      tbcapi.TxNotificationType(n.Type),
+			TxID:      n.ID,
+			Timestamp: n.Timestamp.Unix(),
+			Metadata:  n.Metadata,
+		}
+
+		// Generate a unique message ID for the push.
+		buf := make([]byte, 8)
+		// rand.Read uses the OS CSPRNG which never returns an error
+		// on supported platforms (Linux, macOS, Windows).
+		_, _ = rand.Read(buf)
+		pushID := "ntfy-" + hex.EncodeToString(buf)
+
+		if err := tbcapi.Write(ctx, ws.conn, pushID, ntfy); err != nil {
+			log.Debugf("push notification write: %v", err)
+			return
+		}
+	}
+}
+
+// parseScriptHashes validates and converts raw byte slices to ScriptHashes.
+func parseScriptHashes(raw []api.ByteSlice) ([]tbcd.ScriptHash, error) {
+	scripts := make([]tbcd.ScriptHash, 0, len(raw))
+	for _, b := range raw {
+		if len(b) != len(tbcd.ScriptHash{}) {
+			return nil, fmt.Errorf("invalid script hash length: %d", len(b))
+		}
+		var sh tbcd.ScriptHash
+		copy(sh[:], b)
+		scripts = append(scripts, sh)
+	}
+	return scripts, nil
+}
+
+func (s *Server) handleTxWatchRequest(ctx context.Context, ws *tbcWs, req *tbcapi.TxWatchRequest) (any, error) {
+	log.Tracef("handleTxWatchRequest: %v", ws.addr)
+	defer log.Tracef("handleTxWatchRequest exit: %v", ws.addr)
+
+	l, err := s.ensureListener(ctx, ws)
+	if err != nil {
+		return &tbcapi.TxWatchResponse{
+			Error: protocol.RequestErrorf("watch: %v", err),
+		}, nil
+	}
+
+	scripts, err := parseScriptHashes(req.ScriptHashes)
+	if err != nil {
+		return &tbcapi.TxWatchResponse{
+			Error: protocol.RequestErrorf("%v", err),
+		}, nil
+	}
+
+	if err := l.Watch(scripts); err != nil {
+		return &tbcapi.TxWatchResponse{
+			Error: protocol.RequestErrorf("%v", err),
+		}, nil
+	}
+
+	return &tbcapi.TxWatchResponse{}, nil
+}
+
+func (s *Server) handleTxUnwatchRequest(ctx context.Context, ws *tbcWs, req *tbcapi.TxUnwatchRequest) (any, error) {
+	log.Tracef("handleTxUnwatchRequest: %v", ws.addr)
+	defer log.Tracef("handleTxUnwatchRequest exit: %v", ws.addr)
+
+	ws.listenerMtx.Lock()
+	l := ws.listener
+	ws.listenerMtx.Unlock()
+
+	if l == nil {
+		return &tbcapi.TxUnwatchResponse{}, nil
+	}
+
+	scripts, err := parseScriptHashes(req.ScriptHashes)
+	if err != nil {
+		return &tbcapi.TxUnwatchResponse{
+			Error: protocol.RequestErrorf("%v", err),
+		}, nil
+	}
+
+	l.Unwatch(scripts)
+
+	return &tbcapi.TxUnwatchResponse{}, nil
 }

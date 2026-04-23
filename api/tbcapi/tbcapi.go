@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -108,6 +108,13 @@ const (
 
 	CmdZKSpendableOutputsRequest  = "tbcapi-zk-spendable-outputs-request"
 	CmdZKSpendableOutputsResponse = "tbcapi-zk-spendable-outputs-response"
+
+	CmdTxWatchRequest    = "tbcapi-tx-watch-request"
+	CmdTxWatchResponse   = "tbcapi-tx-watch-response"
+	CmdTxUnwatchRequest  = "tbcapi-tx-unwatch-request"
+	CmdTxUnwatchResponse = "tbcapi-tx-unwatch-response"
+
+	CmdTxNotification = "tbcapi-tx-notification"
 )
 
 var (
@@ -494,6 +501,48 @@ type ZKSpendableOutputsResponse struct {
 	Error            *protocol.Error     `json:"error,omitempty"`
 }
 
+// TxWatchRequest registers ScriptHashes for tx notifications on
+// the current websocket session.
+type TxWatchRequest struct {
+	ScriptHashes []api.ByteSlice `json:"script_hashes"`
+}
+
+// TxWatchResponse is the response for TxWatchRequest.
+type TxWatchResponse struct {
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
+// TxUnwatchRequest deregisters ScriptHashes from tx notifications.
+type TxUnwatchRequest struct {
+	ScriptHashes []api.ByteSlice `json:"script_hashes"`
+}
+
+// TxUnwatchResponse is the response for TxUnwatchRequest.
+type TxUnwatchResponse struct {
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
+// TxNotificationType identifies the kind of transaction notification.
+type TxNotificationType string
+
+const (
+	// TxNotificationMempool indicates the transaction entered the mempool.
+	TxNotificationMempool TxNotificationType = "tx_mempool"
+
+	// TxNotificationConfirmed indicates the transaction was confirmed
+	// in a block.
+	TxNotificationConfirmed TxNotificationType = "tx_confirmed"
+)
+
+// TxNotification is an unsolicited push from server to client when
+// a watched transaction hits the mempool or is confirmed in a block.
+type TxNotification struct {
+	Type      TxNotificationType `json:"type"`
+	TxID      string             `json:"tx_id"`
+	Timestamp int64              `json:"timestamp"`
+	Metadata  map[string]string  `json:"metadata,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                              reflect.TypeFor[PingRequest](),
 	CmdPingResponse:                             reflect.TypeFor[PingResponse](),
@@ -551,6 +600,11 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdZKSpendingOutpointsResponse:              reflect.TypeFor[ZKSpendingOutpointsResponse](),
 	CmdZKSpendableOutputsRequest:                reflect.TypeFor[ZKSpendableOutputsRequest](),
 	CmdZKSpendableOutputsResponse:               reflect.TypeFor[ZKSpendableOutputsResponse](),
+	CmdTxWatchRequest:                           reflect.TypeFor[TxWatchRequest](),
+	CmdTxWatchResponse:                          reflect.TypeFor[TxWatchResponse](),
+	CmdTxUnwatchRequest:                         reflect.TypeFor[TxUnwatchRequest](),
+	CmdTxUnwatchResponse:                        reflect.TypeFor[TxUnwatchResponse](),
+	CmdTxNotification:                           reflect.TypeFor[TxNotification](),
 }
 
 type tbcAPI struct{}

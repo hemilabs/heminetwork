@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add Continuum Transfuctioner protocol and daemon to handle threshold signatures ([#752](https://github.com/hemilabs/heminetwork/pull/752)).
 - Add Trust, rust version of TBC Headers only mode ([#970](https://github.com/hemilabs/heminetwork/pull/970))
 - Add Authenticated RPC route for administrative requests to TBC ([#1003](https://github.com/hemilabs/heminetwork/pull/1003)).
+- Add filtered transaction notifications to TBC for commerce (TxWatch/TxUnwatch API).
 
 ### Changed
 
