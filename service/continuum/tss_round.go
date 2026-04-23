@@ -49,12 +49,7 @@ func newMsgBuf(ch <-chan *tss.Message) *msgBuf {
 // collect reads n messages that pass accept.  Messages that don't
 // match are kept in the buffer for later rounds.  accept returns
 // (partyIndex, true) for wanted messages.
-func (b *msgBuf) collect(
-	ctx context.Context,
-	n int,
-	nParties int,
-	accept func(*tss.Message) (slot int, ok bool),
-) ([]*tss.Message, error) {
+func (b *msgBuf) collect(ctx context.Context, n int, nParties int, accept func(*tss.Message) (slot int, ok bool)) ([]*tss.Message, error) {
 	out := make([]*tss.Message, nParties)
 	got := 0
 
@@ -90,13 +85,7 @@ func (b *msgBuf) collect(
 }
 
 // collectDual reads two message types simultaneously.
-func (b *msgBuf) collectDual(
-	ctx context.Context,
-	n int,
-	nParties int,
-	acceptA func(*tss.Message) (slot int, ok bool),
-	acceptB func(*tss.Message) (slot int, ok bool),
-) (a, b2 []*tss.Message, err error) {
+func (b *msgBuf) collectDual(ctx context.Context, n int, nParties int, acceptA func(*tss.Message) (slot int, ok bool), acceptB func(*tss.Message) (slot int, ok bool)) (a, b2 []*tss.Message, err error) {
 	a = make([]*tss.Message, nParties)
 	b2 = make([]*tss.Message, nParties)
 	gotA, gotB := 0, 0

@@ -685,13 +685,7 @@ func rpcCommittee(nodes []*rpcTSSNode) tss.UnSortedPartyIDs {
 	return pids
 }
 
-func rpcInitKeygen(
-	t *testing.T,
-	nodes []*rpcTSSNode,
-	committee tss.UnSortedPartyIDs,
-	cid CeremonyID,
-	threshold int,
-) {
+func rpcInitKeygen(t *testing.T, nodes []*rpcTSSNode, committee tss.UnSortedPartyIDs, cid CeremonyID, threshold int) {
 	t.Helper()
 
 	req := KeygenRequest{
@@ -714,15 +708,7 @@ func rpcInitKeygen(
 	initiator.handleKeygen(req)
 }
 
-func rpcInitSign(
-	t *testing.T,
-	nodes []*rpcTSSNode,
-	committee tss.UnSortedPartyIDs,
-	cid CeremonyID,
-	keyID []byte,
-	threshold int,
-	data [32]byte,
-) {
+func rpcInitSign(t *testing.T, nodes []*rpcTSSNode, committee tss.UnSortedPartyIDs, cid CeremonyID, keyID []byte, threshold int, data [32]byte) {
 	t.Helper()
 
 	req := SignRequest{
@@ -746,14 +732,7 @@ func rpcInitSign(
 	initiator.handleSign(req)
 }
 
-func rpcInitReshare(
-	t *testing.T,
-	nodes []*rpcTSSNode,
-	oldCommittee, newCommittee tss.UnSortedPartyIDs,
-	cid CeremonyID,
-	keyID []byte,
-	oldThreshold, newThreshold int,
-) {
+func rpcInitReshare(t *testing.T, nodes []*rpcTSSNode, oldCommittee, newCommittee tss.UnSortedPartyIDs, cid CeremonyID, keyID []byte, oldThreshold, newThreshold int) {
 	t.Helper()
 
 	req := ReshareRequest{
@@ -782,11 +761,7 @@ func rpcInitReshare(
 // rpcSigningCommittee builds a signing committee with PartyID keys
 // matching the key share's Ks. Handles both raw and XORed keys
 // (post-keygen vs post-reshare).
-func rpcSigningCommittee(
-	t *testing.T,
-	nodes []*rpcTSSNode,
-	keyID []byte,
-) tss.UnSortedPartyIDs {
+func rpcSigningCommittee(t *testing.T, nodes []*rpcTSSNode, keyID []byte) tss.UnSortedPartyIDs {
 	t.Helper()
 
 	// Find any node that has the key and get Ks.
