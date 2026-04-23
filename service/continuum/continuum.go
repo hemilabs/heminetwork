@@ -117,6 +117,21 @@ const (
 	// promPollInterval is how often the Prometheus scrape loop
 	// refreshes ceremony/peer gauges.
 	promPollInterval = 3 * time.Second
+
+	// defaultTTL is the hop count for originated routed messages.
+	defaultTTL = 8
+
+	// ceremonyMaxAge is how long completed/failed ceremonies remain in the
+	// tracking map before eviction.  Running ceremonies are never evicted.
+	ceremonyMaxAge = 29 * time.Minute
+
+	// ceremonyEvictInterval is the tick period for the eviction goroutine.
+	ceremonyEvictInterval = 11 * time.Minute
+
+	// tcpKeepAlivePeriod is the TCP keepalive probe interval.  With Linux
+	// default 9 retries, worst-case dead-peer detection is ~153s.
+	// Complements the application-layer ping TTL (~54s worst case).
+	tcpKeepAlivePeriod = 17 * time.Second
 )
 
 var log = loggo.GetLogger(appName)
@@ -454,21 +469,6 @@ func (s *Server) isDuplicate(ctx context.Context, h *Header) bool {
 	return false
 }
 
-// defaultTTL is the hop count for originated routed messages.
-const defaultTTL = 8
-
-// ceremonyMaxAge is how long completed/failed ceremonies remain in the
-// tracking map before eviction.  Running ceremonies are never evicted.
-const ceremonyMaxAge = 29 * time.Minute
-
-// ceremonyEvictInterval is the tick period for the eviction goroutine.
-const ceremonyEvictInterval = 11 * time.Minute
-
-// tcpKeepAlivePeriod is the TCP keepalive probe interval.  With Linux
-// default 9 retries, worst-case dead-peer detection is ~153s.
-// Complements the application-layer ping TTL (~54s worst case).
-const tcpKeepAlivePeriod = 17 * time.Second
-
 // forward relays a message that is not destined for us.  If TTL is
 // zero, the message is dropped.  Otherwise TTL is decremented and the
 // message is sent to the destination (if directly connected) or
@@ -529,10 +529,10 @@ func (s *Server) forward(header *Header, payload any, from *Identity) {
 		}
 		if err := t.WriteHeader(fwd, payload); err != nil {
 			log.Debugf("flood forward to %v: %v", id, err)
-		} else {
-			s.forwarded.Add(1)
-			sent++
+			continue
 		}
+		s.forwarded.Add(1)
+		sent++
 	}
 	log.Debugf("forward flood %v -> %v: sent to %d peer(s) TTL %d",
 		header.Origin, dest, sent, fwd.TTL)
@@ -567,10 +567,10 @@ func (s *Server) forwardBroadcast(header *Header, payload any, from *Identity) {
 	for _, tgt := range targets {
 		if err := tgt.t.WriteHeader(fwd, payload); err != nil {
 			log.Debugf("broadcast forward to %v: %v", tgt.id, err)
-		} else {
-			s.forwarded.Add(1)
-			sent++
+			continue
 		}
+		s.forwarded.Add(1)
+		sent++
 	}
 	log.Debugf("broadcast %v: forwarded to %d peer(s) TTL %d",
 		header.Origin, sent, fwd.TTL)
@@ -689,19 +689,21 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 		s.wg.Add(1)
 		go s.pingLoop(sessionCtx, id, t)
 
-		if err := t.Write(s.secret.Identity, PeerNotify{
+		err := t.Write(s.secret.Identity, PeerNotify{
 			Count: s.PeerCount(),
-		}); err != nil {
+		})
+		if err != nil {
 			log.Warningf("initial peer notify %v: %v", id, err)
 		}
-		if err := t.Write(s.secret.Identity,
-			PeerListRequest{}); err != nil {
+		err = t.Write(s.secret.Identity, PeerListRequest{})
+		if err != nil {
 			log.Warningf("initial peer list request %v: %v", id, err)
 		}
 
-		if err := t.Write(s.secret.Identity, PingRequest{
+		err = t.Write(s.secret.Identity, PingRequest{
 			OriginTimestamp: time.Now().Unix(),
-		}); err != nil {
+		})
+		if err != nil {
 			log.Warningf("initial ping %v: %v", id, err)
 		} else {
 			ipt := s.cfg.InitialPingTimeout
@@ -768,8 +770,8 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 			s.routedReceived.Add(1)
 		}
 
-		log.Debugf("%v", spew.Sdump(header))
-		log.Debugf("%v", spew.Sdump(payload))
+		log.Tracef("%v", spew.Sdump(header))
+		log.Tracef("%v", spew.Sdump(payload))
 
 		// Dispatch payload through the registration-based handler map.
 		dc := &dispatchCtx{
@@ -937,7 +939,7 @@ func (s *Server) seed(ctx context.Context) {
 		// In reverse/off mode, the resolved IP is correct
 		// for both dialing and gossip (rDNS verification).
 		var gossipAddr string
-		if isHostname(host) && (s.cfg.DNS == DNSForward || s.cfg.DNS == DNSAll) {
+		if (s.cfg.DNS == DNSForward || s.cfg.DNS == DNSAll) && isHostname(host) {
 			gossipAddr = v
 		}
 		for _, ip := range ips {
@@ -1416,12 +1418,12 @@ func (s *Server) PeerCount() int {
 	return len(s.peers)
 }
 
-// SendTo sends a command to a remote peer, routing through the mesh if
+// sendTo sends a command to a remote peer, routing through the mesh if
 // no direct session exists.  When no direct session is available, the
 // message is sent via an arbitrary connected peer for multi-hop
 // forwarding.  Returns an error if no sessions are available.
-func (s *Server) SendTo(dest Identity, cmd any) error {
-	log.Tracef("SendTo %v", dest)
+func (s *Server) sendTo(dest Identity, cmd any) error {
+	log.Tracef("sendTo %v", dest)
 
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
@@ -1436,7 +1438,7 @@ func (s *Server) SendTo(dest Identity, cmd any) error {
 	// next hop on the shortest path to dest.
 	if hop, ok := s.routeNextHop(dest); ok {
 		if t, ok := s.sessions[hop]; ok {
-			log.Debugf("SendTo %v via route hop %v", dest, hop)
+			log.Debugf("sendTo %v via route hop %v", dest, hop)
 			return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
 		}
 	}
@@ -1446,7 +1448,7 @@ func (s *Server) SendTo(dest Identity, cmd any) error {
 	var sent int
 	for id, t := range s.sessions {
 		if err := t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd); err != nil {
-			log.Debugf("SendTo flood %v via %v: %v", dest, id, err)
+			log.Debugf("sendTo flood %v via %v: %v", dest, id, err)
 		} else {
 			sent++
 		}
@@ -1454,7 +1456,7 @@ func (s *Server) SendTo(dest Identity, cmd any) error {
 	if sent == 0 {
 		return errors.New("no route to destination")
 	}
-	log.Debugf("SendTo %v: flooded to %d peer(s) (no route)", dest, sent)
+	log.Debugf("sendTo %v: flooded to %d peer(s) (no route)", dest, sent)
 	return nil
 }
 
@@ -1501,7 +1503,7 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 		return fmt.Errorf("seal: %w", err)
 	}
 
-	return s.SendTo(dest, *ep)
+	return s.sendTo(dest, *ep)
 }
 
 // decryptPayload decrypts an EncryptedPayload received at this node.
@@ -2407,32 +2409,39 @@ func (s *Server) initPaillierPrimes(pctx context.Context) error {
 	defer cancel()
 
 	preparamsFilename := filepath.Join(s.data, "preparams.json")
-	ppf, err := os.Open(preparamsFilename)
-	if errors.Is(err, os.ErrNotExist) {
-		log.Infof("Generating TSS Paillier primes (timeout %v)", timeout)
-		lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
-		if err != nil {
+	f, err := os.Open(preparamsFilename)
+	if err == nil {
+		if err := json.NewDecoder(f).Decode(&s.preParams); err != nil {
+			_ = f.Close()
 			return err
 		}
-		jpp, err := json.MarshalIndent(lpp, "  ", "  ")
-		if err != nil {
-			return err
-		}
-		err = os.WriteFile(preparamsFilename, jpp, 0o400)
-		if err != nil {
-			return err
-		}
-		s.preParams = *lpp
-		log.Infof("Generating TSS Paillier primes complete")
-		return nil
-	} else if err != nil {
+		return f.Close()
+	}
+	if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
-	if err := json.NewDecoder(ppf).Decode(&s.preParams); err != nil {
+	log.Infof("Generating TSS Paillier primes (timeout %v)", timeout)
+	lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
+	if err != nil {
 		return err
 	}
-	return ppf.Close()
+	f, err = os.OpenFile(preparamsFilename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o400)
+	if err != nil {
+		return err
+	}
+	je := json.NewEncoder(f)
+	je.SetIndent("", "  ")
+	if err = je.Encode(lpp); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	s.preParams = *lpp
+	log.Infof("Generating TSS Paillier primes complete")
+	return nil
 }
 
 // Run starts the server, listens for connections, and blocks until the
@@ -2478,51 +2487,44 @@ func (s *Server) Run(pctx context.Context) error {
 	defer cancel()
 
 	// Initialize peer TTL map.
-	peersTTL, err := ttl.New(s.cfg.PeersWanted, true)
+	s.peersTTL, err = ttl.New(s.cfg.PeersWanted, true)
 	if err != nil {
 		return fmt.Errorf("peer ttl: %w", err)
 	}
-	s.peersTTL = peersTTL
 
 	// Initialize unanswered ping timeout map.
-	pings, err := ttl.New(s.cfg.PeersWanted, true)
+	s.pings, err = ttl.New(s.cfg.PeersWanted, true)
 	if err != nil {
 		return fmt.Errorf("ping ttl: %w", err)
 	}
-	s.pings = pings
 
 	// Initialize message dedup cache.
-	seen, err := ttl.New(seenCapacity, true)
+	s.seen, err = ttl.New(seenCapacity, true)
 	if err != nil {
 		return fmt.Errorf("seen ttl: %w", err)
 	}
-	s.seen = seen
 
 	// Initialize DNS lookup rate limiter — one lookup per IP
 	// per 60 seconds.
-	dnsLookups, err := ttl.New(s.cfg.PeersWanted, true)
+	s.dnsLookups, err = ttl.New(s.cfg.PeersWanted, true)
 	if err != nil {
 		return fmt.Errorf("dns ttl: %w", err)
 	}
-	s.dnsLookups = dnsLookups
 
 	// Per-IP reconnection cooldown (F5).
-	connCooldown, err := ttl.New(s.cfg.PeersWanted*4, true)
+	s.connCooldown, err = ttl.New(s.cfg.PeersWanted*4, true)
 	if err != nil {
 		return fmt.Errorf("conn cooldown ttl: %w", err)
 	}
-	s.connCooldown = connCooldown
 
 	// Per-sender envelope rate limiter (F3).
-	envelopeRates, err := ttl.New(s.cfg.PeersWanted*4, true)
+	s.envelopeRates, err = ttl.New(s.cfg.PeersWanted*4, true)
 	if err != nil {
 		return fmt.Errorf("envelope rate ttl: %w", err)
 	}
-	s.envelopeRates = envelopeRates
 
 	// Read or generate Paillier primes.
-	err = s.initPaillierPrimes(ctx)
-	if err != nil {
+	if err = s.initPaillierPrimes(ctx); err != nil {
 		return fmt.Errorf("party: %w", err)
 	}
 
