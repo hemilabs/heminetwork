@@ -123,10 +123,6 @@ func init() {
 // Ceremony commands
 // =============================================================================
 
-// XXX(AL-CT): continuumKeygen, continuumSign, continuumReshare, autoSelectPeers,
-// sendToUnion, and printCommittee have 0% unit coverage — they need a live
-// Transport.  Wire these into the e2e test harness.
-
 // continuumKeygen triggers a keygen ceremony.  Sends a KeygenRequest to
 // each committee member via the local transfunctionerd's routed
 // transport.  The first member in the resolved committee is designated

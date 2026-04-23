@@ -35,22 +35,22 @@ var payloadDispatch map[reflect.Type]dispatchFn
 
 func init() {
 	payloadDispatch = map[reflect.Type]dispatchFn{
-		reflect.TypeOf((*PingRequest)(nil)):           handlePingRequest,
-		reflect.TypeOf((*PingResponse)(nil)):          handlePingResponse,
-		reflect.TypeOf((*PeerNotify)(nil)):            handlePeerNotify,
-		reflect.TypeOf((*PeerListRequest)(nil)):       handlePeerListRequest,
-		reflect.TypeOf((*PeerListResponse)(nil)):      handlePeerListResponse,
-		reflect.TypeOf((*KeygenRequest)(nil)):         handleKeygenRequest,
-		reflect.TypeOf((*SignRequest)(nil)):           handleSignRequest,
-		reflect.TypeOf((*ReshareRequest)(nil)):        handleReshareRequest,
-		reflect.TypeOf((*TSSMessage)(nil)):            handleTSSMessage,
-		reflect.TypeOf((*EncryptedPayload)(nil)):      handleEncryptedPayload,
-		reflect.TypeOf((*CeremonyResult)(nil)):        handleCeremonyResult,
-		reflect.TypeOf((*PeerListAdminRequest)(nil)):  handlePeerListAdmin,
-		reflect.TypeOf((*CeremonyStatusRequest)(nil)): handleCeremonyStatusReq,
-		reflect.TypeOf((*CeremonyListRequest)(nil)):   handleCeremonyListReq,
-		reflect.TypeOf((*PeerAddRequest)(nil)):        handlePeerAddReq,
-		reflect.TypeOf((*BusyResponse)(nil)):          handleBusyResponse,
+		reflect.TypeFor[*PingRequest]():           handlePingRequest,
+		reflect.TypeFor[*PingResponse]():          handlePingResponse,
+		reflect.TypeFor[*PeerNotify]():            handlePeerNotify,
+		reflect.TypeFor[*PeerListRequest]():       handlePeerListRequest,
+		reflect.TypeFor[*PeerListResponse]():      handlePeerListResponse,
+		reflect.TypeFor[*KeygenRequest]():         handleKeygenRequest,
+		reflect.TypeFor[*SignRequest]():           handleSignRequest,
+		reflect.TypeFor[*ReshareRequest]():        handleReshareRequest,
+		reflect.TypeFor[*TSSMessage]():            handleTSSMessage,
+		reflect.TypeFor[*EncryptedPayload]():      handleEncryptedPayload,
+		reflect.TypeFor[*CeremonyResult]():        handleCeremonyResult,
+		reflect.TypeFor[*PeerListAdminRequest]():  handlePeerListAdmin,
+		reflect.TypeFor[*CeremonyStatusRequest](): handleCeremonyStatusReq,
+		reflect.TypeFor[*CeremonyListRequest]():   handleCeremonyListReq,
+		reflect.TypeFor[*PeerAddRequest]():        handlePeerAddReq,
+		reflect.TypeFor[*BusyResponse]():          handleBusyResponse,
 	}
 }
 
