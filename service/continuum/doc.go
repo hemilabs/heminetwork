@@ -101,7 +101,7 @@
 //  2. Link-state route: every node gossips its session list via
 //     PeerRecord.Sessions.  Each node builds a BFS routing table
 //     mapping every known identity to the next-hop identity on the
-//     shortest path.  When no direct session exists, SendTo sends
+//     shortest path.  When no direct session exists, sendTo sends
 //     the message to the computed next hop, which forwards it
 //     toward the destination.  The table is rebuilt on every gossip
 //     update and every local session add/remove.
@@ -112,7 +112,7 @@
 //     tier strategy.  The dedup cache prevents forwarding loops.
 //     This is the path of last resort — correct but wasteful.
 //
-// All three tiers are transparent to callers.  SendTo picks the
+// All three tiers are transparent to callers.  sendTo picks the
 // best available path automatically.  The routing table provides
 // O(1) next-hop lookup with zero per-message overhead when accurate.
 // Staleness window is one gossip round (~67s at default peerTTL);
@@ -131,7 +131,7 @@
 //     PeersWanted < committee size), the TSSMessage is sealed in a
 //     NaCl box envelope (SealBox: ephemeral X25519 keypair, encrypt
 //     to recipient's NaCl pub, secp256k1 sender signature) and
-//     delivered via SendTo through the mesh.
+//     delivered via sendTo through the mesh.
 //
 //  3. At the destination, handleEncryptedPayload decrypts the
 //     envelope (verify sender sig, OpenBox with static X25519 key),
