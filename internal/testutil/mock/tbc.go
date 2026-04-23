@@ -277,6 +277,10 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 			UTXOs:          mempoolUtxos,
 			SpentOutpoints: spentOps,
 		}
+	case tbcapi.CmdTxWatchRequest:
+		resp = &tbcapi.TxWatchResponse{}
+	case tbcapi.CmdTxUnwatchRequest:
+		resp = &tbcapi.TxUnwatchResponse{}
 	default:
 		panic(fmt.Errorf("unknown command: %v", cmd))
 	}
