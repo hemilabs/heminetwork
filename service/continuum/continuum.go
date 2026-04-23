@@ -743,6 +743,17 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 			}
 		}
 
+		// Cleartext TSS rejection: a TSSMessage must never
+		// carry a routing header.  Legitimate cleartext TSS
+		// is one-hop (Destination == nil, via Write).  Multi-
+		// hop TSS must be inside an EncryptedPayload.  If a
+		// peer sends a routed cleartext TSSMessage, it is
+		// either buggy or malicious — disconnect immediately.
+		if _, isTSS := payload.(*TSSMessage); isTSS && header.Destination != nil {
+			log.Warningf("handle %v: cleartext TSSMessage with routing header: disconnecting", id)
+			return
+		}
+
 		// Forward: if destination is set and is not us,
 		// decrement TTL and relay to the next hop.
 		// Broadcast: if destination is BroadcastDestination,
