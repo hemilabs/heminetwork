@@ -1339,10 +1339,7 @@ func (t *tssImpl) buildPartyContext(parties []Identity) (tss.SortedPartyIDs, *ts
 // contains XORed keys; after keygen, Ks contains raw identity keys.
 // This function transparently handles both cases by matching each
 // signer's identity to the corresponding key in Ks.
-func (t *tssImpl) buildSigningPartyContext(
-	parties []Identity,
-	ks []*big.Int,
-) (tss.SortedPartyIDs, *tss.PartyID, map[string]Identity, error) {
+func (t *tssImpl) buildSigningPartyContext(parties []Identity, ks []*big.Int) (tss.SortedPartyIDs, *tss.PartyID, map[string]Identity, error) {
 	// Build a set of valid keys from the save data.
 	ksSet := make(map[string]*big.Int, len(ks))
 	for _, k := range ks {
@@ -1390,10 +1387,7 @@ func (t *tssImpl) buildSigningPartyContext(
 // For the new committee, keys are XORed with 1 so tss-lib sees
 // disjoint committees even when parties overlap. Returns both
 // id-based and key-based identity maps for message routing.
-func (t *tssImpl) buildResharePartyContext(
-	parties []Identity,
-	isNew bool,
-) (tss.SortedPartyIDs, *tss.PartyID, map[string]Identity, map[string]Identity, error) {
+func (t *tssImpl) buildResharePartyContext(parties []Identity, isNew bool) (tss.SortedPartyIDs, *tss.PartyID, map[string]Identity, map[string]Identity, error) {
 	pids := make([]*tss.PartyID, len(parties))
 	pidToID := make(map[string]Identity) // PartyID.Id → Identity
 	keyToID := make(map[string]Identity) // PartyID key bytes → Identity
