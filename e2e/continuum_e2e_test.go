@@ -384,16 +384,7 @@ func findKey(t *testing.T, servers []*continuum.Server, coord continuum.Identity
 	return nil
 }
 
-func sendSign(
-	t *testing.T,
-	adminTr *continuum.Transport,
-	adminSecret *continuum.Secret,
-	committee []continuum.Identity,
-	cid continuum.CeremonyID,
-	keyID []byte,
-	data [32]byte,
-	threshold int,
-) {
+func sendSign(t *testing.T, adminTr *continuum.Transport, adminSecret *continuum.Secret, committee []continuum.Identity, cid continuum.CeremonyID, keyID []byte, data [32]byte, threshold int) {
 	t.Helper()
 	partyIDs := continuum.IdentitiesToPartyIDs(committee)
 	for _, dest := range committee {
