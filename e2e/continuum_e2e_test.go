@@ -229,7 +229,7 @@ func TestTenNodeCeremonyFlow(t *testing.T) {
 
 func loadFixturePreParams(t *testing.T, count int) []keygen.LocalPreParams {
 	t.Helper()
-	data, err := os.ReadFile("../service/continuum/testdata/preparams.json")
+	data, err := os.ReadFile("testdata/preparams.json")
 	if err != nil {
 		t.Fatalf("read preparams fixture: %v", err)
 	}
@@ -245,49 +245,65 @@ func loadFixturePreParams(t *testing.T, count int) []keygen.LocalPreParams {
 
 func waitForListen(t *testing.T, s *continuum.Server, timeout time.Duration) string {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if addr := s.ListenAddress(); addr != "" {
-			return addr
+	ctx := t.Context()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("test context cancelled")
+		case <-timer.C:
+			t.Fatal("server did not start listening")
+		case <-ticker.C:
+			if addr := s.ListenAddress(); addr != "" {
+				return addr
+			}
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("server did not start listening")
-	return ""
 }
 
 func waitForGossip(t *testing.T, servers []*continuum.Server, n int, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		ready := true
-		for i := 0; i < n; i++ {
-			peers := servers[i].KnownPeers()
-			if len(peers) < n {
-				ready = false
-				break
+	ctx := t.Context()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("test context cancelled")
+		case <-timer.C:
+			for i := 0; i < n; i++ {
+				t.Logf("node %d: peers=%d sessions=%d",
+					i, servers[i].PeerCount(), len(servers[i].SessionIdentities()))
 			}
-			for _, pr := range peers {
-				if len(pr.NaClPub) != continuum.NaClPubSize {
+			t.Fatal("gossip did not converge")
+		case <-ticker.C:
+			ready := true
+			for i := 0; i < n; i++ {
+				peers := servers[i].KnownPeers()
+				if len(peers) < n {
 					ready = false
 					break
 				}
+				for _, pr := range peers {
+					if len(pr.NaClPub) != continuum.NaClPubSize {
+						ready = false
+						break
+					}
+				}
+				if !ready {
+					break
+				}
 			}
-			if !ready {
-				break
+			if ready {
+				return
 			}
 		}
-		if ready {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
-	// Dump state for debugging.
-	for i := 0; i < n; i++ {
-		t.Logf("node %d: peers=%d sessions=%d",
-			i, servers[i].PeerCount(), len(servers[i].SessionIdentities()))
-	}
-	t.Fatal("gossip did not converge")
 }
 
 // adminDial connects to a node's admin port.  The admin listener
@@ -319,53 +335,70 @@ func adminDial(t *testing.T, ctx context.Context, s *continuum.Server) (*continu
 
 func waitForAdminListen(t *testing.T, s *continuum.Server, timeout time.Duration) string {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if addr := s.AdminListenAddress(); addr != "" {
-			return addr
+	ctx := t.Context()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("test context cancelled")
+		case <-timer.C:
+			t.Fatal("admin listener did not start")
+		case <-ticker.C:
+			if addr := s.AdminListenAddress(); addr != "" {
+				return addr
+			}
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("admin listener did not start")
-	return ""
 }
 
 func waitForCeremonyDone(t *testing.T, servers []*continuum.Server, cid continuum.CeremonyID, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		allDone := true
-		for _, s := range servers {
-			info := s.CeremonyStatus(cid)
-			if info == nil {
-				continue // not a participant
+	ctx := t.Context()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("test context cancelled")
+		case <-timer.C:
+			for i, s := range servers {
+				info := s.CeremonyStatus(cid)
+				if info != nil {
+					t.Logf("node %d: status=%s error=%q", i, info.Status, info.Error)
+				}
 			}
-			if info.Status == "running" {
-				allDone = false
-				break
-			}
-			if info.Status == "failed" {
-				t.Fatalf("ceremony %s failed on %v: %s", cid, s.Identity(), info.Error)
-			}
-		}
-		if allDone {
-			// Verify at least one node completed.
+			t.Fatalf("ceremony %s timed out", cid)
+		case <-ticker.C:
+			allDone := true
 			for _, s := range servers {
 				info := s.CeremonyStatus(cid)
-				if info != nil && info.Status == "complete" {
-					return
+				if info == nil {
+					continue // not a participant
+				}
+				if info.Status == "running" {
+					allDone = false
+					break
+				}
+				if info.Status == "failed" {
+					t.Fatalf("ceremony %s failed on %v: %s", cid, s.Identity(), info.Error)
+				}
+			}
+			if allDone {
+				// Verify at least one node completed.
+				for _, s := range servers {
+					info := s.CeremonyStatus(cid)
+					if info != nil && info.Status == "complete" {
+						return
+					}
 				}
 			}
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
-	for i, s := range servers {
-		info := s.CeremonyStatus(cid)
-		if info != nil {
-			t.Logf("node %d: status=%s error=%q", i, info.Status, info.Error)
-		}
-	}
-	t.Fatalf("ceremony %s timed out", cid)
 }
 
 func findKey(t *testing.T, servers []*continuum.Server, coord continuum.Identity) []byte {
