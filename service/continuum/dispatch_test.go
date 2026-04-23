@@ -14,60 +14,37 @@ import (
 )
 
 // TestDispatchMapCompleteness verifies that every incoming payload type
-// that handle() could receive has an entry in payloadDispatch.  Types
-// that are never received inside handle() (Hello*, outbound responses)
-// are excluded.
+// that handle() could receive has an entry in payloadDispatch, and
+// that no stale handlers for removed types exist.
 func TestDispatchMapCompleteness(t *testing.T) {
 	// Types that handle() must dispatch.  This is the authoritative
 	// list — if a new wire type is added to pt2str, the developer
 	// must consciously decide whether it belongs here.
-	required := []any{
-		(*PingRequest)(nil),
-		(*PingResponse)(nil),
-		(*PeerNotify)(nil),
-		(*PeerListRequest)(nil),
-		(*PeerListResponse)(nil),
-		(*KeygenRequest)(nil),
-		(*SignRequest)(nil),
-		(*ReshareRequest)(nil),
-		(*TSSMessage)(nil),
-		(*EncryptedPayload)(nil),
-		(*CeremonyResult)(nil),
-		(*PeerListAdminRequest)(nil),
-		(*CeremonyStatusRequest)(nil),
-		(*CeremonyListRequest)(nil),
-		(*PeerAddRequest)(nil),
-		(*BusyResponse)(nil),
+	required := []reflect.Type{
+		reflect.TypeFor[*PingRequest](),
+		reflect.TypeFor[*PingResponse](),
+		reflect.TypeFor[*PeerNotify](),
+		reflect.TypeFor[*PeerListRequest](),
+		reflect.TypeFor[*PeerListResponse](),
+		reflect.TypeFor[*KeygenRequest](),
+		reflect.TypeFor[*SignRequest](),
+		reflect.TypeFor[*ReshareRequest](),
+		reflect.TypeFor[*TSSMessage](),
+		reflect.TypeFor[*EncryptedPayload](),
+		reflect.TypeFor[*CeremonyResult](),
+		reflect.TypeFor[*PeerListAdminRequest](),
+		reflect.TypeFor[*CeremonyStatusRequest](),
+		reflect.TypeFor[*CeremonyListRequest](),
+		reflect.TypeFor[*PeerAddRequest](),
+		reflect.TypeFor[*BusyResponse](),
 	}
 
-	for _, p := range required {
-		rt := reflect.TypeOf(p)
+	expected := make(map[reflect.Type]bool, len(required))
+	for _, rt := range required {
+		expected[rt] = true
 		if _, ok := payloadDispatch[rt]; !ok {
 			t.Errorf("payloadDispatch missing entry for %v", rt)
 		}
-	}
-}
-
-// TestDispatchMapNoExtras verifies that payloadDispatch contains
-// only the expected entries — no stale handlers for removed types.
-func TestDispatchMapNoExtras(t *testing.T) {
-	expected := map[reflect.Type]bool{
-		reflect.TypeOf((*PingRequest)(nil)):           true,
-		reflect.TypeOf((*PingResponse)(nil)):          true,
-		reflect.TypeOf((*PeerNotify)(nil)):            true,
-		reflect.TypeOf((*PeerListRequest)(nil)):       true,
-		reflect.TypeOf((*PeerListResponse)(nil)):      true,
-		reflect.TypeOf((*KeygenRequest)(nil)):         true,
-		reflect.TypeOf((*SignRequest)(nil)):           true,
-		reflect.TypeOf((*ReshareRequest)(nil)):        true,
-		reflect.TypeOf((*TSSMessage)(nil)):            true,
-		reflect.TypeOf((*EncryptedPayload)(nil)):      true,
-		reflect.TypeOf((*CeremonyResult)(nil)):        true,
-		reflect.TypeOf((*PeerListAdminRequest)(nil)):  true,
-		reflect.TypeOf((*CeremonyStatusRequest)(nil)): true,
-		reflect.TypeOf((*CeremonyListRequest)(nil)):   true,
-		reflect.TypeOf((*PeerAddRequest)(nil)):        true,
-		reflect.TypeOf((*BusyResponse)(nil)):          true,
 	}
 	for rt := range payloadDispatch {
 		if !expected[rt] {
