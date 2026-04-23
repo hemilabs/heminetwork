@@ -21,7 +21,7 @@ package continuum
 // Staleness: the table reflects the last rebuild.  A dropped session
 // on a remote node takes up to one gossip round (~67s) to propagate.
 // During that window, a route may point through a dead link.  When
-// the next-hop write fails, SendTo and forward fall through to the
+// the next-hop write fails, sendTo and forward fall through to the
 // flood path, which delivers as long as the mesh is connected.
 //
 // Complexity: BFS is O(V+E) where V = known peers and E = sum of

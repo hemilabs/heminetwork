@@ -214,9 +214,10 @@ func continuumStatus(ctx context.Context, cidHex string) error {
 	}
 	defer t.Close()
 
-	if err := t.Write(secret.Identity, continuum.CeremonyStatusRequest{
+	err = t.Write(secret.Identity, continuum.CeremonyStatusRequest{
 		CeremonyID: ceremonyID,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("write: %w", err)
 	}
 
