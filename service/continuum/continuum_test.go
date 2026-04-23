@@ -352,11 +352,17 @@ func newTestServer(t *testing.T, preParams []keygen.LocalPreParams, idx int, lis
 
 	// Write cached preparams to avoid slow generation.
 	if idx < len(preParams) {
-		pp, err := json.MarshalIndent(preParams[idx], "  ", "  ")
+		f, err := os.OpenFile(filepath.Join(dataDir, "preparams.json"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o400)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dataDir, "preparams.json"), pp, 0o400); err != nil {
+		je := json.NewEncoder(f)
+		je.SetIndent("", "  ")
+		if err = je.Encode(preParams[idx]); err != nil {
+			_ = f.Close()
+			t.Fatal(err)
+		}
+		if err = f.Close(); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1921,11 +1927,11 @@ func TestThreeNodeForwarding(t *testing.T) {
 
 	// A sends a routed PingRequest to C.
 	destC := servers[2].Identity()
-	err := servers[0].SendTo(destC, PingRequest{
+	err := servers[0].sendTo(destC, PingRequest{
 		OriginTimestamp: time.Now().Unix(),
 	})
 	if err != nil {
-		t.Fatalf("SendTo: %v", err)
+		t.Fatalf("sendTo: %v", err)
 	}
 	t.Log("A sent routed PingRequest to C")
 
@@ -6554,11 +6560,11 @@ func TestDecryptPayloadBadInnerJSON(t *testing.T) {
 	s.wg.Wait()
 }
 
-// --- SendTo / SendEncrypted ---
+// --- sendTo / SendEncrypted ---
 
-// TestSendToDirectSession covers SendTo when the destination has a
+// Test_sendToDirectSession covers sendTo when the destination has a
 // direct session (no routing needed).
-func TestSendToDirectSession(t *testing.T) {
+func Test_sendToDirectSession(t *testing.T) {
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -6572,7 +6578,7 @@ func TestSendToDirectSession(t *testing.T) {
 	}
 
 	errCh := pipeWrite(func() error {
-		return s.SendTo(dest, PingRequest{OriginTimestamp: 401})
+		return s.sendTo(dest, PingRequest{OriginTimestamp: 401})
 	})
 	_, cmd, err := cliTr.Read()
 	if err != nil {
@@ -6590,9 +6596,9 @@ func TestSendToDirectSession(t *testing.T) {
 	}
 }
 
-// TestSendToRelayRoute covers SendTo when destination has no direct
+// Test_sendToRelayRoute covers sendTo when destination has no direct
 // session and the message is relayed through the first available peer.
-func TestSendToRelayRoute(t *testing.T) {
+func Test_sendToRelayRoute(t *testing.T) {
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -6607,7 +6613,7 @@ func TestSendToRelayRoute(t *testing.T) {
 	}
 
 	errCh := pipeWrite(func() error {
-		return s.SendTo(dest, PingRequest{OriginTimestamp: 402})
+		return s.sendTo(dest, PingRequest{OriginTimestamp: 402})
 	})
 	h, cmd, err := cliTr.Read()
 	if err != nil {
@@ -6628,8 +6634,8 @@ func TestSendToRelayRoute(t *testing.T) {
 	}
 }
 
-// TestSendToNoRoute covers SendTo when there are no sessions at all.
-func TestSendToNoRoute(t *testing.T) {
+// Test_sendToNoRoute covers sendTo when there are no sessions at all.
+func Test_sendToNoRoute(t *testing.T) {
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -6639,14 +6645,14 @@ func TestSendToNoRoute(t *testing.T) {
 		sessions: make(map[Identity]*Transport),
 	}
 
-	err = s.SendTo(Identity{0xCC}, PingRequest{})
+	err = s.sendTo(Identity{0xCC}, PingRequest{})
 	if err == nil || err.Error() != "no route to destination" {
 		t.Fatalf("expected 'no route to destination', got %v", err)
 	}
 }
 
 // TestSendEncryptedHappyPath covers the full SendEncrypted flow:
-// look up peer NaCl pub, encrypt, and deliver via SendTo.
+// look up peer NaCl pub, encrypt, and deliver via sendTo.
 func TestSendEncryptedHappyPath(t *testing.T) {
 	secret, err := NewSecret()
 	if err != nil {
