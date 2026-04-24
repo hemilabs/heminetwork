@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -35,6 +36,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/v2/api"
+	"github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/database"
 	dbnames "github.com/hemilabs/heminetwork/v2/database/level"
@@ -188,6 +190,9 @@ type Config struct {
 	Seeds                   []string
 	ZKIndex                 bool
 
+	// Admin API
+	JWTSecret string // Hex-encoded JWT token for admin RPC authentication
+
 	// Fields used for running TBC in External Header Mode, where P2P is disabled
 	// and TBC is used to determine consensus based on headers fed from external
 	// code that manages the TBC node.
@@ -278,6 +283,10 @@ type Server struct {
 	httpListener   net.Listener
 	sessions       map[string]*tbcWs
 	requestTimeout time.Duration
+
+	// Admin HTTP/WebSockets
+	adminJWTSecret []byte
+	adminSessions  AdminHub
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -334,6 +343,17 @@ func NewServer(cfg *Config) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if s.cfg.JWTSecret != "" {
+		s.adminJWTSecret, err = hex.DecodeString(s.cfg.JWTSecret)
+		if err != nil {
+			return nil, fmt.Errorf("JWT secret %w", err)
+		}
+		if len(s.adminJWTSecret) != 32 {
+			return nil, fmt.Errorf("invalid JWT secret")
+		}
+		s.cfg.JWTSecret = ""
 	}
 
 	// TBC Notifier
@@ -3034,6 +3054,7 @@ func (s *Server) Run(pctx context.Context) error {
 	// Rely on dbOpen failing if the database is already open.
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
+
 	err = s.dbOpen(ctx)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
@@ -3100,6 +3121,13 @@ func (s *Server) Run(pctx context.Context) error {
 		log.Infof("handle (tbc): %s", tbcapi.RouteWebsocket)
 		mux.HandleFunc(tbcapi.RouteWebsocket, s.handleWebsocket)
 
+		// Admin WebSocket route (JWT authenticated)
+		if len(s.adminJWTSecret) > 0 {
+			s.adminSessions = *NewHub(ctx)
+			log.Infof("handle (tbc admin): %s", tbcadminapi.RouteAdminWs)
+			mux.HandleFunc(tbcadminapi.RouteAdminWs, s.handleAdminWebsocket)
+		}
+
 		httpServer := &http.Server{
 			Handler:     mux,
 			BaseContext: func(_ net.Listener) context.Context { return ctx },
@@ -3115,6 +3143,11 @@ func (s *Server) Run(pctx context.Context) error {
 			}
 			log.Infof("RPC server shutdown cleanly")
 		}()
+
+		msg := NotificationService("tbc_http_server", "ready")
+		if err = s.notifier.Notify(ctx, msg); err != nil {
+			log.Errorf("send http service notification: %v", err)
+		}
 	}
 
 	// pprof

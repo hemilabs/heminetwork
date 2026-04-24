@@ -59,6 +59,12 @@ var (
 			Help:         "enable/disable block sanity checks before inserting",
 			Print:        config.PrintAll,
 		},
+		"TBC_JWT_TOKEN": config.Config{
+			Value:        &cfg.JWTSecret,
+			DefaultValue: "",
+			Help:         "JWT token for admin RPC authentication",
+			Print:        config.PrintSecret,
+		},
 		"TBC_HEMI_INDEX": config.Config{
 			Value:        &cfg.HemiIndex,
 			DefaultValue: false,

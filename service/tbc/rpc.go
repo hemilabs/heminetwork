@@ -49,6 +49,125 @@ type tbcWs struct {
 	requestContext context.Context
 }
 
+func (s *Server) getTBCAPICommandHandler(cmd protocol.Command, payload any) func(ctx context.Context) (any, error) {
+	switch cmd {
+	case tbcapi.CmdPingRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handlePingRequest(ctx, payload.(*tbcapi.PingRequest))
+		}
+	case tbcapi.CmdBlockByHashRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockByHashRequest(ctx, payload.(*tbcapi.BlockByHashRequest))
+		}
+	case tbcapi.CmdBlockByHashRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockByHashRawRequest(ctx, payload.(*tbcapi.BlockByHashRawRequest))
+		}
+	case tbcapi.CmdBlockHeadersByHeightRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockHeadersByHeightRequest(ctx, payload.(*tbcapi.BlockHeadersByHeightRequest))
+		}
+	case tbcapi.CmdBlockHeadersByHeightRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockHeadersByHeightRawRequest(ctx, payload.(*tbcapi.BlockHeadersByHeightRawRequest))
+		}
+	case tbcapi.CmdBlockHeaderBestRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockHeaderBestRawRequest(ctx, payload.(*tbcapi.BlockHeaderBestRawRequest))
+		}
+	case tbcapi.CmdBlockHeaderBestRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockHeaderBestRequest(ctx, payload.(*tbcapi.BlockHeaderBestRequest))
+		}
+	case tbcapi.CmdBalanceByAddressRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBalanceByAddressRequest(ctx, payload.(*tbcapi.BalanceByAddressRequest))
+		}
+	case tbcapi.CmdUTXOsByAddressRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleUtxosByAddressRawRequest(ctx, payload.(*tbcapi.UTXOsByAddressRawRequest))
+		}
+	case tbcapi.CmdUTXOsByAddressRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleUtxosByAddressRequest(ctx, payload.(*tbcapi.UTXOsByAddressRequest))
+		}
+	case tbcapi.CmdTxByIdRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleTxByIdRequest(ctx, payload.(*tbcapi.TxByIdRequest))
+		}
+	case tbcapi.CmdTxByIdRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleTxByIdRawRequest(ctx, payload.(*tbcapi.TxByIdRawRequest))
+		}
+	case tbcapi.CmdTxBroadcastRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleTxBroadcastRequest(ctx, payload.(*tbcapi.TxBroadcastRequest))
+		}
+	case tbcapi.CmdTxBroadcastRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleTxBroadcastRawRequest(ctx, payload.(*tbcapi.TxBroadcastRawRequest))
+		}
+	case tbcapi.CmdBlockInsertRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockInsertRequest(ctx, payload.(*tbcapi.BlockInsertRequest))
+		}
+	case tbcapi.CmdBlockInsertRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockInsertRawRequest(ctx, payload.(*tbcapi.BlockInsertRawRequest))
+		}
+	case tbcapi.CmdBlockDownloadAsyncRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockDownloadAsyncRequest(ctx, payload.(*tbcapi.BlockDownloadAsyncRequest))
+		}
+	case tbcapi.CmdBlockDownloadAsyncRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockDownloadAsyncRawRequest(ctx, payload.(*tbcapi.BlockDownloadAsyncRawRequest))
+		}
+	case tbcapi.CmdBlocksByL2AbrevHashesRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx, payload.(*tbcapi.BlocksByL2AbrevHashesRequest))
+		}
+	case tbcapi.CmdKeystoneTxsByL2KeystoneAbrevHashRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx, payload.(*tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest))
+		}
+	case tbcapi.CmdFeeEstimateRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleFeeEstimateRequest(ctx, payload.(*tbcapi.FeeEstimateRequest))
+		}
+	case tbcapi.CmdMempoolInfoRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleMempoolInfoRequest(ctx, payload.(*tbcapi.MempoolInfoRequest))
+		}
+	case tbcapi.CmdKeystonesByHeightRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleKeystonesByHeightRequest(ctx, payload.(*tbcapi.KeystonesByHeightRequest))
+		}
+	case tbcapi.CmdZKValueAndScriptByOutpointRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleZKValueAndScriptByOutpointRequest(ctx, payload.(*tbcapi.ZKValueAndScriptByOutpointRequest))
+		}
+	case tbcapi.CmdZKBalanceByScriptHashRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleZKBalanceByScriptHashRequest(ctx, payload.(*tbcapi.ZKBalanceByScriptHashRequest))
+		}
+	case tbcapi.CmdZKSpentOutputsRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleZKSpentOutputsRequest(ctx, payload.(*tbcapi.ZKSpentOutputsRequest))
+		}
+	case tbcapi.CmdZKSpendingOutpointsRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleZKSpendingOutpointsRequest(ctx, payload.(*tbcapi.ZKSpendingOutpointsRequest))
+		}
+	case tbcapi.CmdZKSpendableOutputsRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleZKSpendableOutputsRequest(ctx, payload.(*tbcapi.ZKSpendableOutputsRequest))
+		}
+	default:
+		return nil
+	}
+}
+
 func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 	defer ws.wg.Done()
 
@@ -72,208 +191,14 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			return
 		}
 
-		switch cmd {
-		case tbcapi.CmdPingRequest:
-			err = s.handlePingRequest(ctx, ws, payload, id)
-		case tbcapi.CmdBlockByHashRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockByHashRequest)
-				return s.handleBlockByHashRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockByHashRawRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockByHashRawRequest)
-				return s.handleBlockByHashRawRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockHeadersByHeightRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockHeadersByHeightRequest)
-				return s.handleBlockHeadersByHeightRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockHeadersByHeightRawRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockHeadersByHeightRawRequest)
-				return s.handleBlockHeadersByHeightRawRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockHeaderBestRawRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockHeaderBestRawRequest)
-				return s.handleBlockHeaderBestRawRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockHeaderBestRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockHeaderBestRequest)
-				return s.handleBlockHeaderBestRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBalanceByAddressRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BalanceByAddressRequest)
-				return s.handleBalanceByAddressRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdUTXOsByAddressRawRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.UTXOsByAddressRawRequest)
-				return s.handleUtxosByAddressRawRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdUTXOsByAddressRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.UTXOsByAddressRequest)
-				return s.handleUtxosByAddressRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdTxByIdRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.TxByIdRequest)
-				return s.handleTxByIdRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdTxByIdRawRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.TxByIdRawRequest)
-				return s.handleTxByIdRawRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdTxBroadcastRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.TxBroadcastRequest)
-				return s.handleTxBroadcastRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdTxBroadcastRawRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.TxBroadcastRawRequest)
-				return s.handleTxBroadcastRawRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockInsertRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockInsertRequest)
-				return s.handleBlockInsertRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockInsertRawRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockInsertRawRequest)
-				return s.handleBlockInsertRawRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockDownloadAsyncRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockDownloadAsyncRequest)
-				return s.handleBlockDownloadAsyncRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockDownloadAsyncRawRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockDownloadAsyncRawRequest)
-				return s.handleBlockDownloadAsyncRawRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlocksByL2AbrevHashesRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
-				return s.handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdKeystoneTxsByL2KeystoneAbrevHashRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest)
-				return s.handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdFeeEstimateRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.FeeEstimateRequest)
-				return s.handleFeeEstimateRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdMempoolInfoRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.MempoolInfoRequest)
-				return s.handleMempoolInfoRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdKeystonesByHeightRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.KeystonesByHeightRequest)
-				return s.handleKeystonesByHeightRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdZKValueAndScriptByOutpointRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.ZKValueAndScriptByOutpointRequest)
-				return s.handleZKValueAndScriptByOutpointRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdZKBalanceByScriptHashRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.ZKBalanceByScriptHashRequest)
-				return s.handleZKBalanceByScriptHashRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdZKSpentOutputsRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.ZKSpentOutputsRequest)
-				return s.handleZKSpentOutputsRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdZKSpendingOutpointsRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.ZKSpendingOutpointsRequest)
-				return s.handleZKSpendingOutpointsRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdZKSpendableOutputsRequest:
-			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.ZKSpendableOutputsRequest)
-				return s.handleZKSpendableOutputsRequest(ctx, req)
-			}
-
-			go s.handleRequest(ctx, ws, id, cmd, handler)
-		default:
-			err = fmt.Errorf("unknown command: %v", cmd)
-		}
-
-		// Command failed
-		if err != nil {
+		handler := s.getTBCAPICommandHandler(cmd, payload)
+		if handler == nil {
 			log.Errorf("handleWebsocketRead %s %s %s: %v",
-				ws.addr, cmd, id, err)
+				ws.addr, cmd, id, "unknown command")
 			return
 		}
+
+		go s.handleRequest(ctx, ws, id, cmd, handler)
 	}
 }
 
@@ -307,30 +232,16 @@ func (s *Server) handleRequest(ctx context.Context, ws *tbcWs, id string, cmd pr
 	s.cmdsProcessed.Inc()
 }
 
-func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
-	log.Tracef("handlePingRequest: %v", ws.addr)
-	defer log.Tracef("handlePingRequest exit: %v", ws.addr)
-
-	p, ok := payload.(*tbcapi.PingRequest)
-	if !ok {
-		return fmt.Errorf("invalid payload type: %T", payload)
-	}
+func (s *Server) handlePingRequest(ctx context.Context, req *tbcapi.PingRequest) (any, error) {
+	log.Tracef("handlePingRequest")
+	defer log.Tracef("handlePingRequest exit")
 
 	res := &tbcapi.PingResponse{
-		OriginTimestamp: p.Timestamp,
+		OriginTimestamp: req.Timestamp,
 		Timestamp:       time.Now().Unix(),
 	}
 
-	// XXX: spew.Sdump should only be called when the log level is enabled.
-	log.Tracef("responding with %v", spew.Sdump(res))
-
-	if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
-		return fmt.Errorf("handlePingRequest write: %v %w", ws.addr, err)
-	}
-
-	// Ping request processed successfully
-	s.cmdsProcessed.Inc()
-	return nil
+	return res, nil
 }
 
 func (s *Server) handleBlockByHashRequest(ctx context.Context, req *tbcapi.BlockByHashRequest) (any, error) {

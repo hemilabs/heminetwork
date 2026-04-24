@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -20,6 +20,7 @@ type Notification struct {
 	Type      string    `json:"type"`
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
+	Msg       string    `json:"msg"`
 	Error     error     `json:"error,omitempty"`
 }
 
@@ -28,13 +29,14 @@ func (n Notification) Is(target Notification) bool {
 }
 
 func (n Notification) String() string {
-	return fmt.Sprintf("[%v] %s %s", n.Timestamp, n.Type, n.ID)
+	return fmt.Sprintf("[%v] %s %s: %s", n.Timestamp, n.Type, n.ID, n.Msg)
 }
 
 func NotificationBlock(hash chainhash.Hash) Notification {
 	return Notification{
 		Type:      "block_insert",
 		ID:        hash.String(),
+		Msg:       fmt.Sprintf("block inserted: %s", hash.String()),
 		Timestamp: time.Now(),
 	}
 }
@@ -43,6 +45,25 @@ func NotificationBlockheader(hash chainhash.Hash) Notification {
 	return Notification{
 		Type:      "blockheader_insert",
 		ID:        hash.String(),
+		Msg:       fmt.Sprintf("blockheader inserted: %s", hash.String()),
+		Timestamp: time.Now(),
+	}
+}
+
+func NotificationJob(id string, jobType jobType, status jobStatus) Notification {
+	return Notification{
+		Type:      string(jobType),
+		ID:        id,
+		Msg:       string(status),
+		Timestamp: time.Now(),
+	}
+}
+
+func NotificationService(serviceID string, status string) Notification {
+	return Notification{
+		Type:      "service_update",
+		ID:        serviceID,
+		Msg:       status,
 		Timestamp: time.Now(),
 	}
 }
