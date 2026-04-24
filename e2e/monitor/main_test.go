@@ -135,6 +135,7 @@ func privateKeyForTestByIndex(t *testing.T, index uint) string {
 	keys := []string{
 		"dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530", // sequencing
 		"8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba", // non-sequencing
+		"fbe93b7c626721b844ff03923c296c395e7729b81096a9a5c3d8a87b57e01db6",
 	}
 	if index >= uint(len(keys)) {
 		t.Fatalf("index %d exceeds available keys (max: %d)", index, len(keys)-1)
@@ -300,20 +301,23 @@ func TestMonitor(t *testing.T) {
 
 func TestL1L2Comms(t *testing.T) {
 	t.Parallel()
-	testL1L2Comms(t, l1Endpoint(), forkedL2Endpoint(), "http://localhost:18546")
+	testL1L2Comms(t, l1Endpoint(), forkedL2Endpoint(), "http://localhost:18546", "http://localhost:28546")
 }
 
-func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequencingEndpoint string) {
-	for i, sequencing := range []bool{true, false} {
-		var name string
-		if sequencing {
-			name = "testing sequencing client"
-		} else {
-			name = "testing non-sequencing client"
-		}
-		// Capture loop variables
-		i := i
-		sequencing := sequencing
+func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequencingEndpoint string, l2NonSequencingSnapSyncEndpoint string) {
+	// todo: combine these into a nice struct or something similar
+	testNames := []string{
+		"testing sequencing client",
+		"testing non-sequencing client",
+		"testing non-sequencing client with snap-sync",
+	}
+	tests := []bool{true, false, false}
+
+	const snapSyncNodeIndex = 2
+
+	for i, sequencing := range tests {
+		name := testNames[i]
+
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -332,7 +336,12 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 
 			l2ClientNonSequencing, err := ethclient.Dial(l2NonSequencingEndpoint)
 			if err != nil {
-				t.Fatalf("could not dial eth l1 %s", err)
+				t.Fatalf("could not dial eth l2 non sequencing %s", err)
+			}
+
+			l2ClientNonSequencingSnapSync, err := ethclient.Dial(l2NonSequencingSnapSyncEndpoint)
+			if err != nil {
+				t.Fatalf("could not dial eth l2 non sequencing snap sync %s", err)
 			}
 
 			// Use different private key for each subtest to avoid conflicts
@@ -348,6 +357,10 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 					t.Fatal("there is no non-sequencing client for testing a forked network")
 				}
 				l2ClientToUse = l2ClientNonSequencing
+
+				if i == snapSyncNodeIndex {
+					l2ClientToUse = l2ClientNonSequencingSnapSync
+				}
 			}
 
 			if testingReclaimFunds() {
@@ -379,7 +392,8 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 
 			opNodeSequencingEndpoint := "http://localhost:8548"
 			opNodeNonSequencingEndpoint := "http://localhost:18548"
-			assertOutputRootsAreTheSame(t, ctx, l2ClientToUse, opNodeSequencingEndpoint, opNodeNonSequencingEndpoint)
+			opNodeNonSequencingSnapSyncEndpoint := "http://localhost:28548"
+			assertOutputRootsAreTheSame(t, ctx, l2ClientToUse, opNodeSequencingEndpoint, opNodeNonSequencingEndpoint, opNodeNonSequencingSnapSyncEndpoint)
 			assertSafeAndFinalBlocksAreProgressing(t, ctx, l2ClientToUse)
 		})
 	}
@@ -929,6 +943,13 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
 	t.Logf("receiver address is %s", receiverAddress)
+
+	l1Balance, err := l1Client.BalanceAt(ctx, receiverAddress, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("the l1 balance for %s is %x", receiverAddress, l1Balance)
 
 	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge(t), l1Client)
 	if err != nil {
@@ -1839,7 +1860,8 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 		resolvedtx, err := gameContract.ResolveClaimTx(0)
 		if err != nil {
-			t.Fatal(err)
+			t.Logf("resolveClaimtx could not be retrieved, will retry")
+			continue
 		}
 
 		_, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
@@ -1990,7 +2012,14 @@ func assertSafeAndFinalBlocksAreProgressing(t *testing.T, ctx context.Context, l
 	}
 }
 
-func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *ethclient.Client, opNodeSequencingEndpoint string, opNodeNonSequencingEndpoint string) {
+func assertOutputRootsAreTheSame(
+	t *testing.T,
+	ctx context.Context,
+	l2Client *ethclient.Client,
+	opNodeSequencingEndpoint string,
+	opNodeNonSequencingEndpoint string,
+	opNodeNonSequencingSnapSyncEndpoint string,
+) {
 	bigTip, err := l2Client.HeaderByNumber(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("error getting l2 tip: %s", err)
@@ -1999,6 +2028,24 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 	tip := bigTip.Number.Uint64()
 
 	tip -= 5
+
+	// snap syncs do not store all of the output roots, but the most recent
+	// should be available and match other nodes.  100 is a safe number
+	// for example, you may see an error like this:
+	// {
+	// 	"jsonrpc": "2.0",
+	// 	"id": 1,
+	// 	"error": {
+	// 	  "code": -32000,
+	// 	  "message": "failed to get L2 output at block 0x78cfcb0adbb4053f7194910f9faf2a440fd95547171f8db6c42314fbd6f9661e:40: failed to get contract proof at block 0x78cfcb0adbb4053f7194910f9faf2a440fd95547171f8db6c42314fbd6f9661e: not supported"
+	// 	}
+	// }
+	// according to geth docs:
+	// eth_getProof for historical blocks is supported if history.trienode = N is configured, which enables retention of the required historical trie nodes.
+	// ...
+	// --history.state=0 is the key flag. When combined with --syncmode=full to perform a full sync from genesis, Geth will retain all the historical states.
+	// and we use --syncmode=snap (obviously) for our snap synced node
+	snapSyncMax := tip - 100
 
 	t.Logf("checking output roots from tip %d", tip)
 
@@ -2034,7 +2081,12 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 
 		res2, err := client.Post(opNodeNonSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
 		if err != nil {
-			t.Fatalf("error making request to sequencer endpoint: %s", err)
+			t.Fatalf("error making request to non sequencing endpoint: %s", err)
+		}
+
+		res3, err := client.Post(opNodeNonSequencingSnapSyncEndpoint, "application/json", bytes.NewBuffer(jsonbody))
+		if err != nil {
+			t.Fatalf("error making request to non sequencing snap sync endpoint: %s", err)
 		}
 
 		resBody, err := io.ReadAll(res.Body)
@@ -2047,8 +2099,14 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 			t.Fatalf("error reading response body from non-sequencer: %s", err)
 		}
 
+		resBody3, err := io.ReadAll(res3.Body)
+		if err != nil {
+			t.Fatalf("error reading response body from non-sequencer-snap-sync: %s", err)
+		}
+
 		res.Body.Close()
 		res2.Body.Close()
+		res3.Body.Close()
 
 		assertResultNotError := func(body *outputAtBlockResponse) error {
 			if body.Error != nil {
@@ -2060,12 +2118,17 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 
 		var outputAtBlockResponseOne outputAtBlockResponse
 		var outputAtBlockResponseTwo outputAtBlockResponse
+		var outputAtBlockResponseThree outputAtBlockResponse
 
 		if err := json.Unmarshal(resBody, &outputAtBlockResponseOne); err != nil {
 			t.Fatal(err)
 		}
 
 		if err := json.Unmarshal(resBody2, &outputAtBlockResponseTwo); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := json.Unmarshal(resBody3, &outputAtBlockResponseThree); err != nil {
 			t.Fatal(err)
 		}
 
@@ -2077,11 +2140,19 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 			t.Fatalf("error in response: %v", outputAtBlockResponseTwo.Error)
 		}
 
-		assertResultNotError(&outputAtBlockResponseOne)
-		assertResultNotError(&outputAtBlockResponseTwo)
+		// only check against snap sync if within snapSyncMax of the tip
+		if tip >= snapSyncMax {
+			if err := assertResultNotError(&outputAtBlockResponseThree); err != nil {
+				t.Fatalf("error in response: %v, will skip comparison", outputAtBlockResponseThree.Error)
+			}
+
+			if diff := deep.Equal(outputAtBlockResponseOne, outputAtBlockResponseThree); len(diff) > 0 {
+				t.Fatalf("output roots are not the same for sequencing and non-sequencing snap sync: %s", diff)
+			}
+		}
 
 		if diff := deep.Equal(outputAtBlockResponseOne, outputAtBlockResponseTwo); len(diff) > 0 {
-			t.Fatalf("output roots are not the same: %s", diff)
+			t.Fatalf("output roots are not the same for sequencing and non-sequencing: %s", diff)
 		}
 
 		tip--
