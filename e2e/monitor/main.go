@@ -201,12 +201,22 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			panic(fmt.Sprintf("could not get chain tips: %v", err))
 		}
 
-		if len(tips) != 1 {
+		// since we will be testing forks of the bitcoin chain, ensure that
+		// we are working off of the "active" tip
+		var activeTipHash string
+		for _, tip := range tips {
+			if tip.Status == "active" {
+				activeTipHash = tip.Hash
+				break
+			}
+		}
+
+		if activeTipHash == "" {
 			// should not happen in localnet
 			continue
 		}
 
-		hash, err := chainhash.NewHashFromStr(tips[0].Hash)
+		hash, err := chainhash.NewHashFromStr(activeTipHash)
 		if err != nil {
 			panic(fmt.Sprintf("could not get hash from string %s: %v", tips[0].Hash, err))
 		}
