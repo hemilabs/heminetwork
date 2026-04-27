@@ -378,7 +378,7 @@ func (t *tbcGozer) connectTBC(pctx context.Context, connected func()) error {
 	defer log.Tracef("connectTBC exit")
 
 	conn, err := protocol.NewConn(t.url, &protocol.ConnOptions{
-		ReadLimit: 6 * (1 << 20), // 6 MiB
+		ReadLimit: tbcapi.MaxResponseSize,
 	})
 	if err != nil {
 		return err

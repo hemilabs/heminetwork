@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -24,6 +24,18 @@ import (
 
 const (
 	APIVersion = 1
+
+	// MaxResponseSize is the maximum serialized JSON response
+	// size for bulk RPC responses (e.g. blocks).  Must match the
+	// client's websocket ReadLimit.  The tbcgozer client sets
+	// ReadLimit to this value; other clients must set their read
+	// limit to at least this size.
+	//
+	// The previous default of 6 MiB was insufficient for worst-
+	// case blocks (4 MB raw, 8 MB hex-encoded via api.ByteSlice).
+	// 16 MiB accommodates the largest possible Bitcoin block with
+	// JSON overhead.
+	MaxResponseSize = 16 * (1 << 20) // 16 MiB
 
 	CmdPingRequest  = "tbcapi-ping-request"
 	CmdPingResponse = "tbcapi-ping-response"
