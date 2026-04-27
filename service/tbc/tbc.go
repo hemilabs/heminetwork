@@ -2127,6 +2127,20 @@ func (s *Server) UtxosByAddress(ctx context.Context, filterMempool bool, encoded
 	return utxos, nil
 }
 
+// MempoolUtxos returns all unspent outputs from mempool transactions.
+// These are NOT safe to spend — use UtxosByAddress for building
+// transactions.
+func (s *Server) MempoolUtxos(ctx context.Context) ([]tbcd.Utxo, []tbcd.ScriptHash, []wire.OutPoint, error) {
+	log.Tracef("MempoolUtxos")
+	defer log.Tracef("MempoolUtxos exit")
+
+	if !s.cfg.MempoolEnabled {
+		return nil, nil, nil, errors.New("mempool not enabled")
+	}
+
+	return s.mempool.UnconfirmedUtxos(ctx)
+}
+
 func (s *Server) UtxosByScriptHash(ctx context.Context, hash tbcd.ScriptHash, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	log.Tracef("UtxosByScriptHash")
 	defer log.Tracef("UtxosByScriptHash exit")
@@ -2402,41 +2416,44 @@ func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHea
 	return s.g.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
-func parseTx(ctx context.Context, db tbcd.Database, tx *wire.MsgTx) (int64, int64, map[wire.OutPoint]struct{}, error) {
+func parseTx(ctx context.Context, db tbcd.Database, tx *wire.MsgTx) (int64, int64, error) {
 	var iv, ov int64
-	txins := make(map[wire.OutPoint]struct{}, len(tx.TxIn))
 	for _, txIn := range tx.TxIn {
 		po := txIn.PreviousOutPoint
 		wtxo, err := txOutFromOutPoint(ctx,
 			db, tbcd.NewOutpoint(po.Hash, po.Index))
 		if err != nil {
-			return 0, 0, nil, err
+			return 0, 0, err
 		}
 		iv += wtxo.Value
-
-		txins[po] = struct{}{}
 	}
 
 	for _, txOut := range tx.TxOut {
 		ov += txOut.Value
 	}
 
-	return iv, ov, txins, nil
+	return iv, ov, nil
 }
 
 func mempoolTxNew(ctx context.Context, db tbcd.Database, utx *btcutil.Tx) (*MempoolTx, error) {
 	// Create mempool tx
-	inValue, outValue, txins, err := parseTx(ctx, db, utx.MsgTx())
+	inValue, outValue, err := parseTx(ctx, db, utx.MsgTx())
 	if err != nil {
 		return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
 	}
+	msg := utx.MsgTx()
+	txins := make(map[wire.OutPoint]struct{}, len(msg.TxIn))
+	for _, txIn := range msg.TxIn {
+		txins[txIn.PreviousOutPoint] = struct{}{}
+	}
 	return &MempoolTx{
-		id:       utx.MsgTx().TxHash(),
+		id:       msg.TxHash(),
 		weight:   blockchain.GetTransactionWeight(utx),
 		size:     btcmempool.GetTxVirtualSize(utx),
 		outValue: outValue,
 		inValue:  inValue,
 		expires:  time.Now().Add(defaultMempoolAge),
+		tx:       msg,
 		txins:    txins,
 	}, nil
 }

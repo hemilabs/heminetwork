@@ -27,11 +27,18 @@ type MempoolTx struct {
 	size     int64                      // transaction virtual size
 	inValue  int64                      // total txin value
 	outValue int64                      // total txout value
-	txins    map[wire.OutPoint]struct{} // txins in transaction
+	tx       *wire.MsgTx                // full transaction
+	txins    map[wire.OutPoint]struct{} // spent outpoints for O(1) lookup
 }
 
-func NewMempoolTx(id chainhash.Hash, txins map[wire.OutPoint]struct{}) MempoolTx {
-	return MempoolTx{id: id, txins: txins}
+// NewMempoolTx creates a MempoolTx from a wire transaction, computing
+// the txid and building the spent-outpoint map for O(1) inMempool lookups.
+func NewMempoolTx(tx *wire.MsgTx) MempoolTx {
+	txins := make(map[wire.OutPoint]struct{}, len(tx.TxIn))
+	for _, txIn := range tx.TxIn {
+		txins[txIn.PreviousOutPoint] = struct{}{}
+	}
+	return MempoolTx{id: tx.TxHash(), tx: tx, txins: txins}
 }
 
 type Mempool struct {
@@ -55,12 +62,10 @@ func (m *Mempool) inMempool(utxo tbcd.Utxo) bool {
 	opp := wire.NewOutPoint(utxo.ChainHash(), utxo.OutputIndex())
 	op := *opp
 	for _, tx := range m.txs {
-		// Skip tx that aren't fully in the mempool yet.
-		if tx == nil {
+		if tx == nil || tx.tx == nil {
 			continue
 		}
 		if _, ok := tx.txins[op]; ok {
-			// Found in txins.
 			return true
 		}
 	}
@@ -93,6 +98,36 @@ func (m *Mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 	// }
 	// return out
 	return slices.DeleteFunc(utxos[:], m.inMempool), nil
+}
+
+// UnconfirmedUtxos returns all outputs from mempool transactions
+// with their script hashes, plus all outpoints being spent by
+// mempool transactions.
+func (m *Mempool) UnconfirmedUtxos(ctx context.Context) ([]tbcd.Utxo, []tbcd.ScriptHash, []wire.OutPoint, error) {
+	log.Tracef("UnconfirmedUtxos")
+	defer log.Tracef("UnconfirmedUtxos exit")
+
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	// Estimate 2 outputs and 2 inputs per tx on average.
+	est := len(m.txs) * 2
+	utxos := make([]tbcd.Utxo, 0, est)
+	shs := make([]tbcd.ScriptHash, 0, est)
+	spent := make([]wire.OutPoint, 0, est)
+	for _, mptx := range m.txs {
+		if mptx == nil || mptx.tx == nil {
+			continue
+		}
+		for i, out := range mptx.tx.TxOut {
+			utxos = append(utxos, tbcd.NewUtxo(mptx.id, uint64(out.Value), uint32(i)))
+			shs = append(shs, tbcd.NewScriptHashFromScript(out.PkScript))
+		}
+		for _, txIn := range mptx.tx.TxIn {
+			spent = append(spent, txIn.PreviousOutPoint)
+		}
+	}
+	return utxos, shs, spent, nil
 }
 
 func (m *Mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
