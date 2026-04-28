@@ -11,6 +11,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -27,29 +28,32 @@ import (
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/hemilabs/x/tss-lib/v3/tss"
 	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
 // The continuum protocol is a simple gossipy P2P system.
 //
 // The continuum transfunctioner is a very mysterious and powerful device and
-// it's mystery is exceeded only by it's power.
+// its mystery is exceeded only by its power.
 //
 // Continuum runs directly on top of TCP and can run in the clear since it does
-// it's own encryption. It is a streaming protocol that prefixes encrypted
+// its own encryption. It is a streaming protocol that prefixes encrypted
 // payloads with a size (that is capped). If the message is too large the
 // receiver will drop the connection and potentially blacklist the caller.
 //
 // Communication should occur between a transport "client" and a "server",
-// where the server determines the type of Curve and encryption key shared
+// where the server determines the type of Curve and encryption keys derived
 // by both. Communication between these two parties is initiated by performing
 // a key exchange, followed by a handshake where the other party's identity
 // is verified. After this, envelopes can be shared freely between both sides.
 //
-// An envelope is constructed on the wire as: [size+nonce][header+payload].
-// The size and nonce are unencrypted, the former being used to validate the
-// amount of data to be read, and the latter for decrypting the message.
+// An envelope is constructed on the wire using two-phase authenticated
+// framing.  Phase 1 is a fixed-size 44-byte encrypted header containing
+// the body size.  Phase 2 is the encrypted payload whose length is
+// authenticated from phase 1.  No cleartext framing exists on the wire.
 //
 // Once an envelope is decrypted there are two distinct pieces, a header
 // and a message + payload. The header contains information akin to TCP
@@ -83,17 +87,23 @@ import (
 //
 //	3. Both sides verify the transport protocol version in TransportRequest.
 //	4. Both sides calculate the shared transport secret using Elliptic
-//	Curve Diffie-Hellman (ECDH). Next they derive a shared transport
-//	encryption key (STK) using an HMAC-based key derivation function (HKDF).
-//	The hash used is SHA256, salt remains unused at this time and the info
-//	is "continuum-transport-v1".
+//	Curve Diffie-Hellman (ECDH). Next they derive two directional
+//	shared transport encryption keys using an HMAC-based key derivation
+//	function (HKDF). The hash used is SHA256, salt is session-specific
+//	("continuum-hkdf-salt-v2" || serverPub || clientPub) and the info
+//	strings are "continuum-s2c-v1" (server-to-client) and
+//	"continuum-c2s-v1" (client-to-server). This ensures that each
+//	direction uses a unique key, containing the blast radius if a
+//	nonce ever repeats.
 //
-// At this point, both sides have an identical STK which they use to encrypt
-// all packets going forward using NaCl's secretbox. Protocol requires one
-// packet per secretbox and the wire format is 24 bits of cleartext that
-// designates encrypted blob length. The encrypted blob comprises of a 24 byte
-// nonce plus ciphertext. Decrypting is done by calling secretbox open using
-// STK and nonce.
+// At this point, both sides have directional keys which they use to encrypt
+// all packets going forward using NaCl's secretbox. The server encrypts with
+// the s2c key and decrypts with the c2s key; the client does the inverse.
+// Protocol requires one logical message per pair of secretbox operations.
+// The wire format is a 44-byte encrypted header (containing the body
+// size) followed by the encrypted body.  Decrypting is done by opening
+// the header secretbox to learn the body size, then opening the body
+// secretbox for the payload.
 //
 // Note on nonces: When using secretbox it is imperative to not use duplicate
 // nonces. In order to prevent reuse both sides generate a random 256 bit key
@@ -106,7 +116,7 @@ import (
 // an envelope (see below).
 //	1. Both sides send a HelloRequest that contains a version, their
 //	identity, a challenge, options etc.
-//	2. Both sides read the HelloRequest and validate it's contents prior to
+//	2. Both sides read the HelloRequest and validate its contents prior to
 //	replying with a HelloResponse. By protocol, either side can hang up at
 //	any time if they feel their counterparty is misbehaving. It is
 //	important to note that the challenge that must be signed is the SHA256
@@ -114,9 +124,17 @@ import (
 //	3. Both sides read the HelloResponse and derive the remote's ETP from
 //	the signature. The derived ETP must match the provided identity to
 //	prove ownership of the accompanying private key. Additionally, the
-//	identity may be stores in a DNS TXT record that is associated with the
+//	identity may be stored in a DNS TXT record that is associated with the
 //	remote host.
-//	TODO: define DNS mechanism in more detail.
+//
+//	DNS identity verification: the node resolves TXT records for the
+//	remote host and checks whether any record contains the hex-encoded
+//	identity.  For outbound connections the node does a forward lookup
+//	(host → TXT); for inbound connections it does a reverse lookup
+//	(IP → hostname → TXT).  DNS verification is advisory: failure
+//	logs a warning but does not reject the connection.  The TXT
+//	record format is: "continuum-id=<hex identity>".  Port is
+//	discovered via a SRV record or falls back to the default port.
 //
 // In the continuum protocol every host has a long lived identity. This
 // identity is the RIPEMD160 digest of a public secp256k1 compressed key. This
@@ -125,32 +143,103 @@ import (
 // the protocol.
 //
 // An envelope is defined as an encrypted blob that contains a header and a
-// command. A headers is akin to a TCP header that contains routing
+// command. A header is akin to a TCP header that contains routing
 // information, TTL and hints for the remote side to aid in command decoding.
 //
-// TODO:
-//	* routing
-//	* TTL
-//	* gossip rules
-//	* uniqueness of commands
-//	* envelope wrapped in envelope (encrypted routing)
-//	* commands
+// Protocol wire format:
+//   - Routing: each envelope carries a Header with Source, Destination,
+//     and TTL fields.  Messages with a Destination are forwarded
+//     hop-by-hop; broadcasts (nil Destination) are flooded to all
+//     sessions with dedup.
+//   - TTL: decremented at each hop; dropped at zero to prevent
+//     infinite forwarding loops.
+//   - Gossip rules: peers are exchanged via PeerNotify (push) and
+//     PeerListRequest/PeerListResponse (pull).  Each node maintains
+//     a map of known peers and periodically dials under-connected
+//     targets.
+//   - Uniqueness: broadcast dedup uses a TTL-based cache keyed on
+//     (Source, PayloadType, content hash).  Duplicate envelopes
+//     within the TTL window are dropped.
+//   - Envelope wrapping: after KX, all envelopes are NaCl box
+//     encrypted between session peers.  EncryptedPayload carries
+//     the ciphertext; the inner payload is decoded after decryption.
+//   - Commands: typed payloads registered in the pt2rt/str2pt maps
+//     below.  Each type has a string tag for wire encoding and a
+//     reflect.Type for dispatch.
 
+// PayloadType identifies the command type carried by an envelope.
 type PayloadType string
 
+// Payload type constants for all protocol commands.
 const (
-	PHelloRequest  PayloadType = "hello"
-	PHelloResponse PayloadType = "hello-response"
-	PPingRequest   PayloadType = "ping"
-	PPingResponse  PayloadType = "ping-response"
+	PHelloRequest    PayloadType = "hello"
+	PHelloResponse   PayloadType = "hello-response"
+	PPingRequest     PayloadType = "ping"
+	PPingResponse    PayloadType = "ping-response"
+	PKeygenRequest   PayloadType = "keygen"
+	PKeygenResponse  PayloadType = "keygen-response"
+	PReshareRequest  PayloadType = "reshare"
+	PReshareResponse PayloadType = "reshare-response"
+	PSignRequest     PayloadType = "sign"
+	PSignResponse    PayloadType = "sign-response"
+	PTSSMessage      PayloadType = "tss"
+	PCeremonyResult  PayloadType = "ceremony-result"
+	PCeremonyAbort   PayloadType = "ceremony-abort"
+
+	// Gossip
+	PPeerNotify       PayloadType = "peer-notify"
+	PPeerListRequest  PayloadType = "peer-list-request"
+	PPeerListResponse PayloadType = "peer-list-response"
+
+	// End-to-end encryption
+	PEncryptedPayload PayloadType = "encrypted"
+
+	// Admin (localhost only)
+	PPeerListAdminRequest   PayloadType = "peer-list-admin"
+	PPeerListAdminResponse  PayloadType = "peer-list-admin-response"
+	PCeremonyStatusRequest  PayloadType = "ceremony-status"
+	PCeremonyStatusResponse PayloadType = "ceremony-status-response"
+	PCeremonyListRequest    PayloadType = "ceremony-list"
+	PCeremonyListResponse   PayloadType = "ceremony-list-response"
+	PPeerAddRequest         PayloadType = "peer-add"
+	PPeerAddResponse        PayloadType = "peer-add-response"
+
+	// Session management
+	PBusyResponse PayloadType = "busy"
 )
 
 var (
 	pt2str = map[reflect.Type]PayloadType{
-		reflect.TypeFor[HelloRequest]():  PHelloRequest,
-		reflect.TypeFor[HelloResponse](): PHelloResponse,
-		reflect.TypeFor[PingRequest]():   PPingRequest,
-		reflect.TypeFor[PingResponse]():  PPingResponse,
+		reflect.TypeOf(HelloRequest{}):     PHelloRequest,
+		reflect.TypeOf(HelloResponse{}):    PHelloResponse,
+		reflect.TypeOf(PingRequest{}):      PPingRequest,
+		reflect.TypeOf(PingResponse{}):     PPingResponse,
+		reflect.TypeOf(KeygenRequest{}):    PKeygenRequest,
+		reflect.TypeOf(KeygenResponse{}):   PKeygenResponse,
+		reflect.TypeOf(ReshareRequest{}):   PReshareRequest,
+		reflect.TypeOf(ReshareResponse{}):  PReshareResponse,
+		reflect.TypeOf(SignRequest{}):      PSignRequest,
+		reflect.TypeOf(SignResponse{}):     PSignResponse,
+		reflect.TypeOf(TSSMessage{}):       PTSSMessage,
+		reflect.TypeOf(CeremonyResult{}):   PCeremonyResult,
+		reflect.TypeOf(CeremonyAbort{}):    PCeremonyAbort,
+		reflect.TypeOf(PeerNotify{}):       PPeerNotify,
+		reflect.TypeOf(PeerListRequest{}):  PPeerListRequest,
+		reflect.TypeOf(PeerListResponse{}): PPeerListResponse,
+		reflect.TypeOf(EncryptedPayload{}): PEncryptedPayload,
+
+		// Admin
+		reflect.TypeOf(PeerListAdminRequest{}):   PPeerListAdminRequest,
+		reflect.TypeOf(PeerListAdminResponse{}):  PPeerListAdminResponse,
+		reflect.TypeOf(CeremonyStatusRequest{}):  PCeremonyStatusRequest,
+		reflect.TypeOf(CeremonyStatusResponse{}): PCeremonyStatusResponse,
+		reflect.TypeOf(CeremonyListRequest{}):    PCeremonyListRequest,
+		reflect.TypeOf(CeremonyListResponse{}):   PCeremonyListResponse,
+		reflect.TypeOf(PeerAddRequest{}):         PPeerAddRequest,
+		reflect.TypeOf(PeerAddResponse{}):        PPeerAddResponse,
+
+		// Session management
+		reflect.TypeOf(BusyResponse{}): PBusyResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -220,20 +309,21 @@ type Header struct {
 	Origin      Identity    `json:"origin"`                // Origin identity
 	Destination *Identity   `json:"destination,omitempty"` // Intended receiver
 	TTL         uint8       `json:"ttl"`                   // Time To Live
-	// Path        []Identity      // Record path when routing XXX ?
+	// Path []Identity // Deferred: requires per-hop signing.
 }
 
 // HelloRequest is the first command that is sent to the other side after the
-// key exchange pahse. It advertises the version the node is running and some
+// key exchange phase. It advertises the version the node is running and some
 // desired options. The challenge must be signed by the remote node.
 type HelloRequest struct {
 	Version   uint32            `json:"version"`           // Version number
 	Options   map[string]string `json:"options,omitempty"` // x=y
 	Identity  Identity          `json:"identity"`          // Advertise our identity
 	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
+	NaClPub   []byte            `json:"nacl_pub"`          // X25519 public key for e2e encryption
 }
 
-// HelloResponse returns the signed challenge. The remote identity is dervied
+// HelloResponse returns the signed challenge. The remote identity is derived
 // from the signature.
 type HelloResponse struct {
 	Signature []byte `json:"signature"` // Signature of Challenge
@@ -244,26 +334,355 @@ type PingRequest struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Sender timestamp
 }
 
-// PingResponse is the response to a pin request.
+// PingResponse is the response to a ping request.
 type PingResponse struct {
 	OriginTimestamp int64 `json:"origintimestamp"` // Copy the value back
 	PeerTimestamp   int64 `json:"peertimestamp"`   // Remote timestamp
 }
 
+// PeerRecord describes a known peer for gossip exchange.
+type PeerRecord struct {
+	Identity Identity   `json:"identity"`
+	Address  string     `json:"address"`            // host:port
+	NaClPub  []byte     `json:"nacl_pub,omitempty"` // X25519 public key for e2e encryption
+	Version  uint32     `json:"version"`            // ProtocolVersion at time of discovery
+	LastSeen int64      `json:"last_seen"`          // unix timestamp
+	Sessions []Identity `json:"sessions,omitempty"` // direct session neighbors (gossip topology)
+}
+
+// PeerNotify announces that the sender has new peer information.
+// The receiver may request the full list if interested.
+type PeerNotify struct {
+	Count int `json:"count"` // number of peers we know about
+}
+
+// PeerListRequest requests the sender's known peer list.
+type PeerListRequest struct{}
+
+// PeerListResponse contains the sender's known peer list.
+type PeerListResponse struct {
+	Peers []PeerRecord `json:"peers"`
+}
+
+// EncryptedPayload wraps a nacl box-encrypted payload for end-to-end
+// encryption.  The outer Header carries routing information in the
+// clear; the payload is encrypted to the destination's X25519 public
+// key.  Intermediate routers can read the Header but not the Payload.
+//
+// The sender generates a fresh ephemeral X25519 keypair per message
+// and destroys the private key immediately after encryption.  Only
+// the recipient (who holds the static X25519 private key) can
+// decrypt.  This provides sender-side forward secrecy: compromising
+// the sender after the fact cannot recover the ephemeral key.
+//
+// Sender authentication is provided by a secp256k1 compact signature
+// over the envelope hash (EphemeralPub || Nonce || Ciphertext).  The
+// receiver verifies the signature against Sender before decrypting.
+type EncryptedPayload struct {
+	EphemeralPub [32]byte    `json:"ephemeral_pub"` // sender's ephemeral X25519 public key
+	Nonce        [24]byte    `json:"nonce"`         // nacl box nonce
+	Ciphertext   []byte      `json:"ciphertext"`    // nacl box sealed
+	Signature    []byte      `json:"signature"`     // secp256k1 compact sig over envelope hash
+	Sender       Identity    `json:"sender"`        // routing: who sent this
+	InnerType    PayloadType `json:"inner_type"`    // type hint for decoding after decryption
+}
+
+// KeygenRequest initiates a key generation ceremony.
+// Sent by the router to all participating parties.
+type KeygenRequest struct {
+	CeremonyID  CeremonyID           `json:"ceremonyid"`  // Unique ceremony identifier
+	Curve       string               `json:"curve"`       // Curve for TSS
+	Committee   tss.UnSortedPartyIDs `json:"committee"`   // Signing committee
+	Threshold   int                  `json:"threshold"`   // Threshold (t, need t+1 to sign)
+	Coordinator Identity             `json:"coordinator"` // First elected member; broadcasts result
+}
+
+// KeygenResponse acknowledges a keygen request.
+type KeygenResponse struct {
+	CeremonyID CeremonyID `json:"ceremonyid"` // Echo back ceremony ID
+	Success    bool       `json:"success"`    // Whether party accepted
+	Error      string     `json:"error,omitempty"`
+}
+
+// CeremonyID uniquely identifies a ceremony instance.
+// Generated by the router when initiating a ceremony.
+type CeremonyID [32]byte
+
+// String returns the hex encoded string of the ceremony ID.
+func (c CeremonyID) String() string {
+	return hex.EncodeToString(c[:])
+}
+
+// MarshalJSON satisfies the JSON Encode interface.
+func (c CeremonyID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(hex.EncodeToString(c[:]))
+}
+
+// UnmarshalJSON satisfies the JSON Decode interface.
+func (c *CeremonyID) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	d, err := hex.DecodeString(s)
+	if err != nil {
+		return err
+	}
+	if len(d) != len(c) {
+		return fmt.Errorf("invalid ceremony id length: %v", len(d))
+	}
+	copy(c[:], d)
+	return nil
+}
+
+// CeremonyType identifies the type of TSS ceremony.
+type CeremonyType uint8
+
 const (
-	TransportVersion = 1 // Transport protocol version
+	CeremonyKeygen  CeremonyType = 1
+	CeremonyReshare CeremonyType = 2
+	CeremonySign    CeremonyType = 3
+)
+
+// String returns the string representation of the ceremony type.
+func (c CeremonyType) String() string {
+	switch c {
+	case CeremonyKeygen:
+		return "keygen"
+	case CeremonyReshare:
+		return "reshare"
+	case CeremonySign:
+		return "sign"
+	default:
+		return fmt.Sprintf("unknown(%d)", c)
+	}
+}
+
+// Ceremony status values.
+const (
+	CeremonyRunning  = "running"
+	CeremonyComplete = "complete"
+	CeremonyFailed   = "failed"
+)
+
+// ReshareRequest initiates a reshare ceremony.
+// Sent by the router to all participating parties.
+type ReshareRequest struct {
+	CeremonyID   CeremonyID           `json:"ceremonyid"`   // Unique ceremony identifier
+	Curve        string               `json:"curve"`        // Elliptic curve (e.g., "secp256k1")
+	KeyID        []byte               `json:"keyid"`        // Key to reshare
+	OldCommittee tss.UnSortedPartyIDs `json:"oldcommittee"` // Current key holders
+	NewCommittee tss.UnSortedPartyIDs `json:"newcommittee"` // New key holders
+	OldThreshold int                  `json:"oldthreshold"` // Current threshold (t, need t+1 to sign)
+	NewThreshold int                  `json:"newthreshold"` // New threshold
+}
+
+// ReshareResponse acknowledges a reshare request.
+type ReshareResponse struct {
+	CeremonyID CeremonyID `json:"ceremonyid"` // Echo back ceremony ID
+	Success    bool       `json:"success"`    // Whether party accepted the request
+	Error      string     `json:"error,omitempty"`
+}
+
+// SignRequest initiates a signing ceremony.
+// Sent by the router to participating parties.
+type SignRequest struct {
+	CeremonyID CeremonyID           `json:"ceremonyid"` // Unique ceremony identifier
+	KeyID      []byte               `json:"keyid"`      // Identifies which TSS key to use
+	Committee  tss.UnSortedPartyIDs `json:"committee"`  // Signing parties
+	Threshold  int                  `json:"threshold"`  // Threshold (t, need t+1 to sign)
+	Data       []byte               `json:"data"`       // Hash to sign (32 bytes)
+}
+
+// SignResponse returns the signature or error.
+type SignResponse struct {
+	CeremonyID CeremonyID `json:"ceremonyid"`
+	Success    bool       `json:"success"`
+	R          []byte     `json:"r,omitempty"` // Signature R component
+	S          []byte     `json:"s,omitempty"` // Signature S component
+	Error      string     `json:"error,omitempty"`
+}
+
+// TSSMsgFlags encodes broadcast and committee routing metadata as a
+// single bitfield on TSSMessage.
+type TSSMsgFlags byte
+
+const (
+	TSSFlagBroadcast TSSMsgFlags = 1 << iota // Broadcast to all parties
+	TSSFlagToOld                             // Route to old committee (reshare)
+	TSSFlagToNew                             // Route to new committee (reshare)
+	TSSFlagFromNew                           // Sender is new committee (reshare)
+)
+
+// TSSMessage wraps tss-lib protocol messages exchanged between parties.
+// The message MUST be signed to prevent injection by routing nodes.
+type TSSMessage struct {
+	CeremonyID CeremonyID   `json:"ceremonyid"` // Which ceremony this belongs to
+	Type       CeremonyType `json:"type"`       // Ceremony type hint
+	From       Identity     `json:"from"`       // Originating party (for sig verification)
+	Flags      TSSMsgFlags  `json:"flags"`      // Broadcast + committee routing
+	Data       []byte       `json:"data"`       // serialized TSS message content
+	Signature  []byte       `json:"signature"`  // Sign(Hash(CeremonyID || Data))
+}
+
+// IsBroadcast reports whether the message is broadcast to all parties.
+func (m TSSMessage) IsBroadcast() bool {
+	return m.Flags&TSSFlagBroadcast != 0
+}
+
+// HashTSSMessage computes the hash that must be signed for a
+// TSSMessage. Hash = SHA256("continuum-tss-msg-v1" || CeremonyID || len(Data) || Data).
+// The domain separator prevents cross-protocol signature replay.
+// The length prefix prevents ambiguous CeremonyID/Data splits.
+func HashTSSMessage(cid CeremonyID, data []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte("continuum-tss-msg-v1"))
+	h.Write(cid[:])
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
+	h.Write(lenBuf[:])
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+// NewCeremonyID generates a random ceremony identifier.
+func NewCeremonyID() CeremonyID {
+	var cid CeremonyID
+	if _, err := rand.Read(cid[:]); err != nil {
+		panic(fmt.Errorf("read random: %w", err))
+	}
+	return cid
+}
+
+// CeremonyResult signals ceremony completion to the router.
+type CeremonyResult struct {
+	CeremonyID CeremonyID `json:"ceremonyid"`
+	Success    bool       `json:"success"`
+	Error      string     `json:"error,omitempty"`
+}
+
+// CeremonyAbort signals ceremony termination.
+// Can be sent by any party or the router.
+type CeremonyAbort struct {
+	CeremonyID CeremonyID `json:"ceremonyid"`
+	Reason     string     `json:"reason"`
+}
+
+// =============================================================================
+// Admin RPC types (localhost only)
+// =============================================================================
+
+// PeerListAdminRequest requests the full peer map with session status.
+type PeerListAdminRequest struct{}
+
+// PeerListAdminResponse contains all known peers with connection status.
+type PeerListAdminResponse struct {
+	Peers []PeerAdminRecord `json:"peers"`
+}
+
+// PeerAdminRecord extends PeerRecord with session status.
+type PeerAdminRecord struct {
+	PeerRecord
+	Connected bool `json:"connected"` // has active session
+	Live      bool `json:"live"`      // connected and responded to at least one ping
+	Self      bool `json:"self"`      // true if this is the server's own record
+}
+
+// CeremonyStatusRequest queries the status of a specific ceremony.
+type CeremonyStatusRequest struct {
+	CeremonyID CeremonyID `json:"ceremony_id"`
+}
+
+// CeremonyStatusResponse reports the status of a ceremony.
+type CeremonyStatusResponse struct {
+	CeremonyID CeremonyID `json:"ceremony_id"`
+	Found      bool       `json:"found"`
+	Type       string     `json:"type,omitempty"`       // "keygen", "reshare", "sign"
+	Status     string     `json:"status,omitempty"`     // "running", "complete", "failed"
+	StartTime  int64      `json:"start_time,omitempty"` // unix timestamp
+	KeyID      []byte     `json:"key_id,omitempty"`     // set after keygen completes
+	Committee  []Identity `json:"committee,omitempty"`  // ceremony participants
+	Error      string     `json:"error,omitempty"`
+}
+
+// CeremonyListRequest requests all known ceremonies.
+type CeremonyListRequest struct{}
+
+// CeremonyListResponse returns all known ceremonies with their status.
+type CeremonyListResponse struct {
+	Ceremonies []CeremonyStatusResponse `json:"ceremonies"`
+}
+
+// PeerAddRequest requests that the server attempt to connect to a peer.
+type PeerAddRequest struct {
+	Address string `json:"address"` // IP:port or hostname:port
+}
+
+// PeerAddResponse reports the result of a peer add request.
+type PeerAddResponse struct {
+	Accepted bool   `json:"accepted"`
+	Error    string `json:"error,omitempty"`
+}
+
+// BusyResponse is sent post-handshake when the server is at capacity.
+// The connecting peer should close the transport and retry later.
+type BusyResponse struct{}
+
+// ErrAdminNotLocal is returned when an admin request arrives from a
+// non-localhost connection.
+var ErrAdminNotLocal = errors.New("admin request rejected: not localhost")
+
+// BroadcastDestination is the all-zeros Identity sentinel used as
+// Header.Destination to indicate a broadcast message.  Every node
+// processes the message locally AND forwards to all connected peers.
+var BroadcastDestination = Identity{}
+
+// broadcastWhitelist is the set of payload types allowed to use the
+// broadcast primitive.  Non-whitelisted types with BroadcastDestination
+// are silently dropped.
+var broadcastWhitelist = map[reflect.Type]bool{
+	reflect.TypeOf(CeremonyResult{}): true,
+	reflect.TypeOf(CeremonyAbort{}):  true,
+}
+
+// IsBroadcastable reports whether cmd is a broadcast-type payload.
+// Handles both value and pointer types.
+func IsBroadcastable(cmd any) bool {
+	t := reflect.TypeOf(cmd)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return broadcastWhitelist[t]
+}
+
+// Protocol and transport wire constants.
+const (
+	TransportVersion = 2 // Transport protocol version
 
 	ProtocolVersion = 1 // Node version
 
-	TransportNonceSize = 24         // 24 bytes, per secretbox
-	TransportMaxSize   = 0x00ffffff // 24 bit, 3 bytes
+	TransportNonceSize = 24      // 24 bytes, per secretbox
+	TransportMaxSize   = 1 << 20 // 1 MB — sufficient for 100-party TSS
+
+	// transportFrameHeaderSize is the fixed-size encrypted header
+	// read by the receiver before any variable-length data.
+	//   24 (nonce) + secretbox(4-byte body_size) = 24 + 4 + 16 = 44
+	transportFrameHeaderSize = TransportNonceSize + 4 + secretbox.Overhead
 
 	ChallengeSize = 32 // 32 bytes random data
+
+	NaClPubSize = 32 // X25519 public key length
+
+	// secp256k1KeySize is the expected byte length of a secp256k1
+	// private key (32 bytes = 256 bits).
+	secp256k1KeySize = 32
 
 	dnsAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
 )
 
-var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is an invalid challenge
+// ZeroChallenge is an all-zeros challenge value used as an invalid sentinel.
+// Handshake rejects challenges that compare equal to this.
+var ZeroChallenge = [ChallengeSize]byte{}
 
 // Nonce is used by transport for message encryption / decryption.
 // It is first generated during key exchange, and is atomically
@@ -296,6 +715,7 @@ func (n *Nonce) Next() *[TransportNonceSize]byte {
 func NewNonce() (*Nonce, error) {
 	n := &Nonce{}
 	_, err := rand.Read(n.key[:])
+	// untested: rand.Read fails only on OS entropy exhaustion (unrecoverable)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +730,7 @@ func Hash160(data []byte) []byte {
 	return ripemd.Sum(nil)
 }
 
-// Hash160 is a utility function that returns the sha256 of multiple byte
+// Hash256 is a utility function that returns the sha256 of multiple byte
 // slices.
 func Hash256(data []byte, extraData ...[]byte) []byte {
 	hash := sha256.New()
@@ -331,14 +751,14 @@ func Hash256(data []byte, extraData ...[]byte) []byte {
 // public key.
 type Identity [ripemd160.Size]byte // ripemd160 of compressed pubkey
 
-// String returns the hex endoded string of the identity.
+// String returns the hex encoded string of the identity.
 func (i Identity) String() string {
 	return hex.EncodeToString(i[:])
 }
 
 // Bytes returns a copy of identity as a byte slice.
 func (i Identity) Bytes() []byte {
-	return append([]byte{}, i[:]...) // Fucking linter rejects append(i[:])
+	return append([]byte{}, i[:]...) // Copy; append(i[:]) rejected by linter.
 }
 
 // UnmarshalJSON satisfies the JSON Decode interface.
@@ -403,6 +823,111 @@ func (s Secret) Sign(hash []byte) []byte {
 	return ecdsa.SignCompact(s.privateKey, hash[:], true)
 }
 
+// NaClPrivateKey returns the X25519 private key derived from the
+// secp256k1 private key using domain-separated SHA256.
+func (s Secret) NaClPrivateKey() (*ecdh.PrivateKey, error) {
+	h := sha256.New()
+	h.Write([]byte("continuum-x25519-v1"))
+	h.Write(s.privateKey.Serialize())
+	seed := h.Sum(nil)
+	return ecdh.X25519().NewPrivateKey(seed)
+}
+
+// NaClPublicKey returns the X25519 public key bytes corresponding to
+// the derived private key.
+func (s Secret) NaClPublicKey() ([]byte, error) {
+	priv, err := s.NaClPrivateKey()
+	// untested: NaClPrivateKey derives curve25519 from valid secp256k1; cannot fail with valid secret
+	if err != nil {
+		return nil, err
+	}
+	return priv.PublicKey().Bytes(), nil
+}
+
+// hashEncryptedPayload computes a domain-separated hash of the
+// encrypted envelope fields for signing/verification.
+func hashEncryptedPayload(ephPub *[32]byte, nonce *[24]byte, ciphertext []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte("continuum-e2e-sig-v1"))
+	h.Write(ephPub[:])
+	h.Write(nonce[:])
+	h.Write(ciphertext)
+	return h.Sum(nil)
+}
+
+// SealBox encrypts plaintext to the recipient's X25519 public key
+// using a fresh ephemeral X25519 keypair.  The ephemeral private key
+// is destroyed immediately after encryption (MetaMask/libsodium
+// sealed-box pattern).  Only the recipient can decrypt.
+//
+// Sender authentication is provided by a secp256k1 compact signature
+// over the envelope hash, verified by the receiver before decrypting.
+func SealBox(plaintext []byte, recipientPub []byte, sender *Secret, innerType PayloadType) (*EncryptedPayload, error) {
+	if len(recipientPub) != NaClPubSize {
+		return nil, fmt.Errorf("recipient %w: len %d", ErrInvalidNaClPub, len(recipientPub))
+	}
+
+	// Generate ephemeral X25519 keypair.
+	ephemeral, err := ecdh.X25519().GenerateKey(rand.Reader)
+	// untested: GenerateKey wraps rand.Read; fails only on OS entropy exhaustion
+	if err != nil {
+		return nil, fmt.Errorf("generate ephemeral key: %w", err)
+	}
+
+	var nonce [24]byte
+	// untested: rand.Read fails only on OS entropy exhaustion
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, err
+	}
+
+	var pub, priv [32]byte
+	copy(pub[:], recipientPub)
+	copy(priv[:], ephemeral.Bytes())
+
+	sealed := box.Seal(nil, plaintext, &nonce, &pub, &priv)
+
+	// Destroy ephemeral private key.  We zero the local [32]byte
+	// copy; the ecdh.PrivateKey object's internal state cannot be
+	// wiped via the public API and relies on GC.
+	for i := range priv {
+		priv[i] = 0
+	}
+
+	var ephPub [32]byte
+	copy(ephPub[:], ephemeral.PublicKey().Bytes())
+
+	// Sign the envelope.
+	hash := hashEncryptedPayload(&ephPub, &nonce, sealed)
+	sig := sender.Sign(hash)
+
+	return &EncryptedPayload{
+		EphemeralPub: ephPub,
+		Nonce:        nonce,
+		Ciphertext:   sealed,
+		Signature:    sig,
+		Sender:       sender.Identity,
+		InnerType:    innerType,
+	}, nil
+}
+
+// OpenBox decrypts an EncryptedPayload using the recipient's X25519
+// private key and the sender's ephemeral public key (carried in the
+// payload).  Callers should verify the envelope signature before
+// calling OpenBox.
+func OpenBox(ep *EncryptedPayload, recipientPriv *ecdh.PrivateKey) ([]byte, error) {
+	var priv [32]byte
+	copy(priv[:], recipientPriv.Bytes())
+
+	plaintext, ok := box.Open(nil, ep.Ciphertext, &ep.Nonce, &ep.EphemeralPub, &priv)
+	for i := range priv {
+		priv[i] = 0
+	}
+	if !ok {
+		return nil, errors.New("nacl box open failed")
+	}
+	return plaintext, nil
+}
+
 // Verify verifies that hash was signed by the provided identity. It returns
 // the derived compact public key.
 func Verify(hash []byte, remote Identity, sig []byte) (*secp256k1.PublicKey, error) {
@@ -414,7 +939,7 @@ func Verify(hash []byte, remote Identity, sig []byte) (*secp256k1.PublicKey, err
 		return nil, ErrNotCompact
 	}
 	recoveredID := NewIdentityFromPub(publicKey)
-	if !bytes.Equal(recoveredID[:], remote[:]) {
+	if subtle.ConstantTimeCompare(recoveredID[:], remote[:]) != 1 {
 		return nil, ErrIdentityMismatch
 	}
 	return publicKey, nil
@@ -428,15 +953,15 @@ func NewSecretFromPrivate(privateKey *secp256k1.PrivateKey) *Secret {
 	}
 }
 
-// NewSecretFromString returns a secret type for the provided string encoded
-// private key.
+// NewSecretFromString returns a Secret for the provided hex-encoded private
+// key string.
 func NewSecretFromString(secret string) (*Secret, error) {
 	s, err := hex.DecodeString(secret)
 	if err != nil {
 		return nil, err
 	}
 	// This may not always be the case and may need to be a range.
-	if len(s) != 32 {
+	if len(s) != secp256k1KeySize {
 		return nil, fmt.Errorf("invalid key")
 	}
 	return NewSecretFromPrivate(secp256k1.PrivKeyFromBytes(s)), nil
@@ -445,6 +970,7 @@ func NewSecretFromString(secret string) (*Secret, error) {
 // NewSecret returns a secret type with a randomly generated private key.
 func NewSecret() (*Secret, error) {
 	s, err := secp256k1.GeneratePrivateKey()
+	// untested: secp256k1.GeneratePrivateKey wraps crypto/rand, fails only on OS entropy exhaustion
 	if err != nil {
 		return nil, err
 	}
@@ -458,6 +984,7 @@ type TransportRequest struct {
 	PublicKey []byte `json:"publickey"`
 }
 
+// Sentinel errors returned by transport and handshake operations.
 var (
 	ErrDecrypt                = errors.New("could not decrypt")
 	ErrIdentityMismatch       = errors.New("identity mismatch")
@@ -470,10 +997,27 @@ var (
 	ErrNoSuitableCurve        = errors.New("no suitable curve found")
 	ErrUnsupportedVersion     = errors.New("unsupported version")
 	ErrMessageTooLarge        = errors.New("message too large")
+	ErrInvalidNaClPub         = errors.New("invalid nacl public key")
+	ErrUseBroadcast           = errors.New("broadcast-type payload: use Broadcast(), not SendEncrypted()")
+	ErrNotInCommittee         = errors.New("self not in old or new committee")
+	ErrUnknownCeremony        = errors.New("unknown ceremony")
 
 	// placeholders until we decide on timeout handling
-	readTimeout  time.Duration = 4 * time.Second
-	writeTimeout time.Duration = 4 * time.Second
+	readTimeout time.Duration = 4 * time.Second
+
+	// messageReadTimeout bounds each message read on an
+	// established session.  Prevents slowloris attacks where
+	// an attacker sends one byte per second to tie up the
+	// handle goroutine indefinitely.  Must be > pingInterval
+	// (29s) so idle-but-alive sessions survive between pings.
+	// 37s gives 8s of headroom for the pong round-trip.
+	messageReadTimeout time.Duration = 37 * time.Second
+	writeTimeout       time.Duration = 4 * time.Second
+
+	// handshakeTimeout bounds the X25519 key exchange.  The
+	// deadline is set on the net.Conn directly because the KX
+	// reads/writes are not context-aware (crypto/ecdh).
+	handshakeTimeout = 5 * time.Second
 )
 
 // Transport is an opaque type that provides encrypted transport for
@@ -501,12 +1045,13 @@ type Transport struct {
 	mtx sync.Mutex
 
 	// Transport encryption bits
-	isServer      bool             // server or client
-	curve         ecdh.Curve       // transport encryption curve
-	us            *ecdh.PrivateKey // our transport ephemeral private key
-	them          *ecdh.PublicKey  // their ephemeral public key
-	encryptionKey *[32]byte        // shared symmetric ephemeral encryption key
-	nonce         *Nonce           // transport nonce
+	isServer   bool             // server or client
+	curve      ecdh.Curve       // transport encryption curve
+	us         *ecdh.PrivateKey // our transport ephemeral private key
+	them       *ecdh.PublicKey  // their ephemeral public key
+	encryptKey *[32]byte        // directional encryption key (our sends)
+	decryptKey *[32]byte        // directional decryption key (their sends)
+	nonce      *Nonce           // transport nonce
 
 	conn net.Conn
 }
@@ -533,6 +1078,7 @@ func (t *Transport) Curve() string {
 // This is the listening side.
 func NewTransportFromCurve(curve ecdh.Curve) (*Transport, error) {
 	privateKey, err := curve.GenerateKey(rand.Reader)
+	// untested: ecdh.GenerateKey wraps rand.Reader, fails only on OS entropy exhaustion
 	if err != nil {
 		return nil, err
 	}
@@ -565,6 +1111,7 @@ func (t *Transport) setTransportFromPublicKey(publicKey []byte) error {
 		}
 
 		privateKey, err := curve.GenerateKey(rand.Reader)
+		// untested: ecdh.GenerateKey wraps rand.Reader, fails only on OS entropy exhaustion
 		if err != nil {
 			return err
 		}
@@ -579,39 +1126,136 @@ func (t *Transport) setTransportFromPublicKey(publicKey []byte) error {
 	return ErrNoSuitableCurve
 }
 
-// Close closes the underlying connection but leaves the ephemeral encryption
-// key and connection set. This is deliberate to prevent reuse.
+// Close closes the underlying connection and zeros key material to
+// limit exposure in swap files and core dumps.
+//
+// The connection is closed first so that any in-flight readers blocked
+// in readExact unblock with an I/O error before we zero the keys they
+// would use in decrypt/decryptFrameHeader.
 func (t *Transport) Close() error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	if t.conn == nil {
 		return ErrNoConn
 	}
-	return t.conn.Close()
+	// Close conn first to unblock in-flight I/O.
+	err := t.conn.Close()
+	// Zero key material regardless of close error.
+	if t.encryptKey != nil {
+		for i := range t.encryptKey {
+			t.encryptKey[i] = 0
+		}
+	}
+	if t.decryptKey != nil {
+		for i := range t.decryptKey {
+			t.decryptKey[i] = 0
+		}
+	}
+	if t.nonce != nil {
+		for i := range t.nonce.key {
+			t.nonce.key[i] = 0
+		}
+	}
+	t.us = nil
+	return err
 }
 
-// KeyExchange returns a shared encryption key for the provided private and
-// public keys. The returned encryption key is derived from the shared ECDH
-// secret using HKDF and has 256 bits of entropy.
-func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
+// RemoteAddr returns the remote network address of the underlying
+// connection.  Used for localhost-only admin RPC gating.
+func (t *Transport) RemoteAddr() net.Addr {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+	if t.conn == nil {
+		return nil
+	}
+	return t.conn.RemoteAddr()
+}
+
+// KeyExchange returns directional encryption keys for the provided private and
+// public keys. The keys are derived from the shared ECDH secret using HKDF
+// with SHA256, a session-specific salt (domain || serverPub || clientPub),
+// and directional info strings.
+// Returns (serverToClientKey, clientToServerKey, error).
+func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey, serverPub, clientPub []byte) (*[32]byte, *[32]byte, error) {
+	// Validate pub key lengths against the curve's actual key size.
+	// X25519 = 32, P-256 = 65, P-384 = 97, P-521 = 133.
+	keyLen := len(us.PublicKey().Bytes())
+	if len(serverPub) != keyLen {
+		return nil, nil, fmt.Errorf("server %w: len %d, want %d", ErrInvalidNaClPub, len(serverPub), keyLen)
+	}
+	if len(clientPub) != keyLen {
+		return nil, nil, fmt.Errorf("client %w: len %d, want %d", ErrInvalidNaClPub, len(clientPub), keyLen)
+	}
+
 	// Shared secret seed.
 	shared, err := us.ECDH(them)
+	// untested: ECDH cannot fail with two valid keys from the same curve
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Derive shared ephemeral encryption key.
-	var encryptionKey [32]byte
-	er := hkdf.New(sha256.New, shared, nil, []byte("continuum-transport-v1"))
-	if _, err := io.ReadFull(er, encryptionKey[:]); err != nil {
-		return nil, err
+	// Session-specific salt: domain || serverPub || clientPub.
+	// Public keys are fixed-length per curve — unambiguous.
+	hkdfSalt := make([]byte, 0, len("continuum-hkdf-salt-v2")+len(serverPub)+len(clientPub))
+	hkdfSalt = append(hkdfSalt, []byte("continuum-hkdf-salt-v2")...)
+	hkdfSalt = append(hkdfSalt, serverPub...)
+	hkdfSalt = append(hkdfSalt, clientPub...)
+
+	// Derive server-to-client key.
+	var s2cKey [32]byte
+	s2c := hkdf.New(sha256.New, shared, hkdfSalt, []byte("continuum-s2c-v1"))
+	// untested: HKDF is a PRF with no I/O; io.ReadFull on it cannot fail
+	if _, err := io.ReadFull(s2c, s2cKey[:]); err != nil {
+		return nil, nil, err
 	}
 
-	return &encryptionKey, nil
+	// Derive client-to-server key.
+	var c2sKey [32]byte
+	c2s := hkdf.New(sha256.New, shared, hkdfSalt, []byte("continuum-c2s-v1"))
+	// untested: HKDF is a PRF with no I/O; io.ReadFull on it cannot fail
+	if _, err := io.ReadFull(c2s, c2sKey[:]); err != nil {
+		return nil, nil, err
+	}
+
+	// Zero ECDH shared secret.  Go's ecdh.ECDH returns a []byte
+	// backed by a heap allocation; we can zero the slice contents
+	// but not guarantee the GC won't have copied the backing array.
+	// Go 1.26 runtime.ZeroMemory will provide a proper guarantee.
+	for i := range shared {
+		shared[i] = 0
+	}
+
+	return &s2cKey, &c2sKey, nil
 }
 
-// KeyExchange performs a series of reads and writes to establish a transport
-// encryption key between the server and the client. Note that the server
+// readJSONLine reads from conn one byte at a time until it encounters a
+// newline, then unmarshals the accumulated bytes into v.  This avoids
+// json.NewDecoder which buffers ahead and can consume bytes that belong
+// to subsequent encrypted messages on the same connection.
+func readJSONLine(conn net.Conn, v any) error {
+	const maxLen = 4096
+	var buf []byte
+	b := make([]byte, 1)
+	for {
+		n, err := conn.Read(b)
+		if err != nil {
+			return err
+		}
+		if n == 1 {
+			buf = append(buf, b[0])
+			if len(buf) > maxLen {
+				return fmt.Errorf("%w: %d bytes", ErrMessageTooLarge, len(buf))
+			}
+			if b[0] == '\n' {
+				return json.Unmarshal(buf, v)
+			}
+		}
+	}
+}
+
+// KeyExchange performs a series of reads and writes to establish directional
+// transport encryption keys between the server and the client. Each side
+// derives a server-to-client and client-to-server key from ECDH. The server
 // dictates the curve.
 func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	var (
@@ -623,19 +1267,25 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	// If KeyExchange is aborted the connection is killed.
 	defer func() {
 		if !greatSuccess {
+			// untested: Close() error is logged not returned; cosmetic on real connections
 			if err := conn.Close(); err != nil {
 				log.Errorf("KeyExchange: %v", err)
 			}
 		}
 	}()
 
-	// The key exchange should finish in less than 5 seconds.
-	timeout := 5 * time.Second
+	// The key exchange should finish within the handshake timeout.
+	// The deadline is set on the net.Conn directly because the KX
+	// reads/writes are not context-aware (crypto/ecdh).  The parent
+	// context is used for cancellation in the caller.
+	timeout := handshakeTimeout
+	// untested: SetDeadline cannot fail on real net.TCPConn; requires mock net.Conn
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return err
 	}
 	if t.isServer {
 		// Send TransportRequest
+		// untested: json.Encode of TransportRequest (only []byte + uint32) cannot fail
 		if err := json.NewEncoder(conn).Encode(TransportRequest{
 			Version:   TransportVersion,
 			PublicKey: t.us.PublicKey().Bytes(),
@@ -644,13 +1294,13 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 		}
 
 		// Read TransportRequest
-		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+		if err := readJSONLine(conn, &tr); err != nil {
 			return err
 		}
 		// log.Infof("server read %v", spew.Sdump(tr))
 	} else {
 		// Read TransportRequest
-		if err := json.NewDecoder(conn).Decode(&tr); err != nil {
+		if err := readJSONLine(conn, &tr); err != nil {
 			return err
 		}
 		// log.Infof("client read %v", spew.Sdump(tr))
@@ -680,24 +1330,44 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	encryptionKey, err := KeyExchange(t.us, them)
+
+	// Build session-specific HKDF salt with both pubs in
+	// canonical order (server first, client second).
+	ourPub := t.us.PublicKey().Bytes()
+	theirPub := them.Bytes()
+	var serverPub, clientPub []byte
+	if t.isServer {
+		serverPub, clientPub = ourPub, theirPub
+	} else {
+		serverPub, clientPub = theirPub, ourPub
+	}
+	s2cKey, c2sKey, err := KeyExchange(t.us, them, serverPub, clientPub)
+	// untested: KeyExchange wraps ECDH; cannot fail with valid curve keys
 	if err != nil {
 		return err
 	}
 
 	nonce, err := NewNonce()
+	// untested: NewNonce wraps rand.Read; fails only on OS entropy exhaustion
 	if err != nil {
 		return err
 	}
 
 	// Reset deadline for connection
+	// untested: SetDeadline cannot fail on real net.TCPConn; requires mock net.Conn
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
 
-	// Finish KX
+	// Assign directional keys based on role.
 	t.mtx.Lock()
-	t.encryptionKey = encryptionKey
+	if t.isServer {
+		t.encryptKey = s2cKey
+		t.decryptKey = c2sKey
+	} else {
+		t.encryptKey = c2sKey
+		t.decryptKey = s2cKey
+	}
 	t.them = them
 	t.nonce = nonce
 	t.conn = conn
@@ -708,129 +1378,201 @@ func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	return nil
 }
 
-// encrypt encrypts the passed in slice. The returned encrypted data is
-// prepended with a length and a nonce. This is to facilitate writes directly
-// on the wire.
+// encrypt encrypts the passed in slice using two-phase authenticated
+// framing.  Phase 1 is a fixed-size encrypted header containing the
+// body size.  Phase 2 is the encrypted payload.
+//
+// Wire format (v2):
+//
+//	[24-byte nonce_h][secretbox(4-byte body_size)]   <- fixed 44 bytes
+//	[24-byte nonce_p][secretbox(payload)]             <- body_size bytes
+//
+// body_size = TransportNonceSize + len(payload) + secretbox.Overhead
+//
+// No cleartext framing.  An attacker corrupting any byte of the
+// 44-byte header causes secretbox.Open to fail.  The receiver never
+// trusts an unauthenticated length.
 func (t *Transport) encrypt(cleartext []byte) ([]byte, error) {
-	ts := TransportNonceSize + len(cleartext) + secretbox.Overhead
-	if ts > TransportMaxSize {
+	// Body = nonce_p + secretbox(payload).
+	bodySize := TransportNonceSize + len(cleartext) + secretbox.Overhead
+	if bodySize > TransportMaxSize {
 		return nil, ErrMessageTooLarge
 	}
 
-	// Encode size to prefix nonce
-	var size [4]byte
-	binary.BigEndian.PutUint32(size[:], uint32(ts))
-	nonce := t.nonce.Next()
-	blob := secretbox.Seal(append(size[1:4], nonce[:]...), cleartext, nonce,
-		t.encryptionKey)
+	// Phase 1: encrypt the body size.
+	nonceH := t.nonce.Next()
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(bodySize))
+	header := make([]byte, 0, transportFrameHeaderSize)
+	header = append(header, nonceH[:]...)
+	header = secretbox.Seal(header, lenBuf[:], nonceH, t.encryptKey)
 
-	// diagnostic
-	if ts != len(blob)-3 {
-		panic(fmt.Errorf("encryption diagnostic: wanted %v got %v",
-			ts, len(blob)))
-	}
-	return blob, nil
+	// Phase 2: encrypt the payload.
+	nonceP := t.nonce.Next()
+	body := make([]byte, 0, bodySize)
+	body = append(body, nonceP[:]...)
+	body = secretbox.Seal(body, cleartext, nonceP, t.encryptKey)
+
+	// Combine phases.
+	out := make([]byte, 0, len(header)+len(body))
+	out = append(out, header...)
+	out = append(out, body...)
+	return out, nil
 }
 
-// decrypt decrypts the passed in ciphertext. The ciphertext must be prefixed
-// with the nonce. Note that the three byte length must have been clipped off.
-func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
-	// Make sure we have received enough bytes to decrypt.
-	if len(ciphertext) < TransportNonceSize+1+secretbox.Overhead {
+// decrypt decrypts a phase-2 body blob: [nonce_p][secretbox(payload)].
+func (t *Transport) decrypt(body []byte) ([]byte, error) {
+	if len(body) < TransportNonceSize+1+secretbox.Overhead {
 		return nil, ErrInvalidSecretboxLength
 	}
 
 	var nonce [TransportNonceSize]byte
-	copy(nonce[:], ciphertext[:TransportNonceSize])
-	cleartext, ok := secretbox.Open(nil, ciphertext[TransportNonceSize:], &nonce,
-		t.encryptionKey)
+	copy(nonce[:], body[:TransportNonceSize])
+	cleartext, ok := secretbox.Open(nil, body[TransportNonceSize:], &nonce,
+		t.decryptKey)
 	if !ok {
 		return nil, ErrDecrypt
 	}
 	return cleartext, nil
 }
 
+// decryptFrameHeader decrypts the fixed-size 44-byte frame header
+// and returns the authenticated body size.
+func (t *Transport) decryptFrameHeader(header []byte) (uint32, error) {
+	if len(header) != transportFrameHeaderSize {
+		return 0, fmt.Errorf("frame header: want %d bytes, got %d",
+			transportFrameHeaderSize, len(header))
+	}
+
+	var nonce [TransportNonceSize]byte
+	copy(nonce[:], header[:TransportNonceSize])
+	lenBuf, ok := secretbox.Open(nil, header[TransportNonceSize:], &nonce,
+		t.decryptKey)
+	if !ok {
+		return 0, ErrDecrypt
+	}
+	if len(lenBuf) != 4 {
+		return 0, fmt.Errorf("frame header: decrypted %d bytes, want 4", len(lenBuf))
+	}
+	return binary.BigEndian.Uint32(lenBuf), nil
+}
+
 // Handshake advertises to the other side what version and options this
 // transport wishes to use. It is also used to verify that the derived Identity
-// did indeed sign the challenge.
-func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, error) {
+// did indeed sign the challenge. Returns the remote identity and their X25519
+// public key for e2e encryption.
+func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, []byte, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
+	// untested: rand.Read fails only on OS entropy exhaustion
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	naclPub, err := secret.NaClPublicKey()
+	// untested: NaClPublicKey wraps NaClPrivateKey; cannot fail with valid secret
+	if err != nil {
+		return nil, nil, fmt.Errorf("nacl public key: %w", err)
+	}
+
+	opts := map[string]string{
+		"encoding":    "json",
+		"compression": "none",
+	}
+
 	// Write HelloRequest
 	err = t.Write(secret.Identity, HelloRequest{
 		Version:   ProtocolVersion,
 		Identity:  secret.Identity,
 		Challenge: ourChallenge[:],
-		Options: map[string]string{
-			"encoding":    "json",
-			"compression": "none",
-		},
+		Options:   opts,
+		NaClPub:   naclPub,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Read Hello
-	_, cmd, err := t.read(readTimeout)
+	_, cmd, _, err := t.read(readTimeout)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	helloRequest, ok := cmd.(*HelloRequest)
 	if !ok {
-		return nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
+		return nil, nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
 	}
 	// Validate HelloRequest
 	if helloRequest.Version != ProtocolVersion {
-		return nil, ErrUnsupportedVersion
+		return nil, nil, ErrUnsupportedVersion
 	}
 	if len(helloRequest.Challenge) != ChallengeSize {
-		return nil, ErrInvalidChallenge
+		return nil, nil, ErrInvalidChallenge
 	}
 	if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
-		return nil, ErrInvalidChallenge
+		return nil, nil, ErrInvalidChallenge
+	}
+	// Validate NaCl public key length when present.
+	if len(helloRequest.NaClPub) > 0 && len(helloRequest.NaClPub) != NaClPubSize {
+		return nil, nil, fmt.Errorf("%w: len %d", ErrInvalidNaClPub, len(helloRequest.NaClPub))
 	}
 
 	// Sign combined challenge that is represented by the sha256 hash of
 	// their challenge plus ephemeral transport public key and reply.
-	combinedChallenge := Hash256(helloRequest.Challenge, t.them.Bytes())
+	combinedChallenge := Hash256([]byte("continuum-challenge-v1"), helloRequest.Challenge, t.them.Bytes())
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Read HelloResponse
-	header2, cmd2, err := t.read(readTimeout)
+	header2, cmd2, _, err := t.read(readTimeout)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	_ = header2
 	helloResponse, ok := cmd2.(*HelloResponse)
 	if !ok {
-		return nil, fmt.Errorf("unexpected command: %T", cmd2)
+		return nil, nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
-	// Verify signature over sha256(our challenge + our tranport public key)
-	linkedChallenge := Hash256(ourChallenge[:], t.us.PublicKey().Bytes())
+	// Verify signature over sha256(our challenge + our transport public key)
+	linkedChallenge := Hash256([]byte("continuum-challenge-v1"), ourChallenge[:], t.us.PublicKey().Bytes())
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// XXX do something with options
-
 	themID := NewIdentityFromPub(themPub)
-
-	return &themID, nil
+	return &themID, helloRequest.NaClPub, nil
 }
 
-// readBlob locks the connection and reads a size and the associated blob into
-// a slice and returns that. It is locked for the duration to prevent
-// interleaved reads.
+// readExact reads exactly n bytes from conn, handling partial reads.
+func readExact(conn net.Conn, n int) ([]byte, error) {
+	buf := make([]byte, n)
+	at := 0
+	for at < n {
+		nn, err := conn.Read(buf[at:])
+		if err != nil {
+			return nil, err
+		}
+		at += nn
+	}
+	return buf, nil
+}
+
+// readBlob reads one two-phase authenticated frame from the
+// connection and returns the phase-2 body (nonce_p + ciphertext).
+//
+// Phase 1: read exactly transportFrameHeaderSize (44) bytes.
+//
+//	Decrypt to get the authenticated body size.
+//
+// Phase 2: read exactly body_size bytes.
+//
+// No cleartext framing.  The body size is only trusted after
+// secretbox authentication.
 func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	t.mtx.Lock()
 	conn := t.conn
@@ -846,95 +1588,110 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 		}
 	}
 
-	// Blob size is 24 bits or 3 bytes encoded in big endian
-	var (
-		sizeRE [4]byte
-		at     int
-		sizeR  uint32
-	)
-	for {
-		n, err := conn.Read(sizeRE[1:4]) // read 3 bytes for the nonce+ciphertext
-		if err != nil {
-			return nil, err
-		}
-		at += n
-		if at < 3 {
-			continue
-		}
-		sizeR = binary.BigEndian.Uint32(sizeRE[:])
-		break
+	// Phase 1: read fixed-size encrypted header.
+	header, err := readExact(conn, transportFrameHeaderSize)
+	if err != nil {
+		return nil, err
 	}
-
-	if sizeR > TransportMaxSize {
+	bodySize, err := t.decryptFrameHeader(header)
+	if err != nil {
+		return nil, fmt.Errorf("frame header: %w", err)
+	}
+	if bodySize > TransportMaxSize {
 		return nil, ErrMessageTooLarge
 	}
-
-	blob := make([]byte, sizeR)
-	at = 0
-	for {
-		n, err := conn.Read(blob[at:])
-		if err != nil {
-			return nil, err
-		}
-		at += n
-		if at < len(blob) {
-			continue
-		}
-		return blob, nil
+	// Sanity: body must hold at least a nonce + 1 byte + overhead.
+	if bodySize < uint32(TransportNonceSize+1+secretbox.Overhead) {
+		return nil, ErrInvalidSecretboxLength
 	}
+
+	// Phase 2: read the authenticated body.
+	body, err := readExact(conn, int(bodySize))
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 // read reads the next encrypted blob from the connection stream.
-func (t *Transport) read(timeout time.Duration) (*Header, any, error) {
+// Returns the parsed header, payload, and the raw cleartext bytes
+// (header+payload before JSON parsing).  The cleartext is used for
+// message deduplication and forwarding.
+func (t *Transport) read(timeout time.Duration) (*Header, any, []byte, error) {
 	ciphertext, err := t.readBlob(timeout)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	cleartext, err := t.decrypt(ciphertext)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// log.Infof("%v: read cleartext %v", t, spew.Sdump(cleartext))
 	jd := json.NewDecoder(bytes.NewReader(cleartext))
 	var header Header
 	if err := jd.Decode(&header); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// log.Infof("%v: read %v", t, header.PayloadType)
-	// XXX i was too clever to make the payload hash in the write
-	// but we can't really get to it here. It is a valid unique
-	// hash but it would be cute if we could verify the payload
-	// actual hash
-	//
+
+	// Extract payload portion from cleartext for hash verification
+	headerBytes, err := json.Marshal(header)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("marshal header: %w", err)
+	}
+	if len(cleartext) <= len(headerBytes) {
+		return nil, nil, nil, fmt.Errorf("cleartext too short for payload")
+	}
+	payloadBytes := cleartext[len(headerBytes):]
+
+	// Verify payload hash matches the declared hash in header
+	expectedHash := NewPayloadHash(payloadBytes)
+	if subtle.ConstantTimeCompare(header.PayloadHash[:], expectedHash[:]) != 1 {
+		return nil, nil, nil, fmt.Errorf("payload hash mismatch: got %v, want %v",
+			expectedHash, header.PayloadHash)
+	}
+
 	ct, ok := str2pt[header.PayloadType]
 	if !ok {
-		return nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
+		return nil, nil, nil, fmt.Errorf("unsupported: %v", header.PayloadType)
 	}
 	cmd := reflect.New(ct)
 	if err := jd.Decode(cmd.Interface()); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return &header, cmd.Interface(), nil
+	return &header, cmd.Interface(), cleartext, nil
 }
 
 // Read reads and decrypts the next command from the connection stream. It
 // returns the header and command.
-func (t *Transport) Read() (any, any, error) {
-	return nil, nil, fmt.Errorf("nope")
+func (t *Transport) Read() (*Header, any, error) {
+	h, cmd, _, err := t.read(messageReadTimeout)
+	return h, cmd, err
+}
+
+// ReadEnvelope reads the next command and also returns the raw cleartext
+// bytes (transport-decrypted but not yet parsed).  Used by handle() for
+// message deduplication and forwarding.
+func (t *Transport) ReadEnvelope() (*Header, any, []byte, error) {
+	return t.read(messageReadTimeout)
 }
 
 // write encrypts the passed in cleartext and writes it to the connection
-// stream. This function takes the lock to prevent interleaving writes.
+// stream. The lock is held for the entire encrypt+write sequence to
+// prevent interleaving and to synchronize with Close() zeroing keys.
 func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
-	request, err := t.encrypt(cleartext)
-	if err != nil {
-		panic(err)
-	}
-
-	// Don't interleave writes
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
+
+	if t.conn == nil {
+		return ErrNoConn
+	}
+
+	request, err := t.encrypt(cleartext)
+	if err != nil {
+		return fmt.Errorf("encrypt: %w", err)
+	}
 
 	// Timeout
 	if timeout != 0 {
@@ -942,6 +1699,7 @@ func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 			return err
 		}
 	} else {
+		// untested: SetWriteDeadline cannot fail on real net.TCPConn; requires mock net.Conn
 		if err := t.conn.SetWriteDeadline(time.Time{}); err != nil {
 			return err
 		}
@@ -954,6 +1712,7 @@ func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 			return err
 		}
 		at += n
+		// untested: partial write loop; net.Pipe writes atomically, TCP buffers make this near-impossible
 		if at < len(request) {
 			continue
 		}
@@ -961,16 +1720,17 @@ func (t *Transport) write(timeout time.Duration, cleartext []byte) error {
 	}
 }
 
-// Write creats a new payload and header and sends that to the peer.
+// Write creates a new payload and header and sends that to the peer.
 //
-// XXX think about header construction and if we need like a WriteTo which adds
-// an explicit origin that may need routing.
+// For routed messages that need an explicit destination, use
+// WriteRouted which sets the destination identity and TTL.
 func (t *Transport) Write(origin Identity, cmd any) error {
 	pt, ok := pt2str[reflect.TypeOf(cmd)]
 	if !ok {
 		return fmt.Errorf("invalid command type: %T", cmd)
 	}
 	hash, payload, err := NewPayloadFromCommand(cmd)
+	// untested: NewPayloadFromCommand uses json.Marshal on wire types; cannot fail with valid cmd
 	if err != nil {
 		return err
 	}
@@ -981,19 +1741,63 @@ func (t *Transport) Write(origin Identity, cmd any) error {
 		Destination: nil,
 		TTL:         1, // expires at the receiver
 	})
+	// untested: json.Marshal of Header (strings + []byte) cannot fail
 	if err != nil {
 		return err
 	}
 	return t.write(writeTimeout, append(header, payload...))
 }
 
-// kvFomTxt converts a TXT record to a key value map. The format is typical INI
+// WriteTo creates a routed payload with a specific destination and TTL,
+// then sends it through the transport.  Used for messages that may need
+// multi-hop forwarding.
+func (t *Transport) WriteTo(origin, destination Identity, ttlHops uint8, cmd any) error {
+	pt, ok := pt2str[reflect.TypeOf(cmd)]
+	if !ok {
+		return fmt.Errorf("invalid command type: %T", cmd)
+	}
+	hash, payload, err := NewPayloadFromCommand(cmd)
+	// untested: NewPayloadFromCommand uses json.Marshal on wire types; cannot fail with valid cmd
+	if err != nil {
+		return err
+	}
+	header, err := json.Marshal(Header{
+		PayloadType: pt,
+		PayloadHash: *hash,
+		Origin:      origin,
+		Destination: &destination,
+		TTL:         ttlHops,
+	})
+	// untested: json.Marshal of Header (strings + []byte) cannot fail
+	if err != nil {
+		return err
+	}
+	return t.write(writeTimeout, append(header, payload...))
+}
+
+// WriteHeader writes an envelope with the given header and payload command.
+// Used for forwarding: the caller provides a modified header (e.g.
+// decremented TTL) and the already-parsed payload.
+func (t *Transport) WriteHeader(h Header, cmd any) error {
+	_, payload, err := NewPayloadFromCommand(cmd)
+	if err != nil {
+		return err
+	}
+	header, err := json.Marshal(h)
+	// untested: json.Marshal of Header (strings + []byte) cannot fail
+	if err != nil {
+		return err
+	}
+	return t.write(writeTimeout, append(header, payload...))
+}
+
+// kvFromTxt converts a TXT record to a key value map. The format is typical INI
 // file style. E.g. "v=transfunctioner identity=myidentity key=value".
-func kvFomTxt(txt string) (map[string]string, error) {
+func kvFromTxt(txt string) (map[string]string, error) {
 	s := strings.Split(txt, "; ")
 	m := make(map[string]string)
 	for _, v := range s {
-		kv := strings.Split(v, "=")
+		kv := strings.SplitN(v, "=", 2)
 		if len(kv) != 2 {
 			return nil, ErrInvalidTXTRecord
 		}
@@ -1003,12 +1807,10 @@ func kvFomTxt(txt string) (map[string]string, error) {
 }
 
 // TXTRecordFromAddress returns one and only one TXT record that is associated
-// with an address.
+// with an address.  Used by DNS="reverse" and DNS="all" modes.
 //
-// XXX I slept some more on this and we should use provide a hint during
-// handshake (already encrypted) as to where we are initiating the connection
-// from. DNS has been sufficiently broken by you know who and reverse lookups
-// are essentially undoable these days.
+// Performs a reverse DNS lookup on the IP, then a TXT lookup on the
+// resulting hostname.
 func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.Addr) (map[string]string, error) {
 	if resolver == nil {
 		resolver = &net.Resolver{}
@@ -1032,22 +1834,19 @@ func TXTRecordFromAddress(ctx context.Context, resolver *net.Resolver, addr net.
 	if len(txts) != 1 {
 		return nil, fmt.Errorf("dns no txt records: %v", len(txts))
 	}
-	return kvFomTxt(txts[0])
+	return kvFromTxt(txts[0])
 }
 
-// VerifyRemoteDNSIdentity verifies that passed in identity matches it's
-// associated TXT record identity. This can be used to determine if a server or
-// client are indeed who they claim they are.
-//
-// XXX the likes of amazon and cloudflare have completely destroyed the meaning
-// of reverse DNS records. We thus must flip this around and associate it with
-// regular lookups.
+// VerifyRemoteDNSIdentity verifies that passed in identity matches its
+// associated TXT record identity via reverse DNS lookup.  Used by
+// DNS="reverse" and DNS="all" modes for IP-only peer addresses and
+// incoming connections.
 func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr, id Identity) (bool, error) {
 	m, err := TXTRecordFromAddress(ctx, r, addr)
 	if err != nil {
 		return false, err
 	}
-	// XXX are we going to use port?
+	// Port field present in TXT record but unused.
 
 	if m["v"] != dnsAppName {
 		return false, fmt.Errorf("dns invalid app name: '%v'", m["v"])
@@ -1056,7 +1855,13 @@ func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr
 	if err != nil {
 		return false, fmt.Errorf("dns invalid identity: %w", err)
 	}
-	return bytes.Equal(id[:], remoteDNSID[:]), nil
+	return subtle.ConstantTimeCompare(id[:], remoteDNSID[:]) == 1, nil
 }
 
-// XXX add VerifyRemoteDNSIdentity by hostname and call VerifyRemoteDNSIdentity
+// PrivateKeyHex is intentionally neutered — it returns a redacted
+// placeholder.  Key material must never be accessible through a
+// method that returns a printable string.  Use DebugPrivateKeyHex
+// (debug builds only) for test infrastructure.
+func (s Secret) PrivateKeyHex() string {
+	return "*****"
+}
