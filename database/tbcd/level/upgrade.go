@@ -665,8 +665,7 @@ func (l *ldb) v5(ctx context.Context) error {
 	log.Tracef("v5")
 	defer log.Tracef("v5 exit")
 
-	log.Infof("Upgrading database from v4 to v5: " +
-		"wiping stripped block bodies and rebuilding blocksmissing")
+	log.Infof("Upgrading database from v4 to v5")
 
 	// 1. Close all database handles, delete the BlocksDB rawdb
 	// and BlocksMissingDB trees, then reopen everything via
