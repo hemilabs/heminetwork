@@ -1876,7 +1876,10 @@ func (s *Server) handleGetData(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		switch v.Type {
 		case wire.InvTypeError:
 			log.Errorf("get data error: %v", v.Hash)
-		case wire.InvTypeTx:
+		case wire.InvTypeTx, wire.InvTypeWitnessTx:
+			// Bitcoin Core requests witness txs via InvTypeWitnessTx
+			// even when the INV used InvTypeTx.  Check broadcast map
+			// for both types.
 			s.mtx.RLock()
 			if tx, ok := s.broadcast[v.Hash]; ok {
 				log.Debugf("handleGetData %v", spew.Sdump(msg))
@@ -1893,8 +1896,6 @@ func (s *Server) handleGetData(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 			log.Infof("get data filtered block: %v", v.Hash)
 		case wire.InvTypeWitnessBlock:
 			log.Infof("get data witness block: %v", v.Hash)
-		case wire.InvTypeWitnessTx:
-			log.Infof("get data witness tx: %v", v.Hash)
 		case wire.InvTypeFilteredWitnessBlock:
 			log.Infof("get data filtered witness block: %v", v.Hash)
 		default:
