@@ -72,6 +72,24 @@ func (m *Mempool) inMempool(utxo tbcd.Utxo) bool {
 	return false
 }
 
+// txOutByOutpoint looks up a transaction output in the mempool by
+// its outpoint (txid + output index).  This enables CPFP: a child
+// transaction can resolve its inputs from an unconfirmed parent
+// that is already in the mempool.
+func (m *Mempool) txOutByOutpoint(txid chainhash.Hash, index uint32) *wire.TxOut {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	mptx, ok := m.txs[txid]
+	if !ok || mptx == nil || mptx.tx == nil {
+		return nil
+	}
+	if int(index) >= len(mptx.tx.TxOut) {
+		return nil
+	}
+	return mptx.tx.TxOut[index]
+}
+
 func (m *Mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
 	log.Tracef("filterUtxos")
 	defer log.Tracef("filterUtxos exit")

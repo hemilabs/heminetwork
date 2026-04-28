@@ -1242,7 +1242,7 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 		}
 	}
 
-	mptx, err := mempoolTxNew(ctx, s.g.db, utx)
+	mptx, err := mempoolTxNew(ctx, s.g.db, s.mempool, utx)
 	if err != nil {
 		return fmt.Errorf("new mempool tx: %w", err)
 	}
@@ -2370,8 +2370,9 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 
 	if s.cfg.MempoolEnabled {
 		// Add Tx to our own mempool instead of waiting for it to come
-		// over p2p.
-		mptx, err := mempoolTxNew(ctx, s.g.db, btcutil.NewTx(tx))
+		// over p2p.  Pass s.mempool so child transactions can resolve
+		// inputs from unconfirmed parents (CPFP chains).
+		mptx, err := mempoolTxNew(ctx, s.g.db, s.mempool, btcutil.NewTx(tx))
 		if err != nil {
 			log.Errorf("mempool tx: %w", err)
 		} else if err := s.mempool.TxInsert(ctx, mptx); err != nil {
@@ -2416,13 +2417,27 @@ func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHea
 	return s.g.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
-func parseTx(ctx context.Context, db tbcd.Database, tx *wire.MsgTx) (int64, int64, error) {
+// parseTx computes the total input and output values for a
+// transaction.  Input values are looked up from the block database.
+// If mp is non-nil, unconfirmed parent outputs in the mempool are
+// also checked — this enables child-pays-for-parent (CPFP) chains
+// where a child transaction spends an output from a parent that
+// is still in the mempool.
+func parseTx(ctx context.Context, db tbcd.Database, mp *Mempool, tx *wire.MsgTx) (int64, int64, error) {
 	var iv, ov int64
 	for _, txIn := range tx.TxIn {
 		po := txIn.PreviousOutPoint
 		wtxo, err := txOutFromOutPoint(ctx,
 			db, tbcd.NewOutpoint(po.Hash, po.Index))
 		if err != nil {
+			// If the input isn't in the block database, check
+			// the mempool for an unconfirmed parent transaction.
+			if mp != nil {
+				if ptxo := mp.txOutByOutpoint(po.Hash, po.Index); ptxo != nil {
+					iv += ptxo.Value
+					continue
+				}
+			}
 			return 0, 0, err
 		}
 		iv += wtxo.Value
@@ -2435,9 +2450,9 @@ func parseTx(ctx context.Context, db tbcd.Database, tx *wire.MsgTx) (int64, int6
 	return iv, ov, nil
 }
 
-func mempoolTxNew(ctx context.Context, db tbcd.Database, utx *btcutil.Tx) (*MempoolTx, error) {
+func mempoolTxNew(ctx context.Context, db tbcd.Database, mp *Mempool, utx *btcutil.Tx) (*MempoolTx, error) {
 	// Create mempool tx
-	inValue, outValue, err := parseTx(ctx, db, utx.MsgTx())
+	inValue, outValue, err := parseTx(ctx, db, mp, utx.MsgTx())
 	if err != nil {
 		return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
 	}
@@ -2483,7 +2498,7 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 			// Skip coinbase inputs
 			continue
 		}
-		mptx, err := mempoolTxNew(ctx, s.g.db, utx)
+		mptx, err := mempoolTxNew(ctx, s.g.db, nil, utx)
 		if err != nil {
 			return nil, fmt.Errorf("new mempool tx: %w", err)
 		}
