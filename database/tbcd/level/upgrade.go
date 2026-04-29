@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -678,11 +679,14 @@ func (l *ldb) v5(ctx context.Context) error {
 		return fmt.Errorf("close database: %w", err)
 	}
 	for _, sub := range []string{level.BlocksDB, level.BlocksMissingDB} {
-		target := filepath.Join(l.cfg.Home, sub)
-		rel, err := filepath.Rel(l.cfg.Home, target)
-		if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) {
-			return fmt.Errorf("refusing to remove %v: not a child of %v",
-				target, l.cfg.Home)
+		home := filepath.Clean(l.cfg.Home)
+		target := filepath.Join(home, sub)
+		if !strings.HasPrefix(target, home+string(os.PathSeparator)) {
+			return fmt.Errorf("refusing to remove %q: not a child of %q",
+				target, home)
+		}
+		if fi, err := os.Lstat(target); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to remove %q: is a symlink", target)
 		}
 		if err := os.RemoveAll(target); err != nil {
 			return fmt.Errorf("remove %v: %w", sub, err)

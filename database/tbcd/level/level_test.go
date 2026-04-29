@@ -1559,12 +1559,13 @@ func TestBlockHeadersRemove(t *testing.T) {
 // up the specific failure, then calls v5 directly and asserts the
 // wrapped error prefix.
 func TestDbUpgradeV5Errors(t *testing.T) {
-	type tc struct {
+	type test struct {
 		name      string
 		setup     func(t *testing.T, db *ldb)
 		wantErrIn string
+		seedBlock bool
 	}
-	cases := []tc{
+	tests := []test{
 		{
 			name: "close database fails",
 			setup: func(t *testing.T, db *ldb) {
@@ -1576,6 +1577,7 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 				}
 			},
 			wantErrIn: "close database",
+			seedBlock: true,
 		},
 		{
 			name: "malformed blockheader value size",
@@ -1591,11 +1593,12 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 				}
 			},
 			wantErrIn: "blockheader value size",
+			seedBlock: false,
 		},
 	}
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 
@@ -1618,9 +1621,8 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 
 			// Seed one header + one block so step 1 has
 			// something to wipe and step 2 has a row to
-			// rebuild from.  Skip for the malformed-value
-			// case, which plants its own bogus header.
-			if c.name != "malformed blockheader value size" {
+			// rebuild from.
+			if tt.seedBlock {
 				bh, _, err := insertBlockHeader(ctx, db,
 					&chainhash.Hash{}, 0, 0)
 				if err != nil {
@@ -1631,15 +1633,15 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 				}
 			}
 
-			c.setup(t, db)
+			tt.setup(t, db)
 
 			err = db.v5(ctx)
 			if err == nil {
 				t.Fatalf("expected v5 error, got nil")
 			}
-			if c.wantErrIn != "" && !strings.Contains(err.Error(), c.wantErrIn) {
+			if tt.wantErrIn != "" && !strings.Contains(err.Error(), tt.wantErrIn) {
 				t.Fatalf("v5 error %q does not contain %q",
-					err.Error(), c.wantErrIn)
+					err.Error(), tt.wantErrIn)
 			}
 			t.Logf("v5 returned: %v", err)
 		})

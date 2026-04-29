@@ -192,6 +192,9 @@ func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*C
 	if err != nil {
 		return nil, fmt.Errorf("homedir: %w", err)
 	}
+	if !filepath.IsAbs(homedir) {
+		return nil, fmt.Errorf("home directory must be absolute: %v", homedir)
+	}
 
 	return &Config{
 		Home:                 homedir,
