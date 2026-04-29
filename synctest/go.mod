@@ -7,7 +7,7 @@ toolchain go1.26.2
 require (
 	github.com/caarlos0/env/v11 v11.4.0
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/ethereum/go-ethereum v1.17.1
+	github.com/ethereum/go-ethereum v1.17.2
 	github.com/go-test/deep v1.1.1
 	github.com/hemilabs/heminetwork/v2 v2.0.0-rc.1.0.20260210123146-3d9f4a8d6010
 	github.com/juju/loggo/v2 v2.2.0
@@ -37,7 +37,7 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
-	github.com/crate-crypto/go-eth-kzg v1.4.0 // indirect
+	github.com/crate-crypto/go-eth-kzg v1.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
