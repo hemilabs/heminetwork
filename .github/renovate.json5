@@ -41,6 +41,12 @@
       matchUpdateTypes: ['pin', 'pinDigest'],
       commitMessageAction: 'pin',
     },
+    {
+      description: "Enable auto-merge on pull requests",
+      matchPackageNames: ["*"],
+      automerge: true,
+      automergeType: "pr",
+    },
   ],
   customManagers: [
     {
