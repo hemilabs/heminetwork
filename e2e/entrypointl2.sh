@@ -113,4 +113,5 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --gcmode=archive \
  --state.scheme=hash \
  --config=./config.toml \
- --gcmode=archive
+ --gcmode=archive \
+ --verbosity=5
