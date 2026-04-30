@@ -50,9 +50,9 @@ func (s *Server) validateJWT(strToken string) error {
 		return errors.New("stale token")
 	case time.Until(claims.IssuedAt.Time) > jwtExpiryTimeout:
 		return errors.New("future token")
-	case time.Now().After(claims.ExpiresAt.Time.Add(5 * time.Second)):
+	case time.Now().After(claims.ExpiresAt.Add(5 * time.Second)):
 		return errors.New("token is expired")
-	case time.Now().Before(claims.NotBefore.Time.Add(-5 * time.Second)):
+	case time.Now().Before(claims.NotBefore.Add(-5 * time.Second)):
 		return errors.New("token not ready for use")
 	}
 
