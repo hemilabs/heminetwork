@@ -11,7 +11,7 @@ ARG OPTIMISM_COMMIT=a22bfa0853b40668f17b0a2c81fff515e563f539
 # broken
 ARG FOUNDRY_COMMIT=97fba0a51e335a174442b19d92b64df9d2ab72ab
 
-FROM golang:1.26.2-trixie@sha256:da3943074756e8d6f109ce7a84be16e98bffa39e9d369a0447f016b56db84e8f AS foundry_build
+FROM golang:1.26.2-trixie@sha256:4a7137ea573f79c86ae451ff05817ed762ef5597fcf732259e97abeb3108d873 AS foundry_build
 ARG FOUNDRY_COMMIT
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
@@ -24,7 +24,7 @@ WORKDIR /git/foundry
 RUN git checkout $FOUNDRY_COMMIT
 RUN cargo build --package forge
 
-FROM golang:1.26.2-trixie@sha256:da3943074756e8d6f109ce7a84be16e98bffa39e9d369a0447f016b56db84e8f AS just_build
+FROM golang:1.26.2-trixie@sha256:4a7137ea573f79c86ae451ff05817ed762ef5597fcf732259e97abeb3108d873 AS just_build
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="${PATH}:/root/.cargo/bin"
@@ -36,7 +36,7 @@ WORKDIR /git/just
 RUN git checkout f028de5b258a0cc4696b9dea729cc7d4d5828baa
 RUN cargo install just
 
-FROM golang:1.26.2-trixie@sha256:da3943074756e8d6f109ce7a84be16e98bffa39e9d369a0447f016b56db84e8f AS build_1
+FROM golang:1.26.2-trixie@sha256:4a7137ea573f79c86ae451ff05817ed762ef5597fcf732259e97abeb3108d873 AS build_1
 ARG OP_GETH_COMMIT
 ARG OPTIMISM_COMMIT
 ARG FOUNDRY_COMMIT
@@ -49,7 +49,7 @@ RUN git checkout $OP_GETH_COMMIT
 
 RUN go run build/ci.go install -static ./cmd/geth
 
-FROM golang:1.26.2-trixie@sha256:da3943074756e8d6f109ce7a84be16e98bffa39e9d369a0447f016b56db84e8f AS build_2
+FROM golang:1.26.2-trixie@sha256:4a7137ea573f79c86ae451ff05817ed762ef5597fcf732259e97abeb3108d873 AS build_2
 ARG OP_GETH_COMMIT
 ARG OPTIMISM_COMMIT
 
