@@ -7,6 +7,7 @@ toolchain go1.26.2
 require (
 	github.com/caarlos0/env/v11 v11.4.0
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.17.2
 	github.com/go-test/deep v1.1.1
 	github.com/hemilabs/heminetwork/v2 v2.0.0-rc.1.0.20260210123146-3d9f4a8d6010
@@ -45,7 +46,6 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.6 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
