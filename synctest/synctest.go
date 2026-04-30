@@ -19,6 +19,7 @@ import (
 	"github.com/caarlos0/env/v11"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/dustin/go-humanize"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -259,7 +260,7 @@ func notifySlackSuccess(ctx context.Context, c *config, controlHash *common.Hash
 	}
 }
 
-func generateMsgOptions(ctx context.Context, network string, syncmode string, l2BlockMsg string, syncInfo *tbc.SyncInfo) []slack.MsgOption {
+func generateMsgOptions(_ context.Context, network string, syncmode string, l2BlockMsg string, syncInfo *tbc.SyncInfo) []slack.MsgOption {
 	var color string
 	switch network {
 	case "mainnet":
@@ -477,6 +478,28 @@ func getLogsFromDocker(ctx context.Context) string {
 		if !isValidContainer {
 			continue
 		}
+
+		// Get memory stats
+		stream, err := dockerClient.ContainerStatsOneShot(ctx, c.ID)
+		if err != nil {
+			log.Warningf("could not get stats from running container %s: %s", c.ID, err)
+			return ""
+		}
+		defer stream.Body.Close()
+
+		var stats container.StatsResponse
+		dec := json.NewDecoder(stream.Body)
+		if err := dec.Decode(&stats); err != nil {
+			log.Warningf("could not decode stats for running container %s: %s", c.ID, err)
+			return ""
+		}
+		stream.Body.Close()
+
+		ms := stats.MemoryStats
+		memUsage := fmt.Sprintf("Memory Usage: Current: %s, Max: %s, Limit: %s",
+			humanize.Bytes(ms.Usage), humanize.Bytes(ms.MaxUsage), humanize.Bytes(ms.Limit))
+		logs = fmt.Sprintf("%s\n%s", logs, string(memUsage))
+
 		reader, err := dockerClient.ContainerLogs(ctx, c.ID, container.LogsOptions{
 			ShowStdout: true,
 			ShowStderr: true,
