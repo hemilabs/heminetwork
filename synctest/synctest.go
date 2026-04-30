@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/dustin/go-humanize"
@@ -468,14 +469,14 @@ func getLogsFromDocker(ctx context.Context) string {
 
 	var logs string
 	for _, c := range containers {
-		var isValidContainer bool
+		var validName string
 		for _, name := range c.Names {
 			if strings.Contains(name, "op-geth") || strings.Contains(name, "op-node") {
-				isValidContainer = true
+				validName = name
 				break
 			}
 		}
-		if !isValidContainer {
+		if validName == "" {
 			continue
 		}
 
@@ -496,9 +497,12 @@ func getLogsFromDocker(ctx context.Context) string {
 		stream.Body.Close()
 
 		ms := stats.MemoryStats
-		memUsage := fmt.Sprintf("Memory Usage: Current: %s, Max: %s, Limit: %s",
-			humanize.Bytes(ms.Usage), humanize.Bytes(ms.MaxUsage), humanize.Bytes(ms.Limit))
+		memUsage := fmt.Sprintf("Memory Usage (%s) - Current: %s, Max: %s, Limit: %s",
+			validName, humanize.Bytes(ms.Usage), humanize.Bytes(ms.MaxUsage),
+			humanize.Bytes(ms.Limit))
 		logs = fmt.Sprintf("%s\n%s", logs, string(memUsage))
+
+		spew.Dump(logs)
 
 		reader, err := dockerClient.ContainerLogs(ctx, c.ID, container.LogsOptions{
 			ShowStdout: true,
