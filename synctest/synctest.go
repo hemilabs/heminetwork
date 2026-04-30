@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/dustin/go-humanize"
@@ -501,8 +500,6 @@ func getLogsFromDocker(ctx context.Context) string {
 			validName, humanize.Bytes(ms.Usage), humanize.Bytes(ms.MaxUsage),
 			humanize.Bytes(ms.Limit))
 		logs = fmt.Sprintf("%s\n%s", logs, string(memUsage))
-
-		spew.Dump(logs)
 
 		reader, err := dockerClient.ContainerLogs(ctx, c.ID, container.LogsOptions{
 			ShowStdout: true,
