@@ -83,7 +83,7 @@ type ForbiddenMethodError struct {
 }
 
 func (fme ForbiddenMethodError) Error() string {
-	return fmt.Sprintf("method not allowed: %s", fme.method)
+	return "method not allowed: " + fme.method
 }
 
 func (fme ForbiddenMethodError) Is(target error) bool {

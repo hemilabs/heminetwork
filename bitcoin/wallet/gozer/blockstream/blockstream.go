@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -74,10 +74,10 @@ func (bs *blockstreamGozer) BestHeightHashTime(ctx context.Context) (uint64, *ch
 		if ts, ok := t.(float64); ok && ts > 0 {
 			timestamp = time.Unix(int64(ts), 0)
 		} else {
-			return 0, nil, timestamp, fmt.Errorf("invalid timestamp")
+			return 0, nil, timestamp, errors.New("invalid timestamp")
 		}
 	} else {
-		return 0, nil, timestamp, fmt.Errorf("invalid timestamp")
+		return 0, nil, timestamp, errors.New("invalid timestamp")
 	}
 	if h, ok := bi["height"]; ok {
 		if height, ok := h.(float64); ok && height >= 0 {
@@ -85,7 +85,7 @@ func (bs *blockstreamGozer) BestHeightHashTime(ctx context.Context) (uint64, *ch
 		}
 	}
 
-	return 0, nil, time.Time{}, fmt.Errorf("invalid height")
+	return 0, nil, time.Time{}, errors.New("invalid height")
 }
 
 func (bs *blockstreamGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {

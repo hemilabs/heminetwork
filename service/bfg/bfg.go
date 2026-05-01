@@ -168,7 +168,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		}
 	case bitcoinSourceTBC:
 		if s.cfg.BitcoinURL == "" {
-			return nil, fmt.Errorf("invalid bitcoin url")
+			return nil, errors.New("invalid bitcoin url")
 		}
 		s.gozer = tbcgozer.New(s.cfg.BitcoinURL)
 	default:
@@ -183,7 +183,7 @@ func (s *Server) geth() (*ethclient.Client, error) {
 	geth := s.opgethClient
 	s.mtx.RUnlock()
 	if geth == nil {
-		return nil, fmt.Errorf("not connected")
+		return nil, errors.New("not connected")
 	}
 	return geth, nil
 }

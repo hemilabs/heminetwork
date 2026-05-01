@@ -612,7 +612,7 @@ func TestForksWithGen(t *testing.T) {
 						"-regtest=1",
 						"-named",
 						"sendtoaddress",
-						fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+						"address=" + otherAddress.EncodeAddress(),
 						"conf_target=1",
 						"amount=7",
 						"avoid_reuse=false",
@@ -725,7 +725,7 @@ func TestForksWithGen(t *testing.T) {
 							"-regtest=1",
 							"-named",
 							"sendtoaddress",
-							fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+							"address=" + otherAddress.EncodeAddress(),
 							"conf_target=1",
 							"amount=3",
 							"subtractfeefromamount=true",
@@ -743,7 +743,7 @@ func TestForksWithGen(t *testing.T) {
 							"bitcoin-cli",
 							"-regtest=1",
 							"-generate",
-							fmt.Sprintf("%d", i*2+1),
+							strconv.Itoa(i*2 + 1),
 						})
 					if err != nil {
 						t.Fatal(err)
@@ -779,7 +779,7 @@ func TestForksWithGen(t *testing.T) {
 							"-regtest=1",
 							"-named",
 							"sendtoaddress",
-							fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+							"address=" + otherAddress.EncodeAddress(),
 							"conf_target=1",
 							"amount=2",
 							"subtractfeefromamount=true",
@@ -797,7 +797,7 @@ func TestForksWithGen(t *testing.T) {
 							"bitcoin-cli",
 							"-regtest=1",
 							"-generate",
-							fmt.Sprintf("%d", i*2+2),
+							strconv.Itoa(i*2 + 2),
 						})
 					if err != nil {
 						t.Fatal(err)
@@ -827,7 +827,7 @@ func TestForksWithGen(t *testing.T) {
 						"-regtest=1",
 						"-named",
 						"sendtoaddress",
-						fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+						"address=" + otherAddress.EncodeAddress(),
 						"conf_target=1",
 						"amount=7",
 						"avoid_reuse=false",
@@ -937,7 +937,7 @@ func TestForksWithGen(t *testing.T) {
 						"-regtest=1",
 						"-named",
 						"sendtoaddress",
-						fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+						"address=" + otherAddress.EncodeAddress(),
 						"conf_target=1",
 						"amount=7",
 						"avoid_reuse=false",
@@ -1137,7 +1137,7 @@ func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container 
 		t.Fatal("failed to generate random id:", err)
 	}
 
-	name := fmt.Sprintf("bitcoind-%s", id)
+	name := "bitcoind-" + id
 	req := testcontainers.ContainerRequest{
 		Image:        "kylemanna/bitcoind",
 		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1", "-noonion", "-listenonion=0", "-fallbackfee=0.01", "-peerbloomfilters=1", "-debug"},
@@ -1196,7 +1196,7 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 			"bitcoin-cli",
 			"-regtest=1",
 			"getblockhash",
-			fmt.Sprintf("%d", 1),
+			strconv.Itoa(1),
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -1251,7 +1251,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	cfg.Network = networkLocalnet
 	cfg.ListenAddress = "127.0.0.1:0"
 	cfg.Seeds = []string{
-		fmt.Sprintf("127.0.0.1:%s", mappedPeerPort.Port()),
+		"127.0.0.1:" + mappedPeerPort.Port(),
 	}
 
 	tbcServer, err := NewServer(cfg)
@@ -1392,7 +1392,7 @@ func bitcoindBlockAtHeight(ctx context.Context, t *testing.T, bitcoindContainer 
 		"bitcoin-cli",
 		"-regtest=1",
 		"getblockhash",
-		fmt.Sprintf("%d", height),
+		strconv.FormatUint(height, 10),
 	})
 	if err != nil {
 		t.Fatal(fmt.Errorf("bitcoin-cli getblockhash %d: %w", height, err))

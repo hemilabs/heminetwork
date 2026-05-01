@@ -7,7 +7,6 @@ package blockstream
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,7 +66,7 @@ func mockHttpServer() *httptest.Server {
 			if _, err := w.Write([]byte(response)); err != nil {
 				panic(err)
 			}
-		case r.URL.Path == fmt.Sprintf("/block/%s", fakeHash):
+		case r.URL.Path == "/block/"+fakeHash:
 			response := map[string]any{
 				"height":    uint64(10),
 				"timestamp": int64(15),

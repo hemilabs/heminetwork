@@ -120,7 +120,7 @@ func (e *ExternalHeaderNotAllowedError) Error() string {
 	if e.Op == "" {
 		return "not allowed in external-header mode"
 	}
-	return fmt.Sprintf("%s: not allowed in external-header mode", e.Op)
+	return e.Op + ": not allowed in external-header mode"
 }
 
 // Is allows errors.Is(err, &ExternalHeaderNotAllowedError{}) to match by type.
@@ -620,7 +620,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	if uint64(remoteVersion.LastBlock) < bhb.Height {
 		// Disconnect for now. We only want more or less synced peers.
 		readError = err
-		return fmt.Errorf("remote peer height below ours")
+		return errors.New("remote peer height below ours")
 	} else {
 		err := s.getHeadersByHeights(ctx, p,
 			bhb.Height, bhb.Height-1000, bhb.Height-1999,
