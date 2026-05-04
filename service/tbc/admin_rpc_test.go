@@ -384,7 +384,7 @@ func TestAdminRPCCommands(t *testing.T) {
 					return fmt.Errorf("unexpected error: %w", resp.Error)
 				}
 				if resp.Job.JobID == "" {
-					return fmt.Errorf("empty job ID")
+					return errors.New("empty job ID")
 				}
 				if resp.Job.JobType != string(SyncIndexersToHashJob) {
 					return fmt.Errorf("expected job type %s, got %s",
@@ -409,7 +409,7 @@ func TestAdminRPCCommands(t *testing.T) {
 					return fmt.Errorf("unexpected error: %w", resp.Error)
 				}
 				if resp.Job.JobID != jid {
-					return fmt.Errorf("unknown job ")
+					return errors.New("unknown job ")
 				}
 				if resp.Job != initialInfo {
 					return fmt.Errorf("wanted job %v, got %v",
@@ -526,7 +526,7 @@ func TestAdminRPCCommands(t *testing.T) {
 					return fmt.Errorf("expected height 0, got %d", resp.Height)
 				}
 				if resp.BlockHeader == nil {
-					return fmt.Errorf("expected non-nil block header")
+					return errors.New("expected non-nil block header")
 				}
 				return nil
 			},

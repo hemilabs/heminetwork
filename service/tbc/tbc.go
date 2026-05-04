@@ -351,7 +351,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			return nil, fmt.Errorf("JWT secret %w", err)
 		}
 		if len(s.adminJWTSecret) != 32 {
-			return nil, fmt.Errorf("invalid JWT secret")
+			return nil, errors.New("invalid JWT secret")
 		}
 		s.cfg.JWTSecret = ""
 	}

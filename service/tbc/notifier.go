@@ -36,7 +36,7 @@ func NotificationBlock(hash chainhash.Hash) Notification {
 	return Notification{
 		Type:      "block_insert",
 		ID:        hash.String(),
-		Msg:       fmt.Sprintf("block inserted: %s", hash.String()),
+		Msg:       "block inserted: " + hash.String(),
 		Timestamp: time.Now(),
 	}
 }
@@ -45,7 +45,7 @@ func NotificationBlockheader(hash chainhash.Hash) Notification {
 	return Notification{
 		Type:      "blockheader_insert",
 		ID:        hash.String(),
-		Msg:       fmt.Sprintf("blockheader inserted: %s", hash.String()),
+		Msg:       "blockheader inserted: " + hash.String(),
 		Timestamp: time.Now(),
 	}
 }

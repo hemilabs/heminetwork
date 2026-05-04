@@ -93,7 +93,7 @@ func TestHubSubscribe(t *testing.T) {
 				}
 				return
 			}
-			panic(fmt.Sprintf("message received: %s", spew.Sdump(msg)))
+			panic("message received: " + spew.Sdump(msg))
 		}()
 
 		synctest.Wait()
