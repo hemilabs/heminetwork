@@ -44,13 +44,13 @@ func TestHubSubscribe(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wg.Add(1)
-			if err := h.StartJob(jid); err != nil {
-				t.Fatal(err)
-			}
 			if i < subCount {
 				h.Subscribe(cid, jid)
 				subIDs[jid] = struct{}{}
+			}
+			wg.Add(1)
+			if err := h.StartJob(jid); err != nil {
+				t.Fatal(err)
 			}
 		}
 
