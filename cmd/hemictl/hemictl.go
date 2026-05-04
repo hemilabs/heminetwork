@@ -265,7 +265,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		}
 		hvm := args["hvm"]
 		if hvm == "" {
-			return fmt.Errorf("hvm must be set")
+			return errors.New("hvm must be set")
 		}
 		hvms := strings.Split(hvm, ",")
 		r := make([]map[string]any, len(hvms))
@@ -321,7 +321,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		}
 		hvm := args["hvm"]
 		if hvm == "" {
-			return fmt.Errorf("hvm must be set")
+			return errors.New("hvm must be set")
 		}
 		hvms := strings.Split(hvm, ",")
 		r := make([]map[string]any, len(hvms))
@@ -989,10 +989,10 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 
 	case "dumpmetadata":
-		return fmt.Errorf("fixme dumpmetadata")
+		return errors.New("fixme dumpmetadata")
 
 	case "dumpoutputs":
-		return fmt.Errorf("fixme dumpoutputs")
+		return errors.New("fixme dumpoutputs")
 		// s.DBClose()
 
 		// levelDBHome := "~/.tbcd" // XXX
@@ -1204,7 +1204,7 @@ func p2p(flags []string) error {
 
 	addr := args["addr"]
 	if addr == "" {
-		return fmt.Errorf("addr required")
+		return errors.New("addr required")
 	}
 
 	var network wire.BitcoinNet

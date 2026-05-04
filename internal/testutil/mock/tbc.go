@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -76,7 +76,7 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 			panic(fmt.Errorf("handleWebsocketRead: %w", err))
 		}
 		if errors.Is(err, io.EOF) {
-			panic(fmt.Errorf("handleWebsocketRead: EOF"))
+			panic(errors.New("handleWebsocketRead: EOF"))
 		}
 
 		return "", fmt.Errorf("handleWebsocketRead: %w", err)

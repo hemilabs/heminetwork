@@ -7,13 +7,14 @@ package btctool
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/hemilabs/heminetwork/v2/cmd/btctool/bdf"
 	"github.com/hemilabs/heminetwork/v2/cmd/btctool/blockstream"
 )
 
 func GetAndStoreBlockHeader(ctx context.Context, height int, dir string) (string, error) {
-	hash, err := blockstream.BlockHeightHash(ctx, fmt.Sprintf("%v", height))
+	hash, err := blockstream.BlockHeightHash(ctx, strconv.Itoa(height))
 	if err != nil {
 		return "", fmt.Errorf("retrieve block by hash %v: %w", height, err)
 	}

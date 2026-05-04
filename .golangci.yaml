@@ -27,6 +27,7 @@ linters:
     - "nilerr" # Finds the code that returns nil even if it checks that the error is not nil.
     - "noctx" # Finds http requests without context.Context.
     - "nolintlint" # Reports ill-formed or insufficient nolint directives.
+    - "perfsprint" # Finds uses of formatting that can be replaced with a faster alternative.
     - "prealloc" # Finds slice declarations that could potentially be pre-allocated.
     - "predeclared" # Find code that shadows one of Go's predeclared identifiers.
     - "promlinter" # Check Prometheus metrics naming via promlint.
@@ -57,9 +58,6 @@ linters:
         - "XXX"
         - "TODO"
         - "FIXME"
-    gomoddirectives:
-      replace-allow-list:
-        - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
     nolintlint:
       # Require an explanation after each nolint directive.
       # Explanation format example: '//nolint:ineffassign // Explanation goes here.'
@@ -103,6 +101,7 @@ linters:
 
 formatters:
   enable:
+    - "goimports"
     - "gci" # Enforces package import order, making it deterministic.
     - "gofumpt" # An extended version of go fmt.
   settings:

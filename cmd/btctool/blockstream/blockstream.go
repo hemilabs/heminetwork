@@ -7,6 +7,7 @@ package blockstream
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -57,7 +58,7 @@ func Tip(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("parse int: %w", err)
 	}
 	if height < 0 {
-		return 0, fmt.Errorf("parse uint: unexpected negative value")
+		return 0, errors.New("parse uint: unexpected negative value")
 	}
 
 	return int(height), nil

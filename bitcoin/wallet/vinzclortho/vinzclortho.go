@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -78,14 +78,14 @@ func (vc *VinzClortho) Unlock(secret string) error {
 	vc.mtx.Lock()
 	defer vc.mtx.Unlock()
 	if vc.master != nil {
-		return fmt.Errorf("wallet already unlocked")
+		return errors.New("wallet already unlocked")
 	}
 
 	switch {
 	case strings.HasPrefix(secret, "0x"):
 		secret = secret[2:]
 	case strings.HasPrefix(secret, "xpub"):
-		return fmt.Errorf("not an extended private key")
+		return errors.New("not an extended private key")
 	case strings.HasPrefix(secret, "xprv"):
 		var err error
 		vc.master, err = hdkeychain.NewKeyFromString(secret)
@@ -190,12 +190,12 @@ func (vc *VinzClortho) DerivePath(path string) (*hdkeychain.ExtendedKey, error) 
 
 	p := strings.Split(path, "/")
 	if len(p) < 2 {
-		return nil, fmt.Errorf("invalid path")
+		return nil, errors.New("invalid path")
 	}
 
 	// p[0] must be m
 	if p[0] != "m" {
-		return nil, fmt.Errorf("invalid path prefix")
+		return nil, errors.New("invalid path prefix")
 	}
 
 	// p[1] is the account key and subsequent p elements are children.

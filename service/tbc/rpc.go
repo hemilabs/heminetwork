@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -1261,7 +1262,7 @@ func wireBlockHeaderToTBC(bh *wire.BlockHeader) *tbcapi.BlockHeader {
 		PrevHash:   bh.PrevBlock,
 		MerkleRoot: bh.MerkleRoot,
 		Timestamp:  bh.Timestamp.Unix(),
-		Bits:       fmt.Sprintf("%x", bh.Bits),
+		Bits:       strconv.FormatUint(uint64(bh.Bits), 16),
 		Nonce:      bh.Nonce,
 	}
 }

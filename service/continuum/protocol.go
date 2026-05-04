@@ -437,7 +437,7 @@ func NewSecretFromString(secret string) (*Secret, error) {
 	}
 	// This may not always be the case and may need to be a range.
 	if len(s) != 32 {
-		return nil, fmt.Errorf("invalid key")
+		return nil, errors.New("invalid key")
 	}
 	return NewSecretFromPrivate(secp256k1.PrivKeyFromBytes(s)), nil
 }
@@ -921,7 +921,7 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, error) {
 // Read reads and decrypts the next command from the connection stream. It
 // returns the header and command.
 func (t *Transport) Read() (any, any, error) {
-	return nil, nil, fmt.Errorf("nope")
+	return nil, nil, errors.New("nope")
 }
 
 // write encrypts the passed in cleartext and writes it to the connection

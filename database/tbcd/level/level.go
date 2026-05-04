@@ -1112,7 +1112,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		// This should never happen, one of the above three conditions must be true.
 		// Do this before the end of function so we don't apply database changes.
 		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: none of the chain geometry checks applies to this removal")
+			errors.New("block headers remove: none of the chain geometry checks applies to this removal")
 	}
 
 	// </MAXMADNESS>

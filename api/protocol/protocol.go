@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -538,7 +539,7 @@ func (ac *Conn) Call(ctx context.Context, api API, payload any) (Command, string
 	log.Tracef("Call: %T", payload)
 	defer log.Tracef("Call exit: %T", payload)
 
-	msgID := fmt.Sprintf("%d", ac.nextMsgID())
+	msgID := strconv.FormatUint(ac.nextMsgID(), 10)
 	resultCh := make(chan *readResult, 1)
 
 	ac.Lock()

@@ -243,7 +243,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	switch s.cfg.BitcoinSource {
 	case bitcoinSourceTBC:
 		if s.cfg.BitcoinURL == "" {
-			return nil, fmt.Errorf("invalid bitcoin url")
+			return nil, errors.New("invalid bitcoin url")
 		}
 		s.gozer = tbcgozer.New(s.cfg.BitcoinURL)
 	case bitcoinSourceBlockstream:
@@ -368,7 +368,7 @@ func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2Key
 		return nil, fmt.Errorf("opgeth rpc: %w", err)
 	}
 	if len(kr.L2Keystones) <= 0 {
-		return nil, fmt.Errorf("no keystones")
+		return nil, errors.New("no keystones")
 	}
 	return &kr, nil
 }

@@ -94,7 +94,7 @@ func newInvalidTypeError(msg any, expected ...string) error {
 func (e *InvalidTypeError) Error() string {
 	switch {
 	case len(e.expected) == 0:
-		return fmt.Sprintf("invalid type: %s", e.actual)
+		return "invalid type: " + e.actual
 	case len(e.expected) == 1:
 		return fmt.Sprintf("invalid type: %s, expected %s",
 			e.actual, e.expected[0])
@@ -471,7 +471,7 @@ func (p *Peer) FeeFilter() (*wire.MsgFeeFilter, error) {
 	defer p.mtx.Unlock()
 
 	if p.feeFilterLast == nil {
-		return nil, fmt.Errorf("no fee filter received")
+		return nil, errors.New("no fee filter received")
 	}
 
 	ff := *p.feeFilterLast

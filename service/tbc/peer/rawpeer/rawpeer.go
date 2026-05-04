@@ -215,7 +215,7 @@ func (r *RawPeer) handshake(ctx context.Context, conn net.Conn) error {
 	expire := time.Now().Add(defaultHandshakeTimeout)
 	for {
 		if time.Now().After(expire) {
-			return fmt.Errorf("timeout")
+			return errors.New("timeout")
 		}
 		msg, err := readTimeout(defaultHandshakeTimeout, conn, r.protocolVersion, r.network)
 		if errors.Is(err, wire.ErrUnknownMessage) {
