@@ -1005,14 +1005,13 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
 		break
-	}
 
-	if testingFork() {
-		waitSequencerWindowSizeForFork(t)
-	}
-	for {
+		if testingFork() {
+			waitSequencerWindowSizeForFork(t)
+		}
+
 		select {
-		case <-time.After(1 * time.Second):
+		case <-time.After(5 * time.Second):
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
@@ -1032,9 +1031,13 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		if balance.Cmp(value) < 0 {
 			t.Logf("unexpected balance: %s", balance)
 			continue
+		} else {
+			break
 		}
 
-		break
+		if i == abort {
+			t.Fatal("retries exceeded")
+		}
 	}
 }
 
