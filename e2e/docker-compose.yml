@@ -460,8 +460,8 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      bitcoind:
-        condition: "service_started"
+      wait-for-finalized:
+        condition: "service_completed_successfully"
     command:
       - "bitcoin-cli"
       - "-regtest=1"
@@ -483,8 +483,8 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      bitcoind:
-        condition: "service_started"
+      wait-for-finalized:
+        condition: "service_completed_successfully"
     command:
       - "bitcoin-cli"
       - "-regtest=1"
