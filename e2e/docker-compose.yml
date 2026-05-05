@@ -81,6 +81,7 @@ services:
       TBC_LISTEN_ADDRESS: "0.0.0.0:8082"
     networks:
       e2e:
+        ipv4_address: 192.169.199.9
 
   bfgd:
     build:
@@ -470,6 +471,30 @@ services:
       - "-rpcconnect=bitcoind"
       - "setban"
       - "0.0.0.0/0"
+      - "add"
+    networks:
+      e2e:
+
+  # ban all peers besides tbcd so that we can continue to pop mine
+  bitcoind-setban-2:
+    # yamllint disable-line rule:line-length
+    image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      bitcoind:
+        condition: "service_started"
+    command:
+      - "bitcoin-cli"
+      - "-regtest=1"
+      - "-rpcuser=user"
+      - "-rpcpassword=password"
+      - "-rpcport=18443"
+      - "-rpcconnect=bitcoind"
+      - "setban"
+      - "192.169.199.9"
+      - "remove"
     networks:
       e2e:
 
