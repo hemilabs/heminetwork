@@ -101,20 +101,6 @@ while true; do
     result=$(btc_rpc "{\"jsonrpc\":\"1.0\",\"id\":\"invalidateblock\",\"method\":\"invalidateblock\",\"params\":[\"$canonical_hash\"]}")
     echo "bitcoind response: $result"
 
-    btc_tip=$(btc_rpc '{"jsonrpc":"1.0","id":"getblockcount","method":"getblockcount","params":[]}' | jq -r '.result')
-    echo "pruning bitcoind chain up to height $btc_tip..." >&2
-    btc_rpc "{\"jsonrpc\":\"1.0\",\"id\":\"pruneblockchain\",\"method\":\"pruneblockchain\",\"params\":[$btc_tip]}"
-
-    echo "verifying $canonical_hash is no longer on bitcoind node..."
-    verify_result=$(btc_rpc "{\"jsonrpc\":\"1.0\",\"id\":\"getblock\",\"method\":\"getblock\",\"params\":[\"$canonical_hash\"]}")
-    echo "getblock response: $verify_result"
-    verify_error=$(printf '%s' "$verify_result" | jq -r '.error')
-    if [ -z "$verify_error" ] || [ "$verify_error" = "null" ]; then
-      echo "error: block $canonical_hash still exists on bitcoind node after pruning" >&2
-      exit 1
-    fi
-    echo "confirmed: block $canonical_hash is no longer on bitcoind node"
-
     exit 0
   fi
 

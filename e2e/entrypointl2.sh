@@ -17,15 +17,15 @@ cat /tmp/l1genesisblockhash.txt
 
 echo "$(jq ".genesis.l1.hash = \"$(cat /tmp/l1genesisblockhash.txt)\"" /shared-dir/rollup.json)" > /shared-dir/rollup.json
 
-BESTBLOCKHASH=$(curl --data-binary '{"jsonrpc": "1.0", "id": "curltest", "method": "getbestblockhash", "params": []}' -H 'content-type: text/plain;' http://user:password@bitcoind-prune-mode:18443/ | jq '.result')
+BESTBLOCKHASH=$(curl --data-binary '{"jsonrpc": "1.0", "id": "curltest", "method": "getbestblockhash", "params": []}' -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq '.result')
 
 echo "best block hash $BESTBLOCKHASH"
 
-curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH]}" -H 'content-type: text/plain;' http://user:password@bitcoind-prune-mode:18443/
+curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH]}" -H 'content-type: text/plain;' http://user:password@bitcoind:18443/
 
-BLOCKHEIGHT=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH]}" -H 'content-type: text/plain;' http://user:password@bitcoind-prune-mode:18443/ | jq '.result.height')
+BLOCKHEIGHT=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH]}" -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq '.result.height')
 
-BLOCKHEADER=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH, false]}" -H 'content-type: text/plain;' http://user:password@bitcoind-prune-mode:18443/ | jq -r '.result')
+BLOCKHEADER=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH, false]}" -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq -r '.result')
 
 
 filecontents=$(cat << EOF
@@ -94,7 +94,7 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --authrpc.jwtsecret=/tmp/jwt.hex \
  --tbc.network=localnet \
  --tbc.prometheusaddress='0.0.0.0:5555' \
- --tbc.seeds='bitcoind-prune-mode:18444' \
+ --tbc.seeds='bitcoind:18444' \
  --override.ecotone=1725868497 \
  --override.canyon=1725868497 \
  --hvm.headerdatadir=/tbc/headers \
