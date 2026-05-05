@@ -458,7 +458,7 @@ services:
     image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
     deploy:
       restart_policy:
-        condition: "any"
+        condition: "on-failure"
     depends_on:
       wait-for-finalized:
         condition: "service_completed_successfully"
@@ -481,9 +481,9 @@ services:
     image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
     deploy:
       restart_policy:
-        condition: "any"
+        condition: "on-failure"
     depends_on:
-      wait-for-finalized:
+      bitcoind-setban:
         condition: "service_completed_successfully"
     command:
       - "bitcoin-cli"
