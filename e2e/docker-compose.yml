@@ -460,8 +460,10 @@ services:
       restart_policy:
         condition: "on-failure"
     depends_on:
-      wait-for-finalized:
-        condition: "service_completed_successfully"
+      op-geth-l2-non-sequencing-snap-sync:
+        condition: "service_healthy"
+      op-geth-l2-non-sequencing-full-sync:
+        condition: "service_healthy"
     command:
       - "bitcoin-cli"
       - "-regtest=1"
