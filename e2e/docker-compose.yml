@@ -502,7 +502,7 @@ services:
 
   bitcoind-invalidateblocks:
     depends_on:
-      bitcoind-setban-2:
+      wait-for-finalized:
         condition: "service_completed_successfully"
     image: optimism-stack:latest
     deploy:
