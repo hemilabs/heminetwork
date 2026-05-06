@@ -10,6 +10,9 @@ services:
   bitcoind:
     # yamllint disable-line rule:line-length
     image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
+    deploy:
+      restart_policy:
+        condition: "on-failure"
     command:
       - "bitcoind"
       - "-regtest=1"
