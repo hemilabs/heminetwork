@@ -101,6 +101,12 @@ while true; do
     result=$(btc_rpc "{\"jsonrpc\":\"1.0\",\"id\":\"invalidateblock\",\"method\":\"invalidateblock\",\"params\":[\"$canonical_hash\"]}")
     echo "bitcoind response: $result"
 
+    rpc_error=$(printf '%s' "$result" | jq -r '.error // empty')
+    if [ -n "$rpc_error" ]; then
+      echo "error: invalidateblock failed: $rpc_error" >&2
+      exit 1
+    fi
+
     exit 0
   fi
 

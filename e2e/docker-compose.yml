@@ -20,11 +20,12 @@ services:
       - "-txindex=1"
       - "-rpcworkqueue=400"
       - "-printtoconsole"
+      - "-reindex"
     ports:
       - "18443:18443"
       - "18444:18444"
-    volumes:
-      - {type: "tmpfs", target: "/bitcoin/.bitcoin"}
+    # volumes:
+    #   - {type: "tmpfs", target: "/bitcoin/.bitcoin"}
     networks:
       e2e:
 
