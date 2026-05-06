@@ -675,6 +675,7 @@ func (l *ldb) v5(ctx context.Context) error {
 	// empty.  This avoids iterating BlocksMissing to batch-
 	// delete every key and keeps both the Database and ldb
 	// pools pointing at the same handles.
+	lcfg := l.Config()
 	if err := l.Close(); err != nil {
 		return fmt.Errorf("close database: %w", err)
 	}
@@ -692,7 +693,7 @@ func (l *ldb) v5(ctx context.Context) error {
 			return fmt.Errorf("remove %v: %w", sub, err)
 		}
 	}
-	ld, err := level.New(ctx, level.NewDefaultConfig(l.cfg.Home))
+	ld, err := level.New(ctx, &lcfg)
 	if err != nil {
 		return fmt.Errorf("reopen database: %w", err)
 	}

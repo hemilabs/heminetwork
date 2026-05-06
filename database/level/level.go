@@ -130,6 +130,16 @@ func (l *Database) RawDB() RawPool {
 	return maps.Clone(l.rawPool)
 }
 
+// Config returns a shallow copy of the database configuration.
+// XXX this is a band-aid; the interfaces inside opt.Options (Filter,
+// Comparer, Cacher) are shared references, not deep copies.  Safe
+// today because nothing mutates them after open, but a proper fix
+// would be to stop duplicating pool/rawPool on ldb and use the
+// embedded Database directly.
+func (l *Database) Config() Config {
+	return *l.cfg
+}
+
 func (l *Database) openDB(name string) error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
