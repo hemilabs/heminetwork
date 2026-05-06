@@ -2303,3 +2303,599 @@ func TestNotFoundError(t *testing.T) {
 		})
 	}
 }
+
+func TestTxWatchNotification(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	var dupErr database.DuplicateError
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		HemiIndex:               true,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MempoolEnabled:          true,
+		Network:                 networkLocalnet,
+		ListenAddress:           "127.0.0.1:0",
+		PrometheusListenAddress: "",
+		Seeds:                   []string{"192.0.2.1:8333"},
+		NotificationBlocking:    true,
+	}
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Subscribe to internal notifications to know when the server
+	// is ready (genesis block inserted).
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, dupErr) {
+			panic(err)
+		}
+	}()
+
+	// Wait for genesis block notification.
+	for {
+		msg, err := l.Listen(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if msg.Is(NotificationBlock(chainhash.Hash{})) {
+			break
+		}
+	}
+	l.Unsubscribe()
+
+	// Wait for HTTP to be listening.
+	var tbcAddr string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := s.HTTPAddress(); addr != nil {
+			tbcAddr = addr.String()
+			break
+		}
+	}
+
+	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+
+	// Connect websocket client.
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	// Create a script hash to watch.
+	watchedScript := []byte{
+		0x00, 0x14, // witness v0 keyhash
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+		0x11, 0x12, 0x13, 0x14,
+	}
+	watchedSH := tbcd.NewScriptHashFromScript(watchedScript)
+
+	// Send TxWatch request.
+	if err := tbcapi.Write(ctx, tws.conn, "watch-1", tbcapi.TxWatchRequest{
+		ScriptHashes: []api.ByteSlice{watchedSH[:]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read TxWatch response.
+	var watchResp protocol.Message
+	if err := wsjson.Read(ctx, c, &watchResp); err != nil {
+		t.Fatal(err)
+	}
+	if watchResp.Header.Command != tbcapi.CmdTxWatchResponse {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxWatchResponse, watchResp.Header.Command)
+	}
+
+	// Inject a notification through the server's notifier to simulate
+	// a mempool tx matching the watched script hash.
+	fakeTxid := chainhash.Hash{0xaa, 0xbb, 0xcc}
+	if err := s.notifier.Notify(ctx, NotificationTxMempool(fakeTxid, watchedSH)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read the push notification from the websocket.
+	var ntfy protocol.Message
+	if err := wsjson.Read(ctx, c, &ntfy); err != nil {
+		t.Fatal(err)
+	}
+	if ntfy.Header.Command != tbcapi.CmdTxNotification {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxNotification, ntfy.Header.Command)
+	}
+
+	var txn tbcapi.TxNotification
+	if err := json.Unmarshal(ntfy.Payload, &txn); err != nil {
+		t.Fatal(err)
+	}
+	if txn.Type != NtfnTypeTxMempool {
+		t.Fatalf("expected type tx_mempool, got %s", txn.Type)
+	}
+	if txn.TxID != fakeTxid.String() {
+		t.Fatalf("expected txid %s, got %s", fakeTxid, txn.TxID)
+	}
+}
+
+func TestTxWatchFilterDrop(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	var dupErr database.DuplicateError
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		HemiIndex:               true,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MempoolEnabled:          true,
+		Network:                 networkLocalnet,
+		ListenAddress:           "127.0.0.1:0",
+		PrometheusListenAddress: "",
+		Seeds:                   []string{"192.0.2.1:8333"},
+		NotificationBlocking:    true,
+	}
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, dupErr) {
+			panic(err)
+		}
+	}()
+
+	for {
+		msg, err := l.Listen(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if msg.Is(NotificationBlock(chainhash.Hash{})) {
+			break
+		}
+	}
+	l.Unsubscribe()
+
+	var tbcAddr string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := s.HTTPAddress(); addr != nil {
+			tbcAddr = addr.String()
+			break
+		}
+	}
+
+	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	// Watch for script hash A.
+	shA := tbcd.NewScriptHashFromScript([]byte("address-A"))
+	shB := tbcd.NewScriptHashFromScript([]byte("address-B"))
+
+	if err := tbcapi.Write(ctx, tws.conn, "watch-1", tbcapi.TxWatchRequest{
+		ScriptHashes: []api.ByteSlice{shA[:]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var watchResp protocol.Message
+	if err := wsjson.Read(ctx, c, &watchResp); err != nil {
+		t.Fatal(err)
+	}
+
+	// Send a notification for unwatched shB — should be filtered out.
+	if err := s.notifier.Notify(ctx, NotificationTxMempool(chainhash.Hash{0x01}, shB)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Send a notification for watched shA — should arrive.
+	if err := s.notifier.Notify(ctx, NotificationTxMempool(chainhash.Hash{0x02}, shA)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read — we should get shA's notification, not shB's.
+	var ntfy protocol.Message
+	if err := wsjson.Read(ctx, c, &ntfy); err != nil {
+		t.Fatal(err)
+	}
+	if ntfy.Header.Command != tbcapi.CmdTxNotification {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxNotification, ntfy.Header.Command)
+	}
+
+	var txn tbcapi.TxNotification
+	if err := json.Unmarshal(ntfy.Payload, &txn); err != nil {
+		t.Fatal(err)
+	}
+	if txn.TxID != (chainhash.Hash{0x02}).String() {
+		t.Fatalf("expected txid for shA (0x02), got %s — filter did not drop shB", txn.TxID)
+	}
+}
+
+// txWatchTestServer creates a tbcd server for tx watch tests and returns
+// the server, a connected websocket, and a cleanup function.
+func txWatchTestServer(t *testing.T) (*Server, *websocket.Conn, *tbcWs) {
+	t.Helper()
+
+	ctx := t.Context()
+	var dupErr database.DuplicateError
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		HemiIndex:               true,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MempoolEnabled:          true,
+		Network:                 networkLocalnet,
+		ListenAddress:           "127.0.0.1:0",
+		PrometheusListenAddress: "",
+		Seeds:                   []string{"192.0.2.1:8333"},
+		NotificationBlocking:    true,
+	}
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, dupErr) {
+			panic(err)
+		}
+	}()
+
+	for {
+		msg, err := l.Listen(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if msg.Is(NotificationBlock(chainhash.Hash{})) {
+			break
+		}
+	}
+	l.Unsubscribe()
+
+	var tbcAddr string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := s.HTTPAddress(); addr != nil {
+			tbcAddr = addr.String()
+			break
+		}
+	}
+
+	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{conn: protocol.NewWSConn(c)}
+	return s, c, tws
+}
+
+func TestTxUnwatchThroughWebsocket(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	s, c, tws := txWatchTestServer(t)
+
+	sh := tbcd.NewScriptHashFromScript([]byte("merchant-addr"))
+
+	// Watch first.
+	if err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
+		ScriptHashes: []api.ByteSlice{sh[:]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resp protocol.Message
+	if err := wsjson.Read(ctx, c, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Header.Command != tbcapi.CmdTxWatchResponse {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxWatchResponse, resp.Header.Command)
+	}
+
+	// Unwatch.
+	if err := tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
+		ScriptHashes: []api.ByteSlice{sh[:]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, c, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Header.Command != tbcapi.CmdTxUnwatchResponse {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxUnwatchResponse, resp.Header.Command)
+	}
+	var unwatchResult tbcapi.TxUnwatchResponse
+	if err := json.Unmarshal(resp.Payload, &unwatchResult); err != nil {
+		t.Fatal(err)
+	}
+	if unwatchResult.Error != nil {
+		t.Fatalf("unwatch returned error: %v", unwatchResult.Error)
+	}
+
+	// Verify the unwatch took effect: notification for sh should be dropped.
+	if err := s.notifier.Notify(ctx, NotificationTxMempool(chainhash.Hash{0x01}, sh)); err != nil {
+		t.Fatal(err)
+	}
+	// Send a block as sentinel — if we get the block next, the tx was dropped.
+	if err := s.notifier.Notify(ctx, NotificationBlock(chainhash.Hash{0xff})); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, c, &resp); err != nil {
+		t.Fatal(err)
+	}
+	// The push goroutine serializes all notifications as TxNotification.
+	// Check the payload Type field to verify we got the block sentinel,
+	// not the tx notification that should have been filtered out.
+	var ntfy tbcapi.TxNotification
+	if err := json.Unmarshal(resp.Payload, &ntfy); err != nil {
+		t.Fatal(err)
+	}
+	if ntfy.Type == NtfnTypeTxMempool {
+		t.Fatal("received tx_mempool after unwatch — filter did not remove script hash")
+	}
+	if ntfy.Type != NtfnTypeBlockInsert {
+		t.Fatalf("expected block_insert sentinel, got %s", ntfy.Type)
+	}
+}
+
+func TestTxUnwatchBeforeWatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	_, c, tws := txWatchTestServer(t)
+
+	// Unwatch without ever calling Watch — should succeed with no error.
+	sh := tbcd.NewScriptHashFromScript([]byte("never-watched"))
+	if err := tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
+		ScriptHashes: []api.ByteSlice{sh[:]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resp protocol.Message
+	if err := wsjson.Read(ctx, c, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Header.Command != tbcapi.CmdTxUnwatchResponse {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxUnwatchResponse, resp.Header.Command)
+	}
+	var result tbcapi.TxUnwatchResponse
+	if err := json.Unmarshal(resp.Payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Error != nil {
+		t.Fatalf("unwatch before watch returned error: %v", result.Error)
+	}
+}
+
+func TestTxWatchBadScriptHashLength(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	_, c, tws := txWatchTestServer(t)
+
+	// Send a script hash that's too short (16 bytes instead of 32).
+	if err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
+		ScriptHashes: []api.ByteSlice{make([]byte, 16)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resp protocol.Message
+	if err := wsjson.Read(ctx, c, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Header.Command != tbcapi.CmdTxWatchResponse {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxWatchResponse, resp.Header.Command)
+	}
+	var result tbcapi.TxWatchResponse
+	if err := json.Unmarshal(resp.Payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == nil {
+		t.Fatal("expected error for bad script hash length, got nil")
+	}
+}
+
+func TestTxUnwatchBadScriptHashLength(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	_, c, tws := txWatchTestServer(t)
+
+	// Watch first so the listener exists.
+	sh := tbcd.NewScriptHashFromScript([]byte("addr"))
+	if err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
+		ScriptHashes: []api.ByteSlice{sh[:]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resp protocol.Message
+	if err := wsjson.Read(ctx, c, &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unwatch with bad length.
+	if err := tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
+		ScriptHashes: []api.ByteSlice{make([]byte, 5)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, c, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Header.Command != tbcapi.CmdTxUnwatchResponse {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxUnwatchResponse, resp.Header.Command)
+	}
+	var result tbcapi.TxUnwatchResponse
+	if err := json.Unmarshal(resp.Payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == nil {
+		t.Fatal("expected error for bad unwatch script hash length, got nil")
+	}
+}
+
+func TestTxWatchExceedsLimitThroughWebsocket(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	_, c, tws := txWatchTestServer(t)
+
+	// Fill the watch set to the limit in batches (websocket has a
+	// 32KB frame limit, so we can't send all 1024 hashes at once).
+	const batch = 100
+	sent := 0
+	for sent < maxWatchScripts {
+		n := batch
+		if sent+n > maxWatchScripts {
+			n = maxWatchScripts - sent
+		}
+		hashes := make([]api.ByteSlice, n)
+		for i := range hashes {
+			sh := tbcd.NewScriptHashFromScript([]byte(fmt.Sprintf("addr-%d", sent+i)))
+			hashes[i] = sh[:]
+		}
+		id := fmt.Sprintf("w%d", sent)
+		if err := tbcapi.Write(ctx, tws.conn, id, tbcapi.TxWatchRequest{
+			ScriptHashes: hashes,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var resp protocol.Message
+		if err := wsjson.Read(ctx, c, &resp); err != nil {
+			t.Fatal(err)
+		}
+		var result tbcapi.TxWatchResponse
+		if err := json.Unmarshal(resp.Payload, &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Error != nil {
+			t.Fatalf("batch at offset %d should succeed: %v", sent, result.Error)
+		}
+		sent += n
+	}
+
+	// One more should exceed the limit.
+	extra := tbcd.NewScriptHashFromScript([]byte("one-too-many"))
+	if err := tbcapi.Write(ctx, tws.conn, "overflow", tbcapi.TxWatchRequest{
+		ScriptHashes: []api.ByteSlice{extra[:]},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var resp protocol.Message
+	if err := wsjson.Read(ctx, c, &resp); err != nil {
+		t.Fatal(err)
+	}
+	var result tbcapi.TxWatchResponse
+	if err := json.Unmarshal(resp.Payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Error == nil {
+		t.Fatal("expected error for exceeding watch limit, got nil")
+	}
+}
+
+func TestNotifyTxOutputsNoListeners(t *testing.T) {
+	ctx := t.Context()
+	s := &Server{
+		notifier: NewNotifier(false),
+	}
+	// No listeners — should return immediately without panic.
+	tx := &wire.MsgTx{
+		TxOut: []*wire.TxOut{
+			{PkScript: []byte{0x00, 0x14, 0x01}},
+		},
+	}
+	s.notifyTxOutputs(ctx, tx, tx.TxHash(), NotificationTxMempool)
+}
+
+func TestNotifyTxOutputsContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+
+	s := &Server{
+		notifier: NewNotifier(true),
+	}
+
+	l, err := s.notifier.Subscribe(ctx, 1) // capacity 1 — will block on second
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	tx := &wire.MsgTx{
+		TxOut: []*wire.TxOut{
+			{PkScript: []byte{0x00, 0x14, 0x01}},
+			{PkScript: []byte{0x00, 0x14, 0x02}},
+		},
+	}
+
+	// Cancel context before notification — Notify should fail.
+	cancel()
+	s.notifyTxOutputs(ctx, tx, tx.TxHash(), NotificationTxMempool)
+	// Should not panic; the error path logs and returns.
+}
