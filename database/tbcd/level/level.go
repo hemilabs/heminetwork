@@ -47,7 +47,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 4
+	ldbVersion = 5
 
 	logLevel = "INFO"
 	verbose  = false
@@ -192,6 +192,9 @@ func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*C
 	if err != nil {
 		return nil, fmt.Errorf("homedir: %w", err)
 	}
+	if !filepath.IsAbs(homedir) {
+		return nil, fmt.Errorf("home directory must be absolute: %v", homedir)
+	}
 
 	return &Config{
 		Home:                 homedir,
@@ -291,6 +294,10 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		case 3:
 			// Upgrade to v4
 			err = l.v4(ctx)
+		case 4:
+			// Upgrade to v5: wipe witness-stripped block
+			// bodies and rebuild blocksmissing from headers.
+			err = l.v5(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {

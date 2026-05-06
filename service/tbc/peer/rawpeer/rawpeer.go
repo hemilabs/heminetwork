@@ -169,6 +169,12 @@ func (r *RawPeer) handshake(ctx context.Context, conn net.Conn) error {
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
 	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
+	// Advertise SFNodeWitness so remote peers include witness
+	// data in block and tx replies (BIP-144).  Without this flag
+	// peers treat us as a pre-segwit node and strip the witness
+	// before sending, so on-disk blocks never carry segwit
+	// signatures or tapscript data.
+	msg.Services = wire.SFNodeWitness
 	msg.UserAgent = fmt.Sprintf("/%v:%v/", version.Component, version.String())
 	msg.ProtocolVersion = int32(wire.AddrV2Version)
 	err := writeTimeout(defaultHandshakeTimeout, conn, msg, r.protocolVersion, r.network)

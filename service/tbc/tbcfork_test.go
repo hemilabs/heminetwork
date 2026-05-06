@@ -408,7 +408,11 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 	}
 
 	v := m.InvList[0]
-	if v.Type != wire.InvTypeBlock {
+	// Accept both base and witness-inclusive block-data requests.
+	// tbcd requests witness blocks post-BIP-144; the fake node
+	// stores full MsgBlocks either way, so returning the same
+	// block for both types matches what a real peer does.
+	if v.Type != wire.InvTypeBlock && v.Type != wire.InvTypeWitnessBlock {
 		return nil, fmt.Errorf("unsupported data type: %v", v.Type)
 	}
 
@@ -4122,7 +4126,7 @@ func TestIndexFakeHeaders(t *testing.T) {
 		// This is just for readability
 		isInvalidErr := func(err error) bool {
 			isNotOneOf := !testutil.ErrorIsOneOf(err,
-				[]error{context.Canceled, io.EOF, rawpeer.ErrNoConn},
+				[]error{net.ErrClosed, context.Canceled, io.EOF, rawpeer.ErrNoConn},
 			) && !errors.As(err, new(*net.OpError))
 
 			return isNotOneOf
