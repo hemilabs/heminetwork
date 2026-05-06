@@ -136,6 +136,7 @@ func privateKeyForTestByIndex(t *testing.T, index uint) string {
 		"dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530", // sequencing
 		"8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba", // non-sequencing
 		"fbe93b7c626721b844ff03923c296c395e7729b81096a9a5c3d8a87b57e01db6",
+		"7acf6459a4bb83dc701a107c308dfadae7ee6afec508cdc3a6fcff2a02597d3a",
 	}
 	if index >= uint(len(keys)) {
 		t.Fatalf("index %d exceeds available keys (max: %d)", index, len(keys)-1)
@@ -233,10 +234,6 @@ func game(t *testing.T) common.Address {
 func TestMonitor(t *testing.T) {
 	t.Parallel()
 
-	// let localnet start, there are smarter ways to do this but this will work
-	// for now
-	time.Sleep(2 * time.Minute)
-
 	// somewhat arbitrary; we should be able to get to 24 pop txs mined in a
 	// reasonable amount of time
 	const expectedPopTxs = 24
@@ -301,24 +298,37 @@ func TestMonitor(t *testing.T) {
 
 func TestL1L2Comms(t *testing.T) {
 	t.Parallel()
-	testL1L2Comms(t, l1Endpoint(), forkedL2Endpoint(), "http://localhost:18546", "http://localhost:28546")
+	testL1L2Comms(t, l1Endpoint(), forkedL2Endpoint(), "http://localhost:18546", "http://localhost:28546", "http://localhost:38546")
 }
 
-func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequencingEndpoint string, l2NonSequencingSnapSyncEndpoint string) {
-	// todo: combine these into a nice struct or something similar
-	testNames := []string{
-		"testing sequencing client",
-		"testing non-sequencing client",
-		"testing non-sequencing client with snap-sync",
+func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequencingEndpoint string, l2NonSequencingSnapSyncEndpoint string, l2NonSequencingFullSyncEndpoint string) {
+	type testCase struct {
+		name       string
+		sequencing bool
+		snapSync   bool
+		fullSync   bool
 	}
-	tests := []bool{true, false, false}
 
-	const snapSyncNodeIndex = 2
+	tests := []testCase{
+		{
+			name:       "testing sequencing client",
+			sequencing: true,
+		},
+		{
+			name: "testing non-sequencing client",
+		},
+		{
+			name:     "testing non-sequencing client with snap-sync",
+			snapSync: true,
+		},
+		{
+			name:     "testing non-sequencing client with full-sync",
+			fullSync: true,
+		},
+	}
 
-	for i, sequencing := range tests {
-		name := testNames[i]
-
-		t.Run(name, func(t *testing.T) {
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Minute)
@@ -344,6 +354,11 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				t.Fatalf("could not dial eth l2 non sequencing snap sync %s", err)
 			}
 
+			l2ClientNonSequencingFullSync, err := ethclient.Dial(l2NonSequencingFullSyncEndpoint)
+			if err != nil {
+				t.Fatalf("could not dial eth l2 non sequencing full sync %s", err)
+			}
+
 			// Use different private key for each subtest to avoid conflicts
 			privateKeyHex := privateKeyForTestByIndex(t, uint(i))
 			privateKey, err := crypto.HexToECDSA(privateKeyHex)
@@ -352,14 +367,18 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 			}
 
 			l2ClientToUse := l2Client
-			if !sequencing {
+			if !tc.sequencing {
 				if testingFork() {
 					t.Fatal("there is no non-sequencing client for testing a forked network")
 				}
 				l2ClientToUse = l2ClientNonSequencing
 
-				if i == snapSyncNodeIndex {
+				if tc.snapSync {
 					l2ClientToUse = l2ClientNonSequencingSnapSync
+				}
+
+				if tc.fullSync {
+					l2ClientToUse = l2ClientNonSequencingFullSync
 				}
 			}
 
@@ -393,7 +412,8 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 			opNodeSequencingEndpoint := "http://localhost:8548"
 			opNodeNonSequencingEndpoint := "http://localhost:18548"
 			opNodeNonSequencingSnapSyncEndpoint := "http://localhost:28548"
-			assertOutputRootsAreTheSame(t, ctx, l2ClientToUse, opNodeSequencingEndpoint, opNodeNonSequencingEndpoint, opNodeNonSequencingSnapSyncEndpoint)
+			opNodeNonSequencingFullSyncEndpoint := "http://localhost:38548"
+			assertOutputRootsAreTheSame(t, ctx, l2ClientToUse, opNodeSequencingEndpoint, opNodeNonSequencingEndpoint, opNodeNonSequencingSnapSyncEndpoint, opNodeNonSequencingFullSyncEndpoint)
 			assertSafeAndFinalBlocksAreProgressing(t, ctx, l2ClientToUse)
 		})
 	}
@@ -755,8 +775,12 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 		t.Fatal(err)
 	}
 
+	bitcoinGeneratedBlocksPerRun := 3
+	acceptableDiff := 2 * bitcoinGeneratedBlocksPerRun
+	blockLag := 2
+
 	diff := bestBlockHeight - block.Height
-	if diff > 4 || diff < 2 {
+	if diff > int64(acceptableDiff) || diff < int64(blockLag) {
 		t.Fatalf("invalid diff: %d", diff)
 	}
 }
@@ -2022,6 +2046,7 @@ func assertOutputRootsAreTheSame(
 	opNodeSequencingEndpoint string,
 	opNodeNonSequencingEndpoint string,
 	opNodeNonSequencingSnapSyncEndpoint string,
+	opNodeNonSequencingFullSyncEndpoint string,
 ) {
 	bigTip, err := l2Client.HeaderByNumber(t.Context(), nil)
 	if err != nil {
@@ -2092,6 +2117,11 @@ func assertOutputRootsAreTheSame(
 			t.Fatalf("error making request to non sequencing snap sync endpoint: %s", err)
 		}
 
+		res4, err := client.Post(opNodeNonSequencingFullSyncEndpoint, "application/json", bytes.NewBuffer(jsonbody))
+		if err != nil {
+			t.Fatalf("error making request to non sequencing full sync endpoint: %s", err)
+		}
+
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
 			t.Fatalf("error reading response body from sequencer: %s", err)
@@ -2107,9 +2137,15 @@ func assertOutputRootsAreTheSame(
 			t.Fatalf("error reading response body from non-sequencer-snap-sync: %s", err)
 		}
 
+		resBody4, err := io.ReadAll(res4.Body)
+		if err != nil {
+			t.Fatalf("error reading response body from non-sequencer-full-sync: %s", err)
+		}
+
 		res.Body.Close()
 		res2.Body.Close()
 		res3.Body.Close()
+		res4.Body.Close()
 
 		assertResultNotError := func(body *outputAtBlockResponse) error {
 			if body.Error != nil {
@@ -2122,6 +2158,7 @@ func assertOutputRootsAreTheSame(
 		var outputAtBlockResponseOne outputAtBlockResponse
 		var outputAtBlockResponseTwo outputAtBlockResponse
 		var outputAtBlockResponseThree outputAtBlockResponse
+		var outputAtBlockResponseFour outputAtBlockResponse
 
 		if err := json.Unmarshal(resBody, &outputAtBlockResponseOne); err != nil {
 			t.Fatal(err)
@@ -2135,12 +2172,20 @@ func assertOutputRootsAreTheSame(
 			t.Fatal(err)
 		}
 
+		if err := json.Unmarshal(resBody4, &outputAtBlockResponseFour); err != nil {
+			t.Fatal(err)
+		}
+
 		if err := assertResultNotError(&outputAtBlockResponseOne); err != nil {
 			t.Fatalf("error in response: %v", outputAtBlockResponseOne.Error)
 		}
 
 		if err := assertResultNotError(&outputAtBlockResponseTwo); err != nil {
 			t.Fatalf("error in response: %v", outputAtBlockResponseTwo.Error)
+		}
+
+		if err := assertResultNotError(&outputAtBlockResponseFour); err != nil {
+			t.Fatalf("error in response: %v", outputAtBlockResponseFour.Error)
 		}
 
 		// only check against snap sync if within snapSyncMax of the tip
@@ -2156,6 +2201,10 @@ func assertOutputRootsAreTheSame(
 
 		if diff := deep.Equal(outputAtBlockResponseOne, outputAtBlockResponseTwo); len(diff) > 0 {
 			t.Fatalf("output roots are not the same for sequencing and non-sequencing: %s", diff)
+		}
+
+		if diff := deep.Equal(outputAtBlockResponseOne, outputAtBlockResponseFour); len(diff) > 0 {
+			t.Fatalf("output roots are not the same for sequencing and non-sequencing full syn: %s", diff)
 		}
 
 		tip--
