@@ -28,26 +28,6 @@ services:
     networks:
       e2e:
 
-  bitcoind-initialblocks:
-    # yamllint disable-line rule:line-length
-    image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
-    depends_on:
-      - "bitcoind"
-    command:
-      - "bitcoin-cli"
-      - "-regtest=1"
-      - "-rpcuser=user"
-      - "-rpcpassword=password"
-      - "-rpcport=18443"
-      - "-rpcconnect=bitcoind"
-      - "generatetoaddress"
-      # need to generate a lot for greater chance to not spend coinbase
-      - "1000"
-      - "$BTC_ADDRESS"
-    restart: on-failure
-    networks:
-      e2e:
-
   bitcoind-moreblocks:
     # yamllint disable-line rule:line-length
     image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
@@ -65,7 +45,7 @@ services:
       - "-rpcport=18443"
       - "-rpcconnect=bitcoind"
       - "generatetoaddress"
-      - "3"
+      - "1000"
       - "$BTC_ADDRESS"
     networks:
       e2e:
@@ -187,8 +167,6 @@ services:
     depends_on:
       bitcoind:
         condition: "service_started"
-      bitcoind-initialblocks:
-        condition: "service_completed_successfully"
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
@@ -218,8 +196,6 @@ services:
         condition: "service_started"
       bitcoind:
         condition: "service_started"
-      bitcoind-initialblocks:
-        condition: "service_completed_successfully"
       op-geth-l2-setup:
         condition: "service_completed_successfully"
     healthcheck:
