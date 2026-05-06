@@ -452,75 +452,17 @@ services:
     networks:
       e2e:
 
-  # ban all peers besides tbcd so that we can continue to pop mine
-  bitcoind-setban:
-    # yamllint disable-line rule:line-length
-    image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
-    deploy:
-      restart_policy:
-        condition: "on-failure"
-    depends_on:
-      op-geth-l2-non-sequencing-snap-sync:
-        condition: "service_healthy"
-      op-geth-l2-non-sequencing-full-sync:
-        condition: "service_healthy"
-    command:
-      - "bitcoin-cli"
-      - "-regtest=1"
-      - "-rpcuser=user"
-      - "-rpcpassword=password"
-      - "-rpcport=18443"
-      - "-rpcconnect=bitcoind"
-      - "setban"
-      - "0.0.0.0/0"
-      - "add"
-    networks:
-      e2e:
-
-  # ban all peers besides tbcd so that we can continue to pop mine
-  bitcoind-setban-2:
-    # yamllint disable-line rule:line-length
-    image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
-    deploy:
-      restart_policy:
-        condition: "on-failure"
-    depends_on:
-      bitcoind-setban:
-        condition: "service_completed_successfully"
-    command:
-      - "bitcoin-cli"
-      - "-regtest=1"
-      - "-rpcuser=user"
-      - "-rpcpassword=password"
-      - "-rpcport=18443"
-      - "-rpcconnect=bitcoind"
-      - "setban"
-      - "192.169.199.9"
-      - "remove"
-    networks:
-      e2e:
-
   bitcoind-invalidateblocks:
     depends_on:
       wait-for-finalized:
         condition: "service_completed_successfully"
-    image: optimism-stack:latest
-    deploy:
-      restart_policy:
-        condition: "on-failure"
+    image: docker:dind
     volumes:
-      - ./reorg_and_prune_bitcoin.sh:/tmp/reorg_and_prune_bitcoin.sh
+      - /var/run/docker.sock:/var/run/docker.sock
     command:
-      - bash
-      - /tmp/reorg_and_prune_bitcoin.sh
-    environment:
-      ETH_RPC_URL: "http://op-geth-l2:8546"
-      BTC_RPC_URL: "http://bitcoind:18443"
-      BTC_RPC_USER: "user"
-      BTC_RPC_PASS: "password"
-    networks:
-      e2e:
-
+      - docker
+      - restart
+      - e2e-bitcoind-1
 
   op-geth-l2-non-sequencing-snap-sync:
     image: optimism-stack:latest
