@@ -18,6 +18,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
 
+	"github.com/hemilabs/heminetwork/v2/api"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
@@ -281,11 +283,11 @@ func TestMempoolFiltering(t *testing.T) {
 
 		if len(utxos) > numToFilter {
 			opp := wire.NewOutPoint(ch, 0)
-			mptx := MempoolTx{
-				id:      *ch,
-				expires: time.Now().Add(1 * time.Hour),
-				txins:   map[wire.OutPoint]struct{}{*opp: {}},
-			}
+			msgTx := wire.NewMsgTx(2)
+			msgTx.AddTxIn(&wire.TxIn{PreviousOutPoint: *opp})
+			mptx := NewMempoolTx(msgTx)
+			mptx.id = *ch
+			mptx.expires = time.Now().Add(1 * time.Hour)
 			if err = mp.TxInsert(ctx, &mptx); err != nil {
 				t.Fatal(err)
 			}
@@ -321,11 +323,7 @@ func BenchmarkMempoolFilter(b *testing.B) {
 				txIdBytes := make([]byte, 32)
 				binary.BigEndian.PutUint32(txIdBytes[0:32], uint32(k))
 				txId := testutil.Bytes2Hash(txIdBytes)
-				mptx := MempoolTx{
-					id:      *txId,
-					expires: time.Now().Add(10 * time.Hour),
-					txins:   make(map[wire.OutPoint]struct{}),
-				}
+				msgTx := wire.NewMsgTx(2)
 				// Create utxo and add it to the MempoolTx
 				for i := range txInNum {
 					uniqueBytes := make([]byte, 32)
@@ -336,8 +334,11 @@ func BenchmarkMempoolFilter(b *testing.B) {
 					utxos = append(utxos, utxo)
 
 					opp := wire.NewOutPoint(utxo.ChainHash(), utxo.OutputIndex())
-					mptx.txins[*opp] = struct{}{}
+					msgTx.AddTxIn(&wire.TxIn{PreviousOutPoint: *opp})
 				}
+				mptx := NewMempoolTx(msgTx)
+				mptx.id = *txId
+				mptx.expires = time.Now().Add(10 * time.Hour)
 				if err = mp.TxInsert(b.Context(), &mptx); err != nil {
 					b.Fatal(err)
 				}
@@ -376,4 +377,569 @@ func createTxs(count int, expiration time.Time, increase time.Duration) []Mempoo
 	}
 
 	return txs
+}
+
+func TestUnconfirmedUtxos(t *testing.T) {
+	ctx := t.Context()
+
+	script1 := []byte{
+		0x00, 0x14, 0xca, 0xfe, 0xba, 0xbe, 0x01, 0x02,
+		0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	}
+	script2 := []byte{
+		0x00, 0x14, 0xde, 0xad, 0xbe, 0xef, 0x01, 0x02,
+		0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	}
+	sh1 := tbcd.NewScriptHashFromScript(script1)
+	sh2 := tbcd.NewScriptHashFromScript(script2)
+
+	t.Run("empty mempool", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+		utxos, shs, _, err := mp.UnconfirmedUtxos(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(utxos) != 0 || len(shs) != 0 {
+			t.Fatalf("empty mempool: got %d utxos, %d shs", len(utxos), len(shs))
+		}
+	})
+
+	t.Run("returns all outputs with script hashes", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		tx := wire.NewMsgTx(2)
+		tx.AddTxIn(&wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{
+				Hash: *testutil.String2Hash("aa"), Index: 0,
+			},
+		})
+		tx.AddTxOut(wire.NewTxOut(50000, script1))
+		tx.AddTxOut(wire.NewTxOut(10000, script2))
+
+		err = mp.TxInsert(ctx, &MempoolTx{
+			id: tx.TxHash(), expires: time.Now().Add(time.Hour), tx: tx,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		utxos, shs, _, err := mp.UnconfirmedUtxos(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(utxos) != 2 {
+			t.Fatalf("got %d utxos, want 2", len(utxos))
+		}
+		if len(shs) != 2 {
+			t.Fatalf("got %d script hashes, want 2", len(shs))
+		}
+
+		// Verify script hashes match outputs.
+		found := map[tbcd.ScriptHash]uint64{}
+		for i, u := range utxos {
+			found[shs[i]] = u.Value()
+		}
+		if found[sh1] != 50000 {
+			t.Errorf("script1 value = %d, want 50000", found[sh1])
+		}
+		if found[sh2] != 10000 {
+			t.Errorf("script2 value = %d, want 10000", found[sh2])
+		}
+	})
+
+	t.Run("chain of unconfirmed txs returns all outputs and spent", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		txA := wire.NewMsgTx(2)
+		txA.AddTxIn(&wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{
+				Hash: *testutil.String2Hash("bb"), Index: 0,
+			},
+		})
+		txA.AddTxOut(wire.NewTxOut(30000, script1))
+		txAid := txA.TxHash()
+
+		err = mp.TxInsert(ctx, &MempoolTx{
+			id: txAid, expires: time.Now().Add(time.Hour), tx: txA,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// TX B spends TX A output 0.
+		txB := wire.NewMsgTx(2)
+		txB.AddTxIn(&wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{Hash: txAid, Index: 0},
+		})
+		txB.AddTxOut(wire.NewTxOut(29000, script2))
+
+		err = mp.TxInsert(ctx, &MempoolTx{
+			id: txB.TxHash(), expires: time.Now().Add(time.Hour), tx: txB,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		utxos, _, spent, err := mp.UnconfirmedUtxos(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Both outputs returned.
+		if len(utxos) != 2 {
+			t.Fatalf("got %d utxos, want 2", len(utxos))
+		}
+
+		// Spent outpoints include TX A:0 (spent by TX B) plus
+		// the external input spent by TX A.
+		if len(spent) != 2 {
+			t.Fatalf("got %d spent outpoints, want 2", len(spent))
+		}
+	})
+
+	t.Run("multiple txs aggregated", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for i := range 5 {
+			tx := wire.NewMsgTx(2)
+			tx.AddTxIn(&wire.TxIn{
+				PreviousOutPoint: wire.OutPoint{
+					Hash:  *testutil.String2Hash(fmt.Sprintf("%02x", i)),
+					Index: 0,
+				},
+			})
+			tx.AddTxOut(wire.NewTxOut(int64(1000*(i+1)), script1))
+
+			err = mp.TxInsert(ctx, &MempoolTx{
+				id: tx.TxHash(), expires: time.Now().Add(time.Hour), tx: tx,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		utxos, shs, _, err := mp.UnconfirmedUtxos(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(utxos) != 5 {
+			t.Fatalf("got %d utxos, want 5", len(utxos))
+		}
+
+		var total uint64
+		for i, u := range utxos {
+			total += u.Value()
+			if shs[i] != sh1 {
+				t.Errorf("utxo %d: wrong script hash", i)
+			}
+		}
+		wantTotal := uint64(1000 + 2000 + 3000 + 4000 + 5000)
+		if total != wantTotal {
+			t.Errorf("total = %d, want %d", total, wantTotal)
+		}
+	})
+
+	t.Run("nil tx entries skipped", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Simulate an inv-only entry (tx not yet downloaded).
+		mp.txs[*testutil.String2Hash("cc")] = nil
+
+		tx := wire.NewMsgTx(2)
+		tx.AddTxIn(&wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{
+				Hash: *testutil.String2Hash("dd"), Index: 0,
+			},
+		})
+		tx.AddTxOut(wire.NewTxOut(7777, script1))
+
+		err = mp.TxInsert(ctx, &MempoolTx{
+			id: tx.TxHash(), expires: time.Now().Add(time.Hour), tx: tx,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		utxos, _, _, err := mp.UnconfirmedUtxos(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(utxos) != 1 {
+			t.Fatalf("got %d utxos, want 1", len(utxos))
+		}
+	})
+}
+
+func TestNewMempoolTx(t *testing.T) {
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{
+			Hash: *testutil.String2Hash("aa"), Index: 0,
+		},
+	})
+	tx.AddTxOut(wire.NewTxOut(50000, []byte{0x51}))
+
+	mptx := NewMempoolTx(tx)
+	if mptx.id != tx.TxHash() {
+		t.Errorf("id mismatch: got %v, want %v", mptx.id, tx.TxHash())
+	}
+	if mptx.tx != tx {
+		t.Error("tx pointer not stored")
+	}
+}
+
+func TestMempoolUtxosServer(t *testing.T) {
+	ctx := t.Context()
+
+	script := []byte{
+		0x00, 0x14, 0xca, 0xfe, 0xba, 0xbe, 0x01, 0x02,
+		0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	}
+
+	t.Run("mempool disabled", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &Server{
+			cfg:     &Config{MempoolEnabled: false},
+			mempool: mp,
+		}
+
+		utxos, shs, spent, err := s.MempoolUtxos(ctx)
+		if err == nil {
+			t.Fatal("expected error when mempool disabled")
+		}
+		if utxos != nil || shs != nil || spent != nil {
+			t.Fatal("disabled mempool should return nil")
+		}
+	})
+
+	t.Run("returns all outputs with spent", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &Server{
+			cfg:     &Config{MempoolEnabled: true},
+			mempool: mp,
+		}
+
+		tx := wire.NewMsgTx(2)
+		tx.AddTxIn(&wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{
+				Hash: *testutil.String2Hash("bb"), Index: 0,
+			},
+		})
+		tx.AddTxOut(wire.NewTxOut(42000, script))
+
+		err = mp.TxInsert(ctx, &MempoolTx{
+			id: tx.TxHash(), expires: time.Now().Add(time.Hour), tx: tx,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		utxos, shs, spent, err := s.MempoolUtxos(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(utxos) != 1 {
+			t.Fatalf("got %d utxos, want 1", len(utxos))
+		}
+		if utxos[0].Value() != 42000 {
+			t.Errorf("value = %d, want 42000", utxos[0].Value())
+		}
+		if shs[0] != tbcd.NewScriptHashFromScript(script) {
+			t.Error("script hash mismatch")
+		}
+		if len(spent) != 1 {
+			t.Fatalf("got %d spent, want 1", len(spent))
+		}
+		if spent[0].Hash != *testutil.String2Hash("bb") || spent[0].Index != 0 {
+			t.Error("spent outpoint mismatch")
+		}
+	})
+}
+
+func TestHandleMempoolUtxosRequest(t *testing.T) {
+	ctx := t.Context()
+
+	script := []byte{
+		0x00, 0x14, 0xde, 0xad, 0xbe, 0xef, 0x01, 0x02,
+		0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+	}
+
+	t.Run("mempool disabled returns error", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &Server{
+			cfg:     &Config{MempoolEnabled: false},
+			mempool: mp,
+		}
+
+		resp, _ := s.handleMempoolUtxosRequest(ctx, &tbcapi.MempoolUtxosRequest{})
+		mResp, ok := resp.(*tbcapi.MempoolUtxosResponse)
+		if !ok {
+			t.Fatalf("wrong type: %T", resp)
+		}
+		if mResp.Error == nil {
+			t.Fatal("expected error for disabled mempool")
+		}
+	})
+
+	t.Run("returns filtered utxos and spent outpoints", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &Server{
+			cfg:     &Config{MempoolEnabled: true},
+			mempool: mp,
+		}
+
+		tx := wire.NewMsgTx(2)
+		tx.AddTxIn(&wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{
+				Hash: *testutil.String2Hash("cc"), Index: 0,
+			},
+		})
+		tx.AddTxOut(wire.NewTxOut(99000, script))
+		tx.AddTxOut(wire.NewTxOut(1000, []byte{0x51}))
+
+		mptx := NewMempoolTx(tx)
+		mptx.expires = time.Now().Add(time.Hour)
+		if err := mp.TxInsert(ctx, &mptx); err != nil {
+			t.Fatal(err)
+		}
+
+		// Filter for the known script only.
+		sh := tbcd.NewScriptHashFromScript(script)
+		resp, err := s.handleMempoolUtxosRequest(ctx, &tbcapi.MempoolUtxosRequest{
+			ScriptHashes: []api.ByteSlice{sh[:]},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mResp, ok := resp.(*tbcapi.MempoolUtxosResponse)
+		if !ok {
+			t.Fatalf("wrong type: %T", resp)
+		}
+		if mResp.Error != nil {
+			t.Fatalf("unexpected error: %v", mResp.Error)
+		}
+		if len(mResp.UTXOs) != 1 {
+			t.Fatalf("got %d utxos, want 1 (only script match)", len(mResp.UTXOs))
+		}
+		if len(mResp.SpentOutpoints) != 1 {
+			t.Fatalf("got %d spent, want 1", len(mResp.SpentOutpoints))
+		}
+		if mResp.UTXOs[0].ScriptHash != chainhash.Hash(sh) {
+			t.Error("script hash mismatch")
+		}
+	})
+
+	t.Run("empty script hashes returns error", func(t *testing.T) {
+		mp, err := NewMempool()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := &Server{
+			cfg:     &Config{MempoolEnabled: true},
+			mempool: mp,
+		}
+
+		resp, err := s.handleMempoolUtxosRequest(ctx, &tbcapi.MempoolUtxosRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mResp, ok := resp.(*tbcapi.MempoolUtxosResponse)
+		if !ok {
+			t.Fatalf("wrong type: %T", resp)
+		}
+		if mResp.Error == nil {
+			t.Fatal("expected error for empty script_hashes")
+		}
+	})
+}
+
+func TestInMempoolWithNilEntries(t *testing.T) {
+	ctx := t.Context()
+
+	mp, err := NewMempool()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate inv-only entry (tx announced but not downloaded).
+	mp.txs[*testutil.String2Hash("aa")] = nil
+
+	// Insert a real tx that spends outpoint bb:0.
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{
+			Hash: *testutil.String2Hash("bb"), Index: 0,
+		},
+	})
+	tx.AddTxOut(wire.NewTxOut(5000, []byte{0x51}))
+
+	mptx := NewMempoolTx(tx)
+	mptx.expires = time.Now().Add(time.Hour)
+	if err := mp.TxInsert(ctx, &mptx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Also insert an entry with non-nil MempoolTx but nil tx field.
+	mp.mtx.Lock()
+	mp.txs[*testutil.String2Hash("cc")] = &MempoolTx{
+		id:      *testutil.String2Hash("cc"),
+		expires: time.Now().Add(time.Hour),
+		tx:      nil,
+	}
+	mp.mtx.Unlock()
+
+	// bb:0 is spent by the real tx.
+	utxoBB := tbcd.NewUtxo(*testutil.String2Hash("bb"), 10000, 0)
+	filtered, err := mp.FilterUtxos(ctx, []tbcd.Utxo{utxoBB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("bb:0 should be filtered out, got %d", len(filtered))
+	}
+
+	// dd:0 is NOT spent by anything.
+	utxoDD := tbcd.NewUtxo(*testutil.String2Hash("dd"), 20000, 0)
+	filtered, err = mp.FilterUtxos(ctx, []tbcd.Utxo{utxoDD})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 {
+		t.Fatalf("dd:0 should survive, got %d", len(filtered))
+	}
+
+	// UnconfirmedUtxos should skip nil entries.
+	utxos, _, _, err := mp.UnconfirmedUtxos(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(utxos) != 1 {
+		t.Fatalf("got %d utxos, want 1 (only real tx)", len(utxos))
+	}
+}
+
+func TestHandleMempoolInfoRequestWithStats(t *testing.T) {
+	ctx := t.Context()
+
+	mp, err := NewMempool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg:     &Config{MempoolEnabled: true},
+		mempool: mp,
+	}
+
+	// Empty mempool.
+	resp, err := s.handleMempoolInfoRequest(ctx, &tbcapi.MempoolInfoRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mResp := resp.(*tbcapi.MempoolInfoResponse)
+	if mResp.Error != nil {
+		t.Fatalf("unexpected error: %v", mResp.Error)
+	}
+	if mResp.TxNum != 0 {
+		t.Errorf("tx num = %d, want 0", mResp.TxNum)
+	}
+
+	// Insert a tx.
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{
+			Hash: *testutil.String2Hash("ee"), Index: 0,
+		},
+	})
+	tx.AddTxOut(wire.NewTxOut(1000, []byte{0x51}))
+
+	mptx := &MempoolTx{
+		id:      tx.TxHash(),
+		expires: time.Now().Add(time.Hour),
+		size:    250,
+		tx:      tx,
+	}
+	if err := mp.TxInsert(ctx, mptx); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err = s.handleMempoolInfoRequest(ctx, &tbcapi.MempoolInfoRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mResp = resp.(*tbcapi.MempoolInfoResponse)
+	if mResp.TxNum != 1 {
+		t.Errorf("tx num = %d, want 1", mResp.TxNum)
+	}
+	if mResp.Size == 0 {
+		t.Error("size should be > 0")
+	}
+}
+
+func TestUnconfirmedUtxosNoOutputs(t *testing.T) {
+	ctx := t.Context()
+
+	mp, err := NewMempool()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Tx with inputs but no outputs (degenerate but valid struct).
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{
+			Hash: *testutil.String2Hash("ff"), Index: 0,
+		},
+	})
+
+	err = mp.TxInsert(ctx, &MempoolTx{
+		id: tx.TxHash(), expires: time.Now().Add(time.Hour), tx: tx,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	utxos, shs, spent, err := mp.UnconfirmedUtxos(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(utxos) != 0 {
+		t.Errorf("got %d utxos, want 0", len(utxos))
+	}
+	if len(shs) != 0 {
+		t.Errorf("got %d shs, want 0", len(shs))
+	}
+	if len(spent) != 1 {
+		t.Errorf("got %d spent, want 1", len(spent))
+	}
 }

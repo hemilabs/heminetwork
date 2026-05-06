@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -29,6 +29,7 @@ import (
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
+	MempoolUtxos(ctx context.Context, scriptHashes []api.ByteSlice) (*tbcapi.MempoolUtxosResponse, error)
 	BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *BlocksByL2AbrevHashesResponse
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) (*KeystonesByHeightResponse, error)
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
@@ -142,4 +143,29 @@ type KeystonesByHeightResponse struct {
 	L2KeystoneAbrevs []*hemi.L2KeystoneAbrev `json:"l2_keystone_abrevs"`
 	BTCTipHeight     uint64                  `json:"btc_tip_height"`
 	Error            *protocol.Error         `json:"error,omitempty"`
+}
+
+// FilterSpent removes mempool UTXOs whose outpoint (TxId:OutIndex)
+// appears in the spent set.  Use this to exclude outputs that have
+// been spent by another mempool transaction (CPFP chains).
+func FilterSpent(utxos []*tbcapi.MempoolUTXO, spent []tbcapi.OutPoint) []*tbcapi.MempoolUTXO {
+	if len(spent) == 0 {
+		return utxos
+	}
+	type op struct {
+		Hash  chainhash.Hash
+		Index uint32
+	}
+	set := make(map[op]struct{}, len(spent))
+	for _, s := range spent {
+		set[op{Hash: s.Hash, Index: s.Index}] = struct{}{}
+	}
+	var out []*tbcapi.MempoolUTXO
+	for _, u := range utxos {
+		if _, ok := set[op{Hash: u.TxId, Index: u.OutIndex}]; ok {
+			continue
+		}
+		out = append(out, u)
+	}
+	return out
 }

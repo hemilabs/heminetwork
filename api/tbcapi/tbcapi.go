@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -24,6 +24,13 @@ import (
 
 const (
 	APIVersion = 1
+
+	// MaxResponseSize is the maximum serialized JSON response
+	// size for bulk RPC responses (e.g. MempoolUtxos, blocks).
+	// Must match the client's websocket ReadLimit.  The tbcgozer
+	// client sets ReadLimit to this value; other clients must
+	// set their read limit to at least this size.
+	MaxResponseSize = 16 * (1 << 20) // 16 MiB
 
 	CmdPingRequest  = "tbcapi-ping-request"
 	CmdPingResponse = "tbcapi-ping-response"
@@ -90,6 +97,9 @@ const (
 
 	CmdMempoolInfoRequest  = "tbcapi-mempool-info-request"
 	CmdMempoolInfoResponse = "tbcapi-mempool-info-response"
+
+	CmdMempoolUtxosRequest  = "tbcapi-mempool-utxos-request"
+	CmdMempoolUtxosResponse = "tbcapi-mempool-utxos-response"
 
 	CmdKeystonesByHeightRequest  = "tbcapi-keystones-by-height-request"
 	CmdKeystonesByHeightResponse = "tbcapi-keystones-by-height-response"
@@ -417,6 +427,40 @@ type MempoolInfoResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
+// MempoolUtxosRequest requests unspent outputs currently in the mempool
+// that match the provided script hashes.  ScriptHashes is required and
+// must contain at least one entry; each must be exactly 32 bytes
+// (sha256 of the output's pkScript).
+type MempoolUtxosRequest struct {
+	ScriptHashes []api.ByteSlice `json:"script_hashes"`
+}
+
+// MempoolUTXO is an output from an unconfirmed mempool transaction.
+type MempoolUTXO struct {
+	// TxId is the transaction hash containing this output.
+	TxId chainhash.Hash `json:"tx_id"`
+
+	// Value is the output amount in satoshis.
+	Value btcutil.Amount `json:"value"`
+
+	// OutIndex is the index of this output within the transaction.
+	OutIndex uint32 `json:"out_index"`
+
+	// ScriptHash is sha256 of the output's pkScript.  Callers
+	// match this against sha256(PayToAddrScript(addr)) to find
+	// outputs at a given address.
+	ScriptHash chainhash.Hash `json:"script_hash"`
+}
+
+// MempoolUtxosResponse contains unspent mempool outputs matching the
+// requested script hashes, plus all outpoints being spent by mempool
+// transactions.
+type MempoolUtxosResponse struct {
+	UTXOs          []*MempoolUTXO  `json:"utxos"`
+	SpentOutpoints []OutPoint      `json:"spent_outpoints"`
+	Error          *protocol.Error `json:"error,omitempty"`
+}
+
 type ZKValueAndScriptByOutpointRequest struct {
 	Outpoint OutPoint `json:"outpoint"`
 }
@@ -539,6 +583,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdFeeEstimateResponse:                      reflect.TypeFor[FeeEstimateResponse](),
 	CmdMempoolInfoRequest:                       reflect.TypeFor[MempoolInfoRequest](),
 	CmdMempoolInfoResponse:                      reflect.TypeFor[MempoolInfoResponse](),
+	CmdMempoolUtxosRequest:                      reflect.TypeFor[MempoolUtxosRequest](),
+	CmdMempoolUtxosResponse:                     reflect.TypeFor[MempoolUtxosResponse](),
 	CmdKeystonesByHeightRequest:                 reflect.TypeFor[KeystonesByHeightRequest](),
 	CmdKeystonesByHeightResponse:                reflect.TypeFor[KeystonesByHeightResponse](),
 	CmdZKValueAndScriptByOutpointRequest:        reflect.TypeFor[ZKValueAndScriptByOutpointRequest](),
