@@ -20,7 +20,6 @@ services:
       - "-txindex=1"
       - "-rpcworkqueue=400"
       - "-printtoconsole"
-      - "-reindex"
     ports:
       - "18443:18443"
       - "18444:18444"
