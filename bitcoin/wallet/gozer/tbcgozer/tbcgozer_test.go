@@ -15,9 +15,13 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/juju/loggo/v2"
 
+	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
 	"github.com/hemilabs/heminetwork/v2/service/tbc"
@@ -84,7 +88,7 @@ func TestTBCGozerConnection(t *testing.T) {
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
-		case <-time.Tick(50 * time.Millisecond):
+		case <-time.After(50 * time.Millisecond):
 		}
 	}
 	t.Logf("gozer connected")
@@ -156,7 +160,7 @@ func TestTBCGozerCalls(t *testing.T) {
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
-		case <-time.Tick(50 * time.Millisecond):
+		case <-time.After(50 * time.Millisecond):
 		}
 	}
 	t.Logf("gozer connected")
@@ -275,4 +279,122 @@ func TestTBCGozerCalls(t *testing.T) {
 	if cc != qd {
 		t.Fatalf("cc %v != qd %v", cc, qd)
 	}
+}
+
+func TestTBCGozerMempoolUtxos(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	kssMap, kssList := testutil.MakeSharedKeystones(5)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	mtbc := mock.NewMockTBC(ctx, nil, nil, kssMap, btcTip, 10)
+	defer mtbc.Shutdown()
+
+	DefaultRequestTimeout = 10 * time.Second
+	b := New("ws" + strings.TrimPrefix(mtbc.URL(), "http"))
+	if err := b.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tg, ok := b.(*tbcGozer)
+	if !ok {
+		t.Fatal("expected gozer to be of type tbcGozer")
+	}
+
+	for !tg.Connected() {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	// Script used in the test transaction below.
+	testScript := []byte{
+		0x00, 0x14, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+		0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+		0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+	}
+	opTrueScript := []byte{0x51}
+	sh1 := tbcd.NewScriptHashFromScript(testScript)
+	sh2 := tbcd.NewScriptHashFromScript(opTrueScript)
+	allHashes := []api.ByteSlice{sh1[:], sh2[:]}
+
+	t.Run("empty mempool", func(t *testing.T) {
+		resp, err := b.MempoolUtxos(ctx, allHashes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(resp.UTXOs) != 0 {
+			t.Errorf("got %d utxos, want 0", len(resp.UTXOs))
+		}
+		if len(resp.SpentOutpoints) != 0 {
+			t.Errorf("got %d spent, want 0", len(resp.SpentOutpoints))
+		}
+	})
+
+	// Broadcast a tx to populate the mempool.
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{
+			Hash:  chainhash.HashH([]byte("funding")),
+			Index: 0,
+		},
+	})
+	tx.AddTxOut(wire.NewTxOut(50000, []byte{
+		0x00, 0x14, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+		0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+		0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+	}))
+	tx.AddTxOut(wire.NewTxOut(10000, []byte{0x51}))
+
+	if _, err := b.BroadcastTx(ctx, tx); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("after broadcast", func(t *testing.T) {
+		resp, err := b.MempoolUtxos(ctx, allHashes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(resp.UTXOs) != 2 {
+			t.Fatalf("got %d utxos, want 2", len(resp.UTXOs))
+		}
+		if len(resp.SpentOutpoints) != 1 {
+			t.Fatalf("got %d spent, want 1", len(resp.SpentOutpoints))
+		}
+
+		// Verify values.
+		var total btcutil.Amount
+		for _, u := range resp.UTXOs {
+			total += u.Value
+		}
+		if total != 60000 {
+			t.Errorf("total = %d, want 60000", total)
+		}
+
+		// Verify script hashes are non-zero.
+		for _, u := range resp.UTXOs {
+			var zero chainhash.Hash
+			if u.ScriptHash == zero {
+				t.Error("script hash is zero")
+			}
+		}
+	})
+
+	t.Run("FilterSpent integration", func(t *testing.T) {
+		resp, err := b.MempoolUtxos(ctx, allHashes)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// No outputs are spent by another mempool tx, so
+		// FilterSpent should return all of them.
+		filtered := gozer.FilterSpent(resp.UTXOs, resp.SpentOutpoints)
+		if len(filtered) != len(resp.UTXOs) {
+			t.Fatalf("FilterSpent: got %d, want %d",
+				len(filtered), len(resp.UTXOs))
+		}
+	})
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -138,6 +138,10 @@ func (s *Server) getTBCAPICommandHandler(cmd protocol.Command, payload any) func
 	case tbcapi.CmdMempoolInfoRequest:
 		return func(ctx context.Context) (any, error) {
 			return s.handleMempoolInfoRequest(ctx, payload.(*tbcapi.MempoolInfoRequest))
+		}
+	case tbcapi.CmdMempoolUtxosRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleMempoolUtxosRequest(ctx, payload.(*tbcapi.MempoolUtxosRequest))
 		}
 	case tbcapi.CmdKeystonesByHeightRequest:
 		return func(ctx context.Context) (any, error) {
@@ -654,7 +658,7 @@ func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi
 	}, nil
 }
 
-func (s *Server) handleMempoolInfoRequest(_ context.Context, _ *tbcapi.MempoolInfoRequest) (any, error) {
+func (s *Server) handleMempoolInfoRequest(ctx context.Context, _ *tbcapi.MempoolInfoRequest) (any, error) {
 	log.Tracef("handleMempoolInfoRequest")
 	defer log.Tracef("handleMempoolInfoRequest exit")
 
@@ -666,9 +670,80 @@ func (s *Server) handleMempoolInfoRequest(_ context.Context, _ *tbcapi.MempoolIn
 		}, err
 	}
 
+	txNum, size := s.mempool.stats(ctx)
 	return &tbcapi.MempoolInfoResponse{
-		Size:  s.mempool.size,
-		TxNum: uint(len(s.mempool.txs)),
+		Size:  int64(size),
+		TxNum: uint(txNum),
+	}, nil
+}
+
+func (s *Server) handleMempoolUtxosRequest(ctx context.Context, req *tbcapi.MempoolUtxosRequest) (any, error) {
+	log.Tracef("handleMempoolUtxosRequest")
+	defer log.Tracef("handleMempoolUtxosRequest exit")
+
+	if !s.cfg.MempoolEnabled {
+		err := errors.New("mempool not enabled")
+		e := protocol.NewInternalError(err)
+		return &tbcapi.MempoolUtxosResponse{
+			Error: e.ProtocolError(),
+		}, err
+	}
+
+	// ScriptHashes is required.
+	if len(req.ScriptHashes) == 0 {
+		return &tbcapi.MempoolUtxosResponse{
+			Error: protocol.RequestErrorf("script_hashes is required"),
+		}, nil
+	}
+
+	// Build ScriptHash filter.
+	filter := make(map[tbcd.ScriptHash]struct{}, len(req.ScriptHashes))
+	for _, raw := range req.ScriptHashes {
+		if len(raw) != chainhash.HashSize {
+			return &tbcapi.MempoolUtxosResponse{
+				Error: protocol.RequestErrorf("invalid script hash length: got %d, want %d", len(raw), chainhash.HashSize),
+			}, nil
+		}
+		var sh tbcd.ScriptHash
+		copy(sh[:], raw)
+		filter[sh] = struct{}{}
+	}
+
+	utxos, shs, spent, err := s.MempoolUtxos(ctx)
+	if err != nil {
+		return &tbcapi.MempoolUtxosResponse{
+			Error: protocol.RequestErrorf("mempool utxos: %v", err),
+		}, nil
+	}
+
+	// Apply ScriptHash filter.
+	filtered := make([]tbcd.Utxo, 0, len(utxos)/2)
+	filteredShs := make([]tbcd.ScriptHash, 0, len(utxos)/2)
+	for i, sh := range shs {
+		if _, ok := filter[sh]; ok {
+			filtered = append(filtered, utxos[i])
+			filteredShs = append(filteredShs, sh)
+		}
+	}
+
+	out := make([]*tbcapi.MempoolUTXO, len(filtered))
+	for i, u := range filtered {
+		out[i] = &tbcapi.MempoolUTXO{
+			TxId:       *u.ChainHash(),
+			Value:      btcutil.Amount(u.Value()),
+			OutIndex:   u.OutputIndex(),
+			ScriptHash: chainhash.Hash(filteredShs[i]),
+		}
+	}
+
+	spentOps := make([]tbcapi.OutPoint, len(spent))
+	for i, op := range spent {
+		spentOps[i] = tbcapi.OutPoint{Hash: op.Hash, Index: op.Index}
+	}
+
+	return &tbcapi.MempoolUtxosResponse{
+		UTXOs:          out,
+		SpentOutpoints: spentOps,
 	}, nil
 }
 

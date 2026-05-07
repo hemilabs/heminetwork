@@ -20,6 +20,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo/v2"
 
+	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
@@ -181,6 +182,28 @@ func (t *tbcGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr 
 	}
 
 	return buResp.UTXOs, nil
+}
+
+// MempoolUtxos returns unspent mempool outputs via the TBC websocket API.
+// scriptHashes is required — only outputs matching those script hashes
+// are returned.
+func (t *tbcGozer) MempoolUtxos(ctx context.Context, scriptHashes []api.ByteSlice) (*tbcapi.MempoolUtxosResponse, error) {
+	res, err := t.callTBC(ctx, DefaultRequestTimeout, &tbcapi.MempoolUtxosRequest{
+		ScriptHashes: scriptHashes,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp, ok := res.(*tbcapi.MempoolUtxosResponse)
+	if !ok {
+		return nil, fmt.Errorf("not a mempool utxos response %T", res)
+	}
+	if resp.Error != nil {
+		return nil, resp.Error
+	}
+
+	return resp, nil
 }
 
 func (t *tbcGozer) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *gozer.BlocksByL2AbrevHashesResponse {
@@ -378,7 +401,7 @@ func (t *tbcGozer) connectTBC(pctx context.Context, connected func()) error {
 	defer log.Tracef("connectTBC exit")
 
 	conn, err := protocol.NewConn(t.url, &protocol.ConnOptions{
-		ReadLimit: 6 * (1 << 20), // 6 MiB
+		ReadLimit: tbcapi.MaxResponseSize,
 	})
 	if err != nil {
 		return err

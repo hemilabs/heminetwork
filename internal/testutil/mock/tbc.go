@@ -20,7 +20,6 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
@@ -151,8 +150,7 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 			break
 		}
 
-		opp := pl.Tx.TxIn[0].PreviousOutPoint
-		mptx := tbc.NewMempoolTx(*ch, map[wire.OutPoint]struct{}{opp: {}})
+		mptx := tbc.NewMempoolTx(pl.Tx)
 		err = mp.TxInsert(f.pctx, &mptx)
 		if err != nil {
 			panic(fmt.Errorf("mempool tx insert: %w", err))
@@ -241,6 +239,43 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 				L2KeystoneAbrevs: kssList,
 				BTCTipHeight:     uint64(f.btcTip),
 			}
+		}
+	case tbcapi.CmdMempoolUtxosRequest:
+		req := payload.(*tbcapi.MempoolUtxosRequest)
+		if len(req.ScriptHashes) == 0 {
+			resp = &tbcapi.MempoolUtxosResponse{
+				Error: protocol.RequestErrorf("script_hashes is required"),
+			}
+			break
+		}
+		filter := make(map[tbcd.ScriptHash]struct{}, len(req.ScriptHashes))
+		for _, raw := range req.ScriptHashes {
+			var sh tbcd.ScriptHash
+			copy(sh[:], raw)
+			filter[sh] = struct{}{}
+		}
+		utxos, shs, spent, err := mp.UnconfirmedUtxos(f.pctx)
+		if err != nil {
+			panic(fmt.Errorf("unconfirmed utxos: %w", err))
+		}
+		var mempoolUtxos []*tbcapi.MempoolUTXO
+		for i, sh := range shs {
+			if _, ok := filter[sh]; ok {
+				mempoolUtxos = append(mempoolUtxos, &tbcapi.MempoolUTXO{
+					TxId:       *utxos[i].ChainHash(),
+					Value:      btcutil.Amount(utxos[i].Value()),
+					OutIndex:   utxos[i].OutputIndex(),
+					ScriptHash: chainhash.Hash(sh),
+				})
+			}
+		}
+		spentOps := make([]tbcapi.OutPoint, len(spent))
+		for i, op := range spent {
+			spentOps[i] = tbcapi.OutPoint{Hash: op.Hash, Index: op.Index}
+		}
+		resp = &tbcapi.MempoolUtxosResponse{
+			UTXOs:          mempoolUtxos,
+			SpentOutpoints: spentOps,
 		}
 	default:
 		panic(fmt.Errorf("unknown command: %v", cmd))

@@ -24,6 +24,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 
+	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
@@ -193,6 +194,11 @@ func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, filterMempool bo
 		})
 	}
 	return urv, nil
+}
+
+// MempoolUtxos is not supported by the Blockstream backend.
+func (bs *blockstreamGozer) MempoolUtxos(_ context.Context, _ []api.ByteSlice) (*tbcapi.MempoolUtxosResponse, error) {
+	return nil, errors.New("mempool utxos not supported by blockstream")
 }
 
 func (bs *blockstreamGozer) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *gozer.BlocksByL2AbrevHashesResponse {
