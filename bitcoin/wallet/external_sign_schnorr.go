@@ -61,20 +61,19 @@ func TransactionApplySchnorr(params *chaincfg.Params, tx *wire.MsgTx, idx int, p
 		return fmt.Errorf("input index %d out of range (tx has %d inputs)",
 			idx, len(tx.TxIn))
 	}
-	if len(sig64) != 64 {
-		return fmt.Errorf("schnorr signature must be 64 bytes, got %d",
-			len(sig64))
-	}
 	if err := validateSigHashType(hashType); err != nil {
 		return err
 	}
 
-	// Parse to enforce BIP-340 encoding: upper bit of R.x and a few
-	// other canonicity rules.  ParseSignature catches encodings that
-	// would be rejected by the script engine.
-	if _, err := schnorr.ParseSignature(sig64); err != nil {
+	// Parse and re-encode to guarantee BIP-340 canonical form.
+	// ParseSignature validates length, upper bit of R.x, and
+	// other canonicity rules; Serialize round-trips through the
+	// parsed R,S values.
+	sig, err := schnorr.ParseSignature(sig64)
+	if err != nil {
 		return fmt.Errorf("parse signature: %w", err)
 	}
+	canonical := sig.Serialize()
 
 	class := txscript.GetScriptClass(prev.PkScript)
 	if class != txscript.WitnessV1TaprootTy {
@@ -85,11 +84,11 @@ func TransactionApplySchnorr(params *chaincfg.Params, tx *wire.MsgTx, idx int, p
 		return fmt.Errorf("p2tr: %w", err)
 	}
 
-	witness := sig64
+	witness := canonical
 	if hashType != txscript.SigHashDefault {
-		witness = make([]byte, len(sig64)+1)
-		copy(witness, sig64)
-		witness[len(sig64)] = byte(hashType)
+		witness = make([]byte, len(canonical)+1)
+		copy(witness, canonical)
+		witness[len(canonical)] = byte(hashType)
 	}
 	tx.TxIn[idx].Witness = wire.TxWitness{witness}
 	tx.TxIn[idx].SignatureScript = nil
