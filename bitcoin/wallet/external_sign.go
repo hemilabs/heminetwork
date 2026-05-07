@@ -99,7 +99,7 @@ func ECDSASigFromRS(r, s []byte) ([]byte, error) {
 // receive; the caller already has it.
 func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, prev *wire.TxOut, pubKey *btcec.PublicKey, sigDER []byte, hashType txscript.SigHashType) error {
 	if tx == nil || prev == nil || pubKey == nil {
-		return fmt.Errorf("nil argument")
+		return fmt.Errorf("tx, prev and pubKey cannot be nil")
 	}
 	if idx < 0 || idx >= len(tx.TxIn) {
 		return fmt.Errorf("input index %d out of range (tx has %d inputs)",
@@ -126,8 +126,9 @@ func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, pre
 	pubCompressed := pubKey.SerializeCompressed()
 
 	// Attach sighash byte for script-engine consumption.
-	sigWithHash := append([]byte{}, sigDER...)
-	sigWithHash = append(sigWithHash, byte(hashType))
+	sigWithHash := make([]byte, len(sigDER)+1)
+	copy(sigWithHash, sigDER)
+	sigWithHash[len(sigDER)] = byte(hashType)
 
 	class := txscript.GetScriptClass(prev.PkScript)
 	switch class {

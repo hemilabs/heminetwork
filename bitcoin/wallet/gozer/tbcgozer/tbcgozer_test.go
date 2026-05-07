@@ -432,8 +432,8 @@ func TestTBCGozerTxByIDNilTxid(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nil txid")
 	}
-	if err.Error() != "txid is nil" {
-		t.Fatalf("expected 'txid is nil', got: %v", err)
+	if err.Error() != "txid cannot be nil" {
+		t.Fatalf("expected 'txid cannot be nil', got: %v", err)
 	}
 }
 

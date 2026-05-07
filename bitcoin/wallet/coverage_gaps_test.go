@@ -266,7 +266,7 @@ func TestTransactionApplyECDSAP2WPKHWrongKey(t *testing.T) {
 	outpoint := wire.NewOutPoint(&fundHash, 0)
 	tx := wire.NewMsgTx(2)
 	tx.AddTxIn(wire.NewTxIn(outpoint, nil, nil))
-	prev := wire.NewTxOut(50_000, pkScript)
+	prev := wire.NewTxOut(50000, pkScript)
 
 	// Produce a well-formed sigDER so we get past the parse gate.
 	sigDER := signWithKeyToDER(wrongKey, chainhash.HashB([]byte("x")))
@@ -311,7 +311,7 @@ func TestTransactionApplySchnorrNonDefaultSigHash(t *testing.T) {
 	tx := wire.NewMsgTx(2)
 	tx.AddTxIn(wire.NewTxIn(outpoint, nil, nil))
 
-	prev := wire.NewTxOut(50_000, pkScript)
+	prev := wire.NewTxOut(50000, pkScript)
 	sig64 := make([]byte, 64)
 
 	err = TransactionApplySchnorr(params, tx, 0, prev, priv.PubKey(),

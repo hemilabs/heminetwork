@@ -55,7 +55,7 @@ import (
 // is valid" would be misled.
 func TransactionApplySchnorr(params *chaincfg.Params, tx *wire.MsgTx, idx int, prev *wire.TxOut, pubKey *btcec.PublicKey, sig64 []byte, hashType txscript.SigHashType) error {
 	if tx == nil || prev == nil || pubKey == nil {
-		return fmt.Errorf("nil argument")
+		return fmt.Errorf("tx, prev and pubKey cannot be nil")
 	}
 	if idx < 0 || idx >= len(tx.TxIn) {
 		return fmt.Errorf("input index %d out of range (tx has %d inputs)",
@@ -87,7 +87,9 @@ func TransactionApplySchnorr(params *chaincfg.Params, tx *wire.MsgTx, idx int, p
 
 	witness := sig64
 	if hashType != txscript.SigHashDefault {
-		witness = append(append([]byte{}, sig64...), byte(hashType))
+		witness = make([]byte, len(sig64)+1)
+		copy(witness, sig64)
+		witness[len(sig64)] = byte(hashType)
 	}
 	tx.TxIn[idx].Witness = wire.TxWitness{witness}
 	tx.TxIn[idx].SignatureScript = nil

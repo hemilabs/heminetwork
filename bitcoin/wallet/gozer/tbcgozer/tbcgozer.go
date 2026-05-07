@@ -160,7 +160,7 @@ func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.
 // unreachable.
 func (t *tbcGozer) TxByID(ctx context.Context, txid *chainhash.Hash) (*tbcapi.Tx, error) {
 	if txid == nil {
-		return nil, errors.New("txid is nil")
+		return nil, errors.New("txid cannot be nil")
 	}
 	req := &tbcapi.TxByIdRequest{TxID: *txid}
 
