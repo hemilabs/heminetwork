@@ -16,15 +16,6 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
-// maxECDSASigDERLen is a generous upper bound on a DER-encoded
-// ECDSA signature over secp256k1.  The real maximum is 72 bytes
-// (0x30 <len> 0x02 <rLen=33> <r> 0x02 <sLen=33> <s> with leading
-// zero bytes for r and s when their high bit is set).  The cap
-// gives headroom for encodings we might not have seen while still
-// rejecting attacker-controlled buffers that would otherwise be
-// copied in full before the DER parser runs.
-const maxECDSASigDERLen = 128
-
 // ECDSASigFromRS assembles a DER-encoded ECDSA signature from raw
 // big-endian r and s scalar bytes as produced by many threshold
 // signature libraries (including hemilabs/x/tss-lib/v3).  The
@@ -105,30 +96,25 @@ func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, pre
 		return fmt.Errorf("input index %d out of range (tx has %d inputs)",
 			idx, len(tx.TxIn))
 	}
-	if len(sigDER) == 0 {
-		return fmt.Errorf("empty signature")
-	}
-	if len(sigDER) > maxECDSASigDERLen {
-		return fmt.Errorf("signature exceeds max DER length: got %d, max %d",
-			len(sigDER), maxECDSASigDERLen)
-	}
 	if err := validateSigHashType(hashType); err != nil {
 		return err
 	}
 
-	// Sanity check: ensure sigDER is parseable DER.  This catches
-	// gross encoding errors early; full cryptographic verification
-	// is a caller choice via VerifyECDSA.
-	if _, err := ecdsa.ParseDERSignature(sigDER); err != nil {
+	// Parse and re-encode to guarantee canonical DER.
+	// ParseDERSignature validates length, structure, and padding;
+	// Serialize round-trips through the parsed R,S scalars.
+	sig, err := ecdsa.ParseDERSignature(sigDER)
+	if err != nil {
 		return fmt.Errorf("parse signature: %w", err)
 	}
+	canonicalDER := sig.Serialize()
 
 	pubCompressed := pubKey.SerializeCompressed()
 
 	// Attach sighash byte for script-engine consumption.
-	sigWithHash := make([]byte, len(sigDER)+1)
-	copy(sigWithHash, sigDER)
-	sigWithHash[len(sigDER)] = byte(hashType)
+	sigWithHash := make([]byte, len(canonicalDER)+1)
+	copy(sigWithHash, canonicalDER)
+	sigWithHash[len(canonicalDER)] = byte(hashType)
 
 	class := txscript.GetScriptClass(prev.PkScript)
 	switch class {
