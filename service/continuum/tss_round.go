@@ -215,7 +215,14 @@ func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []*t
 			return fmt.Errorf("marshal content: wire data too large (%d bytes)", len(wireData))
 		}
 
-		data := make([]byte, wireHeaderLen+len(wireData))
+		// Appease static analysis: wireHeaderLen is 2 and wireData
+		// is bounded above, so this cannot overflow on any platform
+		// Go supports, but CodeQL cannot track the constant bound.
+		n := wireHeaderLen + len(wireData)
+		if n < wireHeaderLen {
+			return fmt.Errorf("wire data size overflow")
+		}
+		data := make([]byte, n)
 		data[0] = bcast
 		data[1] = cflags
 		copy(data[wireHeaderLen:], wireData)
