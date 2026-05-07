@@ -5,6 +5,7 @@
 package wallet
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -26,20 +27,20 @@ import (
 // between parse errors and verification mismatches.
 func VerifyECDSA(sigHash, sigDER []byte, pubKey *btcec.PublicKey) error {
 	if pubKey == nil {
-		return fmt.Errorf("nil pubkey")
+		return fmt.Errorf("pubkey cannot be nil")
 	}
 	if len(sigHash) != 32 {
 		return fmt.Errorf("sighash must be 32 bytes, got %d", len(sigHash))
 	}
 	if len(sigDER) == 0 {
-		return fmt.Errorf("empty signature")
+		return errors.New("empty signature")
 	}
 	sig, err := ecdsa.ParseDERSignature(sigDER)
 	if err != nil {
 		return fmt.Errorf("parse signature: %w", err)
 	}
 	if !sig.Verify(sigHash, pubKey) {
-		return fmt.Errorf("signature does not verify")
+		return errors.New("invalid signature")
 	}
 	return nil
 }
@@ -78,7 +79,7 @@ func VerifySchnorr(sigHash, sig64, xOnlyPubKey []byte) error {
 		return fmt.Errorf("parse x-only pubkey: %w", err)
 	}
 	if !sig.Verify(sigHash, pub) {
-		return fmt.Errorf("signature does not verify")
+		return errors.New("invalid signature")
 	}
 	return nil
 }
