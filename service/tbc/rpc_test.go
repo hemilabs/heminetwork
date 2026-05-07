@@ -109,9 +109,10 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRawRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRawRequest{
 		Height: 55,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -180,9 +181,10 @@ func TestBlockHeadersByHeight(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
 		Height: 55,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -244,9 +246,10 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
 		Height: 550,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -540,9 +543,10 @@ func TestBalanceByAddress(t *testing.T) {
 				}
 				indexAll(ctx, t, tbcServer)
 
-				if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BalanceByAddressRequest{
+				err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BalanceByAddressRequest{
 					Address: tti.address(),
-				}); err != nil {
+				})
+				if err != nil {
 					t.Fatal(err)
 				}
 
@@ -762,11 +766,12 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			}
 			indexAll(ctx, t, tbcServer)
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UTXOsByAddressRawRequest{
+			err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UTXOsByAddressRawRequest{
 				Address: tti.address(),
 				Start:   uint(tti.start),
 				Count:   uint(tti.limit),
-			}); err != nil {
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
 
@@ -971,11 +976,12 @@ func TestUtxosByAddress(t *testing.T) {
 			}
 			indexAll(ctx, t, tbcServer)
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UTXOsByAddressRequest{
+			err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UTXOsByAddressRequest{
 				Address: tti.address(),
 				Start:   uint(tti.start),
 				Count:   uint(tti.limit),
-			}); err != nil {
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
 
@@ -1049,9 +1055,10 @@ func TestTxByIdRaw(t *testing.T) {
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 		TxID: *txId,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1132,9 +1139,10 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	txId[0]++
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 		TxID: *txId,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1221,9 +1229,10 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	txId[len(txId)-1] = 8
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 		TxID: *txId,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1296,9 +1305,10 @@ func TestTxById(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 		TxID: *txId,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1375,9 +1385,10 @@ func TestTxByIdInvalid(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	txId[0]++
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 		TxID: *txId,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1854,9 +1865,10 @@ func TestTxByIdNotFound(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	txId[len(txId)-1] = 8
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 		TxID: *txId,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1984,9 +1996,10 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlocksByL2AbrevHashesRequest{
+			err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlocksByL2AbrevHashesRequest{
 				L2KeystoneAbrevHashes: []chainhash.Hash{*tti.l2KeystoneAbrevHash},
-			}); err != nil {
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
 
@@ -2396,9 +2409,10 @@ func TestTxWatchNotification(t *testing.T) {
 	watchedSH := tbcd.NewScriptHashFromScript(watchedScript)
 
 	// Send TxWatch request.
-	if err := tbcapi.Write(ctx, tws.conn, "watch-1", tbcapi.TxWatchRequest{
+	err = tbcapi.Write(ctx, tws.conn, "watch-1", tbcapi.TxWatchRequest{
 		ScriptHashes: []api.ByteSlice{watchedSH[:]},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -2520,9 +2534,10 @@ func TestTxWatchFilterDrop(t *testing.T) {
 	shA := tbcd.NewScriptHashFromScript([]byte("address-A"))
 	shB := tbcd.NewScriptHashFromScript([]byte("address-B"))
 
-	if err := tbcapi.Write(ctx, tws.conn, "watch-1", tbcapi.TxWatchRequest{
+	err = tbcapi.Write(ctx, tws.conn, "watch-1", tbcapi.TxWatchRequest{
 		ScriptHashes: []api.ByteSlice{shA[:]},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -2645,9 +2660,10 @@ func TestTxUnwatchThroughWebsocket(t *testing.T) {
 	sh := tbcd.NewScriptHashFromScript([]byte("merchant-addr"))
 
 	// Watch first.
-	if err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
+	err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
 		ScriptHashes: []api.ByteSlice{sh[:]},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	var resp protocol.Message
@@ -2659,9 +2675,10 @@ func TestTxUnwatchThroughWebsocket(t *testing.T) {
 	}
 
 	// Unwatch.
-	if err := tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
+	err = tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
 		ScriptHashes: []api.ByteSlice{sh[:]},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := wsjson.Read(ctx, c, &resp); err != nil {
@@ -2712,9 +2729,10 @@ func TestTxUnwatchBeforeWatch(t *testing.T) {
 
 	// Unwatch without ever calling Watch — should succeed with no error.
 	sh := tbcd.NewScriptHashFromScript([]byte("never-watched"))
-	if err := tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
+	err := tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
 		ScriptHashes: []api.ByteSlice{sh[:]},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	var resp protocol.Message
@@ -2740,9 +2758,10 @@ func TestTxWatchBadScriptHashLength(t *testing.T) {
 	_, c, tws := txWatchTestServer(t)
 
 	// Send a script hash that's too short (16 bytes instead of 32).
-	if err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
+	err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
 		ScriptHashes: []api.ByteSlice{make([]byte, 16)},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	var resp protocol.Message
@@ -2769,9 +2788,10 @@ func TestTxUnwatchBadScriptHashLength(t *testing.T) {
 
 	// Watch first so the listener exists.
 	sh := tbcd.NewScriptHashFromScript([]byte("addr"))
-	if err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
+	err := tbcapi.Write(ctx, tws.conn, "w1", tbcapi.TxWatchRequest{
 		ScriptHashes: []api.ByteSlice{sh[:]},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	var resp protocol.Message
@@ -2780,9 +2800,10 @@ func TestTxUnwatchBadScriptHashLength(t *testing.T) {
 	}
 
 	// Unwatch with bad length.
-	if err := tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
+	err = tbcapi.Write(ctx, tws.conn, "u1", tbcapi.TxUnwatchRequest{
 		ScriptHashes: []api.ByteSlice{make([]byte, 5)},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := wsjson.Read(ctx, c, &resp); err != nil {
@@ -2821,9 +2842,10 @@ func TestTxWatchExceedsLimitThroughWebsocket(t *testing.T) {
 			hashes[i] = sh[:]
 		}
 		id := fmt.Sprintf("w%d", sent)
-		if err := tbcapi.Write(ctx, tws.conn, id, tbcapi.TxWatchRequest{
+		err := tbcapi.Write(ctx, tws.conn, id, tbcapi.TxWatchRequest{
 			ScriptHashes: hashes,
-		}); err != nil {
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
 		var resp protocol.Message
@@ -2842,9 +2864,10 @@ func TestTxWatchExceedsLimitThroughWebsocket(t *testing.T) {
 
 	// One more should exceed the limit.
 	extra := tbcd.NewScriptHashFromScript([]byte("one-too-many"))
-	if err := tbcapi.Write(ctx, tws.conn, "overflow", tbcapi.TxWatchRequest{
+	err := tbcapi.Write(ctx, tws.conn, "overflow", tbcapi.TxWatchRequest{
 		ScriptHashes: []api.ByteSlice{extra[:]},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	var resp protocol.Message
