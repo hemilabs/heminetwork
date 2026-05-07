@@ -201,9 +201,16 @@ func (s *fileStore) encrypt(keyID, plaintext []byte) ([]byte, error) {
 	}
 
 	// Bind keyID: [4-byte keyID len][keyID][plaintext].
+	// Overflow guard for CodeQL — in practice keyID is a short
+	// identifier and plaintext is a single TSS key, so this sum
+	// is nowhere near int overflow on any 64-bit platform.
+	n := 4 + len(keyID) + len(plaintext)
+	if n < 4 {
+		return nil, fmt.Errorf("encrypt: input size overflow")
+	}
 	var lenBuf [4]byte
 	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(keyID)))
-	bound := make([]byte, 0, 4+len(keyID)+len(plaintext))
+	bound := make([]byte, 0, n)
 	bound = append(bound, lenBuf[:]...)
 	bound = append(bound, keyID...)
 	bound = append(bound, plaintext...)
