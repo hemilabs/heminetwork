@@ -45,9 +45,6 @@ services:
       - "-rpcworkqueue=400"
       - "-printtoconsole"
       - "-addnode=bitcoind:18444"
-    ports:
-      - "18443:18443"
-      - "18444:18444"
     volumes:
       - bitcoind:/bitcoin
     networks:
