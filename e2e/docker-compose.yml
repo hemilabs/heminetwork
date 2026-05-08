@@ -50,6 +50,31 @@ services:
     networks:
       e2e:
 
+  bitcoind-postprune:
+    # yamllint disable-line rule:line-length
+    image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
+    depends_on:
+      bitcoind-prune-to-height:
+        condition: "service_completed_successfully"
+    command:
+      - "bitcoind"
+      - "-regtest=1"
+      - "-rpcuser=user"
+      - "-rpcpassword=password"
+      - "-rpcallowip=0.0.0.0/0"
+      - "-rpcbind=0.0.0.0:18443"
+      - "-txindex=1"
+      - "-rpcworkqueue=400"
+      - "-printtoconsole"
+      - "-addnode=bitcoind-prune:18444"
+    volumes:
+      - bitcoind:/bitcoin
+    ports:
+      - "18443:18443"
+      - "18444:18444"
+    networks:
+      e2e:
+
   bitcoind-prune-to-height:
     # yamllint disable-line rule:line-length
     image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
@@ -105,6 +130,28 @@ services:
       - "-rpcpassword=password"
       - "-rpcport=18443"
       - "-rpcconnect=bitcoind"
+      - "generatetoaddress"
+      - "1"
+      - "$BTC_ADDRESS"
+    networks:
+      e2e:
+
+  bitcoind-moreblocks-postprune:
+    # yamllint disable-line rule:line-length
+    image: "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617"
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      bitcoind-postprune:
+        condition: "service_started"
+    command:
+      - "bitcoin-cli"
+      - "-regtest=1"
+      - "-rpcuser=user"
+      - "-rpcpassword=password"
+      - "-rpcport=18443"
+      - "-rpcconnect=bitcoind-postprune"
       - "generatetoaddress"
       - "1"
       - "$BTC_ADDRESS"
