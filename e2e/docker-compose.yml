@@ -69,9 +69,6 @@ services:
       - "-addnode=bitcoind-prune:18444"
     volumes:
       - bitcoind:/bitcoin
-    ports:
-      - "18443:18443"
-      - "18444:18444"
     networks:
       e2e:
 
