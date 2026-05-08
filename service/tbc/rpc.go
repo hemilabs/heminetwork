@@ -1351,6 +1351,7 @@ func (s *Server) pushNotifications(ctx context.Context, ws *tbcWs, l *Listener) 
 	for {
 		n, err := l.Listen(ctx)
 		if err != nil {
+			log.Errorf("tx notification listen: %v", err)
 			return
 		}
 
@@ -1369,7 +1370,7 @@ func (s *Server) pushNotifications(ctx context.Context, ws *tbcWs, l *Listener) 
 		pushID := "ntfy-" + hex.EncodeToString(buf)
 
 		if err := tbcapi.Write(ctx, ws.conn, pushID, ntfy); err != nil {
-			log.Debugf("push notification write: %v", err)
+			log.Errorf("push notification write: %v", err)
 			return
 		}
 	}

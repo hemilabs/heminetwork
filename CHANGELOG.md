@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add Authenticated RPC route for administrative requests to TBC ([#1003](https://github.com/hemilabs/heminetwork/pull/1003)).
 - Add `MempoolUtxos` RPC command returning unspent mempool outputs matching a required set of script hashes
   ([#987](https://github.com/hemilabs/heminetwork/pull/987)).
-- Add filtered transaction notifications to TBC for commerce (TxWatch/TxUnwatch API).
+- Add filtered transaction notifications to TBC for commerce (TxWatch/TxUnwatch API)
+  ([#986](https://github.com/hemilabs/heminetwork/pull/986)).
 
 ### Changed
 
