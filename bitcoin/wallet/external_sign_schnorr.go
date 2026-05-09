@@ -5,6 +5,7 @@
 package wallet
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -55,7 +56,7 @@ import (
 // is valid" would be misled.
 func TransactionApplySchnorr(params *chaincfg.Params, tx *wire.MsgTx, idx int, prev *wire.TxOut, pubKey *btcec.PublicKey, sig64 []byte, hashType txscript.SigHashType) error {
 	if tx == nil || prev == nil || pubKey == nil {
-		return fmt.Errorf("tx, prev and pubKey cannot be nil")
+		return errors.New("tx, prev and pubKey cannot be nil")
 	}
 	if idx < 0 || idx >= len(tx.TxIn) {
 		return fmt.Errorf("input index %d out of range (tx has %d inputs)",
@@ -115,7 +116,7 @@ func pubKeyMatchesTaprootAddress(params *chaincfg.Params, pkScript []byte, pubKe
 		return fmt.Errorf("derive address: %w", err)
 	}
 	if addrs[0].EncodeAddress() != want.EncodeAddress() {
-		return fmt.Errorf("public key does not match address")
+		return errors.New("public key does not match address")
 	}
 	return nil
 }
