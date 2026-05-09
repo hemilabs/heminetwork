@@ -206,7 +206,7 @@ func (s *fileStore) encrypt(keyID, plaintext []byte) ([]byte, error) {
 	// is nowhere near int overflow on any 64-bit platform.
 	n := 4 + len(keyID) + len(plaintext)
 	if n < 4 {
-		return nil, fmt.Errorf("encrypt: input size overflow")
+		return nil, errors.New("encrypt: input size overflow")
 	}
 	var lenBuf [4]byte
 	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(keyID)))
