@@ -6,6 +6,7 @@ package continuum
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -33,7 +34,7 @@ type tssWireEnvelope struct {
 // types in different packages (ECDSA vs EdDSA keygen).
 func marshalTSSContent(content interface{}) ([]byte, error) {
 	if content == nil {
-		return nil, fmt.Errorf("marshal: nil content")
+		return nil, errors.New("marshal: nil content")
 	}
 	t := reflect.TypeOf(content).Elem()
 	// Extract "ecdsa/keygen" from "github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
