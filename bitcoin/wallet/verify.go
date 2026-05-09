@@ -27,7 +27,7 @@ import (
 // between parse errors and verification mismatches.
 func VerifyECDSA(sigHash, sigDER []byte, pubKey *btcec.PublicKey) error {
 	if pubKey == nil {
-		return fmt.Errorf("pubkey cannot be nil")
+		return errors.New("pubkey cannot be nil")
 	}
 	if len(sigHash) != 32 {
 		return fmt.Errorf("sighash must be 32 bytes, got %d", len(sigHash))

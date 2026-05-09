@@ -5,6 +5,7 @@
 package wallet
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -28,21 +29,21 @@ import (
 // or above the group order is rejected as invalid.
 func ECDSASigFromRS(r, s []byte) ([]byte, error) {
 	if len(r) == 0 || len(s) == 0 {
-		return nil, fmt.Errorf("empty scalar")
+		return nil, errors.New("empty scalar")
 	}
 
 	var rs, ss secp256k1.ModNScalar
 	if overflow := rs.SetByteSlice(r); overflow {
-		return nil, fmt.Errorf("r overflows group order")
+		return nil, errors.New("r overflows group order")
 	}
 	if rs.IsZero() {
-		return nil, fmt.Errorf("r is zero")
+		return nil, errors.New("r is zero")
 	}
 	if overflow := ss.SetByteSlice(s); overflow {
-		return nil, fmt.Errorf("s overflows group order")
+		return nil, errors.New("s overflows group order")
 	}
 	if ss.IsZero() {
-		return nil, fmt.Errorf("s is zero")
+		return nil, errors.New("s is zero")
 	}
 
 	sig := ecdsa.NewSignature(&rs, &ss)
@@ -90,7 +91,7 @@ func ECDSASigFromRS(r, s []byte) ([]byte, error) {
 // receive; the caller already has it.
 func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, prev *wire.TxOut, pubKey *btcec.PublicKey, sigDER []byte, hashType txscript.SigHashType) error {
 	if tx == nil || prev == nil || pubKey == nil {
-		return fmt.Errorf("tx, prev and pubKey cannot be nil")
+		return errors.New("tx, prev and pubKey cannot be nil")
 	}
 	if idx < 0 || idx >= len(tx.TxIn) {
 		return fmt.Errorf("input index %d out of range (tx has %d inputs)",
@@ -187,7 +188,7 @@ func pubKeyMatchesAddress(params *chaincfg.Params, pkScript, pubCompressed []byt
 	}
 
 	if addrs[0].EncodeAddress() != want.EncodeAddress() {
-		return fmt.Errorf("public key does not match address")
+		return errors.New("public key does not match address")
 	}
 	return nil
 }

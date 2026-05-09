@@ -6,6 +6,7 @@
 package memory
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -229,10 +230,10 @@ func ecdsaAddressesForPubKey(params *chaincfg.Params, pubCompressed []byte) ([]s
 // ErrKeyExists.
 func (m *memoryZuul) PutTSSKey(tnk *zuul.TSSNamedKey) error {
 	if tnk == nil || tnk.PublicKey == nil {
-		return fmt.Errorf("tss key: public key required")
+		return errors.New("tss key: public key required")
 	}
 	if len(tnk.KeyID) == 0 {
-		return fmt.Errorf("tss key: key id required")
+		return errors.New("tss key: key id required")
 	}
 
 	pubBytes := tnk.PublicKey.SerializeCompressed()
