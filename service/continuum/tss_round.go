@@ -6,6 +6,7 @@ package continuum
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/hemilabs/x/tss-lib/v3/tss"
@@ -220,7 +221,7 @@ func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []*t
 		// Go supports, but CodeQL cannot track the constant bound.
 		n := wireHeaderLen + len(wireData)
 		if n < wireHeaderLen {
-			return fmt.Errorf("wire data size overflow")
+			return errors.New("wire data size overflow")
 		}
 		data := make([]byte, n)
 		data[0] = bcast
