@@ -1874,7 +1874,7 @@ func validatePeerAddress(addr string) error {
 	}
 	for _, c := range addr {
 		if c < 0x20 {
-			return fmt.Errorf("control character in address")
+			return errors.New("control character in address")
 		}
 	}
 	host, port, err := net.SplitHostPort(addr)
@@ -1882,7 +1882,7 @@ func validatePeerAddress(addr string) error {
 		return fmt.Errorf("split host port: %w", err)
 	}
 	if host == "" {
-		return fmt.Errorf("empty host")
+		return errors.New("empty host")
 	}
 	if port == "" || port == "0" {
 		return fmt.Errorf("invalid port: %q", port)

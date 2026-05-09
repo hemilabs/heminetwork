@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -124,7 +125,7 @@ func continuumctl(pctx context.Context, flags []string) error {
 	case "status":
 		cidHex := args["ceremony_id"]
 		if cidHex == "" {
-			return fmt.Errorf("ceremony_id required")
+			return errors.New("ceremony_id required")
 		}
 		return continuumStatus(ctx, cidHex)
 	case "list":
@@ -171,7 +172,7 @@ func continuumReadResponse(ctx context.Context, t *continuum.Transport) (any, er
 		}
 		return cmd, nil
 	}
-	return nil, fmt.Errorf("no admin response after 20 reads")
+	return nil, errors.New("no admin response after 20 reads")
 }
 
 // continuumPeers queries the peer list from a running transfunctionerd.

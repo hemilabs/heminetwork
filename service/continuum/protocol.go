@@ -962,7 +962,7 @@ func NewSecretFromString(secret string) (*Secret, error) {
 	}
 	// This may not always be the case and may need to be a range.
 	if len(s) != secp256k1KeySize {
-		return nil, fmt.Errorf("invalid key")
+		return nil, errors.New("invalid key")
 	}
 	return NewSecretFromPrivate(secp256k1.PrivKeyFromBytes(s)), nil
 }
@@ -1641,7 +1641,7 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, []byte, error) {
 		return nil, nil, nil, fmt.Errorf("marshal header: %w", err)
 	}
 	if len(cleartext) <= len(headerBytes) {
-		return nil, nil, nil, fmt.Errorf("cleartext too short for payload")
+		return nil, nil, nil, errors.New("cleartext too short for payload")
 	}
 	payloadBytes := cleartext[len(headerBytes):]
 
