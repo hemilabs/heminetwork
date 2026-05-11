@@ -5,7 +5,7 @@ edition.workspace = true
 license = "MIT"
 
 [dependencies]
-bitcoin = "=0.32.8"
+bitcoin = "=0.32.9"
 ethnum = "=1.5.3"
 hex = "=0.4.3"
 rocksdb = "=0.24.0"
