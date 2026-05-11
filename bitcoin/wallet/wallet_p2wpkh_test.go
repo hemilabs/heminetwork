@@ -240,3 +240,84 @@ func TestSignMixedP2PKHAndP2WPKH(t *testing.T) {
 		t.Fatalf("engine rejected P2WPKH input: %v", err)
 	}
 }
+
+// TestSignP2WPKHClearsScriptSig verifies that TransactionSign clears
+// SignatureScript for native segwit inputs.  TransactionCreate
+// pre-populates SignatureScript with the pkScript for fee estimation;
+// the signing path must clear it because native segwit (P2WPKH, P2TR)
+// requires an empty scriptSig.
+func TestSignP2WPKHClearsScriptSig(t *testing.T) {
+	params := &chaincfg.TestNet3Params
+
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := memory.New(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.PutKey(&zuul.NamedKey{
+		Name:       "test-key",
+		PrivateKey: priv,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	pubCompressed := priv.PubKey().SerializeCompressed()
+	pubHash := btcutil.Hash160(pubCompressed)
+	p2wpkhAddr, err := btcutil.NewAddressWitnessPubKeyHash(pubHash, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2wpkhScript, err := txscript.PayToAddrScript(p2wpkhAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	destPriv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destPKHash := btcutil.Hash160(destPriv.PubKey().SerializeCompressed())
+	destAddr, err := btcutil.NewAddressPubKeyHash(destPKHash, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destScript, err := txscript.PayToAddrScript(destAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fundHash := chainhash.DoubleHashH([]byte("test-scriptsig-clearing"))
+	fundOutpoint := wire.NewOutPoint(&fundHash, 0)
+	const fundValue int64 = 100_000
+
+	// Build tx the way TransactionCreate does: pre-populate
+	// SignatureScript with the pkScript.
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(wire.NewTxIn(fundOutpoint, p2wpkhScript, nil))
+	tx.AddTxOut(wire.NewTxOut(fundValue/2, destScript))
+
+	if len(tx.TxIn[0].SignatureScript) == 0 {
+		t.Fatal("precondition: SignatureScript should be pre-populated")
+	}
+
+	prevOuts := PrevOuts{
+		fundOutpoint.String(): wire.NewTxOut(fundValue, p2wpkhScript),
+	}
+
+	if err := TransactionSign(params, m, tx, prevOuts); err != nil {
+		t.Fatalf("TransactionSign: %v", err)
+	}
+
+	if len(tx.TxIn[0].SignatureScript) != 0 {
+		t.Fatalf("SignatureScript not cleared for P2WPKH input: %d bytes remain",
+			len(tx.TxIn[0].SignatureScript))
+	}
+
+	if err := verifyInput(tx, 0, prevOuts); err != nil {
+		t.Fatalf("script engine rejected signed input: %v", err)
+	}
+}

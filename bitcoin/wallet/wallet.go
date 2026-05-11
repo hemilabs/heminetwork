@@ -267,6 +267,7 @@ func signP2WPKH(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx int, p
 		return fmt.Errorf("witness signature: %w", err)
 	}
 	tx.TxIn[idx].Witness = witness
+	tx.TxIn[idx].SignatureScript = nil // native segwit: scriptSig must be empty
 	return nil
 }
 
@@ -293,6 +294,7 @@ func signP2TRKeyPath(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, idx i
 		return fmt.Errorf("taproot signature: %w", err)
 	}
 	tx.TxIn[idx].Witness = wire.TxWitness{sig}
+	tx.TxIn[idx].SignatureScript = nil // native segwit: scriptSig must be empty
 	return nil
 }
 

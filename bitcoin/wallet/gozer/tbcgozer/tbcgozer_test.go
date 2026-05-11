@@ -398,6 +398,7 @@ func TestTBCGozerMempoolUtxos(t *testing.T) {
 		}
 	})
 }
+
 func TestTBCGozerTxByIDNilTxid(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
