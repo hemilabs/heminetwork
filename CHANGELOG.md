@@ -19,8 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#987](https://github.com/hemilabs/heminetwork/pull/987)).
 - Add filtered transaction notifications to TBC for commerce (TxWatch/TxUnwatch API)
   ([#986](https://github.com/hemilabs/heminetwork/pull/986)).
+- Add native P2WPKH and BIP-86 P2TR key-path signing to
+  `wallet.TransactionSign`, with BIP-143/BIP-341 sighash handling
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Add multi-form key indexing to `zuul/memory`: `PutKey` now derives
+  P2PKH, P2WPKH, and BIP-86 P2TR addresses from a single compressed
+  public key and indexes the key under all three
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Add `TxByID` to the `gozer.Gozer` interface with `tbcGozer`
+  implementation backed by TBC RPC
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
 
 ### Changed
+
+- **Breaking:** `wallet.TransactionCreate` and `wallet.TransactionSign` now use
+  `PrevOuts` (`map[string]*wire.TxOut`) instead of `map[string][]byte`.
+  Witness sighash algorithms require the spent output's value; the old type
+  carried only the pkScript
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
 
 - Update required Go version to [Go 1.26](https://tip.golang.org/doc/go1.26)
   ([#673](https://github.com/hemilabs/heminetwork/pull/673), [#698](https://github.com/hemilabs/heminetwork/pull/698),
@@ -52,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix bug that allowed invalid headers to be indexed ([#950](https://github.com/hemilabs/heminetwork/pull/950))
 
 - Fix bug that led to delayed request processing in tbcgozer ([#969](https://github.com/hemilabs/heminetwork/pull/969))
+
+- Fix `signP2WPKH` and `signP2TRKeyPath` not clearing `SignatureScript` after
+  signing.  `TransactionCreate` pre-populates `SignatureScript` for fee
+  estimation; native segwit requires an empty scriptSig
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
 
 - Fix tbcd requesting witness-stripped blocks and txs from peers (BIP-144); on-disk blocks are now
   witness-inclusive after a v5 upgrade plus resync
