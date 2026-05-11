@@ -18,7 +18,7 @@ GOLANGCI_LINT_VERSION="v2.11.4"
 # renovate: datasource=github-releases depName=joshuasing/golicenser versioning=semver
 GOLICENSER_VERSION="v0.3.1"
 # renovate: datasource=github-releases depName=mvdan/gofumpt versioning=semver
-GOFUMPT_VERSION="v0.9.2"
+GOFUMPT_VERSION="v0.10.0"
 
 cmds = \
 	bfgd			\
