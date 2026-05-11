@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -20,9 +20,14 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/go-test/deep"
 
+	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
+	"github.com/hemilabs/heminetwork/v2/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
@@ -652,4 +657,93 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	}
 
 	t.Logf("received body in response: %s", body)
+}
+
+func TestTxWatchUnwatchE2E(t *testing.T) {
+	ctx, cancel := defaultTestContext(t)
+	defer cancel()
+
+	levelDbHome := t.TempDir()
+	tbcServer, tbcUrl := createTbcServer(ctx, t, levelDbHome)
+	_ = tbcServer
+
+	// Connect a websocket client to tbcd.
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	// Read the initial ping.
+	var pingMsg protocol.Message
+	if err := wsjson.Read(ctx, c, &pingMsg); err != nil {
+		t.Fatal(err)
+	}
+	if pingMsg.Header.Command != tbcapi.CmdPingRequest {
+		t.Fatalf("expected ping, got %s", pingMsg.Header.Command)
+	}
+
+	wsConn := protocol.NewWSConn(c)
+
+	// Create a script hash to watch (P2WPKH-style).
+	watchedScript := []byte{
+		0x00, 0x14,
+		0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe,
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0a, 0x0b, 0x0c,
+	}
+	sh := tbcd.NewScriptHashFromScript(watchedScript)
+
+	// Send TxWatch request.
+	err = tbcapi.Write(ctx, wsConn, "e2e-watch-1", tbcapi.TxWatchRequest{
+		ScriptHashes: []api.ByteSlice{sh[:]},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read TxWatch response.
+	var watchResp protocol.Message
+	if err := wsjson.Read(ctx, c, &watchResp); err != nil {
+		t.Fatal(err)
+	}
+	if watchResp.Header.Command != tbcapi.CmdTxWatchResponse {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxWatchResponse, watchResp.Header.Command)
+	}
+	t.Logf("TxWatch response received: %s", watchResp.Header.Command)
+
+	// Send TxUnwatch request.
+	err = tbcapi.Write(ctx, wsConn, "e2e-unwatch-1", tbcapi.TxUnwatchRequest{
+		ScriptHashes: []api.ByteSlice{sh[:]},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Read TxUnwatch response.
+	var unwatchResp protocol.Message
+	if err := wsjson.Read(ctx, c, &unwatchResp); err != nil {
+		t.Fatal(err)
+	}
+	if unwatchResp.Header.Command != tbcapi.CmdTxUnwatchResponse {
+		t.Fatalf("expected %s, got %s", tbcapi.CmdTxUnwatchResponse, unwatchResp.Header.Command)
+	}
+	t.Logf("TxUnwatch response received: %s", unwatchResp.Header.Command)
+
+	// Verify the round-trip worked with no errors.
+	var watchResult tbcapi.TxWatchResponse
+	if err := json.Unmarshal(watchResp.Payload, &watchResult); err != nil {
+		t.Fatal(err)
+	}
+	if watchResult.Error != nil {
+		t.Fatalf("TxWatch returned error: %v", watchResult.Error)
+	}
+
+	var unwatchResult tbcapi.TxUnwatchResponse
+	if err := json.Unmarshal(unwatchResp.Payload, &unwatchResult); err != nil {
+		t.Fatal(err)
+	}
+	if unwatchResult.Error != nil {
+		t.Fatalf("TxUnwatch returned error: %v", unwatchResult.Error)
+	}
 }
