@@ -1042,7 +1042,7 @@ var (
 //	client.KeyExchange(ctx, conn)
 //	derivedServer, _ := client.Handshake(ctx, clientSecret)
 type Transport struct {
-	mtx sync.Mutex
+	mtx sync.RWMutex
 
 	// Transport encryption bits
 	isServer   bool             // server or client
@@ -1163,8 +1163,8 @@ func (t *Transport) Close() error {
 // RemoteAddr returns the remote network address of the underlying
 // connection.  Used for localhost-only admin RPC gating.
 func (t *Transport) RemoteAddr() net.Addr {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
 	if t.conn == nil {
 		return nil
 	}
@@ -1574,9 +1574,9 @@ func readExact(conn net.Conn, n int) ([]byte, error) {
 // No cleartext framing.  The body size is only trusted after
 // secretbox authentication.
 func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
-	t.mtx.Lock()
+	t.mtx.RLock()
 	conn := t.conn
-	t.mtx.Unlock()
+	t.mtx.RUnlock()
 
 	if timeout != 0 {
 		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
@@ -1593,7 +1593,9 @@ func (t *Transport) readBlob(timeout time.Duration) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	t.mtx.RLock()
 	bodySize, err := t.decryptFrameHeader(header)
+	t.mtx.RUnlock()
 	if err != nil {
 		return nil, fmt.Errorf("frame header: %w", err)
 	}
@@ -1622,7 +1624,9 @@ func (t *Transport) read(timeout time.Duration) (*Header, any, []byte, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	t.mtx.RLock()
 	cleartext, err := t.decrypt(ciphertext)
+	t.mtx.RUnlock()
 	if err != nil {
 		return nil, nil, nil, err
 	}
