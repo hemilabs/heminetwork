@@ -20,6 +20,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
@@ -206,6 +207,35 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 				{Blocks: 9, SatsPerByte: 1},
 				{Blocks: 10, SatsPerByte: 1},
 			},
+		}
+	case tbcapi.CmdTxByIdRequest:
+		pl, ok := payload.(*tbcapi.TxByIdRequest)
+		if !ok {
+			panic(fmt.Errorf("unexpected payload format: %v", payload))
+		}
+		// Zero hash signals "not found" for testing error paths.
+		if pl.TxID == (chainhash.Hash{}) {
+			resp = &tbcapi.TxByIdResponse{
+				Error: protocol.RequestErrorf("tx not found"),
+			}
+		} else {
+			resp = &tbcapi.TxByIdResponse{
+				Tx: &tbcapi.Tx{
+					Version:  2,
+					LockTime: 0,
+					TxIn: []*tbcapi.TxIn{{
+						PreviousOutPoint: tbcapi.OutPoint{
+							Hash:  pl.TxID,
+							Index: 0,
+						},
+						Sequence: wire.MaxTxInSequenceNum,
+					}},
+					TxOut: []*tbcapi.TxOut{{
+						Value:    50000,
+						PkScript: []byte{0x00, 0x14, 0x01, 0x02, 0x03},
+					}},
+				},
+			}
 		}
 	case tbcapi.CmdKeystonesByHeightRequest:
 		pl, ok := payload.(*tbcapi.KeystonesByHeightRequest)

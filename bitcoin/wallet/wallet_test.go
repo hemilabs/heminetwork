@@ -222,4 +222,21 @@ func TestIntegration(t *testing.T) {
 	}
 
 	t.Logf("txID: %v", txID)
+
+	// Verify we can look up the broadcast transaction by ID.
+	lookedUp, err := tg.TxByID(ctx, txID)
+	if err != nil {
+		t.Fatalf("TxByID after broadcast: %v", err)
+	}
+	if lookedUp == nil {
+		t.Fatal("TxByID returned nil tx")
+	}
+	if len(lookedUp.TxIn) == 0 {
+		t.Fatal("TxByID returned tx with no inputs")
+	}
+	if len(lookedUp.TxOut) == 0 {
+		t.Fatal("TxByID returned tx with no outputs")
+	}
+	t.Logf("TxByID: version=%v txin=%d txout=%d",
+		lookedUp.Version, len(lookedUp.TxIn), len(lookedUp.TxOut))
 }
