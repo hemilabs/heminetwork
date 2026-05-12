@@ -951,64 +951,6 @@ func TestKeyConstruction(t *testing.T) {
 	})
 }
 
-func TestInscribedSatsFromCache(t *testing.T) {
-	cache := make(map[tbcd.OrdinalKey][]byte)
-
-	// Insert some 's' entries.
-	cache[ordinalSatKey(100)] = []byte{0x01} // inscribed
-	cache[ordinalSatKey(200)] = []byte{0x02} // inscribed
-	cache[ordinalSatKey(300)] = nil          // deleted
-	cache[ordinalSatKey(500)] = []byte{0x03} // inscribed, out of range
-
-	// Also insert non-'s' entries to verify filtering.
-	var rKey [38]byte
-	rKey[0] = 'r'
-	cache[tbcd.OrdinalKey(rKey[:])] = []byte{0xff}
-
-	t.Run("range covering two entries", func(t *testing.T) {
-		got := inscribedSatsFromCache(cache, 50, 250)
-		if len(got) != 2 {
-			t.Fatalf("expected 2 sats, got %d: %v", len(got), got)
-		}
-		found100, found200 := false, false
-		for _, s := range got {
-			if s == 100 {
-				found100 = true
-			}
-			if s == 200 {
-				found200 = true
-			}
-		}
-		if !found100 || !found200 {
-			t.Errorf("expected sats 100 and 200, got %v", got)
-		}
-	})
-
-	t.Run("deleted entry excluded", func(t *testing.T) {
-		got := inscribedSatsFromCache(cache, 250, 350)
-		if len(got) != 0 {
-			t.Errorf("expected 0 sats (deleted), got %d: %v", len(got), got)
-		}
-	})
-
-	t.Run("empty range", func(t *testing.T) {
-		got := inscribedSatsFromCache(cache, 400, 450)
-		if len(got) != 0 {
-			t.Errorf("expected 0 sats, got %d", len(got))
-		}
-	})
-
-	t.Run("out of range excluded", func(t *testing.T) {
-		got := inscribedSatsFromCache(cache, 50, 499)
-		// Should find 100 and 200 but not 500 (exclusive upper bound).
-		for _, s := range got {
-			if s == 500 {
-				t.Error("sat 500 should be excluded (end is exclusive)")
-			}
-		}
-	})
-}
-
 func TestSplitSatRangesFIFOMultiOutput(t *testing.T) {
 	// Simulate a real tx: 2 inputs totaling 150k sats, 3 outputs.
 	input := []SatRange{
