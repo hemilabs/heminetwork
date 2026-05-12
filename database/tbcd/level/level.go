@@ -2672,3 +2672,33 @@ func (l *ldb) OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*tbcd
 	copy(op[:], v)
 	return &op, nil
 }
+
+func (l *ldb) OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error) {
+	log.Tracef("OrdinalInscriptionsBySat")
+	defer log.Tracef("OrdinalInscriptionsBySat exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Iterate 'a' + sat_number prefix for all inscription IDs.
+	var prefix [9]byte
+	prefix[0] = 'a'
+	binary.BigEndian.PutUint64(prefix[1:], satNumber)
+
+	var result [][36]byte
+	it := ordDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
+	defer it.Release()
+	for it.Next() {
+		k := it.Key()
+		// Key is 'a'(1) + sat_number(8) + inscription_id(36) = 45 bytes.
+		if len(k) != 45 {
+			return nil, fmt.Errorf("invalid sat inscription key length: %d", len(k))
+		}
+		var inscID [36]byte
+		copy(inscID[:], k[9:])
+		result = append(result, inscID)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("ordinal inscriptions by sat: %w", err)
+	}
+	return result, nil
+}
