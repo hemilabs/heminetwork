@@ -198,6 +198,10 @@ func (stubDB) OrdinalInscribedSatsInRange(context.Context, uint64, uint64) ([]ui
 	panic("stub")
 }
 
+func (stubDB) OrdinalInscribedSatBounds(context.Context) (uint64, uint64, error) {
+	panic("stub")
+}
+
 func (stubDB) OrdinalOutpointBySat(context.Context, uint64) (*tbcd.Outpoint, error) {
 	panic("stub")
 }

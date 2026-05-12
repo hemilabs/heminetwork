@@ -152,6 +152,7 @@ type Database interface {
 	OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error)
 	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
 	OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error)
+	OrdinalInscribedSatBounds(ctx context.Context) (minSat, maxSat uint64, err error)
 	OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*Outpoint, error)
 	OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error)
 }
