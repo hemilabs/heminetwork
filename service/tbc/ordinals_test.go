@@ -807,7 +807,7 @@ func TestInscribedSatsFromCache(t *testing.T) {
 	// Insert some 's' entries.
 	cache[ordinalSatKey(100)] = []byte{0x01} // inscribed
 	cache[ordinalSatKey(200)] = []byte{0x02} // inscribed
-	cache[ordinalSatKey(300)] = nil           // deleted
+	cache[ordinalSatKey(300)] = nil          // deleted
 	cache[ordinalSatKey(500)] = []byte{0x03} // inscribed, out of range
 
 	// Also insert non-'s' entries to verify filtering.
@@ -950,10 +950,11 @@ func TestParseInscriptionEnvelopeWithParent(t *testing.T) {
 	parentID[0] = 0xde
 	parentID[35] = 0xad
 
+	pngMagic := []byte{0x89, 0x50, 0x4e, 0x47}
 	witness := buildOrdEnvelope(t, map[int][]byte{
 		1: []byte("image/png"),
 		3: parentID[:],
-		5: []byte{0x89, 0x50, 0x4e, 0x47}, // PNG magic
+		5: pngMagic,
 	})
 	env, err := ParseInscriptionEnvelope(witness)
 	if err != nil {
