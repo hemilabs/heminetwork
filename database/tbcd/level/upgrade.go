@@ -789,3 +789,18 @@ func (l *ldb) v6(ctx context.Context) error {
 	binary.BigEndian.PutUint64(v, 6)
 	return l.MetadataPut(ctx, versionKey, v)
 }
+
+func (l *ldb) v7(ctx context.Context) error {
+	log.Tracef("v7")
+	defer log.Tracef("v7 exit")
+
+	log.Infof("Upgrading database from v6 to v7")
+
+	// v7 adds the ordinals index database. The new LevelDB is created
+	// automatically by openDB during startup. No data migration needed.
+
+	// Bump version.
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 7)
+	return l.MetadataPut(ctx, versionKey, v)
+}

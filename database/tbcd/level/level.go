@@ -48,7 +48,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 6
+	ldbVersion = 7
 
 	logLevel = "INFO"
 	verbose  = false
@@ -80,6 +80,7 @@ var (
 	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
 	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
 	zkIndexHashKey       = []byte("zkindexhash")       // last indexed zk block hash
+	ordinalIndexHashKey  = []byte("ordinalindexhash")  // last indexed ordinal block hash
 )
 
 func init() {
@@ -316,6 +317,9 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			// Upgrade to v6: wipe tx index so it rebuilds
 			// with TxLoc values in 't' entries.
 			err = l.v6(ctx)
+		case 6:
+			// Upgrade to v7: add ordinals index database.
+			err = l.v7(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {
@@ -2472,4 +2476,199 @@ func (l *ldb) BlockCacheStats() tbcd.CacheStats {
 		return noStats
 	}
 	return lruStatsToCacheStats(l.blockCache.Stats())
+}
+
+// Ordinals index methods.
+
+func (l *ldb) BlockHeaderByOrdinalIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeaderByOrdinalIndex")
+	defer log.Tracef("BlockHeaderByOrdinalIndex exit")
+
+	ordTx, _, ordDiscard, err := l.startTransaction(level.OrdinalDB)
+	if err != nil {
+		return nil, fmt.Errorf("ordinal open db transaction: %w", err)
+	}
+	defer ordDiscard()
+
+	hash, err := ordTx.Get(ordinalIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("ordinal index get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.OrdinalKey][]byte, ordinalIndexHash chainhash.Hash) error {
+	log.Tracef("BlockOrdinalUpdate")
+	defer log.Tracef("BlockOrdinalUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	ordTx, ordCommit, ordDiscard, err := l.startTransaction(level.OrdinalDB)
+	if err != nil {
+		return fmt.Errorf("ordinal open db transaction: %w", err)
+	}
+	defer ordDiscard()
+
+	ordBatch := new(leveldb.Batch)
+	for k, v := range data {
+		switch direction {
+		case -1:
+			if v == nil {
+				ordBatch.Delete([]byte(k))
+			} else {
+				ordBatch.Put([]byte(k), v)
+			}
+		case 1:
+			if v == nil {
+				ordBatch.Delete([]byte(k))
+			} else {
+				ordBatch.Put([]byte(k), v)
+			}
+		}
+		delete(data, k)
+	}
+
+	ordBatch.Put(ordinalIndexHashKey, ordinalIndexHash[:])
+
+	if err = ordTx.Write(ordBatch, nil); err != nil {
+		return fmt.Errorf("ordinal insert: %w", err)
+	}
+	if err = ordCommit(); err != nil {
+		return fmt.Errorf("ordinal commit: %w", err)
+	}
+
+	return nil
+}
+
+func (l *ldb) OrdinalSatRangesByOutpoint(ctx context.Context, op tbcd.Outpoint) ([]byte, error) {
+	log.Tracef("OrdinalSatRangesByOutpoint")
+	defer log.Tracef("OrdinalSatRangesByOutpoint exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+	var key [38]byte
+	key[0] = 'r'
+	copy(key[1:], op[:])
+
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("ordinal sat ranges: %v", op))
+		}
+		return nil, fmt.Errorf("ordinal sat ranges: %w", err)
+	}
+	return v, nil
+}
+
+func (l *ldb) OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error) {
+	log.Tracef("OrdinalInscriptionByID")
+	defer log.Tracef("OrdinalInscriptionByID exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+	var key [1 + 36]byte
+	key[0] = 'i'
+	copy(key[1:], inscID[:])
+
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("ordinal inscription: %x", inscID))
+		}
+		return nil, fmt.Errorf("ordinal inscription: %w", err)
+	}
+	return v, nil
+}
+
+func (l *ldb) OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error) {
+	log.Tracef("OrdinalInscriptionsByBlockHash")
+	defer log.Tracef("OrdinalInscriptionsByBlockHash exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Iterate 'n' + block_hash prefix.
+	var prefix [1 + 32]byte
+	prefix[0] = 'n'
+	copy(prefix[1:], blockHash[:])
+
+	var result [][36]byte
+	it := ordDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
+	defer it.Release()
+	for it.Next() {
+		v := it.Value()
+		if len(v) != 36 {
+			return nil, fmt.Errorf("invalid inscription ID length: %d", len(v))
+		}
+		var inscID [36]byte
+		copy(inscID[:], v)
+		result = append(result, inscID)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("ordinal inscriptions by block: %w", err)
+	}
+	return result, nil
+}
+
+func (l *ldb) OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error) {
+	log.Tracef("OrdinalInscribedSatsInRange")
+	defer log.Tracef("OrdinalInscribedSatsInRange exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Range scan on 's' prefix for sat numbers in [start, end).
+	var startKey [9]byte
+	startKey[0] = 's'
+	binary.BigEndian.PutUint64(startKey[1:], start)
+
+	var endKey [9]byte
+	endKey[0] = 's'
+	binary.BigEndian.PutUint64(endKey[1:], end)
+
+	var result []uint64
+	it := ordDB.NewIterator(&util.Range{Start: startKey[:], Limit: endKey[:]}, nil)
+	defer it.Release()
+	for it.Next() {
+		k := it.Key()
+		if len(k) != 9 || k[0] != 's' {
+			continue
+		}
+		sat := binary.BigEndian.Uint64(k[1:])
+		result = append(result, sat)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("ordinal inscribed sats in range: %w", err)
+	}
+	return result, nil
+}
+
+func (l *ldb) OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*tbcd.Outpoint, error) {
+	log.Tracef("OrdinalOutpointBySat")
+	defer log.Tracef("OrdinalOutpointBySat exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+	var key [9]byte
+	key[0] = 's'
+	binary.BigEndian.PutUint64(key[1:], satNumber)
+
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("ordinal outpoint by sat: %d", satNumber))
+		}
+		return nil, fmt.Errorf("ordinal outpoint by sat: %w", err)
+	}
+	if len(v) != len(tbcd.Outpoint{}) {
+		return nil, fmt.Errorf("invalid outpoint length: %d", len(v))
+	}
+	var op tbcd.Outpoint
+	copy(op[:], v)
+	return &op, nil
 }
