@@ -155,6 +155,12 @@ var (
 			Help:         "enable/disable various zk related indexes",
 			Print:        config.PrintAll,
 		},
+		"TBC_ORDINAL_INDEX": config.Config{
+			Value:        &cfg.OrdinalIndex,
+			DefaultValue: false,
+			Help:         "enable/disable ordinal (sat range + inscription) indexer",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
