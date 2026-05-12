@@ -214,6 +214,19 @@ func (bs *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32
 	}, err
 }
 
+// TxByID is not yet implemented for Blockstream.
+// TxByID is a stub — blockstream support for transaction lookup is
+// not yet implemented.  The only consumer today is ectoplasm which
+// uses tbcGozer.
+func (bs *blockstreamGozer) TxByID(ctx context.Context, txid *chainhash.Hash) (*tbcapi.Tx, error) {
+	// Blockstream exposes GET /tx/{txid}/hex and GET /tx/{txid},
+	// either of which could be mapped onto *tbcapi.Tx.  Left as
+	// a stub here because the only consumer today is ectoplasm
+	// which uses tbcGozer; fill this in when blockstream-backed
+	// deployments need the ordinal viewer.
+	return nil, errors.New("not supported yet")
+}
+
 func (bs *blockstreamGozer) Run(_ context.Context, _ func()) error {
 	return nil
 }
