@@ -67,7 +67,7 @@ func newPoPFixture(t *testing.T) *popFixture {
 	utxo := &tbcapi.UTXO{
 		TxId:     fundHash,
 		OutIndex: 0,
-		Value:    btcutil.Amount(500_000),
+		Value:    btcutil.Amount(500000),
 	}
 
 	keystone := &hemi.L2Keystone{

@@ -53,7 +53,7 @@ func TestSignP2TRKeyPath(t *testing.T) {
 
 	fundHash := chainhash.DoubleHashH([]byte("p2tr-keypath-funding-txid-00000"))
 	fundOutpoint := wire.NewOutPoint(&fundHash, 0)
-	const fundValue int64 = 100_000
+	const fundValue int64 = 100000
 
 	// Throwaway destination: another P2TR just to keep the output valid.
 	destPriv, err := btcec.NewPrivateKey()
@@ -161,8 +161,8 @@ func TestSignMixedP2PKHAndP2TR(t *testing.T) {
 	op1 := wire.NewOutPoint(&h1, 0)
 	op2 := wire.NewOutPoint(&h2, 0)
 
-	const v1 int64 = 50_000 // legacy funding
-	const v2 int64 = 10_000 // taproot (ordinal-shaped)
+	const v1 int64 = 50000 // legacy funding
+	const v2 int64 = 10000 // taproot (ordinal-shaped)
 
 	destScript := taprootScript // send to ourselves for brevity
 
@@ -223,10 +223,11 @@ func TestSignP2TRKeyPathClearsScriptSig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.PutKey(&zuul.NamedKey{
+	err = m.PutKey(&zuul.NamedKey{
 		Name:       "test-key",
 		PrivateKey: priv,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -258,7 +259,7 @@ func TestSignP2TRKeyPathClearsScriptSig(t *testing.T) {
 
 	fundHash := chainhash.DoubleHashH([]byte("test-p2tr-scriptsig-clearing"))
 	fundOutpoint := wire.NewOutPoint(&fundHash, 0)
-	const fundValue int64 = 100_000
+	const fundValue int64 = 100000
 
 	// Build tx the way TransactionCreate does: pre-populate
 	// SignatureScript with the pkScript.

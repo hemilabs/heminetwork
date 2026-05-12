@@ -28,10 +28,10 @@ import (
 func TestUtxoPickerMultipleEmpty(t *testing.T) {
 	// Request more than the sum of all inputs.
 	utxos := []*tbcapi.UTXO{
-		{Value: 1_000},
-		{Value: 2_000},
+		{Value: 1000},
+		{Value: 2000},
 	}
-	_, err := UtxoPickerMultiple(10_000, 100, utxos)
+	_, err := UtxoPickerMultiple(10000, 100, utxos)
 	if err == nil {
 		t.Fatal("expected error when utxos cannot cover amount+fee")
 	}
@@ -45,11 +45,11 @@ func TestUtxoPickerMultipleEmpty(t *testing.T) {
 // of them and returns the not-found error.
 func TestUtxoPickerSingleNoneLargeEnough(t *testing.T) {
 	utxos := []*tbcapi.UTXO{
-		{Value: 1_000},
-		{Value: 2_000},
-		{Value: 3_000},
+		{Value: 1000},
+		{Value: 2000},
+		{Value: 3000},
 	}
-	_, err := UtxoPickerSingle(100_000, 100, utxos)
+	_, err := UtxoPickerSingle(100000, 100, utxos)
 	if err == nil {
 		t.Fatal("expected error when no single utxo is large enough")
 	}
@@ -66,14 +66,14 @@ func TestUtxoPickerSingleFirstFit(t *testing.T) {
 	utxos := []*tbcapi.UTXO{
 		{Value: 500},
 		{Value: 999},
-		{Value: 50_000},  // first one large enough
-		{Value: 100_000}, // should not be picked
+		{Value: 50000},  // first one large enough
+		{Value: 100000}, // should not be picked
 	}
-	u, err := UtxoPickerSingle(10_000, 100, utxos)
+	u, err := UtxoPickerSingle(10000, 100, utxos)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if u.Value != 50_000 {
+	if u.Value != 50000 {
 		t.Fatalf("expected first-fit utxo of 50000, got %d", u.Value)
 	}
 }
@@ -146,7 +146,7 @@ func TestTransactionSignUnknownP2WPKHKey(t *testing.T) {
 	tx.AddTxIn(wire.NewTxIn(outpoint, nil, nil))
 	tx.AddTxOut(wire.NewTxOut(1000, []byte{txscript.OP_RETURN}))
 
-	prev := wire.NewTxOut(50_000, pkScript)
+	prev := wire.NewTxOut(50000, pkScript)
 	prevOuts := PrevOuts{outpoint.String(): prev}
 
 	err = TransactionSign(params, m, tx, prevOuts)
@@ -194,7 +194,7 @@ func TestTransactionSignUnknownP2TRKey(t *testing.T) {
 	tx.AddTxIn(wire.NewTxIn(outpoint, nil, nil))
 	tx.AddTxOut(wire.NewTxOut(1000, []byte{txscript.OP_RETURN}))
 
-	prev := wire.NewTxOut(50_000, pkScript)
+	prev := wire.NewTxOut(50000, pkScript)
 	prevOuts := PrevOuts{outpoint.String(): prev}
 
 	err = TransactionSign(params, m, tx, prevOuts)

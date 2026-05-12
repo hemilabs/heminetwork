@@ -86,7 +86,7 @@ func TestSignP2WPKHInput(t *testing.T) {
 	// the engine only checks signatures against the tx and prev TxOut.
 	fundHash := chainhash.DoubleHashH([]byte("test-funding-txid-00000000000000"))
 	fundOutpoint := wire.NewOutPoint(&fundHash, 0)
-	const fundValue int64 = 100_000
+	const fundValue int64 = 100000
 
 	// Build a tx that spends the P2WPKH input and sends half to a
 	// throwaway P2PKH output.
@@ -186,8 +186,8 @@ func TestSignMixedP2PKHAndP2WPKH(t *testing.T) {
 	op1 := wire.NewOutPoint(&h1, 0)
 	op2 := wire.NewOutPoint(&h2, 0)
 
-	const v1 int64 = 50_000
-	const v2 int64 = 80_000
+	const v1 int64 = 50000
+	const v2 int64 = 80000
 
 	// Throwaway destination.
 	destPKHash := btcutil.Hash160(legacyPriv.PubKey().SerializeCompressed())
@@ -258,10 +258,11 @@ func TestSignP2WPKHClearsScriptSig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.PutKey(&zuul.NamedKey{
+	err = m.PutKey(&zuul.NamedKey{
 		Name:       "test-key",
 		PrivateKey: priv,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -292,7 +293,7 @@ func TestSignP2WPKHClearsScriptSig(t *testing.T) {
 
 	fundHash := chainhash.DoubleHashH([]byte("test-scriptsig-clearing"))
 	fundOutpoint := wire.NewOutPoint(&fundHash, 0)
-	const fundValue int64 = 100_000
+	const fundValue int64 = 100000
 
 	// Build tx the way TransactionCreate does: pre-populate
 	// SignatureScript with the pkScript.
