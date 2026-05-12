@@ -629,6 +629,156 @@ func TestEncodeInscriptionValue(t *testing.T) {
 	})
 }
 
+func TestDecodeInscriptionValue(t *testing.T) {
+	t.Run("round trip minimal", func(t *testing.T) {
+		env := &InscriptionEnvelope{}
+		var blockHash chainhash.Hash
+		blockHash[0] = 0xaa
+
+		v := encodeInscriptionValue(42, &blockHash, false, env)
+		d, err := decodeInscriptionValue(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.SatNumber != 42 {
+			t.Errorf("sat_number: got %d, want 42", d.SatNumber)
+		}
+		if d.BlockHash != blockHash {
+			t.Errorf("block_hash mismatch")
+		}
+		if d.Cursed {
+			t.Error("expected not cursed")
+		}
+		if d.Parent != nil || d.Delegate != nil || d.Metaprotocol != "" {
+			t.Error("expected no optional fields")
+		}
+	})
+
+	t.Run("round trip cursed", func(t *testing.T) {
+		env := &InscriptionEnvelope{}
+		var blockHash chainhash.Hash
+
+		v := encodeInscriptionValue(100, &blockHash, true, env)
+		d, err := decodeInscriptionValue(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !d.Cursed {
+			t.Error("expected cursed")
+		}
+	})
+
+	t.Run("round trip with parent", func(t *testing.T) {
+		parent := [36]byte{0x01, 0x02, 0x03}
+		env := &InscriptionEnvelope{Parent: &parent}
+		var blockHash chainhash.Hash
+
+		v := encodeInscriptionValue(0, &blockHash, false, env)
+		d, err := decodeInscriptionValue(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Parent == nil {
+			t.Fatal("expected parent")
+		}
+		if *d.Parent != parent {
+			t.Errorf("parent mismatch: got %x, want %x", d.Parent, parent)
+		}
+	})
+
+	t.Run("round trip with delegate", func(t *testing.T) {
+		delegate := [36]byte{0x04, 0x05, 0x06}
+		env := &InscriptionEnvelope{Delegate: &delegate}
+		var blockHash chainhash.Hash
+
+		v := encodeInscriptionValue(0, &blockHash, false, env)
+		d, err := decodeInscriptionValue(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Delegate == nil {
+			t.Fatal("expected delegate")
+		}
+		if *d.Delegate != delegate {
+			t.Errorf("delegate mismatch")
+		}
+	})
+
+	t.Run("round trip with metaprotocol", func(t *testing.T) {
+		env := &InscriptionEnvelope{Metaprotocol: []byte("brc-20")}
+		var blockHash chainhash.Hash
+
+		v := encodeInscriptionValue(0, &blockHash, false, env)
+		d, err := decodeInscriptionValue(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Metaprotocol != "brc-20" {
+			t.Errorf("metaprotocol: got %q, want %q", d.Metaprotocol, "brc-20")
+		}
+	})
+
+	t.Run("round trip all flags", func(t *testing.T) {
+		parent := [36]byte{0x01}
+		delegate := [36]byte{0x02}
+		env := &InscriptionEnvelope{
+			Parent:       &parent,
+			Delegate:     &delegate,
+			Metaprotocol: []byte("test"),
+		}
+		var blockHash chainhash.Hash
+		blockHash[31] = 0xff
+
+		v := encodeInscriptionValue(999, &blockHash, true, env)
+		d, err := decodeInscriptionValue(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.SatNumber != 999 {
+			t.Errorf("sat_number: got %d, want 999", d.SatNumber)
+		}
+		if !d.Cursed {
+			t.Error("expected cursed")
+		}
+		if d.Parent == nil || *d.Parent != parent {
+			t.Error("parent mismatch")
+		}
+		if d.Delegate == nil || *d.Delegate != delegate {
+			t.Error("delegate mismatch")
+		}
+		if d.Metaprotocol != "test" {
+			t.Errorf("metaprotocol: got %q, want %q", d.Metaprotocol, "test")
+		}
+	})
+
+	t.Run("too short", func(t *testing.T) {
+		_, err := decodeInscriptionValue(make([]byte, 40))
+		if err == nil {
+			t.Fatal("expected error for short data")
+		}
+	})
+
+	t.Run("truncated at parent", func(t *testing.T) {
+		// Build a value with parent flag set but truncated data.
+		data := make([]byte, 41+10) // 10 bytes is too short for 36-byte parent
+		data[40] = 1 << 1           // parent flag
+		_, err := decodeInscriptionValue(data)
+		if err == nil {
+			t.Fatal("expected error for truncated parent")
+		}
+	})
+
+	t.Run("truncated at delegate", func(t *testing.T) {
+		// Parent present and complete, delegate flag set but truncated.
+		data := make([]byte, 41+36+10) // parent OK, delegate truncated
+		data[40] = (1 << 1) | (1 << 2) // parent + delegate flags
+		_, err := decodeInscriptionValue(data)
+		if err == nil {
+			t.Fatal("expected error for truncated delegate")
+		}
+	})
+}
+
 func TestSatAtOutputOffset(t *testing.T) {
 	tests := []struct {
 		name         string

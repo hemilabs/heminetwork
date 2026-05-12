@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -3633,4 +3634,316 @@ func (s *Server) ExternalHeaderTearDown() error {
 		return err
 	}
 	return nil
+}
+
+// populateInscription builds an OrdinalInscription from the raw DB data for
+// a given inscription ID. It looks up the 'i' value, decodes it, resolves the
+// current outpoint via 's', and fetches block height via BlockHeaderByHash.
+func (s *Server) populateInscription(ctx context.Context, inscID [36]byte) (*tbcapi.OrdinalInscription, error) {
+	raw, err := s.g.db.OrdinalInscriptionByID(ctx, inscID)
+	if err != nil {
+		return nil, fmt.Errorf("inscription %x: %w", inscID, err)
+	}
+
+	d, err := decodeInscriptionValue(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode inscription %x: %w", inscID, err)
+	}
+
+	bh, err := s.g.db.BlockHeaderByHash(ctx, d.BlockHash)
+	if err != nil {
+		return nil, fmt.Errorf("block header for inscription %x: %w", inscID, err)
+	}
+
+	insc := &tbcapi.OrdinalInscription{
+		SatNumber:   d.SatNumber,
+		Cursed:      d.Cursed,
+		BlockHash:   d.BlockHash,
+		BlockHeight: bh.Height,
+	}
+
+	// Inscription ID = txid(32) + input_index(4 LE).
+	copy(insc.TxID[:], inscID[:32])
+	insc.InputIndex = binary.LittleEndian.Uint32(inscID[32:])
+
+	// Current location of the sat.
+	op, err := s.g.db.OrdinalOutpointBySat(ctx, d.SatNumber)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return nil, fmt.Errorf("outpoint for sat %d: %w", d.SatNumber, err)
+		}
+		// Sat not tracked (burned or not in UTXO set) — leave zero.
+	} else {
+		txid, _ := chainhash.NewHash(op.TxId())
+		insc.CurrentTxID = *txid
+		insc.CurrentVout = op.TxIndex()
+	}
+
+	if d.Parent != nil {
+		var parentTxID chainhash.Hash
+		copy(parentTxID[:], d.Parent[:32])
+		insc.ParentTxID = &parentTxID
+		idx := binary.LittleEndian.Uint32(d.Parent[32:])
+		insc.ParentInputIndex = &idx
+	}
+	if d.Delegate != nil {
+		var delegateTxID chainhash.Hash
+		copy(delegateTxID[:], d.Delegate[:32])
+		insc.DelegateTxID = &delegateTxID
+		idx := binary.LittleEndian.Uint32(d.Delegate[32:])
+		insc.DelegateInputIndex = &idx
+	}
+	if d.Metaprotocol != "" {
+		mp := d.Metaprotocol
+		insc.Metaprotocol = &mp
+	}
+
+	return insc, nil
+}
+
+// InscriptionByID looks up a single inscription by its ID (txid + input index).
+func (s *Server) InscriptionByID(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (*tbcapi.OrdinalInscription, error) {
+	log.Tracef("InscriptionByID")
+	defer log.Tracef("InscriptionByID exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	inscID := makeInscriptionID(&txid, inputIndex)
+	return s.populateInscription(ctx, inscID)
+}
+
+// InscriptionContent retrieves raw inscription content, following delegation
+// chains up to a maximum depth of 10.
+func (s *Server) InscriptionContent(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (string, []byte, error) {
+	log.Tracef("InscriptionContent")
+	defer log.Tracef("InscriptionContent exit")
+
+	if !s.cfg.OrdinalIndex {
+		return "", nil, errors.New("ordinal index not enabled")
+	}
+
+	inscID := makeInscriptionID(&txid, inputIndex)
+
+	// Follow delegation chain.
+	const maxDelegateDepth = 10
+	for depth := range maxDelegateDepth {
+		_ = depth
+
+		raw, err := s.g.db.OrdinalInscriptionByID(ctx, inscID)
+		if err != nil {
+			return "", nil, fmt.Errorf("inscription %x: %w", inscID, err)
+		}
+
+		d, err := decodeInscriptionValue(raw)
+		if err != nil {
+			return "", nil, fmt.Errorf("decode inscription %x: %w", inscID, err)
+		}
+
+		if d.Delegate != nil {
+			copy(inscID[:], d.Delegate[:])
+			continue
+		}
+
+		// Fetch raw block and parse witness envelope.
+		block, err := s.g.db.BlockByHash(ctx, d.BlockHash)
+		if err != nil {
+			return "", nil, fmt.Errorf("block %v: %w", d.BlockHash, err)
+		}
+
+		var targetTxID chainhash.Hash
+		copy(targetTxID[:], inscID[:32])
+		targetInputIdx := binary.LittleEndian.Uint32(inscID[32:])
+
+		for _, tx := range block.Transactions() {
+			if !tx.Hash().IsEqual(&targetTxID) {
+				continue
+			}
+
+			if int(targetInputIdx) >= len(tx.MsgTx().TxIn) {
+				return "", nil, fmt.Errorf("input index %d out of range for tx %v",
+					targetInputIdx, targetTxID)
+			}
+
+			env, err := ParseInscriptionEnvelope(tx.MsgTx().TxIn[targetInputIdx].Witness)
+			if err != nil {
+				return "", nil, fmt.Errorf("parse envelope: %w", err)
+			}
+			if env == nil {
+				return "", nil, fmt.Errorf("no inscription envelope in tx %v input %d",
+					targetTxID, targetInputIdx)
+			}
+
+			return string(env.ContentType), env.Content, nil
+		}
+
+		return "", nil, fmt.Errorf("tx %v not found in block %v", targetTxID, d.BlockHash)
+	}
+
+	return "", nil, errors.New("delegation chain exceeds maximum depth")
+}
+
+// InscriptionsByBlock lists all inscriptions created in a given block.
+func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Hash) ([]*tbcapi.OrdinalInscription, error) {
+	log.Tracef("InscriptionsByBlock")
+	defer log.Tracef("InscriptionsByBlock exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	inscIDs, err := s.g.db.OrdinalInscriptionsByBlockHash(ctx, blockHash)
+	if err != nil {
+		return nil, fmt.Errorf("inscriptions by block %v: %w", blockHash, err)
+	}
+
+	result := make([]*tbcapi.OrdinalInscription, 0, len(inscIDs))
+	for _, inscID := range inscIDs {
+		insc, err := s.populateInscription(ctx, inscID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, insc)
+	}
+
+	return result, nil
+}
+
+// InscriptionsByAddress lists inscriptions currently held by UTXOs at the
+// given address. The ordinal indexer cross-references the utxo index to find
+// outpoints, then checks sat ranges for inscribed sats.
+func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress string, start, count uint32) ([]*tbcapi.OrdinalInscription, error) {
+	log.Tracef("InscriptionsByAddress")
+	defer log.Tracef("InscriptionsByAddress exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	addr, err := btcutil.DecodeAddress(encodedAddress, s.g.chain)
+	if err != nil {
+		return nil, fmt.Errorf("decode address: %w", err)
+	}
+
+	script, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, fmt.Errorf("pay to addr script: %w", err)
+	}
+
+	// Get all UTXOs for this address (no pagination — we paginate on
+	// the inscription results instead).
+	utxos, err := s.g.db.UtxosByScriptHash(ctx,
+		tbcd.NewScriptHashFromScript(script), 0, 10000)
+	if err != nil {
+		return nil, fmt.Errorf("utxos by script hash: %w", err)
+	}
+
+	var result []*tbcapi.OrdinalInscription
+	var seen uint32
+	for _, utxo := range utxos {
+		var txid [32]byte
+		copy(txid[:], utxo[0:32])
+		op := tbcd.NewOutpoint(txid, utxo.OutputIndex())
+
+		rangeData, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op)
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("sat ranges for %v: %w", op, err)
+		}
+
+		ranges := DecodeSatRanges(rangeData)
+		for _, r := range ranges {
+			inscribedSats, err := s.g.db.OrdinalInscribedSatsInRange(ctx,
+				r.Start, r.Start+r.Count)
+			if err != nil {
+				return nil, fmt.Errorf("inscribed sats in range: %w", err)
+			}
+
+			for _, sat := range inscribedSats {
+				inscIDs, err := s.g.db.OrdinalInscriptionsBySat(ctx, sat)
+				if err != nil {
+					return nil, fmt.Errorf("inscriptions by sat %d: %w", sat, err)
+				}
+
+				for _, inscID := range inscIDs {
+					if seen < start {
+						seen++
+						continue
+					}
+					if count > 0 && uint32(len(result)) >= count {
+						return result, nil
+					}
+
+					insc, err := s.populateInscription(ctx, inscID)
+					if err != nil {
+						return nil, err
+					}
+					result = append(result, insc)
+					seen++
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// InscriptionsBySat lists all inscriptions on a given sat (supports
+// reinscriptions — the first result is canonical).
+func (s *Server) InscriptionsBySat(ctx context.Context, satNumber uint64) ([]*tbcapi.OrdinalInscription, error) {
+	log.Tracef("InscriptionsBySat")
+	defer log.Tracef("InscriptionsBySat exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	inscIDs, err := s.g.db.OrdinalInscriptionsBySat(ctx, satNumber)
+	if err != nil {
+		return nil, fmt.Errorf("inscriptions by sat %d: %w", satNumber, err)
+	}
+
+	result := make([]*tbcapi.OrdinalInscription, 0, len(inscIDs))
+	for _, inscID := range inscIDs {
+		insc, err := s.populateInscription(ctx, inscID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, insc)
+	}
+
+	return result, nil
+}
+
+// SatRangesByOutpoint returns the sat ranges assigned to a UTXO.
+func (s *Server) SatRangesByOutpoint(ctx context.Context, txid chainhash.Hash, vout uint32) ([]tbcapi.SatRange, error) {
+	log.Tracef("SatRangesByOutpoint")
+	defer log.Tracef("SatRangesByOutpoint exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	var txidBytes [32]byte
+	copy(txidBytes[:], txid[:])
+	op := tbcd.NewOutpoint(txidBytes, vout)
+
+	data, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op)
+	if err != nil {
+		return nil, fmt.Errorf("sat ranges for %v:%d: %w", txid, vout, err)
+	}
+
+	ranges := DecodeSatRanges(data)
+	result := make([]tbcapi.SatRange, len(ranges))
+	for i, r := range ranges {
+		result[i] = tbcapi.SatRange{
+			Start: r.Start,
+			Count: r.Count,
+		}
+	}
+
+	return result, nil
 }

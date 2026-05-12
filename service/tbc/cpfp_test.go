@@ -202,6 +202,10 @@ func (stubDB) OrdinalOutpointBySat(context.Context, uint64) (*tbcd.Outpoint, err
 	panic("stub")
 }
 
+func (stubDB) OrdinalInscriptionsBySat(context.Context, uint64) ([][36]byte, error) {
+	panic("stub")
+}
+
 // TestTxOutByOutpoint verifies that txOutByOutpoint resolves an
 // output from a parent transaction that is in the mempool.
 func TestTxOutByOutpoint(t *testing.T) {
