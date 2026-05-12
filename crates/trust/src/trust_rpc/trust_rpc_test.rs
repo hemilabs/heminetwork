@@ -1,7 +1,7 @@
 use super::*;
 use bitcoin::hashes::Hash;
 use futures_util::{SinkExt, StreamExt};
-use hmac::{Hmac, Mac, KeyInit};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use std::net::TcpListener;
 use std::time::Duration;
