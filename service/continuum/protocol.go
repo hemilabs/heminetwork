@@ -649,7 +649,7 @@ var broadcastWhitelist = map[reflect.Type]bool{
 // Handles both value and pointer types.
 func IsBroadcastable(cmd any) bool {
 	t := reflect.TypeOf(cmd)
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return broadcastWhitelist[t]
