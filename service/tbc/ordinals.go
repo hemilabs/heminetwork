@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -422,4 +423,55 @@ func encodeInscriptionValue(satNumber uint64, blockHash *chainhash.Hash, cursed 
 	}
 
 	return buf
+}
+
+// decodedInscription holds the fields parsed from the 'i' prefix value.
+type decodedInscription struct {
+	SatNumber    uint64
+	BlockHash    chainhash.Hash
+	Cursed       bool
+	Parent       *[36]byte // inscription ID
+	Delegate     *[36]byte // inscription ID
+	Metaprotocol string
+}
+
+// decodeInscriptionValue decodes the value stored under the 'i' prefix.
+// The encoding is produced by encodeInscriptionValue.
+func decodeInscriptionValue(data []byte) (*decodedInscription, error) {
+	if len(data) < 41 {
+		return nil, fmt.Errorf("inscription value too short: %d", len(data))
+	}
+
+	d := &decodedInscription{
+		SatNumber: binary.BigEndian.Uint64(data[0:8]),
+		Cursed:    data[40]&(1<<0) != 0,
+	}
+	copy(d.BlockHash[:], data[8:40])
+
+	flags := data[40]
+	offset := 41
+
+	if flags&(1<<1) != 0 {
+		if offset+36 > len(data) {
+			return nil, errors.New("inscription value truncated at parent")
+		}
+		var parent [36]byte
+		copy(parent[:], data[offset:offset+36])
+		d.Parent = &parent
+		offset += 36
+	}
+	if flags&(1<<2) != 0 {
+		if offset+36 > len(data) {
+			return nil, errors.New("inscription value truncated at delegate")
+		}
+		var delegate [36]byte
+		copy(delegate[:], data[offset:offset+36])
+		d.Delegate = &delegate
+		offset += 36
+	}
+	if flags&(1<<3) != 0 {
+		d.Metaprotocol = string(data[offset:])
+	}
+
+	return d, nil
 }
