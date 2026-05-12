@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +41,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
+	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
 )
 
 func bytes2Tx(b []byte) (*wire.MsgTx, error) {
@@ -2036,11 +2039,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 }
 
 func assertPing(ctx context.Context, t *testing.T, c *websocket.Conn, cmd protocol.Command) {
-	var v protocol.Message
-	err := wsjson.Read(ctx, c, &v)
-	if err != nil {
-		t.Fatal(err)
-	}
+	v := callTbc(ctx, t, c, nil)
 
 	if v.Header.Command != cmd {
 		t.Fatalf("unexpected command: %s", v.Header.Command)
@@ -2127,18 +2126,19 @@ func TestNotFoundError(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		HemiIndex:            true,
-		LevelDBHome:          t.TempDir(),
-		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
-		MaxCachedTxs:            1000, // XXX
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		HemiIndex:               true,
+		LevelDBHome:             t.TempDir(),
+		ListenAddress:           "127.0.0.1:0",
+		MaxCachedTxs:            1000,
 		Network:                 networkLocalnet,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{"192.0.2.1:8333"},
 		NotificationBlocking:    true,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -2166,12 +2166,15 @@ func TestNotFoundError(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Log(msg)
 		if msg.Error != nil {
 			t.Fatal(msg.Error)
 		}
-		// If we insert genesis, then TBC has finished starting up
-		if msg.Is(NotificationBlock(chainhash.Hash{})) {
-			break
+		// TBC sends a notification when the http service has started.
+		if msg.Is(NotificationService("", "")) {
+			if msg.ID == "tbc_http_server" && msg.Msg == "ready" {
+				break
+			}
 		}
 	}
 
@@ -2300,6 +2303,51 @@ func TestNotFoundError(t *testing.T) {
 			},
 			expectedError: *protocol.NotFoundError("keystone", emptyHash),
 		},
+		{
+			name: "BlockHashByTxId",
+			handler: func(ctx context.Context) (*protocol.Error, error) {
+				req := tbcapi.BlockHashByTxIDRequest{
+					TxID: emptyHash,
+				}
+				res, err := s.handleBlockHashByTxIdRequest(ctx, &req)
+				val, ok := res.(*tbcapi.BlockHashByTxIDResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
+			},
+			expectedError: *protocol.NotFoundError("tx", emptyHash),
+		},
+		{
+			name: "BlockHeaderByHash",
+			handler: func(ctx context.Context) (*protocol.Error, error) {
+				req := tbcapi.BlockHeaderByHashRequest{
+					Hash: emptyHash,
+				}
+				res, err := s.handleBlockHeaderByHashRequest(ctx, &req)
+				val, ok := res.(*tbcapi.BlockHeaderByHashResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
+			},
+			expectedError: *protocol.NotFoundError("block header", emptyHash),
+		},
+		{
+			name: "BlockHeaderByHashRaw",
+			handler: func(ctx context.Context) (*protocol.Error, error) {
+				req := tbcapi.BlockHeaderByHashRawRequest{
+					Hash: emptyHash,
+				}
+				res, err := s.handleBlockHeaderByHashRawRequest(ctx, &req)
+				val, ok := res.(*tbcapi.BlockHeaderByHashRawResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
+			},
+			expectedError: *protocol.NotFoundError("block header", emptyHash),
+		},
 	}
 
 	for _, tti := range testTable {
@@ -2313,6 +2361,416 @@ func TestNotFoundError(t *testing.T) {
 				t.Fatalf("unexpected error %v != %v",
 					resp.Message, tti.expectedError.Message)
 			}
+		})
+	}
+}
+
+func createLocalTBCServer(ctx context.Context, t *testing.T) (string, *Server, *btcNode) {
+	t.Helper()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+	go func() {
+		err := n.Run(ctx)
+		if !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		ListenAddress:           "127.0.0.1:0",
+		Network:                 networkLocalnet,
+		NotificationBlocking:    true,
+		Seeds:                   []string{n.Address()},
+		// LogLevel:             "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	// Wait for http service to start up
+	var tbcURL string
+	for {
+		msg, err := l.Listen(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Log(msg)
+		if msg.Error != nil {
+			t.Fatal(msg.Error)
+		}
+		// TBC sends a notification when the http service has started.
+		if !msg.Is(NotificationService("", "")) {
+			continue
+		}
+
+		if msg.ID != "tbc_http_server" || msg.Msg != "ready" {
+			continue
+		}
+
+		if addr := s.HTTPAddress(); addr != nil {
+			tbcURL = addr.String()
+			break
+		}
+	}
+
+	tbcAddr := fmt.Sprintf("http://%s%s", tbcURL, tbcapi.RouteWebsocket)
+
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	// g ->  b1 ->  b2 -> b3
+
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc downloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	// Verify linear indexing. Current TxIndex is sitting at genesis
+
+	// genesis -> b3 should work with negative direction (cdiff is less than target)
+	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
+	if err != nil {
+		t.Fatalf("expected success g -> b3, got %v", err)
+	}
+	if direction <= 0 {
+		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
+	}
+
+	return tbcAddr, s, n
+}
+
+func callTbc(ctx context.Context, t *testing.T, c *websocket.Conn, msg any) protocol.Message {
+	t.Helper()
+
+	if msg != nil {
+		tws := &tbcWs{
+			conn: protocol.NewWSConn(c),
+		}
+
+		err := tbcapi.Write(ctx, tws.conn, "someid", msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var v protocol.Message
+	if err := wsjson.Read(ctx, c, &v); err != nil {
+		t.Fatal(err)
+	}
+
+	return v
+}
+
+func compareResponse(t *testing.T, cmd protocol.Command, v protocol.Message, expected any) {
+	t.Helper()
+
+	respType, ok := tbcapi.APICommands()[cmd]
+	if !ok {
+		t.Fatalf("unknown command %s", cmd)
+	}
+
+	if v.Header.Command != cmd {
+		t.Fatalf("received unexpected command: %s", v.Header.Command)
+	}
+
+	target := reflect.New(respType).Interface()
+	if err := json.Unmarshal(v.Payload, &target); err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := deep.Equal(target, expected); len(diff) != 0 {
+		t.Fatalf("got %v, wanted %v: diff %s", target, expected, diff)
+	}
+}
+
+func getRandomUtxoLocal(ctx context.Context, s *Server, n *btcNode) (*tbcd.Utxo, error) {
+	for addr := range n.keys {
+		utxos, err := s.UtxosByAddress(ctx, false, addr, 0, 1)
+		if err != nil {
+			return nil, err
+		}
+		if len(utxos) != 0 {
+			return &utxos[0], nil
+		}
+	}
+	return nil, errors.New("no suitable utxo found")
+}
+
+func getRandomTxIDLocal(n *btcNode) (*chainhash.Hash, *chainhash.Hash, error) {
+	for i := n.height; i > 0; i-- {
+		blk := n.blocksAtHeight[i][0]
+		for t := range blk.txs {
+			txID, expectedHash, err := tbcd.TxIdBlockHashFromTxKey(t)
+			if err != nil {
+				continue
+			}
+			return txID, expectedHash, nil
+		}
+	}
+	return nil, nil, errors.New("no suitable tx found")
+}
+
+func TestRPCRequestsLocal(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
+	defer cancel()
+
+	type testTableItem struct {
+		name        string
+		requestFunc func(*testing.T) (any, any)
+		expectedCmd protocol.Command
+	}
+
+	tbcUrl, tbcServer, n := createLocalTBCServer(ctx, t)
+
+	indexAll(ctx, t, tbcServer)
+
+	// Get a random TX and associated block
+	txID, expectedHash, err := getRandomTxIDLocal(n)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get a random UTXO
+	utxo, err := getRandomUtxoLocal(ctx, tbcServer, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []testTableItem{
+		{
+			name:        "BlockHashByTxID",
+			expectedCmd: tbcapi.CmdBlockHashByTxIDResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.BlockHashByTxIDRequest{TxID: *txID}
+				expectedResp := &tbcapi.BlockHashByTxIDResponse{BlockHash: expectedHash}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "BlockHashByTxID Not Found",
+			expectedCmd: tbcapi.CmdBlockHashByTxIDResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.BlockHashByTxIDRequest{TxID: chainhash.Hash{}}
+				expectedResp := &tbcapi.BlockHashByTxIDResponse{
+					Error: protocol.NotFoundError("tx", chainhash.Hash{}),
+				}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "BlockInTxIndex",
+			expectedCmd: tbcapi.CmdBlockInTxIndexResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.BlockInTxIndexRequest{BlockHash: *expectedHash}
+				expectedResp := &tbcapi.BlockInTxIndexResponse{Indexed: true}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "BlockInTxIndex Negative",
+			expectedCmd: tbcapi.CmdBlockInTxIndexResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.BlockInTxIndexRequest{BlockHash: chainhash.Hash{}}
+				expectedResp := &tbcapi.BlockInTxIndexResponse{Indexed: false}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "FullBlockAvailable",
+			expectedCmd: tbcapi.CmdFullBlockAvailableResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.FullBlockAvailableRequest{Hash: *expectedHash}
+				expectedResp := &tbcapi.FullBlockAvailableResponse{Available: true}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "FullBlockAvailable Negative",
+			expectedCmd: tbcapi.CmdFullBlockAvailableResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.FullBlockAvailableRequest{Hash: chainhash.Hash{}}
+				expectedResp := &tbcapi.FullBlockAvailableResponse{Available: false}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "BlockHeaderByHash",
+			expectedCmd: tbcapi.CmdBlockHeaderByHashResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				bh, height, err := tbcServer.BlockHeaderByHash(ctx, *expectedHash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := &tbcapi.BlockHeaderByHashRequest{Hash: *expectedHash}
+				expectedResp := &tbcapi.BlockHeaderByHashResponse{
+					Height:      height,
+					BlockHeader: wireBlockHeaderToTBC(bh),
+				}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "BlockHeaderByHash Not Found",
+			expectedCmd: tbcapi.CmdBlockHeaderByHashResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.BlockHeaderByHashRequest{Hash: chainhash.Hash{}}
+				expectedResp := &tbcapi.BlockHeaderByHashResponse{
+					Error: protocol.NotFoundError("block header", chainhash.Hash{}),
+				}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "BlockHeaderByHashRaw",
+			expectedCmd: tbcapi.CmdBlockHeaderByHashRawResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				bh, height, err := tbcServer.BlockHeaderByHash(ctx, *expectedHash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := &tbcapi.BlockHeaderByHashRawRequest{Hash: *expectedHash}
+				expectedResp := &tbcapi.BlockHeaderByHashRawResponse{
+					Height:      height,
+					BlockHeader: new(h2b(bh))[:],
+				}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "BlockHeaderByHashRaw Not Found",
+			expectedCmd: tbcapi.CmdBlockHeaderByHashRawResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.BlockHeaderByHashRawRequest{Hash: chainhash.Hash{}}
+				expectedResp := &tbcapi.BlockHeaderByHashRawResponse{
+					Error: protocol.NotFoundError("block header", chainhash.Hash{}),
+				}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "ScriptHashAvailableToSpend",
+			expectedCmd: tbcapi.CmdScriptHashAvailableToSpendResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.ScriptHashAvailableToSpendRequest{
+					TxID:  *utxo.ChainHash(),
+					Index: utxo.OutputIndex(),
+				}
+				expectedResp := &tbcapi.ScriptHashAvailableToSpendResponse{Available: true}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "ScriptHashAvailableToSpend Negative",
+			expectedCmd: tbcapi.CmdScriptHashAvailableToSpendResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.ScriptHashAvailableToSpendRequest{
+					TxID:  chainhash.Hash{},
+					Index: 0,
+				}
+				expectedResp := &tbcapi.ScriptHashAvailableToSpendResponse{Available: false}
+				return request, expectedResp
+			},
+		},
+		{
+			name:        "SyncStatus",
+			expectedCmd: tbcapi.CmdSyncStatusResponse,
+			requestFunc: func(t *testing.T) (any, any) {
+				request := &tbcapi.SyncStatusRequest{}
+				height, bh, err := tbcServer.BlockHeaderBest(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				bestHH := tbcapi.HashHeight{
+					Height: height,
+					Hash:   bh.BlockHash(),
+				}
+				expectedResp := &tbcapi.SyncStatusResponse{
+					Synced:         true,
+					AtLeastMissing: 0,
+					BlockHeader:    bestHH,
+					Tx:             bestHH,
+					Utxo:           bestHH,
+				}
+				return request, expectedResp
+			},
+		},
+	}
+
+	for _, tti := range tests {
+		t.Run(tti.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+
+			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.CloseNow()
+
+			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+			req, expected := tti.requestFunc(t)
+
+			v := callTbc(ctx, t, c, req)
+			compareResponse(t, tti.expectedCmd, v, expected)
 		})
 	}
 }

@@ -2241,6 +2241,9 @@ func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId chainhash.
 	op := tbcd.NewOutpoint(txIdBytes, index)
 	sh, err := s.g.db.ScriptHashByOutpoint(ctx, op)
 	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return false, nil
+		}
 		return false, err
 	}
 

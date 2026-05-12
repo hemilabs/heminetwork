@@ -82,6 +82,26 @@ func (s *Server) getTBCAPICommandHandler(cmd protocol.Command, payload any) func
 		return func(ctx context.Context) (any, error) {
 			return s.handleBlockHeaderBestRequest(ctx, payload.(*tbcapi.BlockHeaderBestRequest))
 		}
+	case tbcapi.CmdBlockHeaderByHashRawRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockHeaderByHashRawRequest(ctx, payload.(*tbcapi.BlockHeaderByHashRawRequest))
+		}
+	case tbcapi.CmdBlockHeaderByHashRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockHeaderByHashRequest(ctx, payload.(*tbcapi.BlockHeaderByHashRequest))
+		}
+	case tbcapi.CmdFullBlockAvailableRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleFullBlockAvailableRequest(ctx, payload.(*tbcapi.FullBlockAvailableRequest))
+		}
+	case tbcapi.CmdScriptHashAvailableToSpendRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleScriptHashAvailableToSpendRequest(ctx, payload.(*tbcapi.ScriptHashAvailableToSpendRequest))
+		}
+	case tbcapi.CmdSyncStatusRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleSyncStatusRequest(ctx, payload.(*tbcapi.SyncStatusRequest))
+		}
 	case tbcapi.CmdBalanceByAddressRequest:
 		return func(ctx context.Context) (any, error) {
 			return s.handleBalanceByAddressRequest(ctx, payload.(*tbcapi.BalanceByAddressRequest))
@@ -109,6 +129,14 @@ func (s *Server) getTBCAPICommandHandler(cmd protocol.Command, payload any) func
 	case tbcapi.CmdTxBroadcastRawRequest:
 		return func(ctx context.Context) (any, error) {
 			return s.handleTxBroadcastRawRequest(ctx, payload.(*tbcapi.TxBroadcastRawRequest))
+		}
+	case tbcapi.CmdBlockHashByTxIDRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockHashByTxIdRequest(ctx, payload.(*tbcapi.BlockHashByTxIDRequest))
+		}
+	case tbcapi.CmdBlockInTxIndexRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleBlockInTxIndexRequest(ctx, payload.(*tbcapi.BlockInTxIndexRequest))
 		}
 	case tbcapi.CmdBlockInsertRequest:
 		return func(ctx context.Context) (any, error) {
@@ -401,6 +429,118 @@ func (s *Server) handleBlockHeaderBestRequest(ctx context.Context, _ *tbcapi.Blo
 	}, nil
 }
 
+func (s *Server) handleBlockHeaderByHashRawRequest(ctx context.Context, req *tbcapi.BlockHeaderByHashRawRequest) (any, error) {
+	log.Tracef("handleBlockHeaderByHashRawRequest")
+	defer log.Tracef("handleBlockHeaderByHashRawRequest exit")
+
+	blockHeader, height, err := s.BlockHeaderByHash(ctx, req.Hash)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.BlockHeaderByHashRawResponse{
+				Error: protocol.NotFoundError("block header", req.Hash),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockHeaderByHashRawResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	b := h2b(blockHeader)
+	return &tbcapi.BlockHeaderByHashRawResponse{
+		Height:      height,
+		BlockHeader: b[:],
+	}, nil
+}
+
+func (s *Server) handleBlockHeaderByHashRequest(ctx context.Context, req *tbcapi.BlockHeaderByHashRequest) (any, error) {
+	log.Tracef("handleBlockHeaderByHashRequest")
+	defer log.Tracef("handleBlockHeaderByHashRequest exit")
+
+	blockHeader, height, err := s.BlockHeaderByHash(ctx, req.Hash)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.BlockHeaderByHashResponse{
+				Error: protocol.NotFoundError("block header", req.Hash),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockHeaderByHashResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.BlockHeaderByHashResponse{
+		Height:      height,
+		BlockHeader: wireBlockHeaderToTBC(blockHeader),
+	}, nil
+}
+
+func (s *Server) handleFullBlockAvailableRequest(ctx context.Context, req *tbcapi.FullBlockAvailableRequest) (any, error) {
+	log.Tracef("handleFullBlockAvailableRequest")
+	defer log.Tracef("handleFullBlockAvailableRequest exit")
+
+	available, err := s.FullBlockAvailable(ctx, req.Hash)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.FullBlockAvailableResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.FullBlockAvailableResponse{
+		Available: available,
+	}, nil
+}
+
+func (s *Server) handleScriptHashAvailableToSpendRequest(ctx context.Context, req *tbcapi.ScriptHashAvailableToSpendRequest) (any, error) {
+	log.Tracef("handleScriptHashAvailableToSpendRequest")
+	defer log.Tracef("handleScriptHashAvailableToSpendRequest exit")
+
+	available, err := s.ScriptHashAvailableToSpend(ctx, req.TxID, req.Index)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ScriptHashAvailableToSpendResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.ScriptHashAvailableToSpendResponse{
+		Available: available,
+	}, nil
+}
+
+func (s *Server) handleSyncStatusRequest(ctx context.Context, _ *tbcapi.SyncStatusRequest) (any, error) {
+	log.Tracef("handleSyncStatusRequest")
+	defer log.Tracef("handleSyncStatusRequest exit")
+
+	si := s.Synced(ctx)
+	return &tbcapi.SyncStatusResponse{
+		Synced:         si.Synced,
+		AtLeastMissing: si.AtLeastMissing,
+		BlockHeader: tbcapi.HashHeight{
+			Hash:   si.BlockHeader.Hash,
+			Height: si.BlockHeader.Height,
+		},
+		Keystone: tbcapi.HashHeight{
+			Hash:   si.Keystone.Hash,
+			Height: si.Keystone.Height,
+		},
+		Tx: tbcapi.HashHeight{
+			Hash:   si.Tx.Hash,
+			Height: si.Tx.Height,
+		},
+		Utxo: tbcapi.HashHeight{
+			Hash:   si.Utxo.Hash,
+			Height: si.Utxo.Height,
+		},
+		ZK: tbcapi.HashHeight{
+			Hash:   si.ZK.Hash,
+			Height: si.ZK.Height,
+		},
+	}, nil
+}
+
 func (s *Server) handleBalanceByAddressRequest(ctx context.Context, req *tbcapi.BalanceByAddressRequest) (any, error) {
 	log.Tracef("handleBalanceByAddressRequest")
 	defer log.Tracef("handleBalanceByAddressRequest exit")
@@ -592,6 +732,41 @@ func (s *Server) handleTxBroadcastRawRequest(ctx context.Context, req *tbcapi.Tx
 	}
 
 	return &tbcapi.TxBroadcastRawResponse{TxID: txid}, nil
+}
+
+func (s *Server) handleBlockHashByTxIdRequest(ctx context.Context, req *tbcapi.BlockHashByTxIDRequest) (any, error) {
+	log.Tracef("handleBlockHashByTxIdRequest")
+	defer log.Tracef("handleBlockHashByTxIdRequest exit")
+
+	hash, err := s.BlockHashByTxId(ctx, req.TxID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.BlockHashByTxIDResponse{
+				Error: protocol.NotFoundError("tx", req.TxID),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockHashByTxIDResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.BlockHashByTxIDResponse{BlockHash: hash}, nil
+}
+
+func (s *Server) handleBlockInTxIndexRequest(ctx context.Context, req *tbcapi.BlockInTxIndexRequest) (any, error) {
+	log.Tracef("handleBlockInTxIndexRequest")
+	defer log.Tracef("handleBlockInTxIndexRequest exit")
+
+	indexed, err := s.BlockInTxIndex(ctx, req.BlockHash)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockInTxIndexResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.BlockInTxIndexResponse{Indexed: indexed}, nil
 }
 
 func (s *Server) handleBlockInsertRequest(ctx context.Context, req *tbcapi.BlockInsertRequest) (any, error) {

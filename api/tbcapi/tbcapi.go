@@ -53,6 +53,21 @@ const (
 	CmdBlockHeaderBestRequest  = "tbcapi-block-header-best-request"
 	CmdBlockHeaderBestResponse = "tbcapi-block-header-best-response"
 
+	CmdBlockHeaderByHashRawRequest  = "tbcapi-block-header-by-hash-raw-request"
+	CmdBlockHeaderByHashRawResponse = "tbcapi-block-header-by-hash-raw-response"
+
+	CmdBlockHeaderByHashRequest  = "tbcapi-block-header-by-hash-request"
+	CmdBlockHeaderByHashResponse = "tbcapi-block-header-by-hash-response"
+
+	CmdFullBlockAvailableRequest  = "tbcapi-full-block-available-request"
+	CmdFullBlockAvailableResponse = "tbcapi-full-block-available-response"
+
+	CmdScriptHashAvailableToSpendRequest  = "tbcapi-script-hash-available-to-spend-request"
+	CmdScriptHashAvailableToSpendResponse = "tbcapi-script-hash-available-to-spend-response"
+
+	CmdSyncStatusRequest  = "tbcapi-sync-status-request"
+	CmdSyncStatusResponse = "tbcapi-sync-status-response"
+
 	CmdBalanceByAddressRequest  = "tbcapi-balance-by-address-request"
 	CmdBalanceByAddressResponse = "tbcapi-balance-by-address-response"
 
@@ -73,6 +88,12 @@ const (
 
 	CmdTxBroadcastRawRequest  = "tbcapi-tx-broadcast-raw-request"
 	CmdTxBroadcastRawResponse = "tbcapi-tx-broadcast-raw-response"
+
+	CmdBlockHashByTxIDRequest  = "tbcapi-block-hash-by-tx-id-request"
+	CmdBlockHashByTxIDResponse = "tbcapi-block-hash-by-tx-id-response"
+
+	CmdBlockInTxIndexRequest  = "tbcapi-block-in-tx-index-request"
+	CmdBlockInTxIndexResponse = "tbcapi-block-in-tx-index-response"
 
 	CmdBlockInsertRequest  = "tbcapi-block-insert-request"
 	CmdBlockInsertResponse = "tbcapi-block-insert-response"
@@ -195,6 +216,11 @@ type Block struct {
 	Txs    []Tx           `json:"txs"`
 }
 
+type HashHeight struct {
+	Hash   chainhash.Hash `json:"hash"`
+	Height uint64         `json:"height"`
+}
+
 type L2KeystoneBlockInfo struct {
 	L2KeystoneAbrev       *hemi.L2KeystoneAbrev `json:"l2_keystone_abrev"`
 	L2KeystoneBlockHash   *chainhash.Hash       `json:"l2_keystone_block_hash"`
@@ -261,6 +287,58 @@ type BlockHeaderBestResponse struct {
 	Height      uint64          `json:"height"`
 	BlockHeader *BlockHeader    `json:"block_header"`
 	Error       *protocol.Error `json:"error,omitempty"`
+}
+
+type BlockHeaderByHashRawRequest struct {
+	Hash chainhash.Hash `json:"hash"`
+}
+
+type BlockHeaderByHashRawResponse struct {
+	Height      uint64          `json:"height"`
+	BlockHeader api.ByteSlice   `json:"block_header"`
+	Error       *protocol.Error `json:"error,omitempty"`
+}
+
+type BlockHeaderByHashRequest struct {
+	Hash chainhash.Hash `json:"hash"`
+}
+
+type BlockHeaderByHashResponse struct {
+	Height      uint64          `json:"height"`
+	BlockHeader *BlockHeader    `json:"block_header"`
+	Error       *protocol.Error `json:"error,omitempty"`
+}
+
+type FullBlockAvailableRequest struct {
+	Hash chainhash.Hash `json:"hash"`
+}
+
+type FullBlockAvailableResponse struct {
+	Available bool            `json:"available"`
+	Error     *protocol.Error `json:"error,omitempty"`
+}
+
+type ScriptHashAvailableToSpendRequest struct {
+	TxID  chainhash.Hash `json:"tx_id"`
+	Index uint32         `json:"index"`
+}
+
+type ScriptHashAvailableToSpendResponse struct {
+	Available bool            `json:"available"`
+	Error     *protocol.Error `json:"error,omitempty"`
+}
+
+type SyncStatusRequest struct{}
+
+type SyncStatusResponse struct {
+	Synced         bool            `json:"synced"`
+	AtLeastMissing int             `json:"at_least_missing"`
+	BlockHeader    HashHeight      `json:"blockheader_index_height"`
+	Keystone       HashHeight      `json:"keystone_index_height"`
+	Tx             HashHeight      `json:"tx_index_height"`
+	Utxo           HashHeight      `json:"utxo_index_height"`
+	ZK             HashHeight      `json:"zk_index_height"`
+	Error          *protocol.Error `json:"error,omitempty"`
 }
 
 type BalanceByAddressRequest struct {
@@ -332,6 +410,24 @@ type TxBroadcastRawRequest struct {
 type TxBroadcastRawResponse struct {
 	TxID  *chainhash.Hash `json:"tx_id"`
 	Error *protocol.Error `json:"error,omitempty"`
+}
+
+type BlockHashByTxIDRequest struct {
+	TxID chainhash.Hash `json:"tx_id"`
+}
+
+type BlockHashByTxIDResponse struct {
+	BlockHash *chainhash.Hash `json:"block_hash"`
+	Error     *protocol.Error `json:"error,omitempty"`
+}
+
+type BlockInTxIndexRequest struct {
+	BlockHash chainhash.Hash `json:"block_hash"`
+}
+
+type BlockInTxIndexResponse struct {
+	Indexed bool            `json:"indexed"`
+	Error   *protocol.Error `json:"error,omitempty"`
 }
 
 type BlockInsertRequest struct {
@@ -602,6 +698,16 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockHeaderBestRawResponse:               reflect.TypeFor[BlockHeaderBestRawResponse](),
 	CmdBlockHeaderBestRequest:                   reflect.TypeFor[BlockHeaderBestRequest](),
 	CmdBlockHeaderBestResponse:                  reflect.TypeFor[BlockHeaderBestResponse](),
+	CmdBlockHeaderByHashRawRequest:              reflect.TypeFor[BlockHeaderByHashRawRequest](),
+	CmdBlockHeaderByHashRawResponse:             reflect.TypeFor[BlockHeaderByHashRawResponse](),
+	CmdBlockHeaderByHashRequest:                 reflect.TypeFor[BlockHeaderByHashRequest](),
+	CmdBlockHeaderByHashResponse:                reflect.TypeFor[BlockHeaderByHashResponse](),
+	CmdFullBlockAvailableRequest:                reflect.TypeFor[FullBlockAvailableRequest](),
+	CmdFullBlockAvailableResponse:               reflect.TypeFor[FullBlockAvailableResponse](),
+	CmdScriptHashAvailableToSpendRequest:        reflect.TypeFor[ScriptHashAvailableToSpendRequest](),
+	CmdScriptHashAvailableToSpendResponse:       reflect.TypeFor[ScriptHashAvailableToSpendResponse](),
+	CmdSyncStatusRequest:                        reflect.TypeFor[SyncStatusRequest](),
+	CmdSyncStatusResponse:                       reflect.TypeFor[SyncStatusResponse](),
 	CmdBalanceByAddressRequest:                  reflect.TypeFor[BalanceByAddressRequest](),
 	CmdBalanceByAddressResponse:                 reflect.TypeFor[BalanceByAddressResponse](),
 	CmdUTXOsByAddressRawRequest:                 reflect.TypeFor[UTXOsByAddressRawRequest](),
@@ -616,6 +722,10 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdTxBroadcastResponse:                      reflect.TypeFor[TxBroadcastResponse](),
 	CmdTxBroadcastRawRequest:                    reflect.TypeFor[TxBroadcastRawRequest](),
 	CmdTxBroadcastRawResponse:                   reflect.TypeFor[TxBroadcastRawResponse](),
+	CmdBlockHashByTxIDRequest:                   reflect.TypeFor[BlockHashByTxIDRequest](),
+	CmdBlockHashByTxIDResponse:                  reflect.TypeFor[BlockHashByTxIDResponse](),
+	CmdBlockInTxIndexRequest:                    reflect.TypeFor[BlockInTxIndexRequest](),
+	CmdBlockInTxIndexResponse:                   reflect.TypeFor[BlockInTxIndexResponse](),
 	CmdBlockInsertRequest:                       reflect.TypeFor[BlockInsertRequest](),
 	CmdBlockInsertResponse:                      reflect.TypeFor[BlockInsertResponse](),
 	CmdBlockInsertRawRequest:                    reflect.TypeFor[BlockInsertRawRequest](),

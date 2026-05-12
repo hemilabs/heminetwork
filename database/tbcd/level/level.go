@@ -1671,32 +1671,12 @@ func (l *ldb) BlockInTxIndex(ctx context.Context, hash chainhash.Hash) (bool, er
 	log.Tracef("BlockInTxIndex")
 	defer log.Tracef("BlockInTxIndex exit")
 
-	blocks := make([]*chainhash.Hash, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
 	var blkid [33]byte
 	blkid[0] = 'b'
 	copy(blkid[1:], hash[:])
-	it := txDB.NewIterator(util.BytesPrefix(blkid[:]), nil)
-	defer it.Release()
-	for it.Next() {
-		block, err := chainhash.NewHash(it.Key()[33:])
-		if err != nil {
-			return false, err
-		}
-		blocks = append(blocks, block)
-	}
-	if err := it.Error(); err != nil {
-		return false, fmt.Errorf("blocks by id iterator: %w", err)
-	}
-	switch len(blocks) {
-	case 0:
-		return false, nil
-	case 1:
-		return true, nil
-	default:
-		panic(fmt.Sprintf("invalid blocks count %v: %v",
-			len(blocks), spew.Sdump(blocks)))
-	}
+
+	return txDB.Has(blkid[:], nil)
 }
 
 func (l *ldb) ScriptHashesByOutpoint(ctx context.Context, ops []*tbcd.Outpoint, result func(tbcd.Outpoint, tbcd.ScriptHash) error) error {
@@ -1730,6 +1710,9 @@ func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd
 	uDB := l.pool[level.OutputsDB]
 	scriptHash, err := uDB.Get(op[:], nil)
 	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("not found %s", op))
+		}
 		return nil, fmt.Errorf("script hash by outpoint: %w", err)
 	}
 
