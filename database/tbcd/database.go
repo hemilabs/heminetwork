@@ -154,6 +154,7 @@ type Database interface {
 	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
 	OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error)
 	OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*Outpoint, error)
+	OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error)
 }
 
 type Keystone struct {

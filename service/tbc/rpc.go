@@ -198,6 +198,30 @@ func (s *Server) getTBCAPICommandHandler(cmd protocol.Command, payload any) func
 		return func(ctx context.Context) (any, error) {
 			return s.handleZKSpendableOutputsRequest(ctx, payload.(*tbcapi.ZKSpendableOutputsRequest))
 		}
+	case tbcapi.CmdOrdinalInscriptionByIDRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionByIDRequest(ctx, payload.(*tbcapi.OrdinalInscriptionByIDRequest))
+		}
+	case tbcapi.CmdOrdinalInscriptionContentRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionContentRequest(ctx, payload.(*tbcapi.OrdinalInscriptionContentRequest))
+		}
+	case tbcapi.CmdOrdinalInscriptionsByBlockRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionsByBlockRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsByBlockRequest))
+		}
+	case tbcapi.CmdOrdinalInscriptionsByAddressRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionsByAddressRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsByAddressRequest))
+		}
+	case tbcapi.CmdOrdinalInscriptionsBySatRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionsBySatRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsBySatRequest))
+		}
+	case tbcapi.CmdOrdinalSatRangesByOutpointRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalSatRangesByOutpointRequest(ctx, payload.(*tbcapi.OrdinalSatRangesByOutpointRequest))
+		}
 	default:
 		return nil
 	}
@@ -1614,4 +1638,146 @@ func (s *Server) handleTxUnwatchRequest(ctx context.Context, ws *tbcWs, req *tbc
 	l.Unwatch(scripts)
 
 	return &tbcapi.TxUnwatchResponse{}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionByIDRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionByIDRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionByIDRequest")
+	defer log.Tracef("handleOrdinalInscriptionByIDRequest exit")
+
+	insc, err := s.InscriptionByID(ctx, req.TxID, req.InputIndex)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionByIDResponse{
+				Error: protocol.NotFoundError("inscription",
+					fmt.Sprintf("%v:%d", req.TxID, req.InputIndex)),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionByIDResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionByIDResponse{
+		Inscription: insc,
+	}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionContentRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionContentRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionContentRequest")
+	defer log.Tracef("handleOrdinalInscriptionContentRequest exit")
+
+	contentType, content, err := s.InscriptionContent(ctx, req.TxID, req.InputIndex)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionContentResponse{
+				Error: protocol.NotFoundError("inscription content",
+					fmt.Sprintf("%v:%d", req.TxID, req.InputIndex)),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionContentResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionContentResponse{
+		ContentType: contentType,
+		Content:     content,
+	}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionsByBlockRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionsByBlockRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionsByBlockRequest")
+	defer log.Tracef("handleOrdinalInscriptionsByBlockRequest exit")
+
+	inscriptions, err := s.InscriptionsByBlock(ctx, req.Hash)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionsByBlockResponse{
+				Error: protocol.NotFoundError("block", req.Hash),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionsByBlockResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionsByBlockResponse{
+		Inscriptions: inscriptions,
+	}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionsByAddressRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionsByAddressRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionsByAddressRequest")
+	defer log.Tracef("handleOrdinalInscriptionsByAddressRequest exit")
+
+	inscriptions, err := s.InscriptionsByAddress(ctx, req.Address, req.Start, req.Count)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionsByAddressResponse{
+				Error: protocol.NotFoundError("address", req.Address),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionsByAddressResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionsByAddressResponse{
+		Inscriptions: inscriptions,
+	}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionsBySatRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionsBySatRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionsBySatRequest")
+	defer log.Tracef("handleOrdinalInscriptionsBySatRequest exit")
+
+	inscriptions, err := s.InscriptionsBySat(ctx, req.SatNumber)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionsBySatResponse{
+				Error: protocol.NotFoundError("sat", req.SatNumber),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionsBySatResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionsBySatResponse{
+		Inscriptions: inscriptions,
+	}, nil
+}
+
+func (s *Server) handleOrdinalSatRangesByOutpointRequest(ctx context.Context, req *tbcapi.OrdinalSatRangesByOutpointRequest) (any, error) {
+	log.Tracef("handleOrdinalSatRangesByOutpointRequest")
+	defer log.Tracef("handleOrdinalSatRangesByOutpointRequest exit")
+
+	satRanges, err := s.SatRangesByOutpoint(ctx, req.TxID, req.Vout)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalSatRangesByOutpointResponse{
+				Error: protocol.NotFoundError("outpoint",
+					fmt.Sprintf("%v:%d", req.TxID, req.Vout)),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalSatRangesByOutpointResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalSatRangesByOutpointResponse{
+		SatRanges: satRanges,
+	}, nil
 }
