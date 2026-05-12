@@ -59,7 +59,8 @@ const (
 
 	defaultMaxCachedKeystones = 1e6 // number of cached keystones prior to flush
 	defaultMaxCachedTxs       = 1e6 // dual purpose cache, max key 69, max value 36
-	defaultMaxZK              = 1e6 // number of cached zk rows prior to flush
+	defaultMaxZK              = 1e6
+	defaultMaxCachedOrdinals  = 1e6 // number of cached zk rows prior to flush
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
@@ -191,6 +192,8 @@ type Config struct {
 	Seeds                   []string
 	ZKIndex                 bool
 	UtxoReadCacheSize       string // LRU read cache for utxo fixup; "0" or "" disables
+	OrdinalIndex            bool
+	MaxCachedOrdinals       int
 
 	// Admin API
 	JWTSecret string // Hex-encoded JWT token for admin RPC authentication
@@ -214,6 +217,7 @@ func NewDefaultConfig() *Config {
 		MaxCachedTxs:         defaultMaxCachedTxs,
 		MaxCachedZK:          defaultMaxZK,
 		UtxoReadCacheSize:    "1gb",
+		MaxCachedOrdinals:    defaultMaxCachedOrdinals,
 		MempoolEnabled:       true,
 		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
 		PeersWanted:          defaultPeersWanted,
@@ -271,6 +275,7 @@ type Server struct {
 	ti  Indexer
 	ki  Indexer
 	zki Indexer
+	oi  Indexer
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -806,6 +811,12 @@ func (s *Server) promZK() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	return deucalion.Uint64ToFloat(s.prom.syncInfo.ZK.Height)
+}
+
+func (s *Server) promOrdinal() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.Uint64ToFloat(s.prom.syncInfo.Ordinal.Height)
 }
 
 func (s *Server) promConnectedPeers() float64 {
@@ -2654,6 +2665,13 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 		}
 	}
 
+	// Ordinal indexes
+	if s.cfg.OrdinalIndex {
+		if err := s.oi.IndexToHash(ctx, hash); err != nil {
+			return fmt.Errorf("ordinal indexer: %w", err)
+		}
+	}
+
 	log.Debugf("Done syncing to: %v", hash)
 
 	bh, err := s.g.db.BlockHeaderByHash(ctx, hash)
@@ -2693,6 +2711,12 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 
 	if s.cfg.ZKIndex {
 		if err := s.zki.IndexToBest(ctx); err != nil {
+			return err
+		}
+	}
+
+	if s.cfg.OrdinalIndex {
+		if err := s.oi.IndexToBest(ctx); err != nil {
 			return err
 		}
 	}
@@ -2795,6 +2819,7 @@ type SyncInfo struct {
 	Tx          HashHeight `json:"tx_index_height"`
 	Utxo        HashHeight `json:"utxo_index_height"`
 	ZK          HashHeight `json:"zk_index_height"`
+	Ordinal     HashHeight `json:"ordinal_index_height"`
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2896,14 +2921,35 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		si.ZK = *zkHH
 	}
 
+	if s.cfg.OrdinalIndex {
+		ordBH, err := s.oi.IndexerAt(ctx)
+		if err != nil {
+			ordBH = &tbcd.BlockHeader{}
+		}
+		ordHH := &HashHeight{
+			Hash:   ordBH.Hash,
+			Height: ordBH.Height,
+		}
+		si.Ordinal = *ordHH
+	}
+
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
 		!s.indexing && !blksMissing {
+		// If keystone, zk, and ordinal indexers are disabled we are synced.
+		if !s.cfg.HemiIndex && !s.cfg.ZKIndex && !s.cfg.OrdinalIndex {
+			si.Synced = true
+			return si
+		}
 		if s.cfg.HemiIndex && !si.Keystone.Hash.IsEqual(&bhb.Hash) {
 			// Keystone index not synced
 			return si
 		}
 		if s.cfg.ZKIndex && !si.ZK.Hash.IsEqual(&bhb.Hash) {
 			// ZK index not synced
+			return si
+		}
+		if s.cfg.OrdinalIndex && !si.Ordinal.Hash.IsEqual(&bhb.Hash) {
+			// Ordinal index not synced
 			return si
 		}
 		si.Synced = true
@@ -3029,6 +3075,11 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	if s.cfg.ZKIndex {
 		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedZK,
 			s.cfg.ZKIndex)
+	}
+
+	if s.cfg.OrdinalIndex {
+		s.oi = NewOrdinalIndexer(s.g, s.cfg.MaxCachedOrdinals,
+			s.cfg.OrdinalIndex)
 	}
 
 	return nil
@@ -3201,6 +3252,14 @@ func (s *Server) Collectors() []prometheus.Collector {
 					Name:      "zk_sync_height",
 					Help:      "Height of the zk indexer",
 				}, s.promZK))
+		}
+		if s.cfg.OrdinalIndex {
+			s.promCollectors = append(s.promCollectors,
+				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+					Namespace: s.cfg.PrometheusNamespace,
+					Name:      "ordinal_sync_height",
+					Help:      "Height of the ordinal indexer",
+				}, s.promOrdinal))
 		}
 	}
 	return s.promCollectors
@@ -3441,6 +3500,10 @@ func (s *Server) Run(pctx context.Context) error {
 		if s.cfg.ZKIndex {
 			bh, _ := s.zki.IndexerAt(ctx)
 			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
+		}
+		if s.cfg.OrdinalIndex {
+			bh, _ := s.oi.IndexerAt(ctx)
+			log.Infof("Ordinal index %v @ %v", bh.Height, bh.Hash)
 		}
 
 		// XXX this code really should do something along the lines of

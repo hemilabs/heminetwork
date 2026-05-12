@@ -34,6 +34,7 @@ const (
 	OutputsDB       = "outputs"
 	TransactionsDB  = "transactions"
 	ZKDB            = "zkindex"
+	OrdinalDB       = "ordinals"
 
 	BlocksDB = "blocks" // raw database
 )
@@ -241,6 +242,10 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	err = l.openDB(ZKDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", ZKDB, err)
+	}
+	err = l.openDB(OrdinalDB)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", OrdinalDB, err)
 	}
 	err = l.openDB(MetadataDB)
 	if err != nil {

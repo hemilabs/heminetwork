@@ -174,6 +174,34 @@ func (stubDB) ZKSpendableOutputs(context.Context, tbcd.ScriptHash) ([]tbcd.ZKSpe
 	panic("stub")
 }
 
+func (stubDB) BlockHeaderByOrdinalIndex(context.Context) (*tbcd.BlockHeader, error) {
+	panic("stub")
+}
+
+func (stubDB) BlockOrdinalUpdate(context.Context, int, map[tbcd.OrdinalKey][]byte, chainhash.Hash) error {
+	panic("stub")
+}
+
+func (stubDB) OrdinalSatRangesByOutpoint(context.Context, tbcd.Outpoint) ([]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscriptionByID(context.Context, [36]byte) ([]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscriptionsByBlockHash(context.Context, chainhash.Hash) ([][36]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscribedSatsInRange(context.Context, uint64, uint64) ([]uint64, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalOutpointBySat(context.Context, uint64) (*tbcd.Outpoint, error) {
+	panic("stub")
+}
+
 // TestTxOutByOutpoint verifies that txOutByOutpoint resolves an
 // output from a parent transaction that is in the mempool.
 func TestTxOutByOutpoint(t *testing.T) {

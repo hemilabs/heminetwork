@@ -1041,8 +1041,8 @@ func TestDbUpgradeV5(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != 5 {
-		t.Fatalf("version after v5: got %v want 5", got)
+	if got != 6 {
+		t.Fatalf("version after v6: got %v want 6", got)
 	}
 }
 

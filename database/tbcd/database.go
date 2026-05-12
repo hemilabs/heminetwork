@@ -144,6 +144,15 @@ type Database interface {
 	ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
 	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
 	ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
+
+	// Ordinals
+	BlockHeaderByOrdinalIndex(ctx context.Context) (*BlockHeader, error)
+	BlockOrdinalUpdate(ctx context.Context, direction int, data map[OrdinalKey][]byte, ordinalIndexHash chainhash.Hash) error
+	OrdinalSatRangesByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
+	OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error)
+	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
+	OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error)
+	OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*Outpoint, error)
 }
 
 type Keystone struct {
@@ -610,6 +619,12 @@ func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txi
 // ScriptHash(32), TxSpendKey(72). ScriptHash(32) is the *ONLY* table that is
 // updated, the others are essentially a journal of activity.
 type ZKIndexKey string // ugh to make []byte comparable
+
+// OrdinalKey is a wrapper to make variable-length ordinal index keys
+// comparable. Valid prefixes are: 'r' (sat ranges, 38 bytes),
+// 'i' (inscription, 37 bytes), 's' (inscribed sat, 9 bytes),
+// 'a' (sat→inscriptions, 45 bytes), 'n' (block→inscriptions, 37 bytes).
+type OrdinalKey string
 
 func BEUint64(x uint64) []byte {
 	var b [8]byte
