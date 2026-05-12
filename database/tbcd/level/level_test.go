@@ -1039,8 +1039,8 @@ func TestDbUpgradeV5(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != 6 {
-		t.Fatalf("version after upgrade: got %v want 6", got)
+	if got != 7 {
+		t.Fatalf("version after upgrade: got %v want 7", got)
 	}
 }
 
@@ -1896,8 +1896,8 @@ func TestDbUpgradeV6(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != 6 {
-		t.Fatalf("version after v6 upgrade: got %d want 6", got)
+	if got != 7 {
+		t.Fatalf("version after v6 upgrade: got %d want 7", got)
 	}
 
 	// Verify tx index is empty (wiped)
