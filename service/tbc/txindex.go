@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -62,7 +62,7 @@ func (i *txIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexe
 	return nil
 }
 
-func processTxs(ctx context.Context, block *btcutil.Block, direction int, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
+func processTxs(_ context.Context, block *btcutil.Block, _ int, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
 	blockHash := block.Hash()
 	txs := block.Transactions()
 	for _, tx := range txs {

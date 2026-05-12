@@ -21,7 +21,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
 )
 
-func mockHttpServer() *httptest.Server {
+func mockHTTPServer() *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fakeHash := "00000000c5cbf1fcdc75539ac75fe8a98417976e548197355b3e5f6c4e884a17"
 		switch {
@@ -98,7 +98,7 @@ func TestBlockstreamGozer(t *testing.T) {
 	defer cancel()
 
 	// use mock http server rather than blockstream api
-	ts := mockHttpServer()
+	ts := mockHTTPServer()
 	defer ts.Close()
 
 	// can't use Run() for custom urls

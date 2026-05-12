@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -89,7 +89,7 @@ func (i *zkIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache
 
 func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
-	txId := tx.Hash()
+	txID := tx.Hash()
 	for txInIdx, txIn := range tx.MsgTx().TxIn {
 		// Skip coinbase inputs
 		if blockchain.IsCoinBase(tx) {
@@ -127,7 +127,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 
 		// Insert SpentOutput
 		spo := tbcd.NewSpentOutput(chainhash.Hash(sh), blockHeight,
-			*blockHash, *txId, txIn.PreviousOutPoint.Hash,
+			*blockHash, *txID, txIn.PreviousOutPoint.Hash,
 			txIn.PreviousOutPoint.Index, uint32(txInIdx))
 		if _, ok := cache[tbcd.ZKIndexKey(spo[:])]; ok {
 			panic(fmt.Sprintf("diagnostic: %v", spo))
@@ -137,7 +137,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		// Tx index, where spent
 		sok := tbcd.NewSpendingOutpointKey(txIn.PreviousOutPoint.Hash,
 			blockHeight, *blockHash, txIn.PreviousOutPoint.Index)
-		cache[tbcd.ZKIndexKey(sok[:])] = tbcd.NewSpendingOutpointValueSlice(*txId,
+		cache[tbcd.ZKIndexKey(sok[:])] = tbcd.NewSpendingOutpointValueSlice(*txID,
 			uint32(txInIdx))
 	}
 
@@ -166,7 +166,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 
 		// SpendableOutput
 		so := tbcd.NewSpendableOutput(chainhash.Hash(sh), blockHeight,
-			*blockHash, *txId, uint32(txOutIdx))
+			*blockHash, *txID, uint32(txOutIdx))
 		cache[tbcd.ZKIndexKey(so[:])] = nil
 
 		// Outpoint to TxOut
@@ -183,7 +183,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		cache[tbcd.ZKIndexKey(op[:])] = tbcd.NewTxOut(txOut)
 
 		// Tx index, available to spend
-		sok := tbcd.NewSpendingOutpointKey(*txId, blockHeight, *blockHash,
+		sok := tbcd.NewSpendingOutpointKey(*txID, blockHeight, *blockHash,
 			uint32(txOutIdx))
 		cache[tbcd.ZKIndexKey(sok[:])] = nil
 	}

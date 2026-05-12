@@ -18,10 +18,10 @@ func TestFilterSpent(t *testing.T) {
 	h3 := chainhash.HashH([]byte("tx3"))
 
 	utxos := []*tbcapi.MempoolUTXO{
-		{TxId: h1, OutIndex: 0, Value: 1000},
-		{TxId: h1, OutIndex: 1, Value: 2000},
-		{TxId: h2, OutIndex: 0, Value: 3000},
-		{TxId: h3, OutIndex: 0, Value: 4000},
+		{TxID: h1, OutIndex: 0, Value: 1000},
+		{TxID: h1, OutIndex: 1, Value: 2000},
+		{TxID: h2, OutIndex: 0, Value: 3000},
+		{TxID: h3, OutIndex: 0, Value: 4000},
 	}
 
 	t.Run("no spent", func(t *testing.T) {
@@ -38,7 +38,7 @@ func TestFilterSpent(t *testing.T) {
 			t.Fatalf("got %d, want 3", len(result))
 		}
 		for _, u := range result {
-			if u.TxId == h1 && u.OutIndex == 0 {
+			if u.TxID == h1 && u.OutIndex == 0 {
 				t.Fatal("spent utxo should be excluded")
 			}
 		}

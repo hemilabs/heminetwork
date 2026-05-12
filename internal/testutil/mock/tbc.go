@@ -68,7 +68,7 @@ func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keyst
 	return &th
 }
 
-func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.Mempool, w http.ResponseWriter, r *http.Request) (string, error) {
+func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.Mempool, _ http.ResponseWriter, _ *http.Request) (string, error) {
 	cmd, id, payload, err := tbcapi.Read(f.pctx, c)
 	if err != nil {
 		var ce websocket.CloseError
@@ -114,7 +114,7 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 				panic(fmt.Errorf("amount from utxo value: %w", err))
 			}
 			respUtxos = append(respUtxos, &tbcapi.UTXO{
-				TxId:     *txHash,
+				TxID:     *txHash,
 				Value:    value,
 				OutIndex: utxo.OutputIndex(),
 			})
@@ -208,18 +208,18 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 				{Blocks: 10, SatsPerByte: 1},
 			},
 		}
-	case tbcapi.CmdTxByIdRequest:
-		pl, ok := payload.(*tbcapi.TxByIdRequest)
+	case tbcapi.CmdTxByIDRequest:
+		pl, ok := payload.(*tbcapi.TxByIDRequest)
 		if !ok {
 			panic(fmt.Errorf("unexpected payload format: %v", payload))
 		}
 		// Zero hash signals "not found" for testing error paths.
 		if pl.TxID == (chainhash.Hash{}) {
-			resp = &tbcapi.TxByIdResponse{
+			resp = &tbcapi.TxByIDResponse{
 				Error: protocol.RequestErrorf("tx not found"),
 			}
 		} else {
-			resp = &tbcapi.TxByIdResponse{
+			resp = &tbcapi.TxByIDResponse{
 				Tx: &tbcapi.Tx{
 					Version:  2,
 					LockTime: 0,
@@ -292,7 +292,7 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 		for i, sh := range shs {
 			if _, ok := filter[sh]; ok {
 				mempoolUtxos = append(mempoolUtxos, &tbcapi.MempoolUTXO{
-					TxId:       *utxos[i].ChainHash(),
+					TxID:       *utxos[i].ChainHash(),
 					Value:      btcutil.Amount(utxos[i].Value()),
 					OutIndex:   utxos[i].OutputIndex(),
 					ScriptHash: chainhash.Hash(sh),

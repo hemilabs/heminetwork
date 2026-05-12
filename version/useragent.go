@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// srcUrl is the URL to the source code for this project.
-const srcUrl = "https://github.com/hemilabs/heminetwork"
+// srcURL is the URL to the source code for this project.
+const srcURL = "https://github.com/hemilabs/heminetwork"
 
 var (
 	// Brand is an identifier that is used to identify the organisation or
@@ -45,7 +45,7 @@ var (
 // The User-Agent value contains the component name (e.g. bfgd), version, brand,
 // operating system name (GOOS), system architecture, and source code URL.
 var userAgent = createUserAgent(Component, String(), Brand,
-	runtime.GOOS+"/"+runtime.GOARCH, "+"+srcUrl)
+	runtime.GOOS+"/"+runtime.GOARCH, "+"+srcURL)
 
 // UserAgent returns an HTTP User-Agent header value that should be used when
 // making HTTP requests.

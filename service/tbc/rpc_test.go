@@ -88,9 +88,9 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 			panic(err)
 		}
 	}()
-	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	_, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,9 +160,9 @@ func TestBlockHeadersByHeight(t *testing.T) {
 		}
 	}()
 
-	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	_, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,9 +225,9 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 		}
 	}()
 
-	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	_, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,9 +284,9 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 		}
 	}()
 
-	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	_, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,9 +352,9 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 		}
 	}()
 
-	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	_, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -520,9 +520,9 @@ func TestBalanceByAddress(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+			tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+			c, _, err := websocket.Dial(ctx, tbcURL, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -565,7 +565,7 @@ func TestBalanceByAddress(t *testing.T) {
 
 				var pricePerBlock uint64 = 50 * 100000000
 				var blocks uint64 = 4
-				var expectedBalance uint64 = 0
+				var expectedBalance uint64
 				if !tti.doNotGenerate {
 					expectedBalance = pricePerBlock * blocks
 				}
@@ -583,9 +583,8 @@ func TestBalanceByAddress(t *testing.T) {
 					// there is a chance we just haven't finished indexing
 					// the blocks and txs, retry until timeout
 					continue
-				} else {
-					break
 				}
+				break
 			}
 		})
 	}
@@ -744,9 +743,9 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+			tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+			c, _, err := websocket.Dial(ctx, tbcURL, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -954,9 +953,9 @@ func TestUtxosByAddress(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+			tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+			c, _, err := websocket.Dial(ctx, tbcURL, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1031,9 +1030,9 @@ func TestTxByIdRaw(t *testing.T) {
 		}
 	}()
 
-	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1045,7 +1044,7 @@ func TestTxByIdRaw(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdRawResponse
+	var response tbcapi.TxByIDRawResponse
 	select {
 	case <-time.Tick(1 * time.Second):
 	case <-ctx.Done():
@@ -1053,10 +1052,10 @@ func TestTxByIdRaw(t *testing.T) {
 	}
 	indexAll(ctx, t, tbcServer)
 
-	txId := getRandomTxId(ctx, t, bitcoindContainer)
+	txID := getRandomTxID(ctx, t, bitcoindContainer)
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: *txId,
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRawRequest{
+		TxID: *txID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1067,7 +1066,7 @@ func TestTxByIdRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdRawResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDRawResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1090,8 +1089,8 @@ func TestTxByIdRaw(t *testing.T) {
 
 	// is the hash equal to what we queried for?
 	txHash := tx.TxHash()
-	if !txId.IsEqual(&txHash) {
-		t.Fatalf("id mismatch: %s != %s", txHash, txId)
+	if !txID.IsEqual(&txHash) {
+		t.Fatalf("id mismatch: %s != %s", txHash, txID)
 	}
 }
 
@@ -1114,9 +1113,9 @@ func TestTxByIdRawInvalid(t *testing.T) {
 		}
 	}()
 
-	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1128,7 +1127,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdRawResponse
+	var response tbcapi.TxByIDRawResponse
 	select {
 	case <-time.Tick(1 * time.Second):
 	case <-ctx.Done():
@@ -1136,11 +1135,11 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	}
 	indexAll(ctx, t, tbcServer)
 
-	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txId[0]++
+	txID := getRandomTxID(ctx, t, bitcoindContainer)
+	txID[0]++
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: *txId,
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRawRequest{
+		TxID: *txID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1151,7 +1150,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdRawResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDRawResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1204,9 +1203,9 @@ func TestTxByIdRawNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1218,7 +1217,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdRawResponse
+	var response tbcapi.TxByIDRawResponse
 	select {
 	case <-time.Tick(1 * time.Second):
 	case <-ctx.Done():
@@ -1226,11 +1225,11 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	}
 	indexAll(ctx, t, tbcServer)
 
-	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txId[len(txId)-1] = 8
+	txID := getRandomTxID(ctx, t, bitcoindContainer)
+	txID[len(txID)-1] = 8
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: *txId,
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRawRequest{
+		TxID: *txID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1241,7 +1240,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdRawResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDRawResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1280,9 +1279,9 @@ func TestTxById(t *testing.T) {
 		}
 	}()
 
-	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1300,13 +1299,13 @@ func TestTxById(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 
-	var response tbcapi.TxByIdResponse
+	var response tbcapi.TxByIDResponse
 
 	indexAll(ctx, t, tbcServer)
 
-	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: *txId,
+	txID := getRandomTxID(ctx, t, bitcoindContainer)
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRequest{
+		TxID: *txID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1317,7 +1316,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1329,7 +1328,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(response.Error.Message)
 	}
 
-	tx, err := tbcServer.TxById(ctx, *txId)
+	tx, err := tbcServer.TxByID(ctx, *txID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1360,9 +1359,9 @@ func TestTxByIdInvalid(t *testing.T) {
 		}
 	}()
 
-	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1374,7 +1373,7 @@ func TestTxByIdInvalid(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdResponse
+	var response tbcapi.TxByIDResponse
 	select {
 	case <-time.Tick(1 * time.Second):
 	case <-ctx.Done():
@@ -1382,11 +1381,11 @@ func TestTxByIdInvalid(t *testing.T) {
 	}
 	indexAll(ctx, t, tbcServer)
 
-	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txId[0]++
+	txID := getRandomTxID(ctx, t, bitcoindContainer)
+	txID[0]++
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: *txId,
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRequest{
+		TxID: *txID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1397,7 +1396,7 @@ func TestTxByIdInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1522,9 +1521,9 @@ func TestRpcZK(t *testing.T) {
 		}
 	}
 
-	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+	tbcURL := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1549,12 +1548,12 @@ func TestRpcZK(t *testing.T) {
 			name: "ValueAndScriptByOutpoint",
 			req: tbcapi.ZKValueAndScriptByOutpointRequest{
 				Outpoint: tbcapi.OutPoint{
-					Hash:  *out.TxIdHash(),
+					Hash:  *out.TxIDHash(),
 					Index: out.TxIndex(),
 				},
 			},
 			respHeader: tbcapi.CmdZKValueAndScriptByOutpointResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKValueAndScriptByOutpointResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1574,7 +1573,7 @@ func TestRpcZK(t *testing.T) {
 			name:       "ValueAndScriptByOutpoint Not Found",
 			req:        tbcapi.ZKValueAndScriptByOutpointRequest{},
 			respHeader: tbcapi.CmdZKValueAndScriptByOutpointResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKValueAndScriptByOutpointResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1589,7 +1588,7 @@ func TestRpcZK(t *testing.T) {
 				ScriptHash: sh[:],
 			},
 			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKBalanceByScriptHashResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1607,7 +1606,7 @@ func TestRpcZK(t *testing.T) {
 				ScriptHash: testutil.SHA256(nil),
 			},
 			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKBalanceByScriptHashResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1622,7 +1621,7 @@ func TestRpcZK(t *testing.T) {
 			name:       "BalanceByScriptHash Invalid",
 			req:        tbcapi.ZKBalanceByScriptHashRequest{},
 			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKBalanceByScriptHashResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1637,7 +1636,7 @@ func TestRpcZK(t *testing.T) {
 				ScriptHash: sh[:],
 			},
 			respHeader: tbcapi.CmdZKSpentOutputsResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpentOutputsResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1658,7 +1657,7 @@ func TestRpcZK(t *testing.T) {
 				ScriptHash: testutil.SHA256(nil),
 			},
 			respHeader: tbcapi.CmdZKSpentOutputsResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpentOutputsResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1674,7 +1673,7 @@ func TestRpcZK(t *testing.T) {
 			name:       "SpentOutputs Invalid",
 			req:        tbcapi.ZKSpentOutputsRequest{},
 			respHeader: tbcapi.CmdZKSpentOutputsResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpentOutputsResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1689,7 +1688,7 @@ func TestRpcZK(t *testing.T) {
 				TxID: chainhash.Hash(spending[:32]),
 			},
 			respHeader: tbcapi.CmdZKSpendingOutpointsResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendingOutpointsResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1710,7 +1709,7 @@ func TestRpcZK(t *testing.T) {
 				TxID: chainhash.Hash{},
 			},
 			respHeader: tbcapi.CmdZKSpendingOutpointsResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendingOutpointsResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1728,7 +1727,7 @@ func TestRpcZK(t *testing.T) {
 				ScriptHash: sh[:],
 			},
 			respHeader: tbcapi.CmdZKSpendableOutputsResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendableOutputsResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1749,7 +1748,7 @@ func TestRpcZK(t *testing.T) {
 				ScriptHash: testutil.SHA256(nil),
 			},
 			respHeader: tbcapi.CmdZKSpendableOutputsResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendableOutputsResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1765,7 +1764,7 @@ func TestRpcZK(t *testing.T) {
 			name:       "SpendableOutputs Invalid",
 			req:        tbcapi.ZKSpendableOutputsRequest{},
 			respHeader: tbcapi.CmdZKSpendableOutputsResponse,
-			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+			handler: func(_ context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendableOutputsResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
@@ -1839,9 +1838,9 @@ func TestTxByIdNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+	tbcServer, tbcURL := createTbcServer(ctx, t, mappedPeerPort)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1853,7 +1852,7 @@ func TestTxByIdNotFound(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdResponse
+	var response tbcapi.TxByIDResponse
 	select {
 	case <-time.Tick(1 * time.Second):
 	case <-ctx.Done():
@@ -1862,11 +1861,11 @@ func TestTxByIdNotFound(t *testing.T) {
 
 	indexAll(ctx, t, tbcServer)
 
-	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txId[len(txId)-1] = 8
+	txID := getRandomTxID(ctx, t, bitcoindContainer)
+	txID[len(txID)-1] = 8
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: *txId,
+	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRequest{
+		TxID: *txID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1877,7 +1876,7 @@ func TestTxByIdNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1954,9 +1953,9 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s, tbcUrl := createTbcServer(ctx, t, port)
+			s, tbcURL := createTbcServer(ctx, t, port)
 
-			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+			c, _, err := websocket.Dial(ctx, tbcURL, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2240,13 +2239,13 @@ func TestNotFoundError(t *testing.T) {
 			expectedError: *protocol.NotFoundError("block headers", 1),
 		},
 		{
-			name: "TxById",
+			name: "TxByID",
 			handler: func(ctx context.Context) (*protocol.Error, error) {
-				req := tbcapi.TxByIdRequest{
+				req := tbcapi.TxByIDRequest{
 					TxID: emptyHash,
 				}
-				res, err := s.handleTxByIdRequest(ctx, &req)
-				val, ok := res.(*tbcapi.TxByIdResponse)
+				res, err := s.handleTxByIDRequest(ctx, &req)
+				val, ok := res.(*tbcapi.TxByIDResponse)
 				if !ok {
 					return nil, fmt.Errorf("unexpected type: %T", res)
 				}
@@ -2257,11 +2256,11 @@ func TestNotFoundError(t *testing.T) {
 		{
 			name: "TxByIdRaw",
 			handler: func(ctx context.Context) (*protocol.Error, error) {
-				req := tbcapi.TxByIdRawRequest{
+				req := tbcapi.TxByIDRawRequest{
 					TxID: emptyHash,
 				}
-				res, err := s.handleTxByIdRawRequest(ctx, &req)
-				val, ok := res.(*tbcapi.TxByIdRawResponse)
+				res, err := s.handleTxByIDRawRequest(ctx, &req)
+				val, ok := res.(*tbcapi.TxByIDRawResponse)
 				if !ok {
 					return nil, fmt.Errorf("unexpected type: %T", res)
 				}
@@ -2384,10 +2383,10 @@ func TestTxWatchNotification(t *testing.T) {
 		}
 	}
 
-	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+	tbcURL := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
 
 	// Connect websocket client.
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2516,9 +2515,9 @@ func TestTxWatchFilterDrop(t *testing.T) {
 		}
 	}
 
-	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+	tbcURL := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
 
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2638,8 +2637,8 @@ func txWatchTestServer(t *testing.T) (*Server, *websocket.Conn, *tbcWs) {
 		}
 	}
 
-	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	tbcURL := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

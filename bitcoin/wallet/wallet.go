@@ -100,7 +100,7 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float
 	tx.LockTime = locktime
 	prevOuts := make(PrevOuts, len(utxoList))
 	for _, utxo := range utxoList {
-		outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
+		outpoint := wire.NewOutPoint(&utxo.TxID, utxo.OutIndex)
 		tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
 		prevOuts[outpoint.String()] = wire.NewTxOut(int64(utxo.Value), script)
 	}
@@ -143,7 +143,7 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	// Assemble transaction
 	tx := wire.NewMsgTx(2) // Latest supported version
 	tx.LockTime = locktime
-	outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
+	outpoint := wire.NewOutPoint(&utxo.TxID, utxo.OutIndex)
 	tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
 
 	// Return previous outs to caller so that they can be signed.

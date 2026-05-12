@@ -609,7 +609,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		s.mtx.Lock()
 		s.hvmHandlers[id].setupDuration += int64(setupDuration)
 		s.hvmHandlers[id].proxyDuration += int64(proxyDuration)
-		s.hvmHandlers[id].proxyCalls += 1
+		s.hvmHandlers[id].proxyCalls++
 		s.mtx.Unlock()
 	}
 }
@@ -1077,24 +1077,24 @@ func (s *Server) Run(pctx context.Context) error {
 	}()
 
 	// Control HTTP server
-	ctrlHttpErrCh := make(chan error)
+	ctrlHTTPErrCh := make(chan error)
 	if s.cfg.ControlAddress != "" {
 		cmux := http.NewServeMux()
 		handle("Control", cmux, RouteControlAdd, s.handleControlAddRequest)
 		handle("Control", cmux, RouteControlRemove, s.handleControlRemoveRequest)
 		handle("Control", cmux, RouteControlList, s.handleControlListRequest)
 
-		ctrlHttpServer := &http.Server{
+		ctrlHTTPServer := &http.Server{
 			Addr:        s.cfg.ControlAddress,
 			Handler:     cmux,
 			BaseContext: func(_ net.Listener) context.Context { return ctx },
 		}
 		go func() {
 			log.Infof("Control listening: %s", s.cfg.ControlAddress)
-			ctrlHttpErrCh <- ctrlHttpServer.ListenAndServe()
+			ctrlHTTPErrCh <- ctrlHTTPServer.ListenAndServe()
 		}()
 		defer func() {
-			if err := ctrlHttpServer.Shutdown(ctx); err != nil {
+			if err := ctrlHTTPServer.Shutdown(ctx); err != nil {
 				log.Errorf("control http server exit: %v", err)
 				return
 			}
@@ -1152,7 +1152,7 @@ func (s *Server) Run(pctx context.Context) error {
 	case <-ctx.Done():
 		err = ctx.Err()
 	case err = <-httpErrCh:
-	case err = <-ctrlHttpErrCh:
+	case err = <-ctrlHTTPErrCh:
 	}
 	cancel()
 

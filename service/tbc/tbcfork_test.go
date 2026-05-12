@@ -475,7 +475,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 	}
 }
 
-func (b *btcNode) handleMsg(ctx context.Context, p *rawpeer.RawPeer, msg wire.Message) error {
+func (b *btcNode) handleMsg(_ context.Context, p *rawpeer.RawPeer, msg wire.Message) error {
 	// b.t.Logf("%v", spew.Sdump(msg))
 	// b.t.Logf("%T", msg)
 	switch m := msg.(type) {
@@ -514,7 +514,7 @@ func (b *btcNode) handleMsg(ctx context.Context, p *rawpeer.RawPeer, msg wire.Me
 	return nil
 }
 
-func (b *btcNode) SendBlockheader(ctx context.Context, bh wire.BlockHeader) error {
+func (b *btcNode) SendBlockheader(_ context.Context, bh wire.BlockHeader) error {
 	msg := wire.NewMsgHeaders()
 	if err := msg.AddBlockHeader(&bh); err != nil {
 		return fmt.Errorf("add block header: %w", err)
@@ -1092,7 +1092,7 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 	return blk, nil
 }
 
-func (b *btcNode) MineAndSendEmpty(ctx context.Context) error {
+func (b *btcNode) MineAndSendEmpty(_ context.Context) error {
 	b.t.Logf("send empty headers message")
 	return b.p.Write(defaultCmdTimeout, wire.NewMsgHeaders())
 }
@@ -1120,7 +1120,7 @@ func createTestMsgHeaders(headers []*tbcd.BlockHeader) *wire.MsgHeaders {
 	return msgHeaders
 }
 
-func (b *btcNode) MineAndSendFake(ctx context.Context, prevHash *chainhash.Hash, count uint32) ([]*tbcd.BlockHeader, error) {
+func (b *btcNode) MineAndSendFake(_ context.Context, prevHash *chainhash.Hash, count uint32) ([]*tbcd.BlockHeader, error) {
 	bhs := make([]*tbcd.BlockHeader, 0, count)
 	for i := range count {
 		prev := prevHash
@@ -1182,7 +1182,7 @@ type zkTxInInfo struct {
 	zkTxInfo
 
 	inIndex  int
-	utxoTxId chainhash.Hash
+	utxoTxID chainhash.Hash
 	utxoVal  uint64
 }
 
@@ -1255,7 +1255,7 @@ func zkValidateTxIn(ctx context.Context, s *Server, i *zkTxInInfo) {
 	}
 	sh := tbcd.NewScriptHashFromScript(tout)
 
-	_, err = spendingOutByTxIn(ctx, s, i.utxoTxId,
+	_, err = spendingOutByTxIn(ctx, s, i.utxoTxID,
 		*i.tx.Hash(), i.inIndex)
 	if err != nil {
 		i.errors = append(i.errors, err)
@@ -1267,54 +1267,54 @@ func zkValidateTxIn(ctx context.Context, s *Server, i *zkTxInInfo) {
 	}
 }
 
-func spendingOutByTxIn(ctx context.Context, s *Server, prevTxId, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
-	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, prevTxId)
+func spendingOutByTxIn(ctx context.Context, s *Server, prevTxID, txID chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
+	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, prevTxID)
 	if err != nil {
 		return tbcd.ZKSpendingOutpoint{}, err
 	}
 
 	for _, so := range spendingOps {
 		spv := so.SpendingOutpoint
-		if spv != nil && spv.TxID.IsEqual(&txId) && spv.Index == uint32(index) {
+		if spv != nil && spv.TxID.IsEqual(&txID) && spv.Index == uint32(index) {
 			return so, nil
 		}
 	}
 	return tbcd.ZKSpendingOutpoint{}, database.NotFoundError("spending outpoint by txIn")
 }
 
-func spendingOutByTxOut(ctx context.Context, s *Server, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
-	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, txId)
+func spendingOutByTxOut(ctx context.Context, s *Server, txID chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
+	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, txID)
 	if err != nil {
 		return tbcd.ZKSpendingOutpoint{}, err
 	}
 	for _, so := range spendingOps {
-		if so.TxID.IsEqual(&txId) && so.VOutIndex == uint32(index) {
+		if so.TxID.IsEqual(&txID) && so.VOutIndex == uint32(index) {
 			return so, nil
 		}
 	}
 	return tbcd.ZKSpendingOutpoint{}, database.NotFoundError("spending outpoint by txOut")
 }
 
-func spentOutByTxIn(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId chainhash.Hash, inIndex int) (tbcd.ZKSpentOutput, error) {
+func spentOutByTxIn(ctx context.Context, s *Server, sh tbcd.ScriptHash, txID chainhash.Hash, inIndex int) (tbcd.ZKSpentOutput, error) {
 	spentOps, err := s.g.db.ZKSpentOutputs(ctx, sh)
 	if err != nil {
 		return tbcd.ZKSpentOutput{}, err
 	}
 	for _, so := range spentOps {
-		if so.TxID.IsEqual(&txId) && so.TxInIndex == uint32(inIndex) {
+		if so.TxID.IsEqual(&txID) && so.TxInIndex == uint32(inIndex) {
 			return so, nil
 		}
 	}
 	return tbcd.ZKSpentOutput{}, database.NotFoundError("spent outpoint")
 }
 
-func spendableOutByTxOut(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId *chainhash.Hash, outIndex int) (tbcd.ZKSpendableOutput, error) {
+func spendableOutByTxOut(ctx context.Context, s *Server, sh tbcd.ScriptHash, txID *chainhash.Hash, outIndex int) (tbcd.ZKSpendableOutput, error) {
 	spendableOut, err := s.g.db.ZKSpendableOutputs(ctx, sh)
 	if err != nil {
 		return tbcd.ZKSpendableOutput{}, err
 	}
 	for _, so := range spendableOut {
-		if so.TxID.IsEqual(txId) && so.TxOutIndex == uint32(outIndex) {
+		if so.TxID.IsEqual(txID) && so.TxOutIndex == uint32(outIndex) {
 			return so, nil
 		}
 	}
@@ -1341,7 +1341,7 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 				if err != nil {
 					return fmt.Errorf("invalid tx hash: %w", err)
 				}
-				sis, err := s.SpentOutputsByTxId(ctx, *tx)
+				sis, err := s.SpentOutputsByTxID(ctx, *tx)
 				if err != nil {
 					return fmt.Errorf("invalid spend infos: %w", err)
 				}
@@ -1361,15 +1361,15 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					return errors.New("block mismatch")
 				}
 			case 't':
-				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
+				txID, blockHash, err := tbcd.TxIDBlockHashFromTxKey(ktx)
 				if err != nil {
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
-				_, err = s.TxById(ctx, *txId)
+				_, err = s.TxByID(ctx, *txID)
 				if err != nil {
 					return fmt.Errorf("tx by id: %w", err)
 				}
-				// db block retrieval tested by TxById
+				// db block retrieval tested by TxByID
 				if !b.Hash().IsEqual(blockHash) {
 					return errors.New("t cache block hash invalid")
 				}
@@ -1402,21 +1402,21 @@ func mustNotHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 				if err != nil {
 					return fmt.Errorf("invalid tx hash: %w", err)
 				}
-				_, err = s.SpentOutputsByTxId(ctx, *tx)
+				_, err = s.SpentOutputsByTxID(ctx, *tx)
 				var expected database.NotFoundError
 				if !errors.Is(err, expected) {
 					return fmt.Errorf("expected invalid spend infos %v: %w", tx, err)
 				}
 
 			case 't':
-				txId, _, err := tbcd.TxIdBlockHashFromTxKey(ktx)
+				txID, _, err := tbcd.TxIDBlockHashFromTxKey(ktx)
 				if err != nil {
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
-				_, err = s.TxById(ctx, *txId)
+				_, err = s.TxByID(ctx, *txID)
 				var expected database.NotFoundError
 				if !errors.Is(err, expected) {
-					return fmt.Errorf("expected no tx by id %v: %w", txId, err)
+					return fmt.Errorf("expected no tx by id %v: %w", txID, err)
 				}
 			default:
 				return fmt.Errorf("invalid tx type %v", ktx[0])
@@ -1855,32 +1855,32 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// make sure genesis tx is in db
-	_, err = s.TxById(ctx, *n.gtx.Hash())
+	_, err = s.TxByID(ctx, *n.gtx.Hash())
 	if err != nil {
 		t.Fatalf("genesis not found: %v", err)
 	}
 	// make sure gensis was not spent
-	_, err = s.SpentOutputsByTxId(ctx, *n.gtx.Hash())
+	_, err = s.SpentOutputsByTxID(ctx, *n.gtx.Hash())
 	if err == nil {
 		t.Fatal("genesis coinbase tx should not be spent")
 	}
 
 	// Spot check tx 1 from b2
 	tx := b2.b.Transactions()[1]
-	txb2, err := s.TxById(ctx, *tx.Hash())
+	txb2, err := s.TxByID(ctx, *tx.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
 		t.Fatal("hash not equal")
 	}
-	si, err := s.SpentOutputsByTxId(ctx, *b1.b.Transactions()[0].Hash())
+	si, err := s.SpentOutputsByTxID(ctx, *b1.b.Transactions()[0].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = si
 	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
-	si, err = s.SpentOutputsByTxId(ctx, *b2.b.Transactions()[1].Hash())
+	si, err = s.SpentOutputsByTxID(ctx, *b2.b.Transactions()[1].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1901,7 +1901,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.TxById(ctx, *n.gtx.Hash())
+	_, err = s.TxByID(ctx, *n.gtx.Hash())
 	if err != nil {
 		t.Fatal("expected genesis")
 	}
@@ -2144,33 +2144,33 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// make sure genesis tx is in db
-	_, err = s.TxById(ctx, *n.gtx.Hash())
+	_, err = s.TxByID(ctx, *n.gtx.Hash())
 	if err != nil {
 		t.Fatalf("genesis not found: %v", err)
 	}
 
 	// make sure gensis was not spent
-	_, err = s.SpentOutputsByTxId(ctx, *n.gtx.Hash())
+	_, err = s.SpentOutputsByTxID(ctx, *n.gtx.Hash())
 	if err == nil {
 		t.Fatal("genesis coinbase tx should not be spent")
 	}
 
 	// Spot check tx 1 from b2
 	tx := b2.b.Transactions()[1]
-	txb2, err := s.TxById(ctx, *tx.Hash())
+	txb2, err := s.TxByID(ctx, *tx.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
 		t.Fatal("hash not equal")
 	}
-	si, err := s.SpentOutputsByTxId(ctx, *b1.b.Transactions()[0].Hash())
+	si, err := s.SpentOutputsByTxID(ctx, *b1.b.Transactions()[0].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = si
 	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
-	si, err = s.SpentOutputsByTxId(ctx, *b2.b.Transactions()[1].Hash())
+	si, err = s.SpentOutputsByTxID(ctx, *b2.b.Transactions()[1].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2216,7 +2216,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.TxById(ctx, *n.gtx.Hash())
+	_, err = s.TxByID(ctx, *n.gtx.Hash())
 	if err != nil {
 		t.Fatal("expected genesis")
 	}
@@ -3147,7 +3147,7 @@ func TestTransactions(t *testing.T) {
 	txOutChange := wire.NewTxOut(2000000000, changeScript)
 	redeemTx.AddTxOut(txOutChange)
 	// sign
-	lookupKey := func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+	lookupKey := func(_ btcutil.Address) (*btcec.PrivateKey, bool, error) {
 		return payToKey, true, nil
 	}
 	sigScript, err := txscript.SignTxOutput(&chaincfg.MainNetParams,
@@ -3697,8 +3697,8 @@ func TestZKIndexFork(t *testing.T) {
 	txInfo := zkTxInfo{tx: b2.TxByIndex(1)}
 
 	// b2 tx: txIn 0
-	utxoTxId := *b1.TxByIndex(0).Hash()
-	inInfo := zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	utxoTxID := *b1.TxByIndex(0).Hash()
+	inInfo := zkTxInInfo{txInfo, 0, utxoTxID, 5e9}
 	zki = append(zki, inInfo)
 	zkValidateTxIn(ctx, s, &inInfo)
 	if err := inInfo.Err(); err != nil {
@@ -3737,8 +3737,8 @@ func TestZKIndexFork(t *testing.T) {
 	txInfo = zkTxInfo{tx: b3.TxByIndex(1)}
 
 	// b3 tx1: txIn 0
-	utxoTxId = *b2.TxByIndex(1).Hash()
-	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 3e09}
+	utxoTxID = *b2.TxByIndex(1).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxID, 3e09}
 	zki = append(zki, inInfo)
 	zkValidateTxIn(ctx, s, &inInfo)
 	if err := inInfo.Err(); err != nil {
@@ -3765,8 +3765,8 @@ func TestZKIndexFork(t *testing.T) {
 	txInfo = zkTxInfo{tx: b3.TxByIndex(2)}
 
 	// b3 tx2: txIn 0
-	utxoTxId = *b3.TxByIndex(1).Hash()
-	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 11e08}
+	utxoTxID = *b3.TxByIndex(1).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxID, 11e08}
 	zki = append(zki, inInfo)
 	zkValidateTxIn(ctx, s, &inInfo)
 	if err := inInfo.Err(); err != nil {
@@ -3774,7 +3774,7 @@ func TestZKIndexFork(t *testing.T) {
 	}
 
 	// b3 tx2: txIn 1
-	inInfo = zkTxInInfo{txInfo, 1, utxoTxId, 19e8}
+	inInfo = zkTxInInfo{txInfo, 1, utxoTxID, 19e8}
 	zki = append(zki, inInfo)
 	zkValidateTxIn(ctx, s, &inInfo)
 	if err := inInfo.Err(); err != nil {
@@ -3910,8 +3910,8 @@ func TestZKIndexFork(t *testing.T) {
 	txInfo = zkTxInfo{tx: b2a.TxByIndex(1)}
 
 	// b2a tx: txIn 0
-	utxoTxId = *b1a.TxByIndex(0).Hash()
-	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	utxoTxID = *b1a.TxByIndex(0).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxID, 5e9}
 	zki = append(zki, inInfo)
 	zkValidateTxIn(ctx, s, &inInfo)
 	if err := inInfo.Err(); err != nil {
@@ -4010,8 +4010,8 @@ func TestZKIndexFork(t *testing.T) {
 	txInfo = zkTxInfo{tx: b2b.TxByIndex(1)}
 
 	// b2b tx: txIn 0
-	utxoTxId = *b1b.TxByIndex(0).Hash()
-	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	utxoTxID = *b1b.TxByIndex(0).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxID, 5e9}
 	zki = append(zki, inInfo)
 	zkValidateTxIn(ctx, s, &inInfo)
 	if err := inInfo.Err(); err != nil {

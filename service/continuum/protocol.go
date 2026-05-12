@@ -472,8 +472,8 @@ var (
 	ErrMessageTooLarge        = errors.New("message too large")
 
 	// placeholders until we decide on timeout handling
-	readTimeout  time.Duration = 4 * time.Second
-	writeTimeout time.Duration = 4 * time.Second
+	readTimeout  = 4 * time.Second
+	writeTimeout = 4 * time.Second
 )
 
 // Transport is an opaque type that provides encrypted transport for
@@ -613,7 +613,7 @@ func KeyExchange(us *ecdh.PrivateKey, them *ecdh.PublicKey) (*[32]byte, error) {
 // KeyExchange performs a series of reads and writes to establish a transport
 // encryption key between the server and the client. Note that the server
 // dictates the curve.
-func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
+func (t *Transport) KeyExchange(_ context.Context, conn net.Conn) error {
 	var (
 		them         *ecdh.PublicKey
 		tr           TransportRequest
@@ -753,7 +753,7 @@ func (t *Transport) decrypt(ciphertext []byte) ([]byte, error) {
 // Handshake advertises to the other side what version and options this
 // transport wishes to use. It is also used to verify that the derived Identity
 // did indeed sign the challenge.
-func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, error) {
+func (t *Transport) Handshake(_ context.Context, secret *Secret) (*Identity, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
 	if err != nil {

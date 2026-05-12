@@ -320,9 +320,9 @@ func BenchmarkMempoolFilter(b *testing.B) {
 			utxos := make([]tbcd.Utxo, 0, txInNum*mempoolTxNum)
 			// Create new MempoolTx
 			for k := range mempoolTxNum {
-				txIdBytes := make([]byte, 32)
-				binary.BigEndian.PutUint32(txIdBytes[0:32], uint32(k))
-				txId := testutil.Bytes2Hash(txIdBytes)
+				txIDBytes := make([]byte, 32)
+				binary.BigEndian.PutUint32(txIDBytes[0:32], uint32(k))
+				txID := testutil.Bytes2Hash(txIDBytes)
 				msgTx := wire.NewMsgTx(2)
 				// Create utxo and add it to the MempoolTx
 				for i := range txInNum {
@@ -337,7 +337,7 @@ func BenchmarkMempoolFilter(b *testing.B) {
 					msgTx.AddTxIn(&wire.TxIn{PreviousOutPoint: *opp})
 				}
 				mptx := NewMempoolTx(msgTx)
-				mptx.id = *txId
+				mptx.id = *txID
 				mptx.expires = time.Now().Add(10 * time.Hour)
 				if err = mp.TxInsert(b.Context(), &mptx); err != nil {
 					b.Fatal(err)

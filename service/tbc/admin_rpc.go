@@ -29,7 +29,7 @@ type tbcAdminWs struct {
 }
 
 func (s *Server) validateJWT(strToken string) error {
-	keyFunc := func(token *jwt.Token) (any, error) {
+	keyFunc := func(_ *jwt.Token) (any, error) {
 		return s.adminJWTSecret, nil
 	}
 

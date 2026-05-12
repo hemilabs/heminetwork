@@ -493,7 +493,7 @@ func TestOpgethReconnect(t *testing.T) {
 			t.Fatal("reconnect too long")
 		case err := <-errCh:
 			if errors.Is(err, mock.ErrConnectionClosed) {
-				reconAttempts += 1
+				reconAttempts++
 			}
 		}
 

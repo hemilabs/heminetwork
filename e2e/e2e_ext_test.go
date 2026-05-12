@@ -38,15 +38,15 @@ import (
 	"github.com/hemilabs/heminetwork/v2/service/tbc"
 )
 
-func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opgethWsUrl string) (*bfg.Server, string) {
-	_, tbcPublicUrl := createTbcServer(ctx, t, levelDbHome)
+func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opgethWsURL string) (*bfg.Server, string) {
+	_, tbcPublicURL := createTbcServer(ctx, t, levelDbHome)
 
 	cfg := &bfg.Config{
 		ListenAddress: "127.0.0.1:0",
-		BitcoinURL:    tbcPublicUrl,
+		BitcoinURL:    tbcPublicURL,
 		BitcoinSource: "tbc",
 		Network:       "localnet",
-		OpgethURL:     opgethWsUrl,
+		OpgethURL:     opgethWsURL,
 	}
 
 	bfgServer, err := bfg.NewServer(cfg)
@@ -62,7 +62,7 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 	}()
 
 	// Wait for HTTP server to start
-	var bfgPublicUrl string
+	var bfgPublicURL string
 	for {
 		select {
 		case <-ctx.Done():
@@ -70,16 +70,16 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 		case <-time.After(10 * time.Millisecond):
 		}
 		if addr := bfgServer.HTTPAddress(); addr != nil {
-			bfgPublicUrl = addr.String()
+			bfgPublicURL = addr.String()
 			break
 		}
 	}
 
-	if err := EnsureCanConnectHTTP(t, fmt.Sprintf("http://%s/somethinginvalid", bfgPublicUrl)); err != nil {
+	if err := EnsureCanConnectHTTP(t, fmt.Sprintf("http://%s/somethinginvalid", bfgPublicURL)); err != nil {
 		t.Fatalf("could not make http request to bfg in timeout: %s", err)
 	}
 
-	return bfgServer, bfgPublicUrl
+	return bfgServer, bfgPublicURL
 }
 
 func EnsureCanConnectHTTP(t *testing.T, url string) error {
@@ -132,7 +132,7 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 	}()
 
 	// Wait for HTTP server to start
-	var tbcPublicUrl string
+	var tbcPublicURL string
 	for {
 		select {
 		case <-ctx.Done():
@@ -140,13 +140,13 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 		case <-time.After(10 * time.Millisecond):
 		}
 		if addr := tbcServer.HTTPAddress(); addr != nil {
-			tbcPublicUrl = fmt.Sprintf("http://%s/v1/ws", addr.String())
+			tbcPublicURL = fmt.Sprintf("http://%s/v1/ws", addr.String())
 			break
 		}
 	}
 
 	// Connect with gozer to ensure connectedness
-	g := tbcgozer.New(tbcPublicUrl)
+	g := tbcgozer.New(tbcPublicURL)
 	err = g.Run(ctx, nil)
 	if err != nil {
 		panic(err)
@@ -163,7 +163,7 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 	}
 	t.Logf("gozer connected")
 
-	return tbcServer, tbcPublicUrl
+	return tbcServer, tbcPublicURL
 }
 
 func defaultTestContext(t *testing.T) (context.Context, context.CancelFunc) {
@@ -295,7 +295,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
-	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	_, bfgURL := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
 
 	expectedConfirmations := []int{
 		11,
@@ -306,11 +306,11 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		*keystoneOne,
 		*keystoneTwo,
 	} {
-		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
-		t.Logf("%v", bfgUrlTmp)
+		bfgURLTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgURL, hemi.L2KeystoneAbbreviate(k).Hash())
+		t.Logf("%v", bfgURLTmp)
 
 		client := &http.Client{}
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgURLTmp, http.NoBody)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -408,7 +408,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
-	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	_, bfgURL := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
 
 	expectedConfirmations := []int{
 		11,
@@ -421,12 +421,12 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 		*keystoneTwo,
 		*keystoneThree,
 	} {
-		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
+		bfgURLTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgURL, hemi.L2KeystoneAbbreviate(k).Hash())
 
-		t.Logf("will query for %s", bfgUrlTmp)
+		t.Logf("will query for %s", bfgURLTmp)
 
 		client := http.Client{}
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgURLTmp, http.NoBody)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -508,12 +508,12 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
-	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	_, bfgURL := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
 
-	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
+	bfgURLTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgURL, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
 	client := http.Client{}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgURLTmp, http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,10 +543,10 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	for i, k := range []hemi.L2Keystone{
 		*keystoneOne,
 	} {
-		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
+		bfgURLTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgURL, hemi.L2KeystoneAbbreviate(k).Hash())
 
 		client := http.Client{}
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgURLTmp, http.NoBody)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -630,12 +630,12 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
-	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	_, bfgURL := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
 
-	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
+	bfgURLTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgURL, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
 	client := http.Client{}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgURLTmp, http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,11 +664,11 @@ func TestTxWatchUnwatchE2E(t *testing.T) {
 	defer cancel()
 
 	levelDbHome := t.TempDir()
-	tbcServer, tbcUrl := createTbcServer(ctx, t, levelDbHome)
+	tbcServer, tbcURL := createTbcServer(ctx, t, levelDbHome)
 	_ = tbcServer
 
 	// Connect a websocket client to tbcd.
-	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	c, _, err := websocket.Dial(ctx, tbcURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

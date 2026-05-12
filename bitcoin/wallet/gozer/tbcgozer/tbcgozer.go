@@ -64,9 +64,9 @@ type tbcGozer struct {
 
 var _ gozer.Gozer = (*tbcGozer)(nil)
 
-func New(tbcUrl string) gozer.Gozer {
+func New(tbcURL string) gozer.Gozer {
 	return &tbcGozer{
-		url:   tbcUrl,
+		url:   tbcURL,
 		cmdCh: make(chan tbcCmd, DefaultCommandQueueDepth),
 	}
 }
@@ -162,16 +162,16 @@ func (t *tbcGozer) TxByID(ctx context.Context, txid *chainhash.Hash) (*tbcapi.Tx
 	if txid == nil {
 		return nil, errors.New("txid is nil")
 	}
-	req := &tbcapi.TxByIdRequest{TxID: *txid}
+	req := &tbcapi.TxByIDRequest{TxID: *txid}
 
 	res, err := t.callTBC(ctx, DefaultRequestTimeout, req)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, ok := res.(*tbcapi.TxByIdResponse)
+	resp, ok := res.(*tbcapi.TxByIDResponse)
 	if !ok {
-		return nil, fmt.Errorf("not a TxByIdResponse: %T", res)
+		return nil, fmt.Errorf("not a TxByIDResponse: %T", res)
 	}
 
 	if resp.Error != nil {

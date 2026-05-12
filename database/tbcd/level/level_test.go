@@ -41,7 +41,7 @@ func TestMD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := New(ctx, cfg)
+	db, err := newLDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestHeightHashIndexing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := New(ctx, cfg)
+	db, err := newLDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +470,7 @@ func TestKeystoneUpdate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			db, err := New(ctx, cfg)
+			db, err := newLDB(ctx, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -568,7 +568,7 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := New(ctx, cfg)
+	db, err := newLDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -636,7 +636,7 @@ func TestKeystoneDBCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := New(ctx, cfg)
+	db, err := newLDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -802,7 +802,7 @@ func TestDbUpgradeV4Errors(t *testing.T) {
 			}
 
 			cfg.SetUpgradeOpen(true)
-			dbTemp, err := New(ctx, cfg)
+			dbTemp, err := newLDB(ctx, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -824,7 +824,7 @@ func TestDbUpgradeV4Errors(t *testing.T) {
 
 			cfg.SetUpgradeOpen(false)
 			// upgrade
-			_, err = New(ctx, cfg)
+			_, err = newLDB(ctx, cfg)
 			if !tti.pass && err == nil {
 				t.Fatal("expected error")
 			}
@@ -879,7 +879,7 @@ func TestDbUpgradeV5(t *testing.T) {
 	// rows in the tables v5 must not touch, then stamp the
 	// version down so reopen runs v5.
 	cfg.SetUpgradeOpen(true)
-	db, err := New(ctx, cfg)
+	db, err := newLDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -956,7 +956,7 @@ func TestDbUpgradeV5(t *testing.T) {
 	// Phase 2: reopen with the upgrade ladder enabled.  The
 	// stamped v4 triggers v5 end-to-end.
 	cfg.SetUpgradeOpen(false)
-	db2, err := New(ctx, cfg)
+	db2, err := newLDB(ctx, cfg)
 	if err != nil {
 		t.Fatalf("reopen (runs v5): %v", err)
 	}
@@ -1142,13 +1142,13 @@ func insertBlockHeader(ctx context.Context, db *ldb, prevHash *chainhash.Hash, h
 	return *bh, it, nil
 }
 
-func createNewDB(t *testing.T, ctx context.Context) (*ldb, func()) {
+func createNewDB(ctx context.Context, t *testing.T) (*ldb, func()) {
 	home := t.TempDir()
 	cfg, err := NewConfig("testnet3", home, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := New(ctx, cfg)
+	db, err := newLDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1166,7 +1166,7 @@ func TestBlockInsert(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	db, discard := createNewDB(t, ctx)
+	db, discard := createNewDB(ctx, t)
 	defer discard()
 
 	prevHash := &chainhash.Hash{}
@@ -1218,7 +1218,7 @@ func TestBlockNegative(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	db, discard := createNewDB(t, ctx)
+	db, discard := createNewDB(ctx, t)
 	defer discard()
 
 	fakeHash := chainhash.Hash{0xFF}
@@ -1255,7 +1255,7 @@ func TestBlocksMissing(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	db, discard := createNewDB(t, ctx)
+	db, discard := createNewDB(ctx, t)
 	defer discard()
 
 	var (
@@ -1328,7 +1328,7 @@ func TestBlockHeadersFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	db, discard := createNewDB(t, ctx)
+	db, discard := createNewDB(ctx, t)
 	defer discard()
 
 	hashes := []*chainhash.Hash{{}}
@@ -1388,7 +1388,7 @@ func TestBlockHeadersByHeight(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	db, discard := createNewDB(t, ctx)
+	db, discard := createNewDB(ctx, t)
 	defer discard()
 
 	gen, _, err := insertBlockHeader(ctx, db, &chainhash.Hash{}, 0, 0)
@@ -1500,7 +1500,7 @@ func TestBlockHeadersRemove(t *testing.T) {
 
 	for _, tti := range tests {
 		t.Run(tti.name, func(t *testing.T) {
-			db, discard := createNewDB(t, ctx)
+			db, discard := createNewDB(ctx, t)
 			defer discard()
 
 			gen, _, err := insertBlockHeader(ctx, db, &chainhash.Hash{}, 0, 0)
@@ -1608,7 +1608,7 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.SetUpgradeOpen(true)
-			db, err := New(ctx, cfg)
+			db, err := newLDB(ctx, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

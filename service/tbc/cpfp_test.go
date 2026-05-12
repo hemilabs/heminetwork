@@ -25,15 +25,15 @@ type stubDB struct{}
 
 func (stubDB) Close() error { return nil }
 
-// BlockHashByTxId is the first thing txOutFromOutPoint calls.
+// BlockHashByTxID is the first thing txOutFromOutPoint calls.
 // Returning an error simulates "parent not in block db", which
 // is the trigger for the CPFP mempool fallback.
-func (stubDB) BlockHashByTxId(context.Context, chainhash.Hash) (*chainhash.Hash, error) {
+func (stubDB) BlockHashByTxID(context.Context, chainhash.Hash) (*chainhash.Hash, error) {
 	return nil, errors.New("not found")
 }
 
 // The remaining methods satisfy the tbcd.Database interface but
-// should never be reached by parseTx when BlockHashByTxId fails.
+// should never be reached by parseTx when BlockHashByTxID fails.
 func (stubDB) Version(context.Context) (int, error)                { panic("stub") }
 func (stubDB) MetadataDel(context.Context, []byte) error           { panic("stub") }
 func (stubDB) MetadataGet(context.Context, []byte) ([]byte, error) { panic("stub") }
@@ -102,7 +102,7 @@ func (stubDB) BlockTxUpdate(context.Context, int, map[tbcd.TxKey]*tbcd.TxValue, 
 	panic("stub")
 }
 
-func (stubDB) SpentOutputsByTxId(context.Context, chainhash.Hash) ([]tbcd.SpentInfo, error) {
+func (stubDB) SpentOutputsByTxID(context.Context, chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	panic("stub")
 }
 

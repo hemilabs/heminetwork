@@ -115,7 +115,7 @@ func (h *AdminHub) NewJob(jt jobType, jr JobRunFunc) (string, error) {
 
 	for {
 		// Create random hexadecimal string to use as an ID
-		id, err := randHexId(16)
+		id, err := randHexID(16)
 		if err != nil {
 			cancel()
 			return "", fmt.Errorf("generate job id: %w", err)
@@ -218,7 +218,7 @@ func (h *AdminHub) NewSession(ctx context.Context, blocking bool) (string, *List
 
 	for {
 		// Create random hexadecimal string to use as an ID
-		id, err := randHexId(16)
+		id, err := randHexID(16)
 		if err != nil {
 			client.listener.Unsubscribe()
 			return "", nil, fmt.Errorf("generate admin session id: %w", err)

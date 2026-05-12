@@ -65,7 +65,7 @@ func newPoPFixture(t *testing.T) *popFixture {
 
 	fundHash := chainhash.DoubleHashH([]byte("pop-regression-funding-txid-000"))
 	utxo := &tbcapi.UTXO{
-		TxId:     fundHash,
+		TxID:     fundHash,
 		OutIndex: 0,
 		Value:    btcutil.Amount(500000),
 	}

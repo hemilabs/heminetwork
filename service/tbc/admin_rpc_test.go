@@ -464,7 +464,7 @@ func TestAdminRPCCommands(t *testing.T) {
 		{
 			name:    "JobCancelRequest",
 			request: tbcadminapi.JobCancelRequest{JobID: jid},
-			postCheck: func(c *protocol.WSConn, msg protocol.Message) error {
+			postCheck: func(_ *protocol.WSConn, msg protocol.Message) error {
 				if msg.Header.Command != tbcadminapi.CmdJobCancelResponse {
 					return fmt.Errorf("expected %s, got %s",
 						tbcadminapi.CmdJobCancelResponse, msg.Header.Command)
@@ -489,7 +489,7 @@ func TestAdminRPCCommands(t *testing.T) {
 		{
 			name:    "BlockHeaderBestRawRequest",
 			request: tbcapi.BlockHeaderBestRawRequest{},
-			postCheck: func(c *protocol.WSConn, msg protocol.Message) error {
+			postCheck: func(_ *protocol.WSConn, msg protocol.Message) error {
 				if msg.Header.Command != tbcapi.CmdBlockHeaderBestRawResponse {
 					return fmt.Errorf("expected %s, got %s",
 						tbcapi.CmdBlockHeaderBestRawResponse, msg.Header.Command)
@@ -510,7 +510,7 @@ func TestAdminRPCCommands(t *testing.T) {
 		{
 			name:    "BlockHeaderBestRequest",
 			request: tbcapi.BlockHeaderBestRequest{},
-			postCheck: func(c *protocol.WSConn, msg protocol.Message) error {
+			postCheck: func(_ *protocol.WSConn, msg protocol.Message) error {
 				if msg.Header.Command != tbcapi.CmdBlockHeaderBestResponse {
 					return fmt.Errorf("expected %s, got %s",
 						tbcapi.CmdBlockHeaderBestResponse, msg.Header.Command)

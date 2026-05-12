@@ -55,19 +55,19 @@ type jsonrpcMessage struct {
 	ID      int             `json:"id,omitempty"`
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
-	Error   *jsonError      `json:"error,omitempty"`
+	Error   *JSONError      `json:"error,omitempty"`
 	Result  any             `json:"result,omitempty"`
 }
 
-type jsonError struct {
+type JSONError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
 }
 
 // NewJSONError creates a new JSON error.
-func NewJSONError(code int, message string, data any) *jsonError {
-	return &jsonError{Code: code, Message: message, Data: data}
+func NewJSONError(code int, message string, data any) *JSONError {
+	return &JSONError{Code: code, Message: message, Data: data}
 }
 
 // Retrieve the URL from the test server
@@ -107,7 +107,7 @@ func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, ke
 	return &th
 }
 
-func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *http.Request, kc *keystoneCounter) (string, error) {
+func (f *OpGethMockHandler) handle(c *websocket.Conn, _ http.ResponseWriter, _ *http.Request, kc *keystoneCounter) (string, error) {
 	var msg jsonrpcMessage
 
 	_, rd, err := c.Reader(f.pctx)

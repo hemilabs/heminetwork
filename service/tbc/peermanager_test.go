@@ -16,7 +16,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
 )
 
-func ping(ctx context.Context, t *testing.T, p *rawpeer.RawPeer) error {
+func ping(_ context.Context, _ *testing.T, p *rawpeer.RawPeer) error {
 	err := p.Write(time.Second, wire.NewMsgPing(uint64(time.Now().Unix())))
 	if err != nil {
 		return err

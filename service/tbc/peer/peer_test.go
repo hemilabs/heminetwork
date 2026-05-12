@@ -132,7 +132,7 @@ func TestPeer(t *testing.T) {
 		}(uint64(i))
 	}
 	wg.Wait()
-	pongs.Range(func(k, v any) bool {
+	pongs.Range(func(k, _ any) bool {
 		t.Fatalf("expected empty map: %v", k)
 		return false
 	})

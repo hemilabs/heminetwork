@@ -31,8 +31,7 @@ linters:
     - "prealloc" # Finds slice declarations that could potentially be pre-allocated.
     - "predeclared" # Find code that shadows one of Go's predeclared identifiers.
     - "promlinter" # Check Prometheus metrics naming via promlint.
-    # TODO: enable revive - when bored, run 'golangci-lint run -Erevive' and fix issues
-    # - "revive" # Miscellaneous linter
+    - "revive" # Miscellaneous linter
     - "staticcheck" # Runs staticcheck.
     - "sqlclosecheck" # Checks that sql.Rows, sql.Stmt, sqlx.NamedStmt, pgx.Query are closed.
     - "rowserrcheck" # Checks whether Rows.Err of rows is checked successfully.

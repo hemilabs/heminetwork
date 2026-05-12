@@ -23,7 +23,7 @@ import (
 // of a net.Pipe.  The server end is returned so the caller can
 // read/write wire messages directly.  readLoop is started; callers
 // must cancel ctx to tear down.
-func newLoopbackPeer(t *testing.T, ctx context.Context) (*Peer, *rawpeer.RawPeer) {
+func newLoopbackPeer(ctx context.Context, t *testing.T) (*Peer, *rawpeer.RawPeer) {
 	t.Helper()
 	clientConn, serverConn := net.Pipe()
 	t.Cleanup(func() {
@@ -78,7 +78,7 @@ func TestGetDataWitnessBlock(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		p, srv := newLoopbackPeer(t, ctx)
+		p, srv := newLoopbackPeer(ctx, t)
 
 		// Build block first, derive its hash, then request that hash.
 		prev := chainhash.DoubleHashH([]byte("prev"))
@@ -133,7 +133,7 @@ func TestGetDataWitnessTx(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		p, srv := newLoopbackPeer(t, ctx)
+		p, srv := newLoopbackPeer(ctx, t)
 
 		// Build tx first, derive its hash, then request that hash.
 		tx := wire.NewMsgTx(2)
@@ -188,7 +188,7 @@ func TestGetDataBaseBlockStillWorks(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		p, srv := newLoopbackPeer(t, ctx)
+		p, srv := newLoopbackPeer(ctx, t)
 
 		prev := chainhash.DoubleHashH([]byte("base-prev"))
 		bh := wire.NewBlockHeader(0, &prev, &chainhash.Hash{}, 0, 0)
@@ -231,7 +231,7 @@ func TestGetDataNotFound(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		p, srv := newLoopbackPeer(t, ctx)
+		p, srv := newLoopbackPeer(ctx, t)
 
 		hash := chainhash.DoubleHashH([]byte("missing-block"))
 
@@ -274,7 +274,7 @@ func TestGetBlockWitness(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		p, srv := newLoopbackPeer(t, ctx)
+		p, srv := newLoopbackPeer(ctx, t)
 		// Also register the headers handler.
 		p.setHandler(wire.CmdHeaders, p.onHeadersHandler)
 
@@ -351,7 +351,7 @@ func TestGetTxWitness(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		p, srv := newLoopbackPeer(t, ctx)
+		p, srv := newLoopbackPeer(ctx, t)
 
 		tx := wire.NewMsgTx(2)
 		prevHash := chainhash.DoubleHashH([]byte("gettx-prev"))
