@@ -1,6 +1,6 @@
 use crate::trust_rpc::protocol::{JobStatus, Payload};
-use futures_util::{SinkExt, StreamExt};
 use base64::Engine as _;
+use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use serde::Serialize;
 use sha2::Sha256;
