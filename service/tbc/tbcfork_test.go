@@ -4534,10 +4534,18 @@ func TestOrdinalIndexFork(t *testing.T) {
 		}
 		t.Logf("[%s] 'a' sat %d has 1 inscription", label, satNumber)
 
-		// Content: verify inscription content is retrievable.
+		// Content: verify inscription content is retrievable and correct.
 		contentType, content, err := s.InscriptionContent(ctx, inscTxid, 0)
 		if err != nil {
 			t.Fatalf("[%s] InscriptionContent: %v", label, err)
+		}
+		wantContentType := "text/plain;charset=utf-8"
+		if contentType != wantContentType {
+			t.Fatalf("[%s] content type: got %q, want %q", label, contentType, wantContentType)
+		}
+		wantContent := "inscription in " + blk.name
+		if string(content) != wantContent {
+			t.Fatalf("[%s] content body: got %q, want %q", label, string(content), wantContent)
 		}
 		t.Logf("[%s] content: type=%q body=%q", label, contentType, string(content))
 
