@@ -27,6 +27,15 @@ type ordinalIndexer struct {
 	cacheCapacity int
 	mtx           sync.Mutex // protects cache map during parallel fixup/unwind
 
+	// batchCreated tracks 'r' (range) keys that were created by
+	// windTx in the current cache batch (not fetched from DB by
+	// fixupCacheHook). When windTx spends an input whose range key
+	// is in this set, the entry is annihilated (deleted from cache)
+	// rather than marked nil (which would mean "delete from DB").
+	// This mirrors the utxo indexer's IsDelete/annihilation pattern.
+	// Cleared on commit.
+	batchCreated map[tbcd.OrdinalKey]struct{}
+
 	// Inscribed-sat tracking. inscribedSatSet tracks sat numbers with
 	// 's' entries created in the current cache batch (not yet flushed
 	// to DB). Cleared on commit.
@@ -50,6 +59,7 @@ var (
 func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 	oi := &ordinalIndexer{
 		cacheCapacity:   cacheLen,
+		batchCreated:    make(map[tbcd.OrdinalKey]struct{}),
 		inscribedSatSet: make(map[uint64]struct{}),
 		minInscribedSat: math.MaxUint64,
 	}
@@ -161,6 +171,14 @@ func (i *ordinalIndexer) updateInscribedSats(blockInscribedSats []uint64, inputR
 		}
 	}
 	return feeSats
+}
+
+// putRange writes a sat range to the cache and tracks the key in
+// batchCreated so windTx can annihilate batch-local create+spend.
+func (i *ordinalIndexer) putRange(cache map[tbcd.OrdinalKey][]byte, op tbcd.Outpoint, encoded []byte) {
+	k := ordinalRangeKey(op)
+	cache[k] = encoded
+	i.batchCreated[k] = struct{}{}
 }
 
 func (i *ordinalIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
@@ -289,7 +307,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	for txOutIdx, txOut := range coinbaseTx.MsgTx().TxOut {
 		outpoint := tbcd.NewOutpoint(*coinbaseTx.Hash(), uint32(txOutIdx))
 		if txOut.Value == 0 {
-			cache[ordinalRangeKey(outpoint)] = EncodeSatRanges(nil)
+			i.putRange(cache, outpoint, EncodeSatRanges(nil))
 			continue
 		}
 		outRanges, newRangeOffset, newSatOffset := SplitSatRanges(
@@ -297,7 +315,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		rangeOffset = newRangeOffset
 		satOffset = newSatOffset
 		outputRanges[uint32(txOutIdx)] = outRanges
-		cache[ordinalRangeKey(outpoint)] = EncodeSatRanges(outRanges)
+		i.putRange(cache, outpoint, EncodeSatRanges(outRanges))
 	}
 
 	// Update 's' entries for inscribed sats that became fees.
@@ -349,7 +367,16 @@ func (i *ordinalIndexer) windTx(ctx context.Context, blockHeight uint32, blockHa
 		allInputRanges = append(allInputRanges, ranges...)
 
 		// Mark spent input's sat ranges for deletion.
-		cache[ordinalRangeKey(op)] = nil
+		// If the range was created in this cache batch (not from
+		// DB), annihilate it — remove from cache entirely so it
+		// never reaches DB. Mirrors utxo indexer's annihilation.
+		rk := ordinalRangeKey(op)
+		if _, created := i.batchCreated[rk]; created {
+			delete(cache, rk)
+			delete(i.batchCreated, rk)
+		} else {
+			cache[rk] = nil
+		}
 	}
 
 	// Step 2: Flatten contiguous ranges for FIFO split. O(inputs).
@@ -362,7 +389,7 @@ func (i *ordinalIndexer) windTx(ctx context.Context, blockHeight uint32, blockHa
 	for txOutIdx, txOut := range txOuts {
 		outpoint := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
 		if txOut.Value == 0 {
-			cache[ordinalRangeKey(outpoint)] = EncodeSatRanges(nil)
+			i.putRange(cache, outpoint, EncodeSatRanges(nil))
 			continue
 		}
 		outRanges, newRangeOffset, newSatOffset := SplitSatRanges(
@@ -370,7 +397,7 @@ func (i *ordinalIndexer) windTx(ctx context.Context, blockHeight uint32, blockHa
 		rangeOffset = newRangeOffset
 		satOffset = newSatOffset
 		outputRanges[uint32(txOutIdx)] = outRanges
-		cache[ordinalRangeKey(outpoint)] = EncodeSatRanges(outRanges)
+		i.putRange(cache, outpoint, EncodeSatRanges(outRanges))
 	}
 
 	// Compute fee: remaining sats after all outputs consumed.
@@ -430,7 +457,7 @@ func (i *ordinalIndexer) windTx(ctx context.Context, blockHeight uint32, blockHa
 		}
 	satFound:
 
-		cache[ordinalSatInscriptionKey(inscribedSat, inscID)] = nil
+		cache[ordinalSatInscriptionKey(inscribedSat, inscID)] = []byte{}
 		cache[ordinalBlockInscriptionKey(blockHash, *inscriptionSeq)] = inscID[:]
 
 		*inscriptionSeq++
@@ -533,6 +560,7 @@ func (i *ordinalIndexer) commit(ctx context.Context, direction int, atHash chain
 	// Inscribed sats from this batch are now in DB; clear the set.
 	// Min/max boundaries persist across batches (they only grow).
 	clear(i.inscribedSatSet)
+	clear(i.batchCreated)
 	return nil
 }
 
