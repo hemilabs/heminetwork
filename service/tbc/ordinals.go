@@ -215,6 +215,28 @@ func parseEnvelopeTags(tokenizer *txscript.ScriptTokenizer) (*InscriptionEnvelop
 			return env, nil
 		}
 
+		// OP_0 is the body separator (tag 0 in the ord protocol).
+		// All subsequent data pushes until OP_ENDIF or next
+		// recognized tag are body content.
+		if op == txscript.OP_0 {
+			for tokenizer.Next() {
+				nextOp := tokenizer.Opcode()
+				if nextOp == txscript.OP_ENDIF {
+					return env, nil
+				}
+				nextTag := envelopeTag(nextOp, tokenizer.Data())
+				if nextTag >= 0 {
+					if !tokenizer.Next() {
+						break
+					}
+					applyTag(env, nextTag, tokenizer.Data())
+					break
+				}
+				env.Content = append(env.Content, tokenizer.Data()...)
+			}
+			continue
+		}
+
 		// Tags are single-byte push opcodes (OP_1 through OP_16 or
 		// OP_DATA_1 with the tag number).
 		tag := envelopeTag(op, tokenizer.Data())
@@ -242,10 +264,9 @@ func parseEnvelopeTags(tokenizer *txscript.ScriptTokenizer) (*InscriptionEnvelop
 				copy(parent[:], value)
 				env.Parent = &parent
 			}
-		case 5: // content (body, may be split across multiple pushes)
+		case 5: // content (body via OP_5, alternate encoding)
 			env.Content = append(env.Content, value...)
 			// Content can span multiple pushes until next tag or OP_ENDIF.
-			// Peek ahead for continuation.
 			for tokenizer.Next() {
 				nextOp := tokenizer.Opcode()
 				if nextOp == txscript.OP_ENDIF {
@@ -253,20 +274,12 @@ func parseEnvelopeTags(tokenizer *txscript.ScriptTokenizer) (*InscriptionEnvelop
 				}
 				nextTag := envelopeTag(nextOp, tokenizer.Data())
 				if nextTag >= 0 {
-					// Hit next tag. We need to process it, but the
-					// tokenizer already consumed it. Handle it in the
-					// next iteration by breaking and letting the outer
-					// loop re-check. But we already called Next(), so
-					// we need to handle this tag here.
-					// Process the tag we just consumed.
 					if !tokenizer.Next() {
 						break
 					}
-					nextValue := tokenizer.Data()
-					applyTag(env, nextTag, nextValue)
+					applyTag(env, nextTag, tokenizer.Data())
 					break
 				}
-				// Still content.
 				env.Content = append(env.Content, tokenizer.Data()...)
 			}
 		case 7: // metaprotocol
