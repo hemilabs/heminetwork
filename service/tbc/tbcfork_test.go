@@ -1052,21 +1052,113 @@ func (b *btcNode) mineN(count int, from *chainhash.Hash, payToAddress btcutil.Ad
 	return blocks, nil
 }
 
+// buildInscriptionWitness creates a taproot-style witness containing
+// an ord inscription envelope. The witness has 3 elements:
+//   - [0]: dummy signature (not validated in tests)
+//   - [1]: tapscript with OP_FALSE OP_IF "ord" <tags> OP_ENDIF
+//   - [2]: dummy control block
+func buildInscriptionWitness(contentType, content string) wire.TxWitness {
+	builder := txscript.NewScriptBuilder()
+	// Prepend a valid-looking script before the envelope.
+	builder.AddOp(txscript.OP_TRUE)
+	// Inscription envelope.
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // tag 1 = content type
+	builder.AddData([]byte(contentType))
+	builder.AddOp(txscript.OP_0) // tag 0 = body
+	builder.AddData([]byte(content))
+	builder.AddOp(txscript.OP_ENDIF)
+
+	script, err := builder.Script()
+	if err != nil {
+		panic(fmt.Sprintf("buildInscriptionWitness: %v", err))
+	}
+
+	return wire.TxWitness{
+		{0x01},             // dummy signature
+		script,             // tapscript with inscription
+		{0xc0, 0x01, 0x02}, // dummy control block (taproot v1)
+	}
+}
+
+// mineInscription mines a block containing an inscription transaction.
+// At height >= 2, spends the parent's coinbase and adds inscription
+// witness data. Also creates a zero-value output for edge case testing.
+func (b *btcNode) mineInscription(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+	parent, ok := b.chain[from.String()]
+	if !ok {
+		return nil, errors.New("parent hash not found")
+	}
+	en := testutil.RandomBytes(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	var mempool []*btcutil.Tx
+
+	nextBlockHeight := parent.Height() + 1
+	if nextBlockHeight >= 2 {
+		// Create a transaction that spends parent coinbase with
+		// an inscription in the witness.
+		coinbaseTx := parent.TxByIndex(0)
+		tx, err := b.newSignedTxFromTx(name+":insc", coinbaseTx, 3000000000)
+		if err != nil {
+			return nil, fmt.Errorf("new inscription tx: %w", err)
+		}
+
+		// Inject inscription witness on the first input.
+		inscContent := "inscription in " + name
+		tx.MsgTx().TxIn[0].Witness = buildInscriptionWitness(
+			"text/plain;charset=utf-8", inscContent)
+
+		// Add a zero-value output for edge case testing.
+		zeroScript, err := txscript.PayToAddrScript(payToAddress)
+		if err != nil {
+			return nil, fmt.Errorf("zero-value script: %w", err)
+		}
+		tx.MsgTx().AddTxOut(wire.NewTxOut(0, zeroScript))
+
+		b.t.Logf("inscription tx %v: %v spent from %v content=%q",
+			nextBlockHeight, tx.Hash(),
+			tx.MsgTx().TxIn[0].PreviousOutPoint, inscContent)
+		mempool = []*btcutil.Tx{tx}
+	}
+
+	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextBlockHeight,
+		parent.Hash(), extraNonce, mempool)
+	if err != nil {
+		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
+	}
+	blk := newBlock(b.params, name, bt)
+	_, err = b.insertBlock(blk)
+	if err != nil {
+		return nil, fmt.Errorf("insert block at height %v: %w",
+			nextBlockHeight, err)
+	}
+	if blk.Height() > b.height {
+		b.height = blk.Height()
+	}
+
+	return blk, nil
+}
+
 // Types of mining
 const (
 	MineNoKeystones = iota
 	MineWithKeystones
 	MineWithMultiple
+	MineWithInscription
 )
 
 func (b *btcNode) Mine(name string, parent *chainhash.Hash, payToAddress btcutil.Address, mineType int) (*block, error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	switch mineType {
-	case 1:
+	case MineWithKeystones:
 		return b.mineKss(name, parent, payToAddress)
-	case 2:
+	case MineWithMultiple:
 		return b.mineMultiple(name, parent, payToAddress)
+	case MineWithInscription:
+		return b.mineInscription(name, parent, payToAddress)
 	default:
 		return b.mine(name, parent, payToAddress)
 	}
@@ -4264,3 +4356,496 @@ func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockH
 }
 
 // end borrowed from btcd
+
+// TestOrdinalIndexFork tests ordinal indexer wind/unwind across forks.
+//
+// Chain geometry:
+//
+//	           /-> b1a (inscription A) -> b2a (inscription A2)
+//	genesis -> b1 (inscription B) -> b2 (inscription B2) -> b3
+//	           \-> b1b (inscription C) -> b2b (inscription C2)
+//
+// Tests:
+//   - Wind to b3: inscriptions B, B2 present, sat ranges correct
+//   - Unwind to genesis: all ordinal data gone
+//   - Wind to b2a: inscriptions A, A2 present, B/C gone
+//   - Unwind to genesis: all gone
+//   - Wind to b2b: inscriptions C, C2 present, A/B gone
+//   - Unwind to genesis: all gone
+//   - Zero-value outputs tracked and cleaned up
+//   - Fee sats flow to coinbase
+func TestOrdinalIndexFork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       1000,
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	address := n.address
+	parent := chaincfg.RegressionNetParams.GenesisHash
+
+	// Mine the best chain: b1 -> b2 (inscription) -> b3
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mine fork A: b1a -> b2a (inscription)
+	b1a, err := n.MineAndSend(ctx, "b1a", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mine fork B: b1b -> b2b (inscription)
+	b1b, err := n.MineAndSend(ctx, "b1b", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Trigger block download and wait for all blocks to arrive.
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	// ordinalVerifyWound checks 'n', 'i', 's', 'a' entries and content
+	// exist for a block containing an inscription tx at index 1.
+	// Does NOT check 'r' (sat ranges) since outputs may be spent by
+	// later blocks. Returns the inscription's sat number.
+	ordinalVerifyWound := func(t *testing.T, label string, blk *block) uint64 {
+		t.Helper()
+		blockHash := *blk.Hash()
+		inscTx := blk.TxByIndex(1)
+		inscTxid := *inscTx.Hash()
+
+		// 'n': InscriptionsByBlock
+		inscs, err := s.InscriptionsByBlock(ctx, blockHash)
+		if err != nil {
+			t.Fatalf("[%s] 'n' InscriptionsByBlock: %v", label, err)
+		}
+		if len(inscs) != 1 {
+			t.Fatalf("[%s] 'n' expected 1 inscription, got %d", label, len(inscs))
+		}
+		t.Logf("[%s] 'n' inscription present: sat=%d", label, inscs[0].SatNumber)
+
+		// 'i': InscriptionByID
+		inscByID, err := s.InscriptionByID(ctx, inscTxid, 0)
+		if err != nil {
+			t.Fatalf("[%s] 'i' InscriptionByID(%v, 0): %v", label, inscTxid, err)
+		}
+		if inscByID.TxID != inscTxid {
+			t.Fatalf("[%s] 'i' TxID mismatch: got %v, want %v", label, inscByID.TxID, inscTxid)
+		}
+		if inscByID.BlockHash != blockHash {
+			t.Fatalf("[%s] 'i' BlockHash mismatch: got %v, want %v", label, inscByID.BlockHash, blockHash)
+		}
+		if inscByID.InputIndex != 0 {
+			t.Fatalf("[%s] 'i' InputIndex: got %d, want 0", label, inscByID.InputIndex)
+		}
+		t.Logf("[%s] 'i' verified: txid=%v sat=%d", label, inscByID.TxID, inscByID.SatNumber)
+
+		// 's': OrdinalOutpointBySat — inscribed sat points at an output
+		satNumber := inscByID.SatNumber
+		op, err := s.g.db.OrdinalOutpointBySat(ctx, satNumber)
+		if err != nil {
+			t.Fatalf("[%s] 's' OrdinalOutpointBySat(%d): %v", label, satNumber, err)
+		}
+		t.Logf("[%s] 's' sat %d -> outpoint %x", label, satNumber, *op)
+
+		// 'a': InscriptionsBySat
+		satInscs, err := s.InscriptionsBySat(ctx, satNumber)
+		if err != nil {
+			t.Fatalf("[%s] 'a' InscriptionsBySat(%d): %v", label, satNumber, err)
+		}
+		if len(satInscs) != 1 {
+			t.Fatalf("[%s] 'a' expected 1 inscription for sat %d, got %d", label, satNumber, len(satInscs))
+		}
+		t.Logf("[%s] 'a' sat %d has 1 inscription", label, satNumber)
+
+		// Content: verify inscription content is retrievable.
+		contentType, content, err := s.InscriptionContent(ctx, inscTxid, 0)
+		if err != nil {
+			t.Fatalf("[%s] InscriptionContent: %v", label, err)
+		}
+		t.Logf("[%s] content: type=%q body=%q", label, contentType, string(content))
+
+		return satNumber
+	}
+
+	// ordinalVerifyRanges checks 'r' entries for every output of a tx.
+	// Spent outputs should NOT have ranges; unspent ones should.
+	ordinalVerifyRanges := func(t *testing.T, label string, blk *block, txIdx int) {
+		t.Helper()
+		tx := blk.TxByIndex(txIdx)
+		txid := *tx.Hash()
+		for i, txOut := range tx.MsgTx().TxOut {
+			ranges, err := s.SatRangesByOutpoint(ctx, txid, uint32(i))
+			if txOut.Value == 0 {
+				if err != nil {
+					t.Fatalf("[%s] 'r' zero-value output %d: %v", label, i, err)
+				}
+				if len(ranges) != 0 {
+					t.Fatalf("[%s] 'r' zero-value output %d should be empty, got %v", label, i, ranges)
+				}
+				t.Logf("[%s] 'r' tx[%d] output %d: zero-value (correct)", label, txIdx, i)
+			} else {
+				if err != nil {
+					t.Fatalf("[%s] 'r' tx[%d] output %d (value=%d): %v", label, txIdx, i, txOut.Value, err)
+				}
+				var total uint64
+				for _, r := range ranges {
+					total += r.Count
+				}
+				t.Logf("[%s] 'r' tx[%d] output %d: %d sats in %d ranges", label, txIdx, i, total, len(ranges))
+			}
+		}
+	}
+
+	// assertSatRange verifies an outpoint has exactly one sat range
+	// with the expected Start and Count.
+	assertSatRange := func(t *testing.T, label string, txid chainhash.Hash, vout uint32, wantStart, wantCount uint64) {
+		t.Helper()
+		ranges, err := s.SatRangesByOutpoint(ctx, txid, vout)
+		if err != nil {
+			t.Fatalf("[%s] %v:%d: %v", label, txid, vout, err)
+		}
+		if len(ranges) != 1 {
+			t.Fatalf("[%s] %v:%d: expected 1 range, got %d: %v", label, txid, vout, len(ranges), ranges)
+		}
+		if ranges[0].Start != wantStart || ranges[0].Count != wantCount {
+			t.Fatalf("[%s] %v:%d: got [%d, %d), want [%d, %d)",
+				label, txid, vout,
+				ranges[0].Start, ranges[0].Start+ranges[0].Count,
+				wantStart, wantStart+wantCount)
+		}
+		t.Logf("[%s] %v:%d: [%d, %d) ✓", label, txid, vout, wantStart, wantStart+wantCount)
+	}
+
+	// assertRangeGone verifies an outpoint has no sat ranges (spent or unwound).
+	assertRangeGone := func(t *testing.T, label string, txid chainhash.Hash, vout uint32) {
+		t.Helper()
+		_, err := s.SatRangesByOutpoint(ctx, txid, vout)
+		if err == nil {
+			t.Fatalf("[%s] %v:%d: should be gone", label, txid, vout)
+		}
+	}
+
+	// assertEmptyRange verifies a zero-value output has an empty range entry.
+	assertEmptyRange := func(t *testing.T, label string, txid chainhash.Hash, vout uint32) {
+		t.Helper()
+		ranges, err := s.SatRangesByOutpoint(ctx, txid, vout)
+		if err != nil {
+			t.Fatalf("[%s] %v:%d: %v", label, txid, vout, err)
+		}
+		if len(ranges) != 0 {
+			t.Fatalf("[%s] %v:%d: expected empty ranges for zero-value, got %v", label, txid, vout, ranges)
+		}
+	}
+
+	// ordinalVerifyUnwound checks 'n', 'i', 'r' entries are gone,
+	// and optionally 's'/'a' (skipped when another chain on the
+	// current tip inscribes the same sat).
+	ordinalVerifyUnwound := func(t *testing.T, label string, blk *block, satNumber uint64, checkSat bool) {
+		t.Helper()
+		blockHash := *blk.Hash()
+		inscTx := blk.TxByIndex(1)
+		inscTxid := *inscTx.Hash()
+
+		// 'n': InscriptionsByBlock — must be empty
+		inscs, _ := s.InscriptionsByBlock(ctx, blockHash)
+		if len(inscs) != 0 {
+			t.Fatalf("[%s] 'n' expected 0 inscriptions, got %d", label, len(inscs))
+		}
+
+		// 'i': InscriptionByID — must fail
+		_, err := s.InscriptionByID(ctx, inscTxid, 0)
+		if err == nil {
+			t.Fatalf("[%s] 'i' should fail after unwind", label)
+		}
+
+		// 's': OrdinalOutpointBySat — must fail (skip if same sat on current chain)
+		if checkSat && satNumber != 0 {
+			_, err = s.g.db.OrdinalOutpointBySat(ctx, satNumber)
+			if err == nil {
+				t.Fatalf("[%s] 's' sat %d should fail after unwind", label, satNumber)
+			}
+		}
+
+		// 'a': InscriptionsBySat — must be empty (skip if same sat on current chain)
+		if checkSat && satNumber != 0 {
+			satInscs, _ := s.InscriptionsBySat(ctx, satNumber)
+			if len(satInscs) != 0 {
+				t.Fatalf("[%s] 'a' sat %d should have 0 inscriptions, got %d", label, satNumber, len(satInscs))
+			}
+		}
+
+		// 'r': every output of the inscription tx must be gone
+		for i := range inscTx.MsgTx().TxOut {
+			_, err := s.SatRangesByOutpoint(ctx, inscTxid, uint32(i))
+			if err == nil {
+				t.Fatalf("[%s] 'r' output %d should be gone", label, i)
+			}
+		}
+
+		t.Logf("[%s] all entries verified absent", label)
+	}
+
+	// --- Wind to b3 (best chain) ---
+	t.Log("=== wind to b3 ===")
+	if err := s.SyncIndexersToHash(ctx, *b3.Hash()); err != nil {
+		t.Fatalf("sync to b3: %v", err)
+	}
+
+	// Verify ordinal index is at b3.
+	ordBH, err := s.oi.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("ordinal indexer at: %v", err)
+	}
+	if !ordBH.Hash.IsEqual(b3.Hash()) {
+		t.Fatalf("ordinal index at %v, want %v", ordBH.Hash, b3.Hash())
+	}
+
+	// Verify all 5 entry types for b2's inscription.
+	b2SatNumber := ordinalVerifyWound(t, "b2@b3", b2)
+
+	// Precise sat range verification for FIFO split.
+	// Regtest: height 1 subsidy = 50 BTC = 5B sats [5B, 10B).
+	// b2 inscription tx spends b1 coinbase [5B, 10B), splits:
+	//   output 0 (30 BTC): [5B, 8B)
+	//   output 1 (20 BTC): [8B, 10B)
+	//   output 2 (0 sats):  empty
+	b2InscTxid := *b2.TxByIndex(1).Hash()
+
+	// b2 inscription tx output 0 was spent by b3 tx1 — gone.
+	assertRangeGone(t, "b2-insc:0@b3", b2InscTxid, 0)
+	// b2 inscription tx output 1 (change) is unspent.
+	assertSatRange(t, "b2-insc:1@b3", b2InscTxid, 1, 8_000_000_000, 2_000_000_000)
+	// b2 inscription tx output 2 (zero-value) is unspent.
+	assertEmptyRange(t, "b2-insc:2@b3", b2InscTxid, 2)
+
+	// b2 coinbase: height 2, subsidy [10B, 15B). Unspent.
+	b2CoinbaseTxid := *b2.TxByIndex(0).Hash()
+	assertSatRange(t, "b2-cb@b3", b2CoinbaseTxid, 0, 10_000_000_000, 5_000_000_000)
+
+	// b3 coinbase: height 3, subsidy [15B, 20B). Unspent.
+	b3CoinbaseTxid := *b3.TxByIndex(0).Hash()
+	assertSatRange(t, "b3-cb@b3", b3CoinbaseTxid, 0, 15_000_000_000, 5_000_000_000)
+
+	// b3 tx1 spends b2 inscription tx output 0 [5B, 8B), splits:
+	//   output 0 (1.1B sats): [5B, 6.1B)
+	//   output 1 (1.9B sats): [6.1B, 8B)
+	// b3 tx1 outputs were spent by b3 tx2 — gone.
+	b3Tx1Txid := *b3.TxByIndex(1).Hash()
+	assertRangeGone(t, "b3-tx1:0@b3", b3Tx1Txid, 0)
+	assertRangeGone(t, "b3-tx1:1@b3", b3Tx1Txid, 1)
+
+	// b3 tx2 (create-and-spend in same block) spends b3 tx1
+	// outputs [5B, 6.1B) + [6.1B, 8B) = merged [5B, 8B), splits:
+	//   output 0 (1.1B): [5B, 6.1B)
+	//   output 1 (1.9B): [6.1B, 8B)
+	b3Tx2Txid := *b3.TxByIndex(2).Hash()
+	assertSatRange(t, "b3-tx2:0@b3", b3Tx2Txid, 0, 5_000_000_000, 1_100_000_000)
+	assertSatRange(t, "b3-tx2:1@b3", b3Tx2Txid, 1, 6_100_000_000, 1_900_000_000)
+
+	// Corner case: 's' entry must track inscribed sat through the
+	// create-and-spend chain. Sat 5B started at b2 inscription tx
+	// output 0, moved to b3 tx1 output 0, then to b3 tx2 output 0.
+	// The 's' entry must point at the FINAL destination (b3 tx2:0).
+	op, err := s.g.db.OrdinalOutpointBySat(ctx, 5_000_000_000)
+	if err != nil {
+		t.Fatalf("'s' tracking through create-and-spend: %v", err)
+	}
+	expectedOP := tbcd.NewOutpoint(b3Tx2Txid, 0)
+	if *op != expectedOP {
+		t.Fatalf("'s' entry for sat 5B points at %x, want %x (b3 tx2:0)",
+			*op, expectedOP)
+	}
+	t.Log("'s' entry correctly tracks sat through create-and-spend chain")
+
+	t.Log("FIFO split verified: sats flow correctly through tx chain")
+
+	// Fork A and B inscriptions must NOT exist.
+	ordinalVerifyUnwound(t, "b2a@b3", b2a, 0, false)
+	ordinalVerifyUnwound(t, "b2b@b3", b2b, 0, false)
+
+	// --- Unwind to genesis ---
+	t.Log("=== unwind to genesis ===")
+	if err := s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash); err != nil {
+		t.Fatalf("unwind to genesis: %v", err)
+	}
+
+	ordBH, err = s.oi.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("ordinal indexer at: %v", err)
+	}
+	if !ordBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("ordinal index at %v, want genesis", ordBH.Hash)
+	}
+
+	// All b2 entries must be gone.
+	ordinalVerifyUnwound(t, "b2@genesis", b2, b2SatNumber, true)
+
+	// b3 ranges must be gone.
+	assertRangeGone(t, "b3-cb@genesis", b3CoinbaseTxid, 0)
+	assertRangeGone(t, "b3-tx2:0@genesis", b3Tx2Txid, 0)
+	assertRangeGone(t, "b3-tx2:1@genesis", b3Tx2Txid, 1)
+
+	// b2 inscription tx ranges must be gone.
+	assertRangeGone(t, "b2-insc:1@genesis", b2InscTxid, 1)
+
+	// b2 coinbase must be gone.
+	assertRangeGone(t, "b2-cb@genesis", b2CoinbaseTxid, 0)
+
+	// b1's coinbase range should also be gone — we unwound past b1.
+	// unwindBlock deletes all outputs, including b1's coinbase.
+	b1CoinbaseTxid := *b1.TxByIndex(0).Hash()
+	assertRangeGone(t, "b1-cb@genesis", b1CoinbaseTxid, 0)
+	t.Log("all ordinal data verified absent at genesis")
+
+	// --- Wind to b2a (fork A) ---
+	t.Log("=== wind to b2a ===")
+	if err := s.SyncIndexersToHash(ctx, *b2a.Hash()); err != nil {
+		t.Fatalf("sync to b2a: %v", err)
+	}
+
+	// Verify all 5 entry types for b2a's inscription.
+	b2aSatNumber := ordinalVerifyWound(t, "b2a@b2a", b2a)
+	// b2a is chain tip — inscription tx outputs are unspent.
+	ordinalVerifyRanges(t, "b2a@b2a", b2a, 1)
+
+	// Precise sat ranges for b2a inscription tx (same FIFO split).
+	b2aInscTxid := *b2a.TxByIndex(1).Hash()
+	assertSatRange(t, "b2a-insc:0@b2a", b2aInscTxid, 0, 5_000_000_000, 3_000_000_000)
+	assertSatRange(t, "b2a-insc:1@b2a", b2aInscTxid, 1, 8_000_000_000, 2_000_000_000)
+	assertEmptyRange(t, "b2a-insc:2@b2a", b2aInscTxid, 2)
+	b2aCoinbaseTxid := *b2a.TxByIndex(0).Hash()
+	assertSatRange(t, "b2a-cb@b2a", b2aCoinbaseTxid, 0, 10_000_000_000, 5_000_000_000)
+
+	// Main chain and fork B must NOT exist.
+	ordinalVerifyUnwound(t, "b2@b2a", b2, b2SatNumber, false)
+	ordinalVerifyUnwound(t, "b2b@b2a", b2b, 0, false)
+
+	// --- Unwind to genesis (2) ---
+	t.Log("=== unwind to genesis (2) ===")
+	if err := s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash); err != nil {
+		t.Fatalf("unwind to genesis 2: %v", err)
+	}
+
+	ordinalVerifyUnwound(t, "b2a@genesis2", b2a, b2aSatNumber, true)
+	t.Log("fork A fully unwound")
+
+	// --- Wind to b2b (fork B) ---
+	t.Log("=== wind to b2b ===")
+	if err := s.SyncIndexersToHash(ctx, *b2b.Hash()); err != nil {
+		t.Fatalf("sync to b2b: %v", err)
+	}
+
+	// Verify all 5 entry types for b2b's inscription.
+	b2bSatNumber := ordinalVerifyWound(t, "b2b@b2b", b2b)
+	// b2b is chain tip — inscription tx outputs are unspent.
+	ordinalVerifyRanges(t, "b2b@b2b", b2b, 1)
+
+	// Precise sat ranges for b2b inscription tx.
+	b2bInscTxid := *b2b.TxByIndex(1).Hash()
+	assertSatRange(t, "b2b-insc:0@b2b", b2bInscTxid, 0, 5_000_000_000, 3_000_000_000)
+	assertSatRange(t, "b2b-insc:1@b2b", b2bInscTxid, 1, 8_000_000_000, 2_000_000_000)
+	assertEmptyRange(t, "b2b-insc:2@b2b", b2bInscTxid, 2)
+	b2bCoinbaseTxid := *b2b.TxByIndex(0).Hash()
+	assertSatRange(t, "b2b-cb@b2b", b2bCoinbaseTxid, 0, 10_000_000_000, 5_000_000_000)
+
+	// No cross-contamination.
+	ordinalVerifyUnwound(t, "b2@b2b", b2, b2SatNumber, false)
+	ordinalVerifyUnwound(t, "b2a@b2b", b2a, b2aSatNumber, false)
+	t.Log("no cross-contamination between forks")
+
+	// --- Final unwind to genesis ---
+	t.Log("=== final unwind to genesis ===")
+	if err := s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash); err != nil {
+		t.Fatalf("final unwind: %v", err)
+	}
+
+	ordinalVerifyUnwound(t, "b2@final", b2, b2SatNumber, true)
+	ordinalVerifyUnwound(t, "b2a@final", b2a, b2aSatNumber, true)
+	ordinalVerifyUnwound(t, "b2b@final", b2b, b2bSatNumber, true)
+
+	ordBH, err = s.oi.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("ordinal indexer at final: %v", err)
+	}
+	if !ordBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("ordinal index at %v, want genesis", ordBH.Hash)
+	}
+	t.Log("final unwind complete — all ordinal data verified absent at genesis")
+}
