@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -37,6 +39,10 @@ import (
 	"github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer/tbcgozer"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul/memory"
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
@@ -3415,36 +3421,13 @@ func TestRpcOrdinalSatRanges(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	// Wait for TBC to sync blocks from bitcoind. Poll best header
-	// until it reaches height 10.
-	var bestHeight uint64
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(250 * time.Millisecond):
-		}
-		h, _, err := tbcServer.BlockHeaderBest(ctx)
-		if err != nil {
-			continue
-		}
-		if h >= 10 {
-			bestHeight = h
-			t.Logf("TBC synced to height %d", bestHeight)
-			break
-		}
+	// Wait for blocks to sync, then index.
+	select {
+	case <-time.Tick(1 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
-
-	// Explicitly sync the ordinal indexer to the best block.
-	_, bestWireHeader, err := tbcServer.BlockHeaderBest(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bestHash := bestWireHeader.BlockHash()
-	if err := tbcServer.SyncIndexersToHash(ctx, bestHash); err != nil {
-		t.Fatalf("SyncIndexersToHash: %v", err)
-	}
-	t.Logf("ordinal indexer synced to %v (height %d)", bestHash, bestHeight)
+	indexAll(ctx, t, tbcServer)
 
 	// Query sat ranges for height 1 coinbase.
 	// Regtest genesis coinbase is unspendable, but the ordinal indexer
@@ -3570,29 +3553,13 @@ func TestRpcOrdinalNotFound(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	// Wait for sync + index.
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(250 * time.Millisecond):
-		}
-		h, _, err := tbcServer.BlockHeaderBest(ctx)
-		if err != nil {
-			continue
-		}
-		if h >= 5 {
-			break
-		}
+	// Wait for sync + ordinal indexing.
+	select {
+	case <-time.Tick(1 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
-	_, bestWH, err := tbcServer.BlockHeaderBest(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bestHash := bestWH.BlockHash()
-	if err := tbcServer.SyncIndexersToHash(ctx, bestHash); err != nil {
-		t.Fatalf("SyncIndexersToHash: %v", err)
-	}
+	indexAll(ctx, t, tbcServer)
 
 	readResponse := func(t *testing.T) protocol.Message {
 		t.Helper()
@@ -3721,4 +3688,319 @@ func TestRpcOrdinalNotFound(t *testing.T) {
 		}
 		t.Logf("sat ranges not found: %v", resp.Error)
 	})
+}
+
+// TestRpcOrdinalInscriptionE2E is the full-pipeline inscription test:
+// gozer wallet builds commit+reveal transactions, broadcasts through
+// TBC to bitcoind, bitcoind mines them, TBC syncs and indexes the
+// ordinals, then inscription data is verified through TBC's websocket
+// RPC layer.
+//
+// Pipeline: gozer → TBC RPC → bitcoind mempool → bitcoin block →
+//
+//	TBC P2P sync → ordinal indexer → TBC RPC query
+func TestRpcOrdinalInscriptionE2E(t *testing.T) {
+	skipIfNoDocker(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+
+	// Mine 101 blocks so the height-1 coinbase is mature (100 confirmations).
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 101, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
+
+	tbcServer, tbcUrl := createTbcServerWithOrdinals(ctx, t, mappedPeerPort)
+
+	// Start gozer wallet connected to TBC.
+	g := tbcgozer.New(tbcUrl)
+	if err := g.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Wait for gozer to connect.
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+		if _, _, _, err := g.BestHeightHashTime(ctx); err == nil {
+			break
+		}
+	}
+
+	// Wait for TBC to sync and index all 101 blocks.
+	select {
+	case <-time.Tick(1 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	indexAll(ctx, t, tbcServer)
+
+	// Derive keys. Use btcec (btcd's native type) for taproot operations.
+	privKeyBytes, err := hex.DecodeString(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, _ := btcec.PrivKeyFromBytes(privKeyBytes)
+	internalKey := priv.PubKey()
+
+	// P2PKH address (matches what createBitcoindWithInitialBlocks mines to).
+	p2pkhAddr, err := btcutil.NewAddressPubKeyHash(
+		btcutil.Hash160(internalKey.SerializeCompressed()),
+		&chaincfg.RegressionNetParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2pkhScript, err := txscript.PayToAddrScript(p2pkhAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get the height-1 coinbase directly — guaranteed mature after 101 blocks.
+	// Don't rely on UtxosByAddress which has no maturity filter.
+	bhs1, err := tbcServer.BlockHeadersByHeight(ctx, 1)
+	if err != nil || len(bhs1) == 0 {
+		t.Fatalf("BlockHeadersByHeight(1): %v", err)
+	}
+	block1, err := tbcServer.BlockByHash(ctx, bhs1[0].BlockHash())
+	if err != nil {
+		t.Fatalf("BlockByHash(height 1): %v", err)
+	}
+	fundingTxid := *block1.Transactions()[0].Hash()
+	const fundingValue int64 = 5_000_000_000 // 50 BTC regtest coinbase
+	t.Logf("funding UTXO: %v:0 value=%d (height 1 coinbase)", fundingTxid, fundingValue)
+
+	// --- Build inscription tapscript ---
+	inscContent := "hello ordinals e2e"
+	inscContentType := "text/plain;charset=utf-8"
+
+	// Reuse the existing helper to build the tapscript (element [1]).
+	inscWitness := buildInscriptionWitness(inscContentType, inscContent)
+	inscScript := inscWitness[1] // the tapscript with OP_TRUE + envelope
+
+	// Build single-leaf tap tree.
+	leaf := txscript.NewBaseTapLeaf(inscScript)
+	tree := txscript.AssembleTaprootScriptTree(leaf)
+	scriptRoot := tree.RootNode.TapHash()
+
+	// Compute the committed P2TR output key.
+	outputKey := txscript.ComputeTaprootOutputKey(internalKey, scriptRoot[:])
+	commitPkScript, err := txscript.PayToTaprootScript(outputKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// --- Build commit TX ---
+	// Spend P2PKH UTXO → P2TR output with inscription commitment.
+	const commitValue int64 = 10_000 // 10K sats to the inscription output
+	commitTx := wire.NewMsgTx(2)
+	commitTx.AddTxIn(wire.NewTxIn(
+		wire.NewOutPoint(&fundingTxid, 0), nil, nil))
+	commitTx.AddTxOut(wire.NewTxOut(commitValue, commitPkScript))
+
+	// Change back to P2PKH (minus fee).
+	changeValue := fundingValue - commitValue - 1000 // 1K sat fee
+	if changeValue > 0 {
+		commitTx.AddTxOut(wire.NewTxOut(changeValue, p2pkhScript))
+	}
+
+	// Sign the P2PKH input.
+	z, err := memory.New(&chaincfg.RegressionNetParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := z.PutKey(&zuul.NamedKey{Name: "test", PrivateKey: priv}); err != nil {
+		t.Fatal(err)
+	}
+	prevOuts := wallet.PrevOuts{
+		wire.NewOutPoint(&fundingTxid, 0).String(): wire.NewTxOut(
+			fundingValue, p2pkhScript),
+	}
+	if err := wallet.TransactionSign(&chaincfg.RegressionNetParams, z,
+		commitTx, prevOuts); err != nil {
+		t.Fatalf("sign commit tx: %v", err)
+	}
+
+	// Broadcast commit TX via gozer → TBC → bitcoind.
+	commitTxid, err := g.BroadcastTx(ctx, commitTx)
+	if err != nil {
+		t.Fatalf("broadcast commit tx: %v", err)
+	}
+	t.Logf("commit TX broadcast: %v", commitTxid)
+
+	// Wait for TBC to relay commit TX to bitcoind, then mine.
+	select {
+	case <-time.Tick(2 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	_, err = runBitcoinCommand(ctx, t, bitcoindContainer, []string{
+		"bitcoin-cli", "-regtest=1", "generatetoaddress", "1",
+		p2pkhAddr.EncodeAddress(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for commit block to sync.
+	select {
+	case <-time.Tick(1 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	indexAll(ctx, t, tbcServer)
+
+	// --- Build reveal TX ---
+	// Script-path spend of the commit P2TR output with inscription witness.
+	revealTx := wire.NewMsgTx(2)
+	revealTx.AddTxIn(wire.NewTxIn(
+		wire.NewOutPoint(commitTxid, 0), nil, nil))
+
+	// Output: change to P2PKH (minus fee).
+	revealTx.AddTxOut(wire.NewTxOut(commitValue-1000, p2pkhScript))
+
+	// Build the control block for the script-path spend.
+	proof := tree.LeafMerkleProofs[0]
+	controlBlock := proof.ToControlBlock(internalKey)
+	controlBlockBytes, err := controlBlock.ToBytes()
+	if err != nil {
+		t.Fatalf("control block: %v", err)
+	}
+
+	// Witness: [tapscript, controlBlock]
+	// The tapscript starts with OP_TRUE, so no signature needed.
+	revealTx.TxIn[0].Witness = wire.TxWitness{inscScript, controlBlockBytes}
+
+	// Broadcast reveal TX via gozer → TBC → bitcoind.
+	revealTxid, err := g.BroadcastTx(ctx, revealTx)
+	if err != nil {
+		t.Fatalf("broadcast reveal tx: %v", err)
+	}
+	t.Logf("reveal TX broadcast: %v", revealTxid)
+
+	// Wait for TBC to relay reveal TX to bitcoind, then mine.
+	select {
+	case <-time.Tick(2 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	_, err = runBitcoinCommand(ctx, t, bitcoindContainer, []string{
+		"bitcoin-cli", "-regtest=1", "generatetoaddress", "1",
+		p2pkhAddr.EncodeAddress(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for TBC to sync and index the reveal block.
+	select {
+	case <-time.Tick(1 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	indexAll(ctx, t, tbcServer)
+	t.Log("ordinal indexer synced after reveal")
+
+	// --- Verify inscription via websocket RPC ---
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	readResponse := func(t *testing.T) protocol.Message {
+		t.Helper()
+		var v protocol.Message
+		if err := wsjson.Read(ctx, c, &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	// Query inscription by ID (reveal txid, input 0).
+	if err := tbcapi.Write(ctx, tws.conn, "insc-1", tbcapi.OrdinalInscriptionByIDRequest{
+		TxID:       *revealTxid,
+		InputIndex: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v := readResponse(t)
+	if v.Header.Command != tbcapi.CmdOrdinalInscriptionByIDResponse {
+		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+	var inscResp tbcapi.OrdinalInscriptionByIDResponse
+	if err := json.Unmarshal(v.Payload, &inscResp); err != nil {
+		t.Fatal(err)
+	}
+	if inscResp.Error != nil {
+		t.Fatalf("inscription by ID error: %v", inscResp.Error)
+	}
+	if inscResp.Inscription == nil {
+		t.Fatal("inscription is nil")
+	}
+	t.Logf("inscription found: txid=%v sat=%d block=%v",
+		inscResp.Inscription.TxID, inscResp.Inscription.SatNumber,
+		inscResp.Inscription.BlockHash)
+
+	// Query inscription content.
+	if err := tbcapi.Write(ctx, tws.conn, "insc-2", tbcapi.OrdinalInscriptionContentRequest{
+		TxID:       *revealTxid,
+		InputIndex: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v = readResponse(t)
+	if v.Header.Command != tbcapi.CmdOrdinalInscriptionContentResponse {
+		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+	var contentResp tbcapi.OrdinalInscriptionContentResponse
+	if err := json.Unmarshal(v.Payload, &contentResp); err != nil {
+		t.Fatal(err)
+	}
+	if contentResp.Error != nil {
+		t.Fatalf("inscription content error: %v", contentResp.Error)
+	}
+	if contentResp.ContentType != inscContentType {
+		t.Fatalf("content type: got %q, want %q", contentResp.ContentType, inscContentType)
+	}
+	if string(contentResp.Content) != inscContent {
+		t.Fatalf("content body: got %q, want %q", string(contentResp.Content), inscContent)
+	}
+	t.Logf("inscription content verified: type=%q body=%q",
+		contentResp.ContentType, string(contentResp.Content))
+
+	// Query sat ranges for the reveal TX output.
+	if err := tbcapi.Write(ctx, tws.conn, "insc-3", tbcapi.OrdinalSatRangesByOutpointRequest{
+		TxID: *revealTxid,
+		Vout: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v = readResponse(t)
+	if v.Header.Command != tbcapi.CmdOrdinalSatRangesByOutpointResponse {
+		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+	var satResp tbcapi.OrdinalSatRangesByOutpointResponse
+	if err := json.Unmarshal(v.Payload, &satResp); err != nil {
+		t.Fatal(err)
+	}
+	if satResp.Error != nil {
+		t.Fatalf("sat ranges error: %v", satResp.Error)
+	}
+	if len(satResp.SatRanges) == 0 {
+		t.Fatal("expected sat ranges for reveal output, got none")
+	}
+	t.Logf("reveal output sat ranges: %v", satResp.SatRanges)
+
+	t.Log("full inscription E2E pipeline verified: gozer → TBC → bitcoind → block → TBC ordinal indexer → RPC")
 }
