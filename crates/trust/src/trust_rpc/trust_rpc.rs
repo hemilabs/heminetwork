@@ -20,6 +20,9 @@ pub mod protocol;
 #[cfg(test)]
 mod trust_rpc_test;
 
+#[cfg(test)]
+mod protocol_test;
+
 #[derive(Error, Debug)]
 pub enum TrustRPCError {
     #[error("Tungstenite error: {0}")]
