@@ -1464,3 +1464,41 @@ func TestCoinbaseSatRangeAfterAllSubsidies(t *testing.T) {
 	}
 	_ = start
 }
+
+// FuzzParseInscriptionEnvelope exercises the inscription parser with
+// arbitrary witness data. The parser must not panic on any input.
+// Seeds cover: valid envelope, empty witness, no envelope, truncated
+// envelope, OP_0 body separator, and garbage.
+func FuzzParseInscriptionEnvelope(f *testing.F) {
+	// Valid envelope: OP_TRUE OP_FALSE OP_IF "ord" OP_1 <content-type> OP_0 <body> OP_ENDIF
+	validScript := buildInscriptionWitness("text/plain", "hello ordinals")
+	for _, elem := range validScript {
+		f.Add(elem)
+	}
+
+	// Empty witness element.
+	f.Add([]byte{})
+
+	// Single opcode.
+	f.Add([]byte{byte(txscript.OP_FALSE)})
+
+	// Random garbage.
+	f.Add([]byte{0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa})
+
+	// OP_FALSE OP_IF without "ord" magic.
+	f.Add([]byte{byte(txscript.OP_FALSE), byte(txscript.OP_IF), 0x03, 'f', 'o', 'o', byte(txscript.OP_ENDIF)})
+
+	// Truncated: OP_FALSE OP_IF "ord" but no OP_ENDIF.
+	f.Add([]byte{byte(txscript.OP_FALSE), byte(txscript.OP_IF), 0x03, 'o', 'r', 'd'})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// Build a witness with the fuzzed data as the tapscript element.
+		witness := wire.TxWitness{
+			{0x01},     // dummy signature
+			data,       // fuzzed tapscript
+			{0xc0, 42}, // dummy control block
+		}
+		// Must not panic. Errors are expected and fine.
+		_, _ = ParseInscriptionEnvelope(witness)
+	})
+}
