@@ -1980,3 +1980,107 @@ func TestApplyTagCoverageViaBodyPath(t *testing.T) {
 		}
 	})
 }
+
+// --- Fuzz tests for encode/decode functions ---
+
+// FuzzDecodeSatRanges verifies DecodeSatRanges does not panic on
+// arbitrary input. Valid input is a multiple of 16 bytes.
+func FuzzDecodeSatRanges(f *testing.F) {
+	f.Add([]byte{})
+	f.Add(EncodeSatRanges([]SatRange{{Start: 0, Count: 1}}))
+	f.Add(EncodeSatRanges([]SatRange{
+		{Start: 0, Count: 100},
+		{Start: 100, Count: 200},
+	}))
+	f.Add([]byte{
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	})
+	f.Add([]byte{1, 2, 3}) // not a multiple of 16
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if len(data)%16 != 0 {
+			// DecodeSatRanges panics on non-multiple-of-16.
+			// That's by design (caller ensures valid data).
+			return
+		}
+		ranges := DecodeSatRanges(data)
+		// Round-trip: encode and decode again must match.
+		reencoded := EncodeSatRanges(ranges)
+		redecoded := DecodeSatRanges(reencoded)
+		if len(ranges) != len(redecoded) {
+			t.Fatalf("round-trip count: %d vs %d", len(ranges), len(redecoded))
+		}
+		for i := range ranges {
+			if ranges[i] != redecoded[i] {
+				t.Fatalf("round-trip mismatch at %d: %v vs %v",
+					i, ranges[i], redecoded[i])
+			}
+		}
+	})
+}
+
+// FuzzDecodeInscriptionValue verifies decodeInscriptionValue does not
+// panic on arbitrary input and that valid encodings round-trip.
+func FuzzDecodeInscriptionValue(f *testing.F) {
+	f.Add([]byte{})
+	f.Add([]byte{0}) // too short
+	f.Add(encodeInscriptionValue(42, &chainhash.Hash{}, false, &InscriptionEnvelope{
+		ContentType: []byte("text/plain"),
+		Content:     []byte("hello"),
+	}))
+	f.Add(encodeInscriptionValue(0, &chainhash.Hash{0xff}, true, &InscriptionEnvelope{
+		ContentType: []byte("application/json"),
+		Content:     []byte("{}"),
+		Parent:      &[36]byte{0xaa},
+	}))
+	f.Add(encodeInscriptionValue(1, &chainhash.Hash{}, false, &InscriptionEnvelope{
+		Delegate:     &[36]byte{0xbb},
+		Metaprotocol: []byte("brc-20"),
+	}))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		d, err := decodeInscriptionValue(data)
+		if err != nil {
+			return // expected for malformed input
+		}
+		// Valid decode: re-encode and verify round-trip.
+		env := &InscriptionEnvelope{
+			Metaprotocol: []byte(d.Metaprotocol),
+		}
+		if d.Parent != nil {
+			env.Parent = d.Parent
+		}
+		if d.Delegate != nil {
+			env.Delegate = d.Delegate
+		}
+		reencoded := encodeInscriptionValue(d.SatNumber, &d.BlockHash, d.Cursed, env)
+		d2, err := decodeInscriptionValue(reencoded)
+		if err != nil {
+			t.Fatalf("round-trip decode failed: %v", err)
+		}
+		if d.SatNumber != d2.SatNumber {
+			t.Fatalf("sat: %d vs %d", d.SatNumber, d2.SatNumber)
+		}
+		if d.BlockHash != d2.BlockHash {
+			t.Fatalf("block hash mismatch")
+		}
+		if d.Cursed != d2.Cursed {
+			t.Fatalf("cursed: %v vs %v", d.Cursed, d2.Cursed)
+		}
+	})
+}
+
+// FuzzDecodeVarUint verifies decodeVarUint does not panic on arbitrary
+// input. It always returns a value (no error), so we just verify no crash.
+func FuzzDecodeVarUint(f *testing.F) {
+	f.Add([]byte{})
+	f.Add([]byte{0})
+	f.Add([]byte{42})
+	f.Add([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
+	f.Add([]byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0}) // >8 bytes
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_ = decodeVarUint(data) // must not panic
+	})
+}
