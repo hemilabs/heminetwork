@@ -19,7 +19,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
-	"github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 	tapi "github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 )
@@ -374,7 +373,7 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 	for i, bh := range req.BlockHeaders {
 		v64, err := strconv.ParseUint(bh.Bits, 16, 32)
 		if err != nil {
-			return &tbcadminapi.BlockHeadersInsertResponse{
+			return &tapi.BlockHeadersInsertResponse{
 				Error: protocol.RequestErrorf(
 					"error converting bits (header index %d): %s", i, err),
 			}, "", nil
@@ -391,7 +390,7 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 
 		if err := wireHeaders.AddBlockHeader(wh); err != nil {
 			e := protocol.NewInternalError(err)
-			return &tbcadminapi.BlockHeadersInsertResponse{
+			return &tapi.BlockHeadersInsertResponse{
 				Error: e.ProtocolError(),
 			}, "", e
 		}
@@ -400,7 +399,7 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 	// Insert headers
 	it, cbh, lbh, n, err := s.BlockHeadersInsert(ctx, &wireHeaders)
 	if err != nil {
-		return &tbcadminapi.BlockHeadersInsertResponse{
+		return &tapi.BlockHeadersInsertResponse{
 			Error: protocol.Errorf("error inserting headers: %s", err),
 		}, "", nil
 	}
@@ -409,14 +408,14 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 	wcbh, err := cbh.Wire()
 	if err != nil {
 		e := protocol.NewInternalError(err)
-		return &tbcadminapi.BlockHeadersInsertResponse{
+		return &tapi.BlockHeadersInsertResponse{
 			Error: e.ProtocolError(),
 		}, "", e
 	}
 	wlbh, err := lbh.Wire()
 	if err != nil {
 		e := protocol.NewInternalError(err)
-		return &tbcadminapi.BlockHeadersInsertResponse{
+		return &tapi.BlockHeadersInsertResponse{
 			Error: e.ProtocolError(),
 		}, "", e
 	}
