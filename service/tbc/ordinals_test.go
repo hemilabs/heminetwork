@@ -6,6 +6,8 @@ package tbc
 
 import (
 	"bytes"
+	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -2083,4 +2085,130 @@ func FuzzDecodeVarUint(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_ = decodeVarUint(data) // must not panic
 	})
+}
+
+// --- Corner case and negative path tests ---
+
+func TestDecodeInscriptionValueMaxSat(t *testing.T) {
+	// Max uint64 sat number must round-trip.
+	env := &InscriptionEnvelope{}
+	var blockHash chainhash.Hash
+	v := encodeInscriptionValue(math.MaxUint64, &blockHash, false, env)
+	d, err := decodeInscriptionValue(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.SatNumber != math.MaxUint64 {
+		t.Errorf("sat: got %d, want %d", d.SatNumber, uint64(math.MaxUint64))
+	}
+}
+
+func TestDecodeInscriptionValueEmptyMetaprotocol(t *testing.T) {
+	// Metaprotocol flag set but zero remaining bytes after offset.
+	// This is a valid encoding — empty metaprotocol string.
+	data := make([]byte, 41)
+	data[40] = 1 << 3 // metaprotocol flag
+	d, err := decodeInscriptionValue(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Metaprotocol != "" {
+		t.Errorf("metaprotocol: got %q, want empty", d.Metaprotocol)
+	}
+}
+
+func TestDecodeInscriptionValueUnknownFlags(t *testing.T) {
+	// Bits 4-7 in the flags byte are unused. Decoder should not
+	// fail and should ignore them (forward compatibility).
+	env := &InscriptionEnvelope{}
+	var blockHash chainhash.Hash
+	v := encodeInscriptionValue(42, &blockHash, false, env)
+	v[40] = 0xF0 // set bits 4-7, clear bits 0-3
+	d, err := decodeInscriptionValue(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.SatNumber != 42 {
+		t.Errorf("sat: got %d, want 42", d.SatNumber)
+	}
+	if d.Cursed || d.Parent != nil || d.Delegate != nil || d.Metaprotocol != "" {
+		t.Error("unknown flags should not activate any fields")
+	}
+}
+
+func TestEncodeSatRangesZeroCount(t *testing.T) {
+	// Zero-count range is semantically empty but must round-trip.
+	encoded := EncodeSatRanges([]SatRange{{Start: 42, Count: 0}})
+	decoded := DecodeSatRanges(encoded)
+	if len(decoded) != 1 || decoded[0].Start != 42 || decoded[0].Count != 0 {
+		t.Errorf("zero-count round-trip: got %v", decoded)
+	}
+}
+
+func TestEncodeSatRangesMaxUint64(t *testing.T) {
+	// Max uint64 Start and Count must round-trip.
+	encoded := EncodeSatRanges([]SatRange{
+		{Start: math.MaxUint64, Count: math.MaxUint64},
+	})
+	decoded := DecodeSatRanges(encoded)
+	if len(decoded) != 1 {
+		t.Fatalf("expected 1 range, got %d", len(decoded))
+	}
+	if decoded[0].Start != math.MaxUint64 || decoded[0].Count != math.MaxUint64 {
+		t.Errorf("max round-trip: got Start=%d Count=%d",
+			decoded[0].Start, decoded[0].Count)
+	}
+}
+
+func TestDecodeVarUintMaxUint64(t *testing.T) {
+	// 8 bytes of 0xff should decode to MaxUint64.
+	data := []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	got := decodeVarUint(data)
+	if got != math.MaxUint64 {
+		t.Errorf("got 0x%x, want 0x%x", got, uint64(math.MaxUint64))
+	}
+}
+
+func TestDecodeVarUintOverflow(t *testing.T) {
+	// >8 bytes: Go shifts past 64 produce 0, extra bytes are silently
+	// ignored. Verify this doesn't corrupt the lower bytes.
+	data := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0xff, 0xff}
+	got := decodeVarUint(data)
+	// Only the first 8 bytes should contribute.
+	expected := decodeVarUint(data[:8])
+	if got != expected {
+		t.Errorf("overflow corruption: got 0x%x, want 0x%x", got, expected)
+	}
+}
+
+func TestDecodeInscriptionValueExact41Bytes(t *testing.T) {
+	// Exactly 41 bytes with no flags — minimum valid encoding.
+	data := make([]byte, 41)
+	binary.BigEndian.PutUint64(data[0:8], 123)
+	data[9] = 0xab // block hash byte
+	d, err := decodeInscriptionValue(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.SatNumber != 123 {
+		t.Errorf("sat: got %d, want 123", d.SatNumber)
+	}
+}
+
+func TestDecodeInscriptionValueMetaprotocolFlagNoParentNoDelegate(t *testing.T) {
+	// Metaprotocol flag with content, but no parent/delegate flags.
+	// Offset should be 41 (skip straight to metaprotocol).
+	env := &InscriptionEnvelope{Metaprotocol: []byte("rune")}
+	var blockHash chainhash.Hash
+	v := encodeInscriptionValue(0, &blockHash, false, env)
+	d, err := decodeInscriptionValue(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Metaprotocol != "rune" {
+		t.Errorf("metaprotocol: got %q, want %q", d.Metaprotocol, "rune")
+	}
+	if d.Parent != nil || d.Delegate != nil {
+		t.Error("unexpected parent/delegate")
+	}
 }
