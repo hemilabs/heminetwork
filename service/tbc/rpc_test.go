@@ -3384,3 +3384,341 @@ func TestNotifyTxOutputsContextCancelled(t *testing.T) {
 	s.notifyTxOutputs(ctx, tx, tx.TxHash(), NotificationTxMempool)
 	// Should not panic; the error path logs and returns.
 }
+
+// TestRpcOrdinalSatRanges is an E2E test: mine blocks via bitcoind,
+// sync TBC with ordinal indexing, then verify sat ranges via websocket
+// RPC. Proves the full pipeline: bitcoind → P2P → TBC → ordinal
+// indexer → LevelDB → RPC response.
+func TestRpcOrdinalSatRanges(t *testing.T) {
+	skipIfNoDocker(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 10, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
+	tbcServer, tbcUrl := createTbcServerWithOrdinals(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	// Wait for TBC to sync blocks from bitcoind. Poll best header
+	// until it reaches height 10.
+	var bestHeight uint64
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
+		h, _, err := tbcServer.BlockHeaderBest(ctx)
+		if err != nil {
+			continue
+		}
+		if h >= 10 {
+			bestHeight = h
+			t.Logf("TBC synced to height %d", bestHeight)
+			break
+		}
+	}
+
+	// Explicitly sync the ordinal indexer to the best block.
+	_, bestWireHeader, err := tbcServer.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bestHash := bestWireHeader.BlockHash()
+	if err := tbcServer.SyncIndexersToHash(ctx, bestHash); err != nil {
+		t.Fatalf("SyncIndexersToHash: %v", err)
+	}
+	t.Logf("ordinal indexer synced to %v (height %d)", bestHash, bestHeight)
+
+	// Query sat ranges for height 1 coinbase.
+	// Regtest genesis coinbase is unspendable, but the ordinal indexer
+	// starts at height 1. Query height 1 coinbase instead.
+	bhs, err := tbcServer.BlockHeadersByHeight(ctx, 1)
+	if err != nil || len(bhs) == 0 {
+		t.Fatalf("BlockHeadersByHeight(1): %v", err)
+	}
+	block1Hash := bhs[0].BlockHash()
+	block1, err := tbcServer.BlockByHash(ctx, block1Hash)
+	if err != nil {
+		t.Fatalf("BlockByHash(height 1): %v", err)
+	}
+	coinbaseTxid := *block1.Transactions()[0].Hash()
+	t.Logf("height 1 coinbase txid: %v", coinbaseTxid)
+
+	// Query sat ranges via RPC websocket.
+	if err := tbcapi.Write(ctx, tws.conn, "ord-sat-1", tbcapi.OrdinalSatRangesByOutpointRequest{
+		TxID: coinbaseTxid,
+		Vout: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var v protocol.Message
+	if err := wsjson.Read(ctx, c, &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Header.Command != tbcapi.CmdOrdinalSatRangesByOutpointResponse {
+		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+
+	var satResp tbcapi.OrdinalSatRangesByOutpointResponse
+	if err := json.Unmarshal(v.Payload, &satResp); err != nil {
+		t.Fatal(err)
+	}
+	if satResp.Error != nil {
+		t.Fatalf("sat ranges response error: %v", satResp.Error)
+	}
+	if len(satResp.SatRanges) == 0 {
+		t.Fatal("expected sat ranges for height 1 coinbase, got none")
+	}
+
+	// Regtest height 1 subsidy = 50 BTC = 5,000,000,000 sats.
+	var total uint64
+	for _, r := range satResp.SatRanges {
+		total += r.Count
+	}
+	if total != 5_000_000_000 {
+		t.Fatalf("coinbase sat total: got %d, want 5000000000", total)
+	}
+	t.Logf("height 1 coinbase sat ranges: %v (total=%d)", satResp.SatRanges, total)
+
+	// Verify sat range starts at expected offset.
+	// Height 0 is genesis (unspendable, 50 BTC).
+	// Height 1 range starts at 5,000,000,000.
+	if satResp.SatRanges[0].Start != 5_000_000_000 {
+		t.Fatalf("sat range start: got %d, want 5000000000", satResp.SatRanges[0].Start)
+	}
+	t.Log("sat range FIFO verified: height 1 starts after height 0 subsidy")
+
+	// Query height 5 coinbase to verify sequential sat allocation.
+	bhs5, err := tbcServer.BlockHeadersByHeight(ctx, 5)
+	if err != nil || len(bhs5) == 0 {
+		t.Fatalf("BlockHeadersByHeight(5): %v", err)
+	}
+	block5Hash := bhs5[0].BlockHash()
+	block5, err := tbcServer.BlockByHash(ctx, block5Hash)
+	if err != nil {
+		t.Fatalf("BlockByHash(height 5): %v", err)
+	}
+	cb5Txid := *block5.Transactions()[0].Hash()
+
+	if err := tbcapi.Write(ctx, tws.conn, "ord-sat-5", tbcapi.OrdinalSatRangesByOutpointRequest{
+		TxID: cb5Txid,
+		Vout: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wsjson.Read(ctx, c, &v); err != nil {
+		t.Fatal(err)
+	}
+	var satResp5 tbcapi.OrdinalSatRangesByOutpointResponse
+	if err := json.Unmarshal(v.Payload, &satResp5); err != nil {
+		t.Fatal(err)
+	}
+	if satResp5.Error != nil {
+		t.Fatalf("height 5 sat ranges error: %v", satResp5.Error)
+	}
+	// Height 5 start = 5 * 5B = 25B.
+	if satResp5.SatRanges[0].Start != 25_000_000_000 {
+		t.Fatalf("height 5 sat range start: got %d, want 25000000000",
+			satResp5.SatRanges[0].Start)
+	}
+	t.Log("height 5 sat range verified: sequential FIFO allocation correct")
+}
+
+// TestRpcOrdinalNotFound tests all ordinal RPC endpoints with inputs
+// that should return not-found or empty results.
+func TestRpcOrdinalNotFound(t *testing.T) {
+	skipIfNoDocker(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancel()
+
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 5, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
+	tbcServer, tbcUrl := createTbcServerWithOrdinals(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	// Wait for sync + index.
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
+		h, _, err := tbcServer.BlockHeaderBest(ctx)
+		if err != nil {
+			continue
+		}
+		if h >= 5 {
+			break
+		}
+	}
+	_, bestWH, err := tbcServer.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bestHash := bestWH.BlockHash()
+	if err := tbcServer.SyncIndexersToHash(ctx, bestHash); err != nil {
+		t.Fatalf("SyncIndexersToHash: %v", err)
+	}
+
+	readResponse := func(t *testing.T) protocol.Message {
+		t.Helper()
+		var v protocol.Message
+		if err := wsjson.Read(ctx, c, &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	t.Run("inscription by ID not found", func(t *testing.T) {
+		fakeTxid := chainhash.Hash{0xde, 0xad}
+		if err := tbcapi.Write(ctx, tws.conn, "nf-1", tbcapi.OrdinalInscriptionByIDRequest{
+			TxID:       fakeTxid,
+			InputIndex: 0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		v := readResponse(t)
+		if v.Header.Command != tbcapi.CmdOrdinalInscriptionByIDResponse {
+			t.Fatalf("unexpected command: %s", v.Header.Command)
+		}
+		var resp tbcapi.OrdinalInscriptionByIDResponse
+		if err := json.Unmarshal(v.Payload, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Error == nil {
+			t.Fatal("expected not-found error")
+		}
+		t.Logf("inscription by ID not found: %v", resp.Error)
+	})
+
+	t.Run("inscription content not found", func(t *testing.T) {
+		fakeTxid := chainhash.Hash{0xbe, 0xef}
+		if err := tbcapi.Write(ctx, tws.conn, "nf-2", tbcapi.OrdinalInscriptionContentRequest{
+			TxID:       fakeTxid,
+			InputIndex: 0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		v := readResponse(t)
+		if v.Header.Command != tbcapi.CmdOrdinalInscriptionContentResponse {
+			t.Fatalf("unexpected command: %s", v.Header.Command)
+		}
+		var resp tbcapi.OrdinalInscriptionContentResponse
+		if err := json.Unmarshal(v.Payload, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Error == nil {
+			t.Fatal("expected not-found error")
+		}
+		t.Logf("inscription content not found: %v", resp.Error)
+	})
+
+	t.Run("inscriptions by block empty", func(t *testing.T) {
+		// Height 1 has no inscriptions — just a coinbase.
+		bhs1, err := tbcServer.BlockHeadersByHeight(ctx, 1)
+		if err != nil || len(bhs1) == 0 {
+			t.Fatal(err)
+		}
+		block1Hash := bhs1[0].BlockHash()
+		if err := tbcapi.Write(ctx, tws.conn, "nf-3", tbcapi.OrdinalInscriptionsByBlockRequest{
+			Hash: block1Hash,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		v := readResponse(t)
+		if v.Header.Command != tbcapi.CmdOrdinalInscriptionsByBlockResponse {
+			t.Fatalf("unexpected command: %s", v.Header.Command)
+		}
+		var resp tbcapi.OrdinalInscriptionsByBlockResponse
+		if err := json.Unmarshal(v.Payload, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Error != nil {
+			t.Fatalf("unexpected error: %v", resp.Error)
+		}
+		if len(resp.Inscriptions) != 0 {
+			t.Fatalf("expected 0 inscriptions, got %d", len(resp.Inscriptions))
+		}
+		t.Log("inscriptions by block: correctly empty for non-inscription block")
+	})
+
+	t.Run("inscriptions by sat empty", func(t *testing.T) {
+		// Sat 42 has no inscription.
+		if err := tbcapi.Write(ctx, tws.conn, "nf-4", tbcapi.OrdinalInscriptionsBySatRequest{
+			SatNumber: 42,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		v := readResponse(t)
+		if v.Header.Command != tbcapi.CmdOrdinalInscriptionsBySatResponse {
+			t.Fatalf("unexpected command: %s", v.Header.Command)
+		}
+		var resp tbcapi.OrdinalInscriptionsBySatResponse
+		if err := json.Unmarshal(v.Payload, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Error != nil {
+			t.Fatalf("unexpected error: %v", resp.Error)
+		}
+		if len(resp.Inscriptions) != 0 {
+			t.Fatalf("expected 0 inscriptions for sat 42, got %d", len(resp.Inscriptions))
+		}
+		t.Log("inscriptions by sat: correctly empty for uninscribed sat")
+	})
+
+	t.Run("sat ranges not found", func(t *testing.T) {
+		fakeTxid := chainhash.Hash{0xca, 0xfe}
+		if err := tbcapi.Write(ctx, tws.conn, "nf-5", tbcapi.OrdinalSatRangesByOutpointRequest{
+			TxID: fakeTxid,
+			Vout: 0,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		v := readResponse(t)
+		if v.Header.Command != tbcapi.CmdOrdinalSatRangesByOutpointResponse {
+			t.Fatalf("unexpected command: %s", v.Header.Command)
+		}
+		var resp tbcapi.OrdinalSatRangesByOutpointResponse
+		if err := json.Unmarshal(v.Payload, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Error == nil {
+			t.Fatal("expected not-found error")
+		}
+		t.Logf("sat ranges not found: %v", resp.Error)
+	})
+}
