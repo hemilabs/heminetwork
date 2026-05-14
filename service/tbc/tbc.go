@@ -3967,9 +3967,7 @@ func (s *Server) SatRangesByOutpoint(ctx context.Context, txid chainhash.Hash, v
 		return nil, errors.New("ordinal index not enabled")
 	}
 
-	var txidBytes [32]byte
-	copy(txidBytes[:], txid[:])
-	op := tbcd.NewOutpoint(txidBytes, vout)
+	op := tbcd.NewOutpoint(txid, vout)
 
 	data, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op)
 	if err != nil {
