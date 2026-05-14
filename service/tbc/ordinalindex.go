@@ -27,15 +27,6 @@ type ordinalIndexer struct {
 	cacheCapacity int
 	mtx           sync.Mutex // protects cache map during parallel fixup/unwind
 
-	// batchCreated tracks 'r' (range) keys that were created by
-	// windTx in the current cache batch (not fetched from DB by
-	// fixupCacheHook). When windTx spends an input whose range key
-	// is in this set, the entry is annihilated (deleted from cache)
-	// rather than marked nil (which would mean "delete from DB").
-	// This mirrors the utxo indexer's IsDelete/annihilation pattern.
-	// Cleared on commit.
-	batchCreated map[tbcd.OrdinalKey]struct{}
-
 	// Inscribed-sat tracking. inscribedSatSet tracks sat numbers with
 	// 's' entries created in the current cache batch (not yet flushed
 	// to DB). Cleared on commit.
@@ -59,7 +50,6 @@ var (
 func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 	oi := &ordinalIndexer{
 		cacheCapacity:   cacheLen,
-		batchCreated:    make(map[tbcd.OrdinalKey]struct{}),
 		inscribedSatSet: make(map[uint64]struct{}),
 		minInscribedSat: math.MaxUint64,
 	}
@@ -73,7 +63,7 @@ func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 }
 
 func (i *ordinalIndexer) newCache() indexerCache {
-	return NewCache[tbcd.OrdinalKey, []byte](i.cacheCapacity)
+	return NewCache[tbcd.OrdinalKey, tbcd.OrdinalValue](i.cacheCapacity)
 }
 
 func (i *ordinalIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -85,7 +75,7 @@ func (i *ordinalIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, erro
 //
 // Time: O(1) cache hit, O(log n) DB miss (LevelDB seek).
 // Space: O(r) where r is ranges per outpoint (typically 1-3).
-func (i *ordinalIndexer) satRanges(ctx context.Context, op tbcd.Outpoint, cache map[tbcd.OrdinalKey][]byte) ([]SatRange, error) {
+func (i *ordinalIndexer) satRanges(ctx context.Context, op tbcd.Outpoint, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) ([]SatRange, error) {
 	k := ordinalRangeKey(op)
 	if v, ok := cache[k]; ok {
 		if v == nil {
@@ -122,7 +112,7 @@ func (i *ordinalIndexer) trackInscribedSat(sat uint64) {
 // Time: O(log(|blockInscribedSats|) + matches * log(|inputRanges|) * |outputRanges|)
 // Two binary searches narrow 96K+ inscribed sats to the few that
 // overlap with this tx's input range.
-func (i *ordinalIndexer) updateInscribedSats(blockInscribedSats []uint64, inputRanges []SatRange, txHash *chainhash.Hash, outputRanges map[uint32][]SatRange, cache map[tbcd.OrdinalKey][]byte) []uint64 {
+func (i *ordinalIndexer) updateInscribedSats(blockInscribedSats []uint64, inputRanges []SatRange, txHash *chainhash.Hash, outputRanges map[uint32][]SatRange, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) []uint64 {
 	if len(inputRanges) == 0 || len(blockInscribedSats) == 0 {
 		return nil
 	}
@@ -173,12 +163,10 @@ func (i *ordinalIndexer) updateInscribedSats(blockInscribedSats []uint64, inputR
 	return feeSats
 }
 
-// putRange writes a sat range to the cache and tracks the key in
-// batchCreated so windTx can annihilate batch-local create+spend.
-func (i *ordinalIndexer) putRange(cache map[tbcd.OrdinalKey][]byte, op tbcd.Outpoint, encoded []byte) {
+// putRange writes a sat range to the cache, overwriting any existing value.
+func (i *ordinalIndexer) putRange(cache map[tbcd.OrdinalKey]tbcd.OrdinalValue, op tbcd.Outpoint, encoded []byte) {
 	k := ordinalRangeKey(op)
 	cache[k] = encoded
-	i.batchCreated[k] = struct{}{}
 }
 
 func (i *ordinalIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
@@ -186,7 +174,7 @@ func (i *ordinalIndexer) process(ctx context.Context, direction int, block *btcu
 		panic("diagnostic: block height not set")
 	}
 
-	cache := c.(*Cache[tbcd.OrdinalKey, []byte]).Map()
+	cache := c.(*Cache[tbcd.OrdinalKey, tbcd.OrdinalValue]).Map()
 	blockHash := block.Hash()
 	blockHeight := uint32(block.Height())
 
@@ -210,7 +198,7 @@ func (i *ordinalIndexer) process(ctx context.Context, direction int, block *btcu
 //
 // Time: O(block_inputs + block_outputs + inscribed_sats_in_range)
 // Space: O(cache_entries_per_block)
-func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache map[tbcd.OrdinalKey][]byte) error {
+func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) error {
 	// One-time check on first call: if resuming from a prior run, the
 	// DB may contain inscribed sats. Two iterator seeks to get
 	// min/max bounds — O(1), no full scan.
@@ -343,7 +331,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 //
 // Time: O(inputs + outputs + |blockInscribedSats|*log(mergedRanges))
 // Space: O(inputs + outputs) for range slices.
-func (i *ordinalIndexer) windTx(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, cache map[tbcd.OrdinalKey][]byte, inscriptionSeq *uint32, blockInscribedSats []uint64) (feeRanges []SatRange, inscribedFeeSats []uint64, err error) {
+func (i *ordinalIndexer) windTx(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue, inscriptionSeq *uint32, blockInscribedSats []uint64) (feeRanges []SatRange, inscribedFeeSats []uint64, err error) {
 	txIns := tx.MsgTx().TxIn
 	txOuts := tx.MsgTx().TxOut
 
@@ -366,17 +354,12 @@ func (i *ordinalIndexer) windTx(ctx context.Context, blockHeight uint32, blockHa
 		}
 		allInputRanges = append(allInputRanges, ranges...)
 
-		// Mark spent input's sat ranges for deletion.
-		// If the range was created in this cache batch (not from
-		// DB), annihilate it — remove from cache entirely so it
-		// never reaches DB. Mirrors utxo indexer's annihilation.
+		// Mark spent input's sat ranges for deletion. Overwrite
+		// with nil (never delete map keys). Mirrors the utxo
+		// indexer's sentinel pattern: the value encodes intent,
+		// the key set is stable across the batch.
 		rk := ordinalRangeKey(op)
-		if _, created := i.batchCreated[rk]; created {
-			delete(cache, rk)
-			delete(i.batchCreated, rk)
-		} else {
-			cache[rk] = nil
-		}
+		cache[rk] = nil
 	}
 
 	// Step 2: Flatten contiguous ranges for FIFO split. O(inputs).
@@ -472,7 +455,7 @@ func (i *ordinalIndexer) windTx(ctx context.Context, blockHeight uint32, blockHa
 //
 // Time: O(block_txs * (outputs + inputs) + inscriptions_in_block)
 // DB reads for input restoration are parallelized (128 concurrent).
-func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache map[tbcd.OrdinalKey][]byte) error {
+func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) error {
 	txs := block.Transactions()
 
 	// Phase 1: Delete all output sat ranges (cache-only, fast).
@@ -499,6 +482,8 @@ func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, bl
 	}
 
 	w := new(sync.WaitGroup)
+	defer w.Wait()
+
 	for _, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if blockchain.IsCoinBase(tx) {
@@ -552,7 +537,7 @@ func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, bl
 }
 
 func (i *ordinalIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
-	cache := c.(*Cache[tbcd.OrdinalKey, []byte])
+	cache := c.(*Cache[tbcd.OrdinalKey, tbcd.OrdinalValue])
 	err := i.g.db.BlockOrdinalUpdate(ctx, direction, cache.Map(), atHash)
 	if err != nil {
 		return err
@@ -560,14 +545,13 @@ func (i *ordinalIndexer) commit(ctx context.Context, direction int, atHash chain
 	// Inscribed sats from this batch are now in DB; clear the set.
 	// Min/max boundaries persist across batches (they only grow).
 	clear(i.inscribedSatSet)
-	clear(i.batchCreated)
 	return nil
 }
 
 // fetchSatRangesParallel fetches sat ranges for a single outpoint and
 // writes them into the cache under the indexer mutex. Mirrors
 // Server.fetchOPParallel from utxoindex.go.
-func (i *ordinalIndexer) fetchSatRangesParallel(ctx context.Context, c chan struct{}, w *sync.WaitGroup, op tbcd.Outpoint, cache map[tbcd.OrdinalKey][]byte) {
+func (i *ordinalIndexer) fetchSatRangesParallel(ctx context.Context, c chan struct{}, w *sync.WaitGroup, op tbcd.Outpoint, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) {
 	defer w.Done()
 	if c != nil {
 		defer func() {
@@ -595,7 +579,7 @@ func (i *ordinalIndexer) fetchSatRangesParallel(ctx context.Context, c chan stru
 //
 // Time: O(cache_misses) DB reads, 128-way parallel.
 func (i *ordinalIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, c indexerCache) error {
-	cache := c.(*Cache[tbcd.OrdinalKey, []byte]).Map()
+	cache := c.(*Cache[tbcd.OrdinalKey, tbcd.OrdinalValue]).Map()
 
 	slots := 128
 	ch := make(chan struct{}, slots)
@@ -611,6 +595,8 @@ func (i *ordinalIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Bloc
 	}
 
 	w := new(sync.WaitGroup)
+	defer w.Wait()
+
 	for _, tx := range block.Transactions() {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if blockchain.IsCoinBase(tx) {
@@ -637,12 +623,6 @@ func (i *ordinalIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Bloc
 			go i.fetchSatRangesParallel(ctx, ch, w, op, cache)
 		}
 	}
-	w.Wait()
-
-	cl := len(ch)
-	if cl != slots {
-		return fmt.Errorf("fixupCacheHook: channel not empty: %v", cl)
-	}
 
 	return nil
 }
@@ -654,40 +634,40 @@ func (i *ordinalIndexer) readCacheInfo() string { return "" }
 // Key construction helpers. These match the SOW prefix scheme exactly.
 
 func ordinalRangeKey(op tbcd.Outpoint) tbcd.OrdinalKey {
-	var key [1 + 37]byte
+	var key tbcd.OrdinalKey
 	key[0] = 'r'
 	copy(key[1:], op[:])
-	return tbcd.OrdinalKey(key[:])
+	return key
 }
 
 func ordinalSatKey(satNumber uint64) tbcd.OrdinalKey {
-	var key [9]byte
+	var key tbcd.OrdinalKey
 	key[0] = 's'
 	binary.BigEndian.PutUint64(key[1:], satNumber)
-	return tbcd.OrdinalKey(key[:])
+	return key
 }
 
 func ordinalInscriptionKey(inscID [36]byte) tbcd.OrdinalKey {
-	var key [1 + 36]byte
+	var key tbcd.OrdinalKey
 	key[0] = 'i'
 	copy(key[1:], inscID[:])
-	return tbcd.OrdinalKey(key[:])
+	return key
 }
 
 func ordinalSatInscriptionKey(satNumber uint64, inscID [36]byte) tbcd.OrdinalKey {
-	var key [1 + 8 + 36]byte
+	var key tbcd.OrdinalKey
 	key[0] = 'a'
 	binary.BigEndian.PutUint64(key[1:], satNumber)
 	copy(key[9:], inscID[:])
-	return tbcd.OrdinalKey(key[:])
+	return key
 }
 
 func ordinalBlockInscriptionKey(blockHash *chainhash.Hash, seq uint32) tbcd.OrdinalKey {
-	var key [1 + 32 + 4]byte
+	var key tbcd.OrdinalKey
 	key[0] = 'n'
 	copy(key[1:], blockHash[:])
 	binary.BigEndian.PutUint32(key[33:], seq)
-	return tbcd.OrdinalKey(key[:])
+	return key
 }
 
 func makeInscriptionID(txHash *chainhash.Hash, inputIdx uint32) [36]byte {

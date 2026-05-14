@@ -2467,7 +2467,7 @@ func (l *ldb) BlockHeaderByOrdinalIndex(ctx context.Context) (*tbcd.BlockHeader,
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
-func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.OrdinalKey][]byte, ordinalIndexHash chainhash.Hash) error {
+func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.OrdinalKey]tbcd.OrdinalValue, ordinalIndexHash chainhash.Hash) error {
 	log.Tracef("BlockOrdinalUpdate")
 	defer log.Tracef("BlockOrdinalUpdate exit")
 
@@ -2481,21 +2481,14 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 	}
 	defer ordDiscard()
 
+	// The cache is updated in a way that makes the direction
+	// irrelevant.
 	ordBatch := new(leveldb.Batch)
 	for k, v := range data {
-		switch direction {
-		case -1:
-			if v == nil {
-				ordBatch.Delete([]byte(k))
-			} else {
-				ordBatch.Put([]byte(k), v)
-			}
-		case 1:
-			if v == nil {
-				ordBatch.Delete([]byte(k))
-			} else {
-				ordBatch.Put([]byte(k), v)
-			}
+		if v.IsDelete() {
+			ordBatch.Delete(k[:])
+		} else {
+			ordBatch.Put(k[:], v.Bytes())
 		}
 		delete(data, k)
 	}
@@ -2517,7 +2510,7 @@ func (l *ldb) OrdinalSatRangesByOutpoint(ctx context.Context, op tbcd.Outpoint) 
 	defer log.Tracef("OrdinalSatRangesByOutpoint exit")
 
 	ordDB := l.pool[level.OrdinalDB]
-	var key [38]byte
+	var key tbcd.OrdinalKey
 	key[0] = 'r'
 	copy(key[1:], op[:])
 
@@ -2536,7 +2529,7 @@ func (l *ldb) OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]by
 	defer log.Tracef("OrdinalInscriptionByID exit")
 
 	ordDB := l.pool[level.OrdinalDB]
-	var key [1 + 36]byte
+	var key tbcd.OrdinalKey
 	key[0] = 'i'
 	copy(key[1:], inscID[:])
 
@@ -2586,11 +2579,11 @@ func (l *ldb) OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64
 	ordDB := l.pool[level.OrdinalDB]
 
 	// Range scan on 's' prefix for sat numbers in [start, end).
-	var startKey [9]byte
+	var startKey tbcd.OrdinalKey
 	startKey[0] = 's'
 	binary.BigEndian.PutUint64(startKey[1:], start)
 
-	var endKey [9]byte
+	var endKey tbcd.OrdinalKey
 	endKey[0] = 's'
 	binary.BigEndian.PutUint64(endKey[1:], end)
 
@@ -2599,7 +2592,7 @@ func (l *ldb) OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64
 	defer it.Release()
 	for it.Next() {
 		k := it.Key()
-		if len(k) != 9 || k[0] != 's' {
+		if len(k) != len(tbcd.OrdinalKey{}) || k[0] != 's' {
 			continue
 		}
 		sat := binary.BigEndian.Uint64(k[1:])
@@ -2621,12 +2614,12 @@ func (l *ldb) OrdinalInscribedSatBounds(ctx context.Context) (uint64, uint64, er
 	ordDB := l.pool[level.OrdinalDB]
 
 	// Find first 's' entry.
-	var startKey [9]byte
+	var startKey tbcd.OrdinalKey
 	startKey[0] = 's'
 	it := ordDB.NewIterator(nil, nil)
 	defer it.Release()
 
-	if !it.Seek(startKey[:]) || len(it.Key()) != 9 || it.Key()[0] != 's' {
+	if !it.Seek(startKey[:]) || len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 's' {
 		return 0, 0, database.NotFoundError("no inscribed sats")
 	}
 	minSat := binary.BigEndian.Uint64(it.Key()[1:])
@@ -2644,7 +2637,7 @@ func (l *ldb) OrdinalInscribedSatBounds(ctx context.Context) (uint64, uint64, er
 			return 0, 0, database.NotFoundError("no inscribed sats")
 		}
 	}
-	if len(it.Key()) != 9 || it.Key()[0] != 's' {
+	if len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 's' {
 		return 0, 0, database.NotFoundError("no inscribed sats")
 	}
 	maxSat := binary.BigEndian.Uint64(it.Key()[1:])
@@ -2660,7 +2653,7 @@ func (l *ldb) OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*tbcd
 	defer log.Tracef("OrdinalOutpointBySat exit")
 
 	ordDB := l.pool[level.OrdinalDB]
-	var key [9]byte
+	var key tbcd.OrdinalKey
 	key[0] = 's'
 	binary.BigEndian.PutUint64(key[1:], satNumber)
 

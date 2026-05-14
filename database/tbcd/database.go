@@ -147,7 +147,7 @@ type Database interface {
 
 	// Ordinals
 	BlockHeaderByOrdinalIndex(ctx context.Context) (*BlockHeader, error)
-	BlockOrdinalUpdate(ctx context.Context, direction int, data map[OrdinalKey][]byte, ordinalIndexHash chainhash.Hash) error
+	BlockOrdinalUpdate(ctx context.Context, direction int, data map[OrdinalKey]OrdinalValue, ordinalIndexHash chainhash.Hash) error
 	OrdinalSatRangesByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error)
 	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
@@ -622,11 +622,25 @@ func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txi
 // updated, the others are essentially a journal of activity.
 type ZKIndexKey string // ugh to make []byte comparable
 
-// OrdinalKey is a wrapper to make variable-length ordinal index keys
-// comparable. Valid prefixes are: 'r' (sat ranges, 38 bytes),
-// 'i' (inscription, 37 bytes), 's' (inscribed sat, 9 bytes),
-// 'a' (sat→inscriptions, 45 bytes), 'n' (block→inscriptions, 37 bytes).
-type OrdinalKey string
+// OrdinalKey is a fixed-size ordinal index key. Using a fixed-size array
+// (like Outpoint and TxKey) avoids heap-allocated map keys and the GC
+// pressure that comes with map[string][]byte under heavy write load.
+// Max key is 'a' (sat→inscriptions) = 1 + 8 + 36 = 45 bytes.
+// Shorter keys are zero-padded; the prefix byte disambiguates.
+type OrdinalKey [45]byte
+
+func (k OrdinalKey) IsRange() bool            { return k[0] == 'r' }
+func (k OrdinalKey) IsSat() bool              { return k[0] == 's' }
+func (k OrdinalKey) IsInscription() bool      { return k[0] == 'i' }
+func (k OrdinalKey) IsSatInscription() bool   { return k[0] == 'a' }
+func (k OrdinalKey) IsBlockInscription() bool { return k[0] == 'n' }
+
+// OrdinalValue wraps ordinal index values. A nil value signals deletion,
+// mirroring CacheOutput.IsDelete() for the utxo indexer.
+type OrdinalValue []byte
+
+func (v OrdinalValue) IsDelete() bool { return v == nil }
+func (v OrdinalValue) Bytes() []byte  { return []byte(v) }
 
 func BEUint64(x uint64) []byte {
 	var b [8]byte
