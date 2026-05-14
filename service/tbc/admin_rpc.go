@@ -443,6 +443,7 @@ func (s *Server) handleSyncIndexersToHashRequest(_ context.Context, sessionID st
 		}
 
 		if err := s.SyncIndexersToHash(jctx, req.Hash); err != nil {
+			log.Errorf("SyncIndexersToHash: %v", err)
 			err := s.adminSessions.BroadcastProgress(s.adminSessions.ctx, jobID, JobStatusFailed)
 			if err != nil {
 				log.Errorf("Failed to broadcast job update %s: %v", jobID, err)
