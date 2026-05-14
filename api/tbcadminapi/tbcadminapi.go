@@ -21,6 +21,9 @@ const (
 
 	CmdSyncIndexersToHashRequest = "tbcadmin-sync-indexers-to-hash-request"
 
+	CmdBlockHeadersInsertRequest  = "tbcadmin-block-headers-insert-request"
+	CmdBlockHeadersInsertResponse = "tbcadmin-block-headers-insert-response"
+
 	// Job lifecycle
 	CmdJobStatusRequest = "tbcadmin-job-status-request"
 
@@ -89,16 +92,29 @@ type SyncIndexersToHashRequest struct {
 	Hash chainhash.Hash `json:"hash"`
 }
 
-var commands = map[protocol.Command]reflect.Type{
-	CmdJobStatusRequest:      reflect.TypeFor[JobStatusRequest](),
-	CmdJobCancelRequest:      reflect.TypeFor[JobCancelRequest](),
-	CmdJobCancelResponse:     reflect.TypeFor[JobCancelResponse](),
-	CmdJobListRequest:        reflect.TypeFor[JobListRequest](),
-	CmdJobListResponse:       reflect.TypeFor[JobListResponse](),
-	CmdJobSubscribeRequest:   reflect.TypeFor[JobSubscribeRequest](),
-	CmdJobUpdateNotification: reflect.TypeFor[JobUpdateNotification](),
+type BlockHeadersInsertRequest struct {
+	BlockHeaders []tbcapi.BlockHeader `json:"block_headers"`
+}
 
-	CmdSyncIndexersToHashRequest: reflect.TypeFor[SyncIndexersToHashRequest](),
+type BlockHeadersInsertResponse struct {
+	InsertType      string              `json:"insert_type"`
+	CanonicalHeader *tbcapi.BlockHeader `json:"canonical_header"`
+	LastHeader      *tbcapi.BlockHeader `json:"last_header"`
+	InsertedCount   uint32              `json:"inserted_count"`
+	Error           *protocol.Error     `json:"error,omitempty"`
+}
+
+var commands = map[protocol.Command]reflect.Type{
+	CmdJobStatusRequest:           reflect.TypeFor[JobStatusRequest](),
+	CmdJobCancelRequest:           reflect.TypeFor[JobCancelRequest](),
+	CmdJobCancelResponse:          reflect.TypeFor[JobCancelResponse](),
+	CmdJobListRequest:             reflect.TypeFor[JobListRequest](),
+	CmdJobListResponse:            reflect.TypeFor[JobListResponse](),
+	CmdJobSubscribeRequest:        reflect.TypeFor[JobSubscribeRequest](),
+	CmdJobUpdateNotification:      reflect.TypeFor[JobUpdateNotification](),
+	CmdBlockHeadersInsertRequest:  reflect.TypeFor[BlockHeadersInsertRequest](),
+	CmdBlockHeadersInsertResponse: reflect.TypeFor[BlockHeadersInsertResponse](),
+	CmdSyncIndexersToHashRequest:  reflect.TypeFor[SyncIndexersToHashRequest](),
 }
 
 func init() {

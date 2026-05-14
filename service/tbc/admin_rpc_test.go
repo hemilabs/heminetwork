@@ -10,23 +10,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
-	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
 )
 
 var (
@@ -48,69 +48,6 @@ func createAdminToken(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return signed
-}
-
-func createTbcAdminServer(ctx context.Context, t *testing.T, seeds []string) (*Server, string) {
-	t.Helper()
-
-	cfg := &Config{
-		AutoIndex:               false,
-		BlockCacheSize:          "10mb",
-		BlockheaderCacheSize:    "1mb",
-		BlockSanity:             false,
-		LevelDBHome:             t.TempDir(),
-		MaxCachedTxs:            1000,
-		PeersWanted:             len(seeds),
-		PrometheusListenAddress: "",
-		ListenAddress:           "127.0.0.1:0",
-		Network:                 networkLocalnet,
-		NotificationBlocking:    true,
-		Seeds:                   seeds,
-		JWTSecret:               testJWTString,
-		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
-	}
-	_ = loggo.ConfigureLoggers(cfg.LogLevel)
-	s, err := NewServer(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// subscribe to tbc notifications
-	l, err := s.SubscribeNotifications(ctx, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Unsubscribe()
-
-	go func() {
-		err := s.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
-			panic(err)
-		}
-	}()
-
-	// Wait for http service to start up
-	var tbcURL string
-	for {
-		msg, err := l.Listen(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Log(msg)
-		if msg.Error != nil {
-			t.Fatal(msg.Error)
-		}
-		// TBC sends a notification when the http service has started.
-		if !msg.Is(NotificationService("", "")) {
-			continue
-		}
-		if addr := s.HTTPAddress(); addr != nil {
-			tbcURL = addr.String()
-			break
-		}
-	}
-	adminURL := fmt.Sprintf("http://%s%s", tbcURL, tbcadminapi.RouteAdminWs)
-	return s, adminURL
 }
 
 func dialAdmin(ctx context.Context, t *testing.T, url string) *websocket.Conn {
@@ -282,7 +219,7 @@ func TestAdminJWTAuthentication(t *testing.T) {
 		},
 	}
 
-	_, adminURL := createTbcAdminServer(ctx, t, nil)
+	adminURL, _, _ := createLocalTBCServer(ctx, t, testJWTString)
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
@@ -320,7 +257,7 @@ func TestAdminRPCCommands(t *testing.T) {
 		postCheck func(*protocol.WSConn, protocol.Message) error
 	}
 
-	s, adminURL := createTbcAdminServer(ctx, t, nil)
+	adminURL, s, _ := createLocalTBCServer(ctx, t, testJWTString)
 
 	var ws sync.WaitGroup
 	ws.Add(1)
@@ -501,8 +438,8 @@ func TestAdminRPCCommands(t *testing.T) {
 				if resp.Error != nil {
 					return fmt.Errorf("unexpected error: %w", resp.Error)
 				}
-				if resp.Height != 0 {
-					return fmt.Errorf("expected height 0, got %d", resp.Height)
+				if resp.Height != 3 {
+					return fmt.Errorf("expected height 3, got %d", resp.Height)
 				}
 				return nil
 			},
@@ -522,8 +459,8 @@ func TestAdminRPCCommands(t *testing.T) {
 				if resp.Error != nil {
 					return fmt.Errorf("unexpected error: %w", resp.Error)
 				}
-				if resp.Height != 0 {
-					return fmt.Errorf("expected height 0, got %d", resp.Height)
+				if resp.Height != 3 {
+					return fmt.Errorf("expected height 3, got %d", resp.Height)
 				}
 				if resp.BlockHeader == nil {
 					return errors.New("expected non-nil block header")
@@ -554,83 +491,196 @@ func TestAdminRPCCommands(t *testing.T) {
 	}
 }
 
+func TestAdminRPCBlockHeadersInsert(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+
+	type testTableItem struct {
+		name      string
+		request   tbcadminapi.BlockHeadersInsertRequest
+		postCheck func(*tbcadminapi.BlockHeadersInsertResponse) error
+	}
+
+	adminURL, _, n := createLocalTBCServer(ctx, t, testJWTString)
+
+	b3 := n.blocksAtHeight[3][0]
+	b3h := wireBlockHeaderToTBC(&b3.MsgBlock().Header)
+	validHeader := tbcapi.BlockHeader{
+		Version:    1,
+		PrevHash:   *b3.Hash(),
+		MerkleRoot: chainhash.Hash{0xff, 0xff},
+		Timestamp:  time.Now().Unix(),
+		Bits:       strconv.FormatUint(uint64(123456780), 16),
+		Nonce:      12345,
+	}
+
+	fork := validHeader
+	fork.Nonce = 54321
+	wfork := wire.NewBlockHeader(1, &fork.PrevHash, &fork.MerkleRoot, 123456780, fork.Nonce)
+	fork.Timestamp = wfork.Timestamp.Unix()
+
+	forkExtend := fork
+	forkExtend.Bits = strconv.FormatUint(uint64(123456789), 16) // higher diff
+	forkExtend.PrevHash = wfork.BlockHash()
+	forkExtend.Timestamp = time.Now().Unix()
+
+	invalidBitsHeader := validHeader
+	invalidBitsHeader.Bits = "invalidbits"
+
+	testTable := []testTableItem{
+		{
+			name: "valid",
+			request: tbcadminapi.BlockHeadersInsertRequest{
+				BlockHeaders: []tbcapi.BlockHeader{*b3h, validHeader},
+			},
+			postCheck: func(resp *tbcadminapi.BlockHeadersInsertResponse) error {
+				if resp.Error != nil {
+					return resp.Error
+				}
+				if *resp.CanonicalHeader != validHeader {
+					return fmt.Errorf("wanted canonical header %v, got %v",
+						validHeader, resp.CanonicalHeader)
+				}
+				if *resp.LastHeader != validHeader {
+					return fmt.Errorf("wanted last header %v, got %v",
+						validHeader, resp.LastHeader)
+				}
+				if resp.InsertType != tbcd.ITChainExtend.String() {
+					return fmt.Errorf("wanted IT %s, got %s",
+						tbcd.ITChainExtend, resp.InsertType)
+				}
+				if resp.InsertedCount != 1 {
+					return fmt.Errorf("wanted insert count %d, got %d",
+						1, resp.InsertedCount)
+				}
+				return nil
+			},
+		},
+		{
+			name: "fork extend",
+			request: tbcadminapi.BlockHeadersInsertRequest{
+				BlockHeaders: []tbcapi.BlockHeader{fork},
+			},
+			postCheck: func(resp *tbcadminapi.BlockHeadersInsertResponse) error {
+				if resp.Error != nil {
+					return resp.Error
+				}
+				if *resp.CanonicalHeader != validHeader {
+					return fmt.Errorf("wanted canonical header %v, got %v",
+						validHeader, resp.CanonicalHeader)
+				}
+				if *resp.LastHeader != fork {
+					return fmt.Errorf("wanted last header %v, got %v",
+						fork, resp.LastHeader)
+				}
+				if resp.InsertType != tbcd.ITForkExtend.String() {
+					return fmt.Errorf("wanted IT %s, got %s",
+						tbcd.ITForkExtend, resp.InsertType)
+				}
+				if resp.InsertedCount != 1 {
+					return fmt.Errorf("wanted insert count %d, got %d",
+						1, resp.InsertedCount)
+				}
+				return nil
+			},
+		},
+		{
+			name: "chain fork",
+			request: tbcadminapi.BlockHeadersInsertRequest{
+				BlockHeaders: []tbcapi.BlockHeader{forkExtend},
+			},
+			postCheck: func(resp *tbcadminapi.BlockHeadersInsertResponse) error {
+				if resp.Error != nil {
+					return resp.Error
+				}
+				if *resp.CanonicalHeader != forkExtend {
+					return fmt.Errorf("wanted canonical header %v, got %v",
+						forkExtend, resp.CanonicalHeader)
+				}
+				if *resp.LastHeader != forkExtend {
+					return fmt.Errorf("wanted last header %v, got %v",
+						forkExtend, resp.LastHeader)
+				}
+				if resp.InsertType != tbcd.ITChainFork.String() {
+					return fmt.Errorf("wanted IT %s, got %s",
+						tbcd.ITChainFork, resp.InsertType)
+				}
+				if resp.InsertedCount != 1 {
+					return fmt.Errorf("wanted insert count %d, got %d",
+						1, resp.InsertedCount)
+				}
+				return nil
+			},
+		},
+		{
+			name: "duplicate",
+			request: tbcadminapi.BlockHeadersInsertRequest{
+				BlockHeaders: []tbcapi.BlockHeader{validHeader},
+			},
+			postCheck: func(resp *tbcadminapi.BlockHeadersInsertResponse) error {
+				if resp.Error == nil {
+					return errors.New("expected error")
+				}
+				return nil
+			},
+		},
+		{
+			name: "invalid bits",
+			request: tbcadminapi.BlockHeadersInsertRequest{
+				BlockHeaders: []tbcapi.BlockHeader{invalidBitsHeader},
+			},
+			postCheck: func(resp *tbcadminapi.BlockHeadersInsertResponse) error {
+				if resp.Error == nil {
+					return errors.New("expected error")
+				}
+				return nil
+			},
+		},
+		{
+			name: "empty headers",
+			request: tbcadminapi.BlockHeadersInsertRequest{
+				BlockHeaders: []tbcapi.BlockHeader{},
+			},
+			postCheck: func(resp *tbcadminapi.BlockHeadersInsertResponse) error {
+				if resp.Error == nil {
+					return errors.New("expected error")
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			c := dialAdmin(ctx, t, adminURL)
+			defer c.CloseNow()
+
+			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+			tws := &tbcWs{conn: protocol.NewWSConn(c)}
+
+			if err := tbcadminapi.Write(ctx, tws.conn, "someid", tti.request); err != nil {
+				t.Fatal(err)
+			}
+
+			msg := readAdminMessage(ctx, t, c)
+			var resp tbcadminapi.BlockHeadersInsertResponse
+			if err := json.Unmarshal(msg.Payload, &resp); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := tti.postCheck(&resp); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestAdminRPCSyncIndexersToHash(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer func() {
-		cancel()
-	}()
+	defer cancel()
 
-	n, err := newFakeNode(t)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		err := n.Stop()
-		if err != nil {
-			t.Logf("node stop: %v", err)
-		}
-	}()
-	go func() {
-		err := n.Run(ctx)
-		if !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
-			panic(err)
-		}
-	}()
-
-	s, adminURL := createTbcAdminServer(ctx, t, []string{n.Address()})
-
-	// Subscribe to tbc notifications
-	l, err := s.SubscribeNotifications(ctx, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Unsubscribe()
-
-	// wait for node to connect as peer
-	select {
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	case <-n.msgCh:
-	}
-
-	// g ->  b1 ->  b2 -> b3
-
-	parent := chaincfg.RegressionNetParams.GenesisHash
-	address := n.address
-	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineNoKeystones)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineNoKeystones)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// make sure tbc downloads blocks
-	if err := n.MineAndSendEmpty(ctx); err != nil {
-		t.Fatal(err)
-	}
-
-	// Wait for tbc to insert all blocks
-	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
-		t.Fatal(err)
-	}
-	l.Unsubscribe()
-
-	// Verify linear indexing. Current TxIndex is sitting at genesis
-
-	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
-	if err != nil {
-		t.Fatalf("expected success g -> b3, got %v", err)
-	}
-	if direction <= 0 {
-		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
-	}
+	adminURL, s, n := createLocalTBCServer(ctx, t, testJWTString)
 
 	// Connect to admin RPC
 	c := dialAdmin(ctx, t, adminURL)
@@ -639,6 +689,7 @@ func TestAdminRPCSyncIndexersToHash(t *testing.T) {
 	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
 	tws := &tbcWs{conn: protocol.NewWSConn(c)}
 
+	b3 := n.blocksAtHeight[3][0]
 	req := tbcadminapi.SyncIndexersToHashRequest{
 		Hash: *b3.Hash(),
 	}
@@ -670,7 +721,9 @@ func TestAdminRPCSyncIndexersToHash(t *testing.T) {
 		}
 	}
 
-	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	b1 := n.blocksAtHeight[1][0]
+	b2 := n.blocksAtHeight[2][0]
+	err := mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -693,7 +746,7 @@ func TestAdminRPCSyncIndexersToHash(t *testing.T) {
 	t.Logf("b3: %v", b3)
 
 	// b3 -> genesis should work with positive direction (cdiff is greater than target)
-	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *s.g.chain.GenesisHash)
+	direction, err := indexIsLinear(ctx, s.g, *b3.Hash(), *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
 	}
@@ -721,7 +774,7 @@ func TestAdminRPCNotFound(t *testing.T) {
 		postCheck func(msg protocol.Message) error
 	}
 
-	_, adminURL := createTbcAdminServer(ctx, t, nil)
+	adminURL, _, _ := createLocalTBCServer(ctx, t, testJWTString)
 	fakeID := "fakeID"
 
 	testTable := []testTableItem{
