@@ -7,14 +7,22 @@ package tbc
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/juju/loggo/v2"
@@ -32,6 +40,14 @@ type ordinalDBSeed struct {
 	inscID    [36]byte
 	satNumber uint64
 	blockHash chainhash.Hash // genesis hash — header exists on server startup
+
+	// Second inscription with all optional fields.
+	txid2   chainhash.Hash
+	inscID2 [36]byte
+	sat2    uint64
+
+	// Address for InscriptionsByAddress testing.
+	address string
 }
 
 // createFullOrdinalDB opens a LevelDB at home, writes ordinal index
@@ -110,8 +126,53 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	// seq 0 → bytes already zero
 	cache[nKey] = tbcd.OrdinalValue(seed.inscID[:])
 
+	// --- Second inscription with parent, delegate, metaprotocol ---
+	seed.txid2 = chainhash.Hash{0x11, 0x12, 0x13, 0x14}
+	copy(seed.inscID2[:32], seed.txid2[:])
+	seed.sat2 = 10_000_000_000
+
+	parent := [36]byte{0xaa, 0xbb, 0xcc}   // parent inscription ID
+	delegate := [36]byte{0xdd, 0xee, 0xff} // delegate inscription ID
+	var iKey2 tbcd.OrdinalKey
+	iKey2[0] = 'i'
+	copy(iKey2[1:], seed.inscID2[:])
+	cache[iKey2] = tbcd.OrdinalValue(encodeInscriptionValue(
+		seed.sat2, &seed.blockHash, true, &InscriptionEnvelope{
+			ContentType:  []byte("application/json"),
+			Content:      []byte(`{"p":"brc-20"}`),
+			Parent:       &parent,
+			Delegate:     &delegate,
+			Metaprotocol: []byte("brc-20"),
+		}))
+
+	// 's' for sat2.
+	var sKey2 tbcd.OrdinalKey
+	sKey2[0] = 's'
+	binary.BigEndian.PutUint64(sKey2[1:], seed.sat2)
+	outpoint2 := tbcd.NewOutpoint(seed.txid2, 1)
+	cache[sKey2] = tbcd.OrdinalValue(outpoint2[:])
+
 	cloned := maps.Clone(cache)
 	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, chainhash.Hash{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed the UTXO index so InscriptionsByAddress can find inscriptions.
+	privKeyBytes, _ := hex.DecodeString(privateKey)
+	_, pub := btcec.PrivKeyFromBytes(privKeyBytes)
+	p2pkhAddr, _ := btcutil.NewAddressPubKeyHash(
+		btcutil.Hash160(pub.SerializeCompressed()),
+		&chaincfg.RegressionNetParams)
+	seed.address = p2pkhAddr.EncodeAddress()
+
+	pkScript, _ := txscript.PayToAddrScript(p2pkhAddr)
+	sh := tbcd.NewScriptHashFromScript(pkScript)
+	co := tbcd.NewCacheOutput([32]byte(sh), 5_000_000_000, 0)
+
+	utxoCache := map[tbcd.Outpoint]tbcd.CacheOutput{
+		seed.outpoint: co,
+	}
+	if err := db.BlockUtxoUpdate(ctx, 1, utxoCache, chainhash.Hash{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -281,6 +342,45 @@ func TestRpcOrdinal(t *testing.T) {
 				fmt.Sprintf("%v:%d", fakeTxid, 0)),
 		},
 		{
+			name: "InscriptionByID with parent+delegate+metaprotocol",
+			req: tbcapi.OrdinalInscriptionByIDRequest{
+				TxID:       seed.txid2,
+				InputIndex: 0,
+			},
+			respHeader: tbcapi.CmdOrdinalInscriptionByIDResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.OrdinalInscriptionByIDResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Error != nil {
+					return r.Error
+				}
+				i := r.Inscription
+				if i == nil {
+					return protocol.Errorf("inscription is nil")
+				}
+				if i.SatNumber != seed.sat2 {
+					return protocol.Errorf("sat: got %d, want %d",
+						i.SatNumber, seed.sat2)
+				}
+				if !i.Cursed {
+					return protocol.Errorf("expected cursed")
+				}
+				if i.ParentTxID == nil {
+					return protocol.Errorf("expected parent")
+				}
+				if i.DelegateTxID == nil {
+					return protocol.Errorf("expected delegate")
+				}
+				if i.Metaprotocol == nil || *i.Metaprotocol != "brc-20" {
+					return protocol.Errorf("metaprotocol: got %v",
+						i.Metaprotocol)
+				}
+				return nil
+			},
+		},
+		{
 			name: "InscriptionsByBlock positive",
 			req: tbcapi.OrdinalInscriptionsByBlockRequest{
 				Hash: seed.blockHash,
@@ -388,7 +488,33 @@ func TestRpcOrdinal(t *testing.T) {
 				fmt.Sprintf("%v:%d", fakeTxid, 0)),
 		},
 		{
-			name: "InscriptionsByAddress ordinal index check",
+			name: "InscriptionsByAddress positive",
+			req: tbcapi.OrdinalInscriptionsByAddressRequest{
+				Address: seed.address,
+				Start:   0,
+				Count:   10,
+			},
+			respHeader: tbcapi.CmdOrdinalInscriptionsByAddressResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.OrdinalInscriptionsByAddressResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Error != nil {
+					return r.Error
+				}
+				if len(r.Inscriptions) != 1 {
+					return protocol.Errorf("expected 1 inscription, got %d",
+						len(r.Inscriptions))
+				}
+				if r.Inscriptions[0].TxID != seed.txid {
+					return protocol.Errorf("txid mismatch")
+				}
+				return nil
+			},
+		},
+		{
+			name: "InscriptionsByAddress empty",
 			req: tbcapi.OrdinalInscriptionsByAddressRequest{
 				Address: "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
 				Start:   0,
@@ -400,7 +526,7 @@ func TestRpcOrdinal(t *testing.T) {
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
 				}
-				// Returns empty or error — both cover the handler.
+				// Empty or nil — both cover the handler.
 				return nil
 			},
 		},
@@ -432,4 +558,80 @@ func TestRpcOrdinal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrometheusOrdinalMetric(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	home := t.TempDir()
+	_ = createFullOrdinalDB(ctx, t, home)
+
+	promAddr := "127.0.0.1:19123"
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		LevelDBHome:             home,
+		ListenAddress:           "127.0.0.1:0",
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       1000,
+		Network:                 networkLocalnet,
+		PrometheusListenAddress: promAddr,
+		Seeds:                   []string{"192.0.2.1:8333"},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// Wait for both HTTP and Prometheus to start.
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+		if s.HTTPAddress() != nil {
+			break
+		}
+	}
+	// Give prometheus listener time to bind.
+	time.Sleep(200 * time.Millisecond)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("http://%s/metrics", promAddr), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /metrics: status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics := string(body)
+
+	if !strings.Contains(metrics, "ordinal_sync_height") {
+		t.Fatal("ordinal_sync_height metric not found in /metrics output")
+	}
+	t.Logf("ordinal_sync_height found in prometheus output")
 }
