@@ -38,7 +38,7 @@ func BenchmarkUpdateInscribedSats_Small(b *testing.B) {
 		0: {{Start: 0, Count: 500}},
 		1: {{Start: 500, Count: 750}},
 	}
-	cache := make(map[tbcd.OrdinalKey][]byte)
+	cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -78,7 +78,7 @@ func BenchmarkUpdateInscribedSats_Large(b *testing.B) {
 		0: {{Start: 500000, Count: 500}},
 		1: {{Start: 500500, Count: 500}},
 	}
-	cache := make(map[tbcd.OrdinalKey][]byte)
+	cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -110,7 +110,7 @@ func BenchmarkUpdateInscribedSats_NoMatch(b *testing.B) {
 	outputRanges := map[uint32][]SatRange{
 		0: {{Start: 20000000, Count: 1000}},
 	}
-	cache := make(map[tbcd.OrdinalKey][]byte)
+	cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
