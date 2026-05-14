@@ -2119,9 +2119,7 @@ func TestNotFoundError(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
-	defer func() {
-		cancel()
-	}()
+	defer cancel()
 
 	var dupErr database.DuplicateError
 

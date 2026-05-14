@@ -140,7 +140,8 @@ func (s *Server) getTBCAdminAPICommandHandler(cmd protocol.Command, payload any,
 	switch cmd {
 	case tapi.CmdBlockHeadersInsertRequest:
 		return func(ctx context.Context) (any, string, error) {
-			return s.handleBlockHeadersInsertRequest(ctx, payload.(*tapi.BlockHeadersInsertRequest))
+			res, err := s.handleBlockHeadersInsertRequest(ctx, payload.(*tapi.BlockHeadersInsertRequest))
+			return res, "", err
 		}
 	case tapi.CmdSyncIndexersToHashRequest:
 		return func(ctx context.Context) (any, string, error) {
@@ -364,7 +365,7 @@ func (s *Server) handleJobStatusRequest(_ context.Context, req *tapi.JobStatusRe
 	}, nil
 }
 
-func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.BlockHeadersInsertRequest) (any, string, error) {
+func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.BlockHeadersInsertRequest) (any, error) {
 	log.Tracef("handleBlockHeadersInsertRequest")
 	defer log.Tracef("handleBlockHeadersInsertRequest exit")
 
@@ -376,7 +377,7 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 			return &tapi.BlockHeadersInsertResponse{
 				Error: protocol.RequestErrorf(
 					"error converting bits (header index %d): %s", i, err),
-			}, "", nil
+			}, nil
 		}
 
 		wh := &wire.BlockHeader{
@@ -392,7 +393,7 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 			e := protocol.NewInternalError(err)
 			return &tapi.BlockHeadersInsertResponse{
 				Error: e.ProtocolError(),
-			}, "", e
+			}, e
 		}
 	}
 
@@ -401,7 +402,7 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 	if err != nil {
 		return &tapi.BlockHeadersInsertResponse{
 			Error: protocol.Errorf("error inserting headers: %s", err),
-		}, "", nil
+		}, nil
 	}
 
 	// Convert tbcd headers to wire
@@ -410,14 +411,14 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 		e := protocol.NewInternalError(err)
 		return &tapi.BlockHeadersInsertResponse{
 			Error: e.ProtocolError(),
-		}, "", e
+		}, e
 	}
 	wlbh, err := lbh.Wire()
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tapi.BlockHeadersInsertResponse{
 			Error: e.ProtocolError(),
-		}, "", e
+		}, e
 	}
 
 	return tapi.BlockHeadersInsertResponse{
@@ -425,7 +426,7 @@ func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.
 		CanonicalHeader: wireBlockHeaderToTBC(wcbh),
 		LastHeader:      wireBlockHeaderToTBC(wlbh),
 		InsertedCount:   uint32(n),
-	}, "", nil
+	}, nil
 }
 
 func (s *Server) handleSyncIndexersToHashRequest(_ context.Context, sessionID string, req *tapi.SyncIndexersToHashRequest) (any, string, error) {

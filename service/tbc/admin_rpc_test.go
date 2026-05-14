@@ -493,9 +493,7 @@ func TestAdminRPCCommands(t *testing.T) {
 
 func TestAdminRPCBlockHeadersInsert(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer func() {
-		cancel()
-	}()
+	defer cancel()
 
 	type testTableItem struct {
 		name      string
@@ -680,9 +678,7 @@ func TestAdminRPCBlockHeadersInsert(t *testing.T) {
 
 func TestAdminRPCSyncIndexersToHash(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer func() {
-		cancel()
-	}()
+	defer cancel()
 
 	adminURL, s, n := createLocalTBCServer(ctx, t, testJWTString)
 
