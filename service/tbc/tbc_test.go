@@ -1238,20 +1238,27 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 }
 
 // createTbcServerWithOrdinals creates a TBC server connected to a bitcoind
-// peer with ordinal indexing enabled. AutoIndex is false so the caller
-// can explicitly sync the indexer to a known hash via SyncIndexersToHash.
+// peer with ordinal indexing enabled. Identical to createTbcServer except
+// cfg.OrdinalIndex = true.
 func createTbcServerWithOrdinals(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
 	t.Helper()
 
-	home := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home := fmt.Sprintf("%s/%s", wd, levelDbHome)
+
+	if err := os.RemoveAll(home); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := NewDefaultConfig()
 	cfg.LevelDBHome = home
 	cfg.Network = networkLocalnet
 	cfg.ListenAddress = "127.0.0.1:0"
-	cfg.AutoIndex = false
 	cfg.OrdinalIndex = true
-	cfg.MaxCachedOrdinals = 1000
 	cfg.Seeds = []string{
 		"127.0.0.1:" + mappedPeerPort.Port(),
 	}
