@@ -1303,6 +1303,60 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	return tbcServer, tbcUrl
 }
 
+// createTbcServerWithOrdinals creates a TBC server connected to a bitcoind
+// peer with ordinal indexing enabled. AutoIndex is false so the caller
+// can explicitly sync the indexer to a known hash via SyncIndexersToHash.
+func createTbcServerWithOrdinals(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
+	t.Helper()
+
+	home := t.TempDir()
+
+	cfg := NewDefaultConfig()
+	cfg.LevelDBHome = home
+	cfg.Network = networkLocalnet
+	cfg.ListenAddress = "127.0.0.1:0"
+	cfg.AutoIndex = false
+	cfg.OrdinalIndex = true
+	cfg.MaxCachedOrdinals = 1000
+	cfg.Seeds = []string{
+		"127.0.0.1:" + mappedPeerPort.Port(),
+	}
+
+	tbcServer, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := tbcServer.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// Wait for HTTP server to start.
+	var tbcAddr string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := tbcServer.HTTPAddress(); addr != nil {
+			tbcAddr = addr.String()
+			break
+		}
+	}
+
+	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+	err = EnsureCanConnect(t, tbcUrl, 5*time.Second)
+	if err != nil {
+		t.Fatalf("could not connect to %s: %s", tbcUrl, err.Error())
+	}
+
+	return tbcServer, tbcUrl
+}
+
 func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	defer cancel()
