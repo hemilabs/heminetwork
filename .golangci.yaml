@@ -58,6 +58,10 @@ linters:
         - "XXX"
         - "TODO"
         - "FIXME"
+    gomoddirectives:
+      replace-local: true # Temporary: tss-lib fork not yet pushed.
+      replace-allow-list:
+        - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
     nolintlint:
       # Require an explanation after each nolint directive.
       # Explanation format example: '//nolint:ineffassign // Explanation goes here.'
