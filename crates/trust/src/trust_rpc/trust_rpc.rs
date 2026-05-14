@@ -62,7 +62,7 @@ enum ChannelEvent {
 /// asynchronous reader, paired with synchronous / sequential writers.
 ///
 /// Calls that send a request to TBC all require borrowing a mutable
-/// version of TrustRPC, preventing them from being executing in parallel.
+/// version of TrustRPC, preventing them from being executed in parallel.
 ///
 /// When TrustRPC receives a Message from TBC, it's discarded if there
 /// is no associated caller (unprompted message), or redirected to a
