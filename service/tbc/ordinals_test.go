@@ -884,7 +884,7 @@ func TestKeyConstruction(t *testing.T) {
 	t.Run("ordinalRangeKey prefix", func(t *testing.T) {
 		op := tbcd.NewOutpoint(chainhash.Hash{0x01}, 42)
 		k := ordinalRangeKey(op)
-		if k[0] != 'r' {
+		if !k.IsRange() {
 			t.Errorf("prefix: got %c want r", k[0])
 		}
 		// Outpoint bytes should follow directly.
@@ -898,7 +898,7 @@ func TestKeyConstruction(t *testing.T) {
 
 	t.Run("ordinalSatKey prefix and encoding", func(t *testing.T) {
 		k := ordinalSatKey(0x0102030405060708)
-		if k[0] != 's' {
+		if !k.IsSat() {
 			t.Errorf("prefix: got %c want s", k[0])
 		}
 		// Big-endian encoding.
@@ -914,7 +914,7 @@ func TestKeyConstruction(t *testing.T) {
 		var inscID [36]byte
 		inscID[0] = 0xff
 		k := ordinalInscriptionKey(inscID)
-		if k[0] != 'i' {
+		if !k.IsInscription() {
 			t.Errorf("prefix: got %c want i", k[0])
 		}
 	})
@@ -922,7 +922,7 @@ func TestKeyConstruction(t *testing.T) {
 	t.Run("ordinalSatInscriptionKey prefix", func(t *testing.T) {
 		var inscID [36]byte
 		k := ordinalSatInscriptionKey(42, inscID)
-		if k[0] != 'a' {
+		if !k.IsSatInscription() {
 			t.Errorf("prefix: got %c want a", k[0])
 		}
 	})
@@ -930,8 +930,75 @@ func TestKeyConstruction(t *testing.T) {
 	t.Run("ordinalBlockInscriptionKey prefix", func(t *testing.T) {
 		var bh chainhash.Hash
 		k := ordinalBlockInscriptionKey(&bh, 7)
-		if k[0] != 'n' {
+		if !k.IsBlockInscription() {
 			t.Errorf("prefix: got %c want n", k[0])
+		}
+	})
+}
+
+func TestOrdinalKeyIsMethods(t *testing.T) {
+	tests := []struct {
+		name            string
+		key             tbcd.OrdinalKey
+		wantRange       bool
+		wantSat         bool
+		wantInscription bool
+		wantSatInsc     bool
+		wantBlockInsc   bool
+	}{
+		{"range key", ordinalRangeKey(tbcd.NewOutpoint(chainhash.Hash{}, 0)), true, false, false, false, false},
+		{"sat key", ordinalSatKey(42), false, true, false, false, false},
+		{"inscription key", ordinalInscriptionKey([36]byte{}), false, false, true, false, false},
+		{"sat inscription key", ordinalSatInscriptionKey(42, [36]byte{}), false, false, false, true, false},
+		{"block inscription key", ordinalBlockInscriptionKey(&chainhash.Hash{}, 0), false, false, false, false, true},
+		{"zero key", tbcd.OrdinalKey{}, false, false, false, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.key.IsRange(); got != tt.wantRange {
+				t.Errorf("IsRange() = %v, want %v", got, tt.wantRange)
+			}
+			if got := tt.key.IsSat(); got != tt.wantSat {
+				t.Errorf("IsSat() = %v, want %v", got, tt.wantSat)
+			}
+			if got := tt.key.IsInscription(); got != tt.wantInscription {
+				t.Errorf("IsInscription() = %v, want %v", got, tt.wantInscription)
+			}
+			if got := tt.key.IsSatInscription(); got != tt.wantSatInsc {
+				t.Errorf("IsSatInscription() = %v, want %v", got, tt.wantSatInsc)
+			}
+			if got := tt.key.IsBlockInscription(); got != tt.wantBlockInsc {
+				t.Errorf("IsBlockInscription() = %v, want %v", got, tt.wantBlockInsc)
+			}
+		})
+	}
+}
+
+func TestOrdinalValueMethods(t *testing.T) {
+	t.Run("nil is delete", func(t *testing.T) {
+		var v tbcd.OrdinalValue
+		if !v.IsDelete() {
+			t.Error("nil OrdinalValue should be delete")
+		}
+		if v.Bytes() != nil {
+			t.Error("nil OrdinalValue.Bytes() should be nil")
+		}
+	})
+
+	t.Run("non-nil is not delete", func(t *testing.T) {
+		v := tbcd.OrdinalValue([]byte{0x01, 0x02})
+		if v.IsDelete() {
+			t.Error("non-nil OrdinalValue should not be delete")
+		}
+		if len(v.Bytes()) != 2 || v.Bytes()[0] != 0x01 {
+			t.Errorf("Bytes() = %x, want 0102", v.Bytes())
+		}
+	})
+
+	t.Run("empty non-nil is not delete", func(t *testing.T) {
+		v := tbcd.OrdinalValue([]byte{})
+		if v.IsDelete() {
+			t.Error("empty non-nil OrdinalValue should not be delete")
 		}
 	})
 }
