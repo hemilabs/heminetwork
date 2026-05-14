@@ -34,6 +34,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin"
 	"github.com/hemilabs/heminetwork/v2/database"
@@ -2365,7 +2366,7 @@ func TestNotFoundError(t *testing.T) {
 	}
 }
 
-func createLocalTBCServer(ctx context.Context, t *testing.T) (string, *Server, *btcNode) {
+func createLocalTBCServer(ctx context.Context, t *testing.T, jwtSecret string) (string, *Server, *btcNode) {
 	t.Helper()
 
 	n, err := newFakeNode(t)
@@ -2397,6 +2398,7 @@ func createLocalTBCServer(ctx context.Context, t *testing.T) (string, *Server, *
 		ListenAddress:           "127.0.0.1:0",
 		Network:                 networkLocalnet,
 		NotificationBlocking:    true,
+		JWTSecret:               jwtSecret,
 		Seeds:                   []string{n.Address()},
 		// LogLevel:             "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 	}
@@ -2446,7 +2448,11 @@ func createLocalTBCServer(ctx context.Context, t *testing.T) (string, *Server, *
 		}
 	}
 
-	tbcAddr := fmt.Sprintf("http://%s%s", tbcURL, tbcapi.RouteWebsocket)
+	route := tbcapi.RouteWebsocket
+	if jwtSecret != "" {
+		route = tbcadminapi.RouteAdminWs
+	}
+	tbcAddr := fmt.Sprintf("http://%s%s", tbcURL, route)
 
 	// wait for node to connect as peer
 	select {
@@ -2578,7 +2584,7 @@ func TestRPCRequestsLocal(t *testing.T) {
 		expectedCmd protocol.Command
 	}
 
-	tbcUrl, tbcServer, n := createLocalTBCServer(ctx, t)
+	tbcUrl, tbcServer, n := createLocalTBCServer(ctx, t, "")
 
 	indexAll(ctx, t, tbcServer)
 

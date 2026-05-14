@@ -9,14 +9,17 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 	tapi "github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 )
@@ -136,6 +139,10 @@ func (s *Server) handleAdminWebsocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getTBCAdminAPICommandHandler(cmd protocol.Command, payload any, ws *tbcAdminWs) func(ctx context.Context) (any, string, error) {
 	switch cmd {
+	case tapi.CmdBlockHeadersInsertRequest:
+		return func(ctx context.Context) (any, string, error) {
+			return s.handleBlockHeadersInsertRequest(ctx, payload.(*tapi.BlockHeadersInsertRequest))
+		}
 	case tapi.CmdSyncIndexersToHashRequest:
 		return func(ctx context.Context) (any, string, error) {
 			return s.handleSyncIndexersToHashRequest(ctx, ws.sessionID, payload.(*tapi.SyncIndexersToHashRequest))
@@ -356,6 +363,70 @@ func (s *Server) handleJobStatusRequest(_ context.Context, req *tapi.JobStatusRe
 	return &tapi.JobUpdateNotification{
 		Job: info,
 	}, nil
+}
+
+func (s *Server) handleBlockHeadersInsertRequest(ctx context.Context, req *tapi.BlockHeadersInsertRequest) (any, string, error) {
+	log.Tracef("handleBlockHeadersInsertRequest")
+	defer log.Tracef("handleBlockHeadersInsertRequest exit")
+
+	// Convert TBC API blockheaders to wire
+	wireHeaders := wire.MsgHeaders{}
+	for i, bh := range req.BlockHeaders {
+		v64, err := strconv.ParseUint(bh.Bits, 16, 32)
+		if err != nil {
+			return &tbcadminapi.BlockHeadersInsertResponse{
+				Error: protocol.RequestErrorf(
+					"error converting bits (header index %d): %s", i, err),
+			}, "", nil
+		}
+
+		wh := &wire.BlockHeader{
+			Version:    bh.Version,
+			PrevBlock:  bh.PrevHash,
+			MerkleRoot: bh.MerkleRoot,
+			Timestamp:  time.Unix(bh.Timestamp, 0),
+			Bits:       uint32(v64),
+			Nonce:      bh.Nonce,
+		}
+
+		if err := wireHeaders.AddBlockHeader(wh); err != nil {
+			e := protocol.NewInternalError(err)
+			return &tbcadminapi.BlockHeadersInsertResponse{
+				Error: e.ProtocolError(),
+			}, "", e
+		}
+	}
+
+	// Insert headers
+	it, cbh, lbh, n, err := s.BlockHeadersInsert(ctx, &wireHeaders)
+	if err != nil {
+		return &tbcadminapi.BlockHeadersInsertResponse{
+			Error: protocol.Errorf("error inserting headers: %s", err),
+		}, "", nil
+	}
+
+	// Convert tbcd headers to wire
+	wcbh, err := cbh.Wire()
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcadminapi.BlockHeadersInsertResponse{
+			Error: e.ProtocolError(),
+		}, "", e
+	}
+	wlbh, err := lbh.Wire()
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcadminapi.BlockHeadersInsertResponse{
+			Error: e.ProtocolError(),
+		}, "", e
+	}
+
+	return tapi.BlockHeadersInsertResponse{
+		InsertType:      it.String(),
+		CanonicalHeader: wireBlockHeaderToTBC(wcbh),
+		LastHeader:      wireBlockHeaderToTBC(wlbh),
+		InsertedCount:   uint32(n),
+	}, "", nil
 }
 
 func (s *Server) handleSyncIndexersToHashRequest(_ context.Context, sessionID string, req *tapi.SyncIndexersToHashRequest) (any, string, error) {
