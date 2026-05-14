@@ -1502,3 +1502,481 @@ func FuzzParseInscriptionEnvelope(f *testing.F) {
 		_, _ = ParseInscriptionEnvelope(witness)
 	})
 }
+
+// --- Coverage gap tests: applyTag, envelopeTag, parseEnvelopeTags ---
+
+func buildWitness(script []byte) wire.TxWitness {
+	return wire.TxWitness{
+		{0x01},     // dummy signature
+		script,     // tapscript
+		{0xc0, 42}, // dummy control block
+	}
+}
+
+func TestParseEnvelopeWithPointerTag(t *testing.T) {
+	// Tag 2 (pointer) with valid length (<=8 bytes).
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // tag 1: content type
+	builder.AddData([]byte("text/plain"))
+	builder.AddOp(txscript.OP_2)              // tag 2: pointer
+	builder.AddData([]byte{0x05, 0x00, 0x00}) // little-endian 5
+	builder.AddOp(txscript.OP_0)              // body
+	builder.AddData([]byte("pointed"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil || env.Pointer == nil {
+		t.Fatal("expected pointer to be set")
+	}
+	if *env.Pointer != 5 {
+		t.Errorf("pointer: got %d, want 5", *env.Pointer)
+	}
+	if string(env.Content) != "pointed" {
+		t.Errorf("content: got %q, want %q", string(env.Content), "pointed")
+	}
+}
+
+func TestParseEnvelopePointerTooLong(t *testing.T) {
+	// Tag 2 (pointer) with length > 8 — should be ignored.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_2)                       // tag 2: pointer
+	builder.AddData([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9}) // 9 bytes, too long
+	builder.AddOp(txscript.OP_0)
+	builder.AddData([]byte("body"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Pointer != nil {
+		t.Error("pointer should be nil for oversized data")
+	}
+}
+
+func TestParseEnvelopeWithMetaprotocol(t *testing.T) {
+	// Tag 7 (metaprotocol).
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // content type
+	builder.AddData([]byte("text/plain"))
+	builder.AddOp(txscript.OP_7) // tag 7: metaprotocol
+	builder.AddData([]byte("brc-20"))
+	builder.AddOp(txscript.OP_0)
+	builder.AddData([]byte("{}"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(env.Metaprotocol) != "brc-20" {
+		t.Errorf("metaprotocol: got %q, want %q", string(env.Metaprotocol), "brc-20")
+	}
+}
+
+func TestParseEnvelopeUnrecognizedEvenTag(t *testing.T) {
+	// Unrecognized even tag (e.g. 4) should set HasUnrecognizedEvenTag.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_4) // tag 4: unrecognized, even
+	builder.AddData([]byte("whatever"))
+	builder.AddOp(txscript.OP_0)
+	builder.AddData([]byte("body"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !env.HasUnrecognizedEvenTag {
+		t.Error("expected HasUnrecognizedEvenTag to be true")
+	}
+}
+
+func TestParseEnvelopeOP5ContentEncoding(t *testing.T) {
+	// Tag 5 (alternate content encoding via OP_5).
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // content type
+	builder.AddData([]byte("text/plain"))
+	builder.AddOp(txscript.OP_5) // tag 5: content (alternate)
+	builder.AddData([]byte("chunk1"))
+	builder.AddData([]byte("chunk2"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(env.Content) != "chunk1chunk2" {
+		t.Errorf("content: got %q, want %q", string(env.Content), "chunk1chunk2")
+	}
+}
+
+func TestParseEnvelopeOP5ThenTag(t *testing.T) {
+	// Tag 5 content followed by a recognized tag mid-body.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_5) // content via OP_5
+	builder.AddData([]byte("body"))
+	builder.AddOp(txscript.OP_7) // tag 7 mid-body
+	builder.AddData([]byte("meta"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(env.Content) != "body" {
+		t.Errorf("content: got %q, want %q", string(env.Content), "body")
+	}
+	if string(env.Metaprotocol) != "meta" {
+		t.Errorf("metaprotocol: got %q, want %q", string(env.Metaprotocol), "meta")
+	}
+}
+
+func TestParseEnvelopeBodyThenTag(t *testing.T) {
+	// OP_0 body separator followed by content, then a recognized tag.
+	// This exercises applyTag via the OP_0 body path.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // content type
+	builder.AddData([]byte("text/plain"))
+	builder.AddOp(txscript.OP_0) // body
+	builder.AddData([]byte("content"))
+	builder.AddOp(txscript.OP_2) // tag 2 (pointer) mid-body → applyTag
+	builder.AddData([]byte{42})  // pointer value
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(env.Content) != "content" {
+		t.Errorf("content: got %q, want %q", string(env.Content), "content")
+	}
+	// The pointer tag was applied via applyTag.
+	if env.Pointer == nil || *env.Pointer != 42 {
+		t.Errorf("pointer: got %v, want 42", env.Pointer)
+	}
+}
+
+func TestParseEnvelopeBodyThenMetaprotocol(t *testing.T) {
+	// OP_0 body → content → tag 7 (metaprotocol) mid-body → applyTag.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_0) // body
+	builder.AddData([]byte("data"))
+	builder.AddOp(txscript.OP_7) // metaprotocol mid-body → applyTag
+	builder.AddData([]byte("sns"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(env.Content) != "data" {
+		t.Errorf("content: got %q, want %q", string(env.Content), "data")
+	}
+	if string(env.Metaprotocol) != "sns" {
+		t.Errorf("metaprotocol: got %q, want %q", string(env.Metaprotocol), "sns")
+	}
+}
+
+func TestParseEnvelopeBodyThenEvenTag(t *testing.T) {
+	// OP_0 body → content → unrecognized even tag → applyTag default.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_0)
+	builder.AddData([]byte("xx")) // multi-byte to avoid tag misparse
+	builder.AddOp(txscript.OP_6)  // tag 6: unrecognized even
+	builder.AddData([]byte("val"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !env.HasUnrecognizedEvenTag {
+		t.Error("expected HasUnrecognizedEvenTag via applyTag")
+	}
+}
+
+func TestParseEnvelopeBodyThenOddTag(t *testing.T) {
+	// OP_0 body → content → unrecognized odd tag → applyTag default (no effect).
+	// Use multi-byte content to avoid single-byte being parsed as a tag number.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_0)
+	builder.AddData([]byte("xx")) // multi-byte so envelopeTag returns -1
+	builder.AddOp(txscript.OP_9)  // tag 9: unrecognized odd
+	builder.AddData([]byte("val"))
+	builder.AddOp(txscript.OP_ENDIF)
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.HasUnrecognizedEvenTag {
+		t.Error("odd tag should not set HasUnrecognizedEvenTag")
+	}
+}
+
+func TestParseEnvelopeDataPushTag(t *testing.T) {
+	// envelopeTag with single-byte data push (OP_DATA_1) instead of OP_N.
+	// Tag number encoded as the byte value.
+	script := []byte{
+		byte(txscript.OP_FALSE),
+		byte(txscript.OP_IF),
+		3, 'o', 'r', 'd', // push "ord"
+		1, 7, // OP_DATA_1 with value 7 → tag 7 (metaprotocol)
+		4, 'c', 'b', 'r', 'c', // push "cbrc"
+		byte(txscript.OP_0),        // body
+		5, 'h', 'e', 'l', 'l', 'o', // push "hello"
+		byte(txscript.OP_ENDIF),
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil {
+		t.Fatal("expected envelope")
+	}
+	if string(env.Metaprotocol) != "cbrc" {
+		t.Errorf("metaprotocol: got %q, want %q", string(env.Metaprotocol), "cbrc")
+	}
+	if string(env.Content) != "hello" {
+		t.Errorf("content: got %q, want %q", string(env.Content), "hello")
+	}
+}
+
+func TestParseEnvelopeFromScriptTokenizerExhaustion(t *testing.T) {
+	// OP_FALSE but tokenizer runs out before OP_IF.
+	script := []byte{byte(txscript.OP_FALSE)}
+	env, err := parseEnvelopeFromScript(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env != nil {
+		t.Error("expected nil for exhausted tokenizer")
+	}
+
+	// OP_FALSE OP_IF but tokenizer runs out before data push.
+	script = []byte{byte(txscript.OP_FALSE), byte(txscript.OP_IF)}
+	env, err = parseEnvelopeFromScript(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env != nil {
+		t.Error("expected nil for truncated envelope")
+	}
+}
+
+func TestParseEnvelopeTagValueExhaustion(t *testing.T) {
+	// Tag present but tokenizer runs out before the value push.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // tag 1 with no value after
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should return a partial envelope (no content type set).
+	if env == nil {
+		t.Fatal("expected partial envelope, got nil")
+	}
+	if env.ContentType != nil {
+		t.Error("content type should be nil when value push is missing")
+	}
+}
+
+func TestApplyTagCoverageViaBodyPath(t *testing.T) {
+	// All these tests exercise applyTag through the OP_0 body mid-tag path.
+
+	t.Run("content type mid-body", func(t *testing.T) {
+		builder := txscript.NewScriptBuilder()
+		builder.AddOp(txscript.OP_FALSE)
+		builder.AddOp(txscript.OP_IF)
+		builder.AddData([]byte("ord"))
+		builder.AddOp(txscript.OP_0) // body
+		builder.AddData([]byte("data"))
+		builder.AddOp(txscript.OP_1) // tag 1 mid-body → applyTag
+		builder.AddData([]byte("image/png"))
+		builder.AddOp(txscript.OP_ENDIF)
+		script, _ := builder.Script()
+		env, err := ParseInscriptionEnvelope(buildWitness(script))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(env.ContentType) != "image/png" {
+			t.Errorf("content type: got %q, want %q", string(env.ContentType), "image/png")
+		}
+	})
+
+	t.Run("parent mid-body valid", func(t *testing.T) {
+		var parentID [36]byte
+		parentID[0] = 0xaa
+		parentID[35] = 0xbb
+		builder := txscript.NewScriptBuilder()
+		builder.AddOp(txscript.OP_FALSE)
+		builder.AddOp(txscript.OP_IF)
+		builder.AddData([]byte("ord"))
+		builder.AddOp(txscript.OP_0)
+		builder.AddData([]byte("data"))
+		builder.AddOp(txscript.OP_3) // tag 3 mid-body → applyTag
+		builder.AddData(parentID[:])
+		builder.AddOp(txscript.OP_ENDIF)
+		script, _ := builder.Script()
+		env, err := ParseInscriptionEnvelope(buildWitness(script))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if env.Parent == nil || env.Parent[0] != 0xaa || env.Parent[35] != 0xbb {
+			t.Errorf("parent: got %v", env.Parent)
+		}
+	})
+
+	t.Run("parent mid-body invalid length", func(t *testing.T) {
+		builder := txscript.NewScriptBuilder()
+		builder.AddOp(txscript.OP_FALSE)
+		builder.AddOp(txscript.OP_IF)
+		builder.AddData([]byte("ord"))
+		builder.AddOp(txscript.OP_0)
+		builder.AddData([]byte("data"))
+		builder.AddOp(txscript.OP_3)     // tag 3 mid-body
+		builder.AddData([]byte{1, 2, 3}) // wrong length
+		builder.AddOp(txscript.OP_ENDIF)
+		script, _ := builder.Script()
+		env, err := ParseInscriptionEnvelope(buildWitness(script))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if env.Parent != nil {
+			t.Error("parent should be nil for invalid length")
+		}
+	})
+
+	t.Run("delegate mid-body valid", func(t *testing.T) {
+		var delegateID [36]byte
+		delegateID[0] = 0xcc
+		builder := txscript.NewScriptBuilder()
+		builder.AddOp(txscript.OP_FALSE)
+		builder.AddOp(txscript.OP_IF)
+		builder.AddData([]byte("ord"))
+		builder.AddOp(txscript.OP_0)
+		builder.AddData([]byte("data"))
+		builder.AddOp(txscript.OP_11) // tag 11 mid-body → applyTag
+		builder.AddData(delegateID[:])
+		builder.AddOp(txscript.OP_ENDIF)
+		script, _ := builder.Script()
+		env, err := ParseInscriptionEnvelope(buildWitness(script))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if env.Delegate == nil || env.Delegate[0] != 0xcc {
+			t.Errorf("delegate: got %v", env.Delegate)
+		}
+	})
+
+	t.Run("delegate mid-body invalid length", func(t *testing.T) {
+		builder := txscript.NewScriptBuilder()
+		builder.AddOp(txscript.OP_FALSE)
+		builder.AddOp(txscript.OP_IF)
+		builder.AddData([]byte("ord"))
+		builder.AddOp(txscript.OP_0)
+		builder.AddData([]byte("data"))
+		builder.AddOp(txscript.OP_11) // tag 11
+		builder.AddData([]byte{1, 2}) // wrong length
+		builder.AddOp(txscript.OP_ENDIF)
+		script, _ := builder.Script()
+		env, err := ParseInscriptionEnvelope(buildWitness(script))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if env.Delegate != nil {
+			t.Error("delegate should be nil for invalid length")
+		}
+	})
+
+	t.Run("pointer mid-body too long", func(t *testing.T) {
+		builder := txscript.NewScriptBuilder()
+		builder.AddOp(txscript.OP_FALSE)
+		builder.AddOp(txscript.OP_IF)
+		builder.AddData([]byte("ord"))
+		builder.AddOp(txscript.OP_0)
+		builder.AddData([]byte("data"))
+		builder.AddOp(txscript.OP_2)                       // tag 2 pointer
+		builder.AddData([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9}) // 9 bytes > 8
+		builder.AddOp(txscript.OP_ENDIF)
+		script, _ := builder.Script()
+		env, err := ParseInscriptionEnvelope(buildWitness(script))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if env.Pointer != nil {
+			t.Error("pointer should be nil for oversized data via applyTag")
+		}
+	})
+}
