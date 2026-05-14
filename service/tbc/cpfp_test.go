@@ -182,7 +182,7 @@ func (stubDB) BlockHeaderByOrdinalIndex(context.Context) (*tbcd.BlockHeader, err
 	panic("stub")
 }
 
-func (stubDB) BlockOrdinalUpdate(context.Context, int, map[tbcd.OrdinalKey][]byte, chainhash.Hash) error {
+func (stubDB) BlockOrdinalUpdate(context.Context, int, map[tbcd.OrdinalKey]tbcd.OrdinalValue, chainhash.Hash) error {
 	panic("stub")
 }
 

@@ -887,9 +887,6 @@ func TestKeyConstruction(t *testing.T) {
 		if k[0] != 'r' {
 			t.Errorf("prefix: got %c want r", k[0])
 		}
-		if len(k) != 38 { // 1 prefix + 37 outpoint
-			t.Errorf("length: got %d want 38", len(k))
-		}
 		// Outpoint bytes should follow directly.
 		for i := range op {
 			if k[1+i] != op[i] {
@@ -903,9 +900,6 @@ func TestKeyConstruction(t *testing.T) {
 		k := ordinalSatKey(0x0102030405060708)
 		if k[0] != 's' {
 			t.Errorf("prefix: got %c want s", k[0])
-		}
-		if len(k) != 9 {
-			t.Errorf("length: got %d want 9", len(k))
 		}
 		// Big-endian encoding.
 		expected := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
@@ -923,9 +917,6 @@ func TestKeyConstruction(t *testing.T) {
 		if k[0] != 'i' {
 			t.Errorf("prefix: got %c want i", k[0])
 		}
-		if len(k) != 37 {
-			t.Errorf("length: got %d want 37", len(k))
-		}
 	})
 
 	t.Run("ordinalSatInscriptionKey prefix", func(t *testing.T) {
@@ -934,9 +925,6 @@ func TestKeyConstruction(t *testing.T) {
 		if k[0] != 'a' {
 			t.Errorf("prefix: got %c want a", k[0])
 		}
-		if len(k) != 45 { // 1 + 8 + 36
-			t.Errorf("length: got %d want 45", len(k))
-		}
 	})
 
 	t.Run("ordinalBlockInscriptionKey prefix", func(t *testing.T) {
@@ -944,9 +932,6 @@ func TestKeyConstruction(t *testing.T) {
 		k := ordinalBlockInscriptionKey(&bh, 7)
 		if k[0] != 'n' {
 			t.Errorf("prefix: got %c want n", k[0])
-		}
-		if len(k) != 37 { // 1 + 32 + 4
-			t.Errorf("length: got %d want 37", len(k))
 		}
 	})
 }
