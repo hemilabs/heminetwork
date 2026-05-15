@@ -77,145 +77,202 @@ func TestAdminJWTAuthentication(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	now := time.Now()
-
-	// Wrong key
-	claims := jwt.RegisteredClaims{
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Second)),
-		NotBefore: jwt.NewNumericDate(now),
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString([]byte("wrong-key-wrong-key-wrong-key!!!"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrongKeySig := http.Header{
-		"Authorization": []string{"Bearer " + signed},
-	}
-
-	// Valid
-	signed, err = token.SignedString(testJWTSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	validSig := http.Header{
-		"Authorization": []string{"Bearer " + signed},
-	}
-
-	// Expired
-	claims = jwt.RegisteredClaims{
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(now.Add(-2 * time.Minute)),
-		NotBefore: jwt.NewNumericDate(now),
-	}
-	token = jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err = token.SignedString(testJWTSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expiredSig := http.Header{
-		"Authorization": []string{"Bearer " + signed},
-	}
-
-	// Not ready
-	claims = jwt.RegisteredClaims{
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Minute)),
-		NotBefore: jwt.NewNumericDate(now.Add(2 * time.Minute)),
-	}
-	token = jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err = token.SignedString(testJWTSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	futureSig := http.Header{
-		"Authorization": []string{"Bearer " + signed},
-	}
-
-	// Stale token
-	claims = jwt.RegisteredClaims{
-		IssuedAt:  jwt.NewNumericDate(now.Add(-2 * jwtExpiryTimeout)),
-		ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Second)),
-		NotBefore: jwt.NewNumericDate(now),
-	}
-	token = jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err = token.SignedString(testJWTSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	staleTokenSig := http.Header{
-		"Authorization": []string{"Bearer " + signed},
-	}
-
-	// Future token
-	claims = jwt.RegisteredClaims{
-		IssuedAt:  jwt.NewNumericDate(now.Add(2 * jwtExpiryTimeout)),
-		ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Second)),
-		NotBefore: jwt.NewNumericDate(now),
-	}
-	token = jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err = token.SignedString(testJWTSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	futureTokenSig := http.Header{
-		"Authorization": []string{"Bearer " + signed},
-	}
-
 	type testTableItem struct {
 		name          string
-		header        http.Header
+		header        func() http.Header
 		expectedError bool
 	}
 
 	testTable := []testTableItem{
 		{
-			name:          "missing header",
+			name: "missing header",
+			header: func() http.Header {
+				return nil
+			},
 			expectedError: true,
 		},
 		{
 			name: "invalid auth format",
-			header: http.Header{
-				"Authorization": []string{"Basic dXNlcjpwYXNz"},
+			header: func() http.Header {
+				return http.Header{
+					"Authorization": []string{"Basic dXNlcjpwYXNz"},
+				}
 			},
 			expectedError: true,
 		},
 		{
 			name: "invalid token",
-			header: http.Header{
-				"Authorization": []string{"Bearer invalid_token_here"},
+			header: func() http.Header {
+				return http.Header{
+					"Authorization": []string{"Bearer invalid_token_here"},
+				}
 			},
 			expectedError: true,
 		},
 		{
-			name:          "invalid signature key",
-			header:        wrongKeySig,
+			name: "invalid signature key",
+			header: func() http.Header {
+				now := time.Now()
+				claims := jwt.RegisteredClaims{
+					IssuedAt:  jwt.NewNumericDate(now),
+					ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Second)),
+					NotBefore: jwt.NewNumericDate(now),
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				signed, err := token.SignedString([]byte("wrong-key-wrong-key-wrong-key!!!"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
 			expectedError: true,
 		},
 		{
-			name:          "expired claims",
-			header:        expiredSig,
+			name: "expired claims",
+			header: func() http.Header {
+				now := time.Now()
+				claims := jwt.RegisteredClaims{
+					IssuedAt:  jwt.NewNumericDate(now),
+					ExpiresAt: jwt.NewNumericDate(now.Add(-2 * time.Minute)),
+					NotBefore: jwt.NewNumericDate(now),
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				signed, err := token.SignedString(testJWTSecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
 			expectedError: true,
 		},
 		{
-			name:          "future claims",
-			header:        futureSig,
+			name: "future claims",
+			header: func() http.Header {
+				now := time.Now()
+				claims := jwt.RegisteredClaims{
+					IssuedAt:  jwt.NewNumericDate(now),
+					ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Minute)),
+					NotBefore: jwt.NewNumericDate(now.Add(2 * time.Minute)),
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				signed, err := token.SignedString(testJWTSecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
 			expectedError: true,
 		},
 		{
-			name:          "stale token",
-			header:        staleTokenSig,
+			name: "stale token",
+			header: func() http.Header {
+				now := time.Now()
+				claims := jwt.RegisteredClaims{
+					IssuedAt:  jwt.NewNumericDate(now.Add(-2 * jwtExpiryTimeout)),
+					ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Second)),
+					NotBefore: jwt.NewNumericDate(now),
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				signed, err := token.SignedString(testJWTSecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
 			expectedError: true,
 		},
 		{
-			name:          "future token",
-			header:        futureTokenSig,
+			name: "future token",
+			header: func() http.Header {
+				now := time.Now()
+				claims := jwt.RegisteredClaims{
+					IssuedAt:  jwt.NewNumericDate(now.Add(2 * jwtExpiryTimeout)),
+					ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Second)),
+					NotBefore: jwt.NewNumericDate(now),
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				signed, err := token.SignedString(testJWTSecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
 			expectedError: true,
 		},
 		{
-			name:   "valid",
-			header: validSig,
+			name: "missing exp",
+			header: func() http.Header {
+				now := time.Now()
+				claims := jwt.RegisteredClaims{
+					IssuedAt:  jwt.NewNumericDate(now),
+					NotBefore: jwt.NewNumericDate(now),
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				signed, err := token.SignedString(testJWTSecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
+			expectedError: true,
+		},
+		{
+			name: "missing nbf",
+			header: func() http.Header {
+				now := time.Now()
+				claims := jwt.RegisteredClaims{
+					IssuedAt:  jwt.NewNumericDate(now),
+					ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Second)),
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				signed, err := token.SignedString(testJWTSecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
+			expectedError: true,
+		},
+		{
+			name: "missing optional iat",
+			header: func() http.Header {
+				now := time.Now()
+				claims := jwt.RegisteredClaims{
+					ExpiresAt: jwt.NewNumericDate(now.Add(30 * time.Second)),
+					NotBefore: jwt.NewNumericDate(now),
+				}
+				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+				signed, err := token.SignedString(testJWTSecret)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
+		},
+		{
+			name: "valid",
+			header: func() http.Header {
+				signed := createAdminToken(t)
+				return http.Header{
+					"Authorization": []string{"Bearer " + signed},
+				}
+			},
 		},
 	}
 
@@ -224,7 +281,7 @@ func TestAdminJWTAuthentication(t *testing.T) {
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
 			c, resp, err := websocket.Dial(ctx, adminURL, &websocket.DialOptions{
-				HTTPHeader: tti.header,
+				HTTPHeader: tti.header(),
 			})
 
 			if tti.expectedError {
