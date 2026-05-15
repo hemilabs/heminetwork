@@ -5,6 +5,7 @@
 package wallet
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -239,4 +240,34 @@ func TestIntegration(t *testing.T) {
 	}
 	t.Logf("TxByID: version=%v txin=%d txout=%d",
 		lookedUp.Version, len(lookedUp.TxIn), len(lookedUp.TxOut))
+}
+
+func TestAbrevKssSerialize(t *testing.T) {
+	kss := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      999999999,
+		L2BlockNumber:      999999999,
+		ParentEPHash:       testutil.FillBytes("parent_ep_hash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prev_kss_ep_hash", 32),
+		StateRoot:          testutil.FillBytes("state_root", 32),
+		EPHash:             testutil.FillBytes("ep_hash", 32),
+	}
+
+	hemiAbrev := hemi.L2KeystoneAbbreviate(kss)
+	hs := hemiAbrev.Serialize()
+
+	gozerAbrev := gozer.L2KeystoneAbrev{
+		Version:            uint(kss.Version),
+		L1BlockNumber:      uint(kss.L1BlockNumber),
+		L2BlockNumber:      uint(kss.L2BlockNumber),
+		ParentEPHash:       kss.ParentEPHash,
+		PrevKeystoneEPHash: kss.PrevKeystoneEPHash,
+		StateRoot:          kss.StateRoot,
+		EPHash:             kss.EPHash,
+	}
+	gs := gozerAbrev.Serialize()
+
+	if !bytes.Equal(gs[:], hs[:]) {
+		t.Fatal("mismatch between serialized abrev kss")
+	}
 }
