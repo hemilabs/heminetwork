@@ -575,13 +575,14 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	defer connCancel()
 
 	var err error
-	s.opgethClient, err = ethclient.DialContext(connCtx, s.cfg.OpgethURL)
+	opgethClient, err := ethclient.DialContext(connCtx, s.cfg.OpgethURL)
 	if err != nil {
 		return err
 	}
-	defer s.opgethClient.Close()
+	defer opgethClient.Close()
 
 	s.mtx.Lock()
+	s.opgethClient = opgethClient
 	s.promHealth.GethConnected = true
 	s.mtx.Unlock()
 	defer func() {
@@ -616,7 +617,7 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	})
 
 	<-ctx.Done()
-	s.opgethClient.Close()
+	opgethClient.Close()
 
 	// Wait for exit
 	s.opgethWG.Wait()
@@ -763,6 +764,12 @@ func (s *Server) promPoll(pctx context.Context) error {
 		s.mtx.Lock()
 		gozer := s.gozer
 		if gozer == nil {
+			// Not ready
+			s.promHealth = health{}
+			s.mtx.Unlock()
+			continue
+		}
+		if s.opgethClient == nil {
 			// Not ready
 			s.promHealth = health{}
 			s.mtx.Unlock()
