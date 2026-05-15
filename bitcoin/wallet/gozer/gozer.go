@@ -78,8 +78,8 @@ type L2KeystoneAbrev struct {
 	EPHash             api.ByteSlice `json:"ep_hash"`
 }
 
-func (a *L2KeystoneAbrev) Serialize() [72]byte {
-	var r [72]byte
+func (a *L2KeystoneAbrev) Serialize() [76]byte {
+	var r [76]byte
 	r[0] = uint8(a.Version)
 	binary.BigEndian.PutUint32(r[1:5], uint32(a.L1BlockNumber))
 	binary.BigEndian.PutUint32(r[5:9], uint32(a.L2BlockNumber))
