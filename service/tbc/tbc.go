@@ -199,7 +199,6 @@ type Config struct {
 	Seeds                   []string
 	ZKIndex                 bool
 	UtxoReadCacheSize       string // LRU read cache for utxo fixup; "0" or "" disables
-	OrdinalReadCacheSize    string // LRU read cache for ordinal fixup; "0" or "" disables
 	OrdinalIndex            bool
 	MaxCachedOrdinals       int
 
@@ -225,7 +224,6 @@ func NewDefaultConfig() *Config {
 		MaxCachedTxs:         defaultMaxCachedTxs,
 		MaxCachedZK:          defaultMaxZK,
 		UtxoReadCacheSize:    "1gb",
-		OrdinalReadCacheSize: "1gb",
 		MaxCachedOrdinals:    defaultMaxCachedOrdinals,
 		MempoolEnabled:       true,
 		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
@@ -247,8 +245,7 @@ type Server struct {
 
 	// utxo read cache survives across write cache flushes, reducing
 	// LevelDB reads for long-lived UTXOs. Cleared at tip.
-	utxoReadCache    *lru.Cache[tbcd.Outpoint, tbcd.ScriptHash]
-	ordinalReadCache *lru.Cache[tbcd.Outpoint, tbcd.OrdinalValue]
+	utxoReadCache *lru.Cache[tbcd.Outpoint, tbcd.ScriptHash]
 
 	// stats
 	printTime      time.Time
@@ -298,7 +295,6 @@ type Server struct {
 		blockCache                tbcd.CacheStats
 		headerCache               tbcd.CacheStats
 		utxoReadCache             lru.Stats
-		ordinalReadCache          lru.Stats
 		diskFree                  uint64
 	} // periodically updated by promPoll
 	isRunning     bool
@@ -952,36 +948,6 @@ func (s *Server) promUtxoReadCacheItems() float64 {
 	return deucalion.IntToFloat(s.prom.utxoReadCache.Items)
 }
 
-func (s *Server) promOrdinalReadCacheHits() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	return deucalion.IntToFloat(s.prom.ordinalReadCache.Hits)
-}
-
-func (s *Server) promOrdinalReadCacheMisses() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	return deucalion.IntToFloat(s.prom.ordinalReadCache.Misses)
-}
-
-func (s *Server) promOrdinalReadCachePurges() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	return deucalion.IntToFloat(s.prom.ordinalReadCache.Purges)
-}
-
-func (s *Server) promOrdinalReadCacheSize() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	return deucalion.IntToFloat(s.prom.ordinalReadCache.Cost)
-}
-
-func (s *Server) promOrdinalReadCacheItems() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	return deucalion.IntToFloat(s.prom.ordinalReadCache.Items)
-}
-
 func (s *Server) promDiskFree() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -1018,9 +984,6 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.headerCache = s.g.db.BlockHeaderCacheStats()
 		if s.utxoReadCache != nil {
 			s.prom.utxoReadCache = s.utxoReadCache.Stats()
-		}
-		if s.ordinalReadCache != nil {
-			s.prom.ordinalReadCache = s.ordinalReadCache.Stats()
 		}
 		if s.cfg.MempoolEnabled {
 			s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
@@ -3124,26 +3087,8 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	if s.cfg.OrdinalIndex {
-		if s.cfg.OrdinalReadCacheSize != "" && s.cfg.OrdinalReadCacheSize != "0" {
-			rcSize, err := humanize.ParseBytes(s.cfg.OrdinalReadCacheSize)
-			if err != nil {
-				return fmt.Errorf("ordinal read cache size: %w", err)
-			}
-			if rcSize > 0 {
-				s.ordinalReadCache, err = lru.New[tbcd.Outpoint, tbcd.OrdinalValue](
-					int(rcSize),
-					func(_ tbcd.Outpoint, v tbcd.OrdinalValue) int {
-						return 37 + len(v) + lru.EntryOverhead
-					},
-					0,
-				)
-				if err != nil {
-					return fmt.Errorf("ordinal read cache: %w", err)
-				}
-			}
-		}
 		s.oi = NewOrdinalIndexer(s.g, s.cfg.MaxCachedOrdinals,
-			s.cfg.OrdinalIndex, s.ordinalReadCache, s.ordinalGenesis)
+			s.cfg.OrdinalIndex, s.ordinalGenesis)
 	}
 
 	return nil
@@ -3324,31 +3269,6 @@ func (s *Server) Collectors() []prometheus.Collector {
 					Name:      "ordinal_sync_height",
 					Help:      "Height of the ordinal indexer",
 				}, s.promOrdinal),
-				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-					Namespace: s.cfg.PrometheusNamespace,
-					Name:      "ordinal_read_cache_hits",
-					Help:      "Ordinal read cache hits",
-				}, s.promOrdinalReadCacheHits),
-				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-					Namespace: s.cfg.PrometheusNamespace,
-					Name:      "ordinal_read_cache_misses",
-					Help:      "Ordinal read cache misses",
-				}, s.promOrdinalReadCacheMisses),
-				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-					Namespace: s.cfg.PrometheusNamespace,
-					Name:      "ordinal_read_cache_purges",
-					Help:      "Ordinal read cache purges",
-				}, s.promOrdinalReadCachePurges),
-				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-					Namespace: s.cfg.PrometheusNamespace,
-					Name:      "ordinal_read_cache_size",
-					Help:      "Ordinal read cache size in bytes",
-				}, s.promOrdinalReadCacheSize),
-				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-					Namespace: s.cfg.PrometheusNamespace,
-					Name:      "ordinal_read_cache_items",
-					Help:      "Number of ordinal read cache entries",
-				}, s.promOrdinalReadCacheItems),
 			)
 		}
 	}
