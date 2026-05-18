@@ -50,7 +50,7 @@ var (
 	_ indexer = (*ordinalIndexer)(nil)
 )
 
-func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool, readCache *lru.Cache[tbcd.Outpoint, tbcd.OrdinalValue]) Indexer {
+func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool, readCache *lru.Cache[tbcd.Outpoint, tbcd.OrdinalValue], ordinalGenesis *HashHeight) Indexer {
 	oi := &ordinalIndexer{
 		cacheCapacity:   cacheLen,
 		inscribedSatSet: make(map[uint64]struct{}),
@@ -62,6 +62,7 @@ func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool, readCache *
 		enabled: enabled,
 		g:       g,
 		p:       oi,
+		genesis: ordinalGenesis,
 	}
 	return oi
 }
