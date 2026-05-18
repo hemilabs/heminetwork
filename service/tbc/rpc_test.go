@@ -1487,17 +1487,17 @@ func TestRpcZK(t *testing.T) {
 	}
 
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		ZKIndex:              true,
-		LevelDBHome:          home,
-		ListenAddress:        "127.0.0.1:0",
-		MaxCachedTxs:         1000,
-		MaxCachedZK:          1000,
-		Network:              networkLocalnet,
-		Seeds:                []string{"192.0.2.1:8333"},
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		ZKIndex:         true,
+		LevelDBHome:     home,
+		ListenAddress:   "127.0.0.1:0",
+		MaxCachedTxs:    1000,
+		MaxCachedZK:     1000,
+		Network:         networkLocalnet,
+		Seeds:           []string{"192.0.2.1:8333"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -2127,7 +2127,7 @@ func TestNotFoundError(t *testing.T) {
 	cfg := &Config{
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
-		BlockheaderCacheSize:    "1mb",
+		HeaderCacheSize:         "1mb",
 		BlockSanity:             false,
 		HemiIndex:               true,
 		LevelDBHome:             t.TempDir(),
@@ -2387,7 +2387,7 @@ func createLocalTBCServer(ctx context.Context, t *testing.T, jwtSecret string) (
 	cfg := &Config{
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
-		BlockheaderCacheSize:    "1mb",
+		HeaderCacheSize:         "1mb",
 		BlockSanity:             false,
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000,
@@ -2788,7 +2788,7 @@ func TestTxWatchNotification(t *testing.T) {
 	cfg := &Config{
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
-		BlockheaderCacheSize:    "1mb",
+		HeaderCacheSize:         "1mb",
 		BlockSanity:             false,
 		HemiIndex:               true,
 		LevelDBHome:             t.TempDir(),
@@ -2924,7 +2924,7 @@ func TestTxWatchFilterDrop(t *testing.T) {
 	cfg := &Config{
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
-		BlockheaderCacheSize:    "1mb",
+		HeaderCacheSize:         "1mb",
 		BlockSanity:             false,
 		HemiIndex:               true,
 		LevelDBHome:             t.TempDir(),
@@ -3047,7 +3047,7 @@ func txWatchTestServer(t *testing.T) (*Server, *websocket.Conn, *tbcWs) {
 	cfg := &Config{
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
-		BlockheaderCacheSize:    "1mb",
+		HeaderCacheSize:         "1mb",
 		BlockSanity:             false,
 		HemiIndex:               true,
 		LevelDBHome:             t.TempDir(),

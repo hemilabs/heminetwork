@@ -137,12 +137,12 @@ func TestDbUpgradeFull(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          true,
-		HemiIndex:            true,
-		LevelDBHome:          home,
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     true,
+		HemiIndex:       true,
+		LevelDBHome:     home,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -415,12 +415,12 @@ func TestDbUpgradeV4(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		HemiIndex:            true,
-		LevelDBHome:          home,
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		HemiIndex:       true,
+		LevelDBHome:     home,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -1500,7 +1500,7 @@ func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Serve
 	cfg.ExternalHeaderMode = true
 	cfg.Network = networkLocalnet
 	cfg.BlockCacheSize = ""
-	cfg.BlockheaderCacheSize = ""
+	cfg.HeaderCacheSize = ""
 	cfg.MempoolEnabled = false
 
 	tbcServer, err := NewServer(cfg)
@@ -2435,7 +2435,7 @@ func TestExternalHeaderModeRunReturnsTypedError(t *testing.T) {
 	cfg.Network = networkLocalnet
 	cfg.MempoolEnabled = false
 	cfg.BlockCacheSize = ""
-	cfg.BlockheaderCacheSize = ""
+	cfg.HeaderCacheSize = ""
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)

@@ -35,7 +35,7 @@ func TestTBCGozerConnection(t *testing.T) {
 	tbcCfg := &tbc.Config{
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
-		BlockheaderCacheSize:    "1mb",
+		HeaderCacheSize:         "1mb",
 		BlockSanity:             false,
 		LevelDBHome:             t.TempDir(),
 		LogLevel:                "tbcd=INFO:level=INFO:tbcgozer=DEBUG",
