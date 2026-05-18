@@ -22,8 +22,9 @@ import (
 type utxoIndexer struct {
 	indexerCommon
 
-	cacheCapacity int
-	fixupHook     fixupCacheFunc
+	cacheCapacity    int
+	fixupHook        fixupCacheFunc
+	syncCompleteHook func() // called by framework after sync reaches target
 }
 
 var (
@@ -33,10 +34,11 @@ var (
 
 type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd.CacheOutput) error
 
-func NewUtxoIndexer(g geometryParams, cacheLen int, f fixupCacheFunc) Indexer {
+func NewUtxoIndexer(g geometryParams, cacheLen int, f fixupCacheFunc, syncComplete func()) Indexer {
 	uxi := &utxoIndexer{
-		cacheCapacity: cacheLen,
-		fixupHook:     f,
+		cacheCapacity:    cacheLen,
+		fixupHook:        f,
+		syncCompleteHook: syncComplete,
 	}
 	uxi.indexerCommon = indexerCommon{
 		name:    "utxo",
@@ -72,6 +74,12 @@ func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhas
 func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, c indexerCache) error {
 	cache := c.(*Cache[tbcd.Outpoint, tbcd.CacheOutput])
 	return i.fixupHook(ctx, block, cache.Map())
+}
+
+func (i *utxoIndexer) onSyncComplete() {
+	if i.syncCompleteHook != nil {
+		i.syncCompleteHook()
+	}
 }
 
 func processUtxos(block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
@@ -189,6 +197,16 @@ func (s *Server) fetchOPParallel(ctx context.Context, c chan struct{}, w *sync.W
 		}()
 	}
 
+	// Check read cache before hitting LevelDB.
+	if s.utxoReadCache != nil {
+		if sh, ok := s.utxoReadCache.Get(op); ok {
+			s.mtx.Lock()
+			utxos[op] = tbcd.NewDeleteCacheOutput(sh, op.TxIndex())
+			s.mtx.Unlock()
+			return
+		}
+	}
+
 	sh, err := s.g.db.ScriptHashByOutpoint(ctx, op)
 	if err != nil {
 		// This happens when a transaction is created and spent in the
@@ -198,6 +216,12 @@ func (s *Server) fetchOPParallel(ctx context.Context, c chan struct{}, w *sync.W
 		log.Debugf("db missing pkscript: %v", op)
 		return
 	}
+
+	// Populate read cache on DB hit.
+	if s.utxoReadCache != nil {
+		s.utxoReadCache.Put(op, *sh)
+	}
+
 	s.mtx.Lock()
 	utxos[op] = tbcd.NewDeleteCacheOutput(*sh, op.TxIndex())
 	s.mtx.Unlock()
@@ -246,12 +270,26 @@ func (s *Server) fixupCacheSerial(ctx context.Context, b *btcutil.Block, utxos m
 				continue
 			}
 
+			// Check read cache before DB.
+			if s.utxoReadCache != nil {
+				if sh, ok := s.utxoReadCache.Get(op); ok {
+					utxos[op] = tbcd.NewDeleteCacheOutput(sh, op.TxIndex())
+					continue
+				}
+			}
+
 			sh, err := s.g.db.ScriptHashByOutpoint(ctx, op)
 			if err != nil {
 				// This happens when a transaction is created
 				// and spent in the same block.
 				continue
 			}
+
+			// Populate read cache on DB hit.
+			if s.utxoReadCache != nil {
+				s.utxoReadCache.Put(op, *sh)
+			}
+
 			// utxo not found, retrieve pkscript from database.
 			utxos[op] = tbcd.NewDeleteCacheOutput(*sh, op.TxIndex())
 		}
@@ -276,11 +314,23 @@ func (s *Server) fixupCacheBatched(ctx context.Context, b *btcutil.Block, utxos 
 				continue
 			}
 
+			// Check read cache before adding to batch.
+			if s.utxoReadCache != nil {
+				if sh, ok := s.utxoReadCache.Get(op); ok {
+					utxos[op] = tbcd.NewDeleteCacheOutput(sh, op.TxIndex())
+					continue
+				}
+			}
+
 			ops = append(ops, &op)
 		}
 	}
 	found := func(op tbcd.Outpoint, sh tbcd.ScriptHash) error {
 		utxos[op] = tbcd.NewDeleteCacheOutput(sh, op.TxIndex())
+		// Populate read cache on DB hit.
+		if s.utxoReadCache != nil {
+			s.utxoReadCache.Put(op, sh)
+		}
 		return nil
 	}
 	return s.g.db.ScriptHashesByOutpoint(ctx, ops, found)

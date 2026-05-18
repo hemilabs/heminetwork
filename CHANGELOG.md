@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add generic `lru` package with cost-based LRU cache (`lru.Cache[K,V]`)
   ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
+- Add utxo read LRU cache (`TBC_UTXO_READ_CACHE_SIZE`) to reduce LevelDB
+  reads during UTXO fixup; cleared when indexer reaches tip
+  ([#1035](https://github.com/hemilabs/heminetwork/pull/1035)).
 - Add ZK indexers.
 - Add RPC request method whitelist to hproxy ([#691](https://github.com/hemilabs/heminetwork/pull/691)).
 - Add TBC notification system ([#725](https://github.com/hemilabs/heminetwork/pull/725)).

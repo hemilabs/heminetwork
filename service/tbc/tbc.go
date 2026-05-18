@@ -42,6 +42,7 @@ import (
 	dbnames "github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/v2/lru"
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
 	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
@@ -189,6 +190,7 @@ type Config struct {
 	PprofListenAddress      string
 	Seeds                   []string
 	ZKIndex                 bool
+	UtxoReadCacheSize       string // LRU read cache for utxo fixup; "0" or "" disables
 
 	// Admin API
 	JWTSecret string // Hex-encoded JWT token for admin RPC authentication
@@ -211,6 +213,7 @@ func NewDefaultConfig() *Config {
 		MaxCachedKeystones:   defaultMaxCachedKeystones,
 		MaxCachedTxs:         defaultMaxCachedTxs,
 		MaxCachedZK:          defaultMaxZK,
+		UtxoReadCacheSize:    "1gb",
 		MempoolEnabled:       true,
 		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
 		PeersWanted:          defaultPeersWanted,
@@ -228,6 +231,10 @@ type Server struct {
 
 	// fixup cache strategy
 	fixupCache func(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error // XXX move this into utxoindexer.go
+
+	// utxo read cache survives across write cache flushes, reducing
+	// LevelDB reads for long-lived UTXOs. Cleared at tip.
+	utxoReadCache *lru.Cache[tbcd.Outpoint, tbcd.ScriptHash]
 
 	// stats
 	printTime      time.Time
@@ -2934,7 +2941,37 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	case 3:
 		s.fixupCache = s.fixupCacheChannel
 	}
-	s.ui = NewUtxoIndexer(s.g, s.cfg.MaxCachedTxs, s.fixupCache)
+	s.ui = NewUtxoIndexer(s.g, s.cfg.MaxCachedTxs, s.fixupCache, func() {
+		if s.utxoReadCache != nil {
+			cs := s.utxoReadCache.Stats()
+			log.Infof("utxo read cache at tip: hits %v misses %v purges %v items %v",
+				cs.Hits, cs.Misses, cs.Purges, cs.Items)
+			s.utxoReadCache.Clear()
+		}
+	})
+
+	// Initialize utxo read cache if configured.
+	if s.cfg.UtxoReadCacheSize != "" && s.cfg.UtxoReadCacheSize != "0" {
+		rcSize, err := humanize.ParseBytes(s.cfg.UtxoReadCacheSize)
+		if err != nil {
+			return fmt.Errorf("utxo read cache size: %w", err)
+		}
+		if rcSize > 0 {
+			s.utxoReadCache, err = lru.New[tbcd.Outpoint, tbcd.ScriptHash](
+				int(rcSize),
+				func(_ tbcd.Outpoint, _ tbcd.ScriptHash) int {
+					// Outpoint=37 + ScriptHash=32 + overhead
+					return 37 + 32 + lru.EntryOverhead
+				},
+				0,
+			)
+			if err != nil {
+				return fmt.Errorf("utxo read cache: %w", err)
+			}
+			log.Infof("utxo read cache: %v", humanize.Bytes(rcSize))
+		}
+	}
+
 	s.ti = NewTxIndexer(s.g, s.cfg.MaxCachedTxs)
 	if s.cfg.HemiIndex {
 		s.ki = NewKeystoneIndexer(s.g, s.cfg.MaxCachedKeystones,
