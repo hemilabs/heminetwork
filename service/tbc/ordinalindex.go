@@ -19,6 +19,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/lru"
 )
 
 type ordinalIndexer struct {
@@ -26,6 +27,8 @@ type ordinalIndexer struct {
 
 	cacheCapacity int
 	mtx           sync.Mutex // protects cache map during parallel fixup/unwind
+
+	readCache *lru.Cache[tbcd.Outpoint, tbcd.OrdinalValue] // optional, nil-safe
 
 	// Inscribed-sat tracking. inscribedSatSet tracks sat numbers with
 	// 's' entries created in the current cache batch (not yet flushed
@@ -47,11 +50,12 @@ var (
 	_ indexer = (*ordinalIndexer)(nil)
 )
 
-func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
+func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool, readCache *lru.Cache[tbcd.Outpoint, tbcd.OrdinalValue]) Indexer {
 	oi := &ordinalIndexer{
 		cacheCapacity:   cacheLen,
 		inscribedSatSet: make(map[uint64]struct{}),
 		minInscribedSat: math.MaxUint64,
+		readCache:       readCache,
 	}
 	oi.indexerCommon = indexerCommon{
 		name:    "ordinal",
@@ -83,9 +87,17 @@ func (i *ordinalIndexer) satRanges(ctx context.Context, op tbcd.Outpoint, cache 
 		}
 		return DecodeSatRanges(v), nil
 	}
+	if i.readCache != nil {
+		if v, ok := i.readCache.Get(op); ok {
+			return DecodeSatRanges(v), nil
+		}
+	}
 	v, err := i.g.db.OrdinalSatRangesByOutpoint(ctx, op)
 	if err != nil {
 		return nil, err
+	}
+	if i.readCache != nil {
+		i.readCache.Put(op, v)
 	}
 	return DecodeSatRanges(v), nil
 }
@@ -562,10 +574,23 @@ func (i *ordinalIndexer) fetchSatRangesParallel(ctx context.Context, c chan stru
 		}()
 	}
 
+	if i.readCache != nil {
+		if v, ok := i.readCache.Get(op); ok {
+			k := ordinalRangeKey(op)
+			i.mtx.Lock()
+			cache[k] = v
+			i.mtx.Unlock()
+			return
+		}
+	}
+
 	v, err := i.g.db.OrdinalSatRangesByOutpoint(ctx, op)
 	if err != nil {
 		// Created and spent in the same block.
 		return
+	}
+	if i.readCache != nil {
+		i.readCache.Put(op, v)
 	}
 	k := ordinalRangeKey(op)
 	i.mtx.Lock()
@@ -627,9 +652,27 @@ func (i *ordinalIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Bloc
 	return nil
 }
 
-func (i *ordinalIndexer) onSyncComplete() {}
+func (i *ordinalIndexer) onSyncComplete() {
+	if i.readCache != nil {
+		i.readCache.Clear()
+	}
+}
 
-func (i *ordinalIndexer) readCacheInfo() string { return "" }
+func (i *ordinalIndexer) readCacheInfo() string {
+	if i.readCache == nil {
+		return ""
+	}
+	cs := i.readCache.Stats()
+	fill := 0
+	if cs.MaxCost > 0 {
+		fill = cs.Cost * 100 / cs.MaxCost
+	}
+	hitPct := 0
+	if total := cs.Hits + cs.Misses; total > 0 {
+		hitPct = cs.Hits * 100 / total
+	}
+	return fmt.Sprintf(" rcache hits %v%% usage %v%%", hitPct, fill)
+}
 
 // Key construction helpers. These match the SOW prefix scheme exactly.
 
