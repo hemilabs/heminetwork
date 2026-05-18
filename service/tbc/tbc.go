@@ -105,6 +105,12 @@ var (
 		Height: 0,
 	}
 
+	// First known inscription: block 767430. Genesis = 767430 - 576.
+	mainnetOrdinalGenesis = &HashHeight{
+		Hash:   *s2h("00000000000000000000aa3565d9ea3056ff31ba416efab16601ccfe50971ab1"),
+		Height: 766854,
+	}
+
 	fixupStrategy = 3 // Do not touch unless your name is marco
 )
 
@@ -262,10 +268,11 @@ type Server struct {
 	invBlocks []*chainhash.Hash
 
 	// bitcoin network
-	wireNet     wire.BitcoinNet
-	timeSource  blockchain.MedianTimeSource
-	hemiGenesis *HashHeight
-	pm          *PeerManager
+	wireNet        wire.BitcoinNet
+	timeSource     blockchain.MedianTimeSource
+	hemiGenesis    *HashHeight
+	ordinalGenesis *HashHeight
+	pm             *PeerManager
 
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL // outstanding pings
@@ -382,6 +389,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	case "mainnet":
 		s.wireNet = wire.MainNet
 		s.hemiGenesis = mainnetHemiGenesis
+		s.ordinalGenesis = mainnetOrdinalGenesis
 
 	case "testnet3", "upgradetest":
 		// upgradetest is a special mode to verify database upgrades.
@@ -3135,7 +3143,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 			}
 		}
 		s.oi = NewOrdinalIndexer(s.g, s.cfg.MaxCachedOrdinals,
-			s.cfg.OrdinalIndex, s.ordinalReadCache)
+			s.cfg.OrdinalIndex, s.ordinalReadCache, s.ordinalGenesis)
 	}
 
 	return nil
