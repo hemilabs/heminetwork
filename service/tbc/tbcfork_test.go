@@ -4397,7 +4397,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 	cfg := &Config{
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
-		BlockheaderCacheSize:    "1mb",
+		HeaderCacheSize:         "1mb",
 		BlockSanity:             false,
 		OrdinalIndex:            true,
 		LevelDBHome:             t.TempDir(),
