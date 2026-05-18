@@ -113,12 +113,6 @@ var (
 			Help:         "size of utxo read LRU cache (0 to disable)",
 			Print:        config.PrintAll,
 		},
-		"TBC_ORDINAL_READ_CACHE_SIZE": config.Config{
-			Value:        &cfg.OrdinalReadCacheSize,
-			DefaultValue: "1gb",
-			Help:         "size of ordinal read LRU cache (0 to disable)",
-			Print:        config.PrintAll,
-		},
 		"TBC_MAX_CACHED_ORDINALS": config.Config{
 			Value:        &cfg.MaxCachedOrdinals,
 			DefaultValue: int(1e6),
