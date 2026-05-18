@@ -5,12 +5,22 @@
 package tbc
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"strconv"
 	"testing"
+	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 	"github.com/hemilabs/heminetwork/v2/lru"
+	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
 )
 
 // utxoReadCacheSizeOf matches production sizeOf in tbc.go.
@@ -192,4 +202,178 @@ func TestUtxoReadCacheNilHookSafe(t *testing.T) {
 	// onSyncComplete with nil hook must not panic.
 	uxi := &utxoIndexer{}
 	uxi.onSyncComplete() // should be a no-op
+}
+
+func TestUtxoReadCacheInfoHook(t *testing.T) {
+	const budget = 10 * (37 + 32 + lru.EntryOverhead)
+	c, err := lru.New[tbcd.Outpoint, tbcd.ScriptHash](budget, utxoReadCacheSizeOf, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	uxi := &utxoIndexer{
+		readCacheInfoHook: func() string {
+			cs := c.Stats()
+			fill := 0
+			if cs.MaxCost > 0 {
+				fill = cs.Cost * 100 / cs.MaxCost
+			}
+			hitPct := 0
+			if total := cs.Hits + cs.Misses; total > 0 {
+				hitPct = cs.Hits * 100 / total
+			}
+			return fmt.Sprintf(" rcache hits %v%% usage %v%%", hitPct, fill)
+		},
+	}
+
+	// Empty cache — 0 hits, 0% fill.
+	info := uxi.readCacheInfo()
+	if info != " rcache hits 0% usage 0%" {
+		t.Fatalf("unexpected empty info: %q", info)
+	}
+
+	// Populate 5 entries.
+	for i := range 5 {
+		c.Put(makeOutpoint(byte(i), 0), makeScriptHash(byte(i)))
+	}
+	// Hit 3 of them.
+	for i := range 3 {
+		c.Get(makeOutpoint(byte(i), 0))
+	}
+
+	info = uxi.readCacheInfo()
+	if info != " rcache hits 100% usage 50%" {
+		t.Fatalf("unexpected info: %q", info)
+	}
+}
+
+func TestUtxoReadCacheInfoNilHook(t *testing.T) {
+	uxi := &utxoIndexer{}
+	if info := uxi.readCacheInfo(); info != "" {
+		t.Fatalf("expected empty string, got %q", info)
+	}
+}
+
+func TestLRUStatsMaxCost(t *testing.T) {
+	const budget = 1000
+	c, err := lru.New[string, string](budget, func(k, v string) int {
+		return len(k) + len(v) + lru.EntryOverhead
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := c.Stats()
+	if s.MaxCost != budget {
+		t.Fatalf("expected MaxCost %d, got %d", budget, s.MaxCost)
+	}
+}
+
+func TestUtxoReadCacheIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockSanity:             false,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            3, // small write cache to force flushes
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          false,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+		UtxoReadCacheSize:       "1mb",
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) && !errors.Is(err, net.ErrClosed) {
+			panic(err)
+		}
+	}()
+
+	// Wait for peer connection.
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	const blockCount = 20
+	blocks := make([]*block, blockCount)
+
+	prevHash := chaincfg.RegressionNetParams.GenesisHash
+	for i := 1; i <= blockCount; i++ {
+		blk, err := n.MineAndSend(ctx, "b"+strconv.Itoa(i), prevHash, n.address, MineWithMultiple)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prevHash = blk.Hash()
+		blocks[i-1] = blk
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	// Index to tip — fixup strategies will exercise the read cache.
+	if err := s.SyncIndexersToHash(ctx, *blocks[blockCount-1].Hash()); err != nil {
+		t.Fatal(err)
+	}
+
+	// After sync completes, onSyncComplete clears items but stats survive.
+	if s.utxoReadCache == nil {
+		t.Fatal("expected utxoReadCache to be initialized after Run")
+	}
+	cs := s.utxoReadCache.Stats()
+
+	t.Logf("read cache stats: hits=%d misses=%d purges=%d items=%d cost=%d",
+		cs.Hits, cs.Misses, cs.Purges, cs.Items, cs.Cost)
+
+	// The cache must have been exercised during fixup.
+	if cs.Hits+cs.Misses == 0 {
+		t.Fatal("expected read cache to be exercised during indexing (hits+misses > 0)")
+	}
+
+	// onSyncComplete should have cleared the cache.
+	if cs.Items != 0 {
+		t.Fatalf("expected 0 items after sync complete, got %d", cs.Items)
+	}
+	if cs.Cost != 0 {
+		t.Fatalf("expected 0 cost after sync complete, got %d", cs.Cost)
+	}
 }

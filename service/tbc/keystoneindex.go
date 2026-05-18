@@ -69,6 +69,8 @@ func (i *keystoneIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ 
 
 func (i *keystoneIndexer) onSyncComplete() {}
 
+func (i *keystoneIndexer) readCacheInfo() string { return "" }
+
 // BlockKeystonesByHash returns all keystones within a block. If hash is not
 // nil then it returns *only* the keystone transactions where the L2
 // abbreviated hash is equal to the provided hash.

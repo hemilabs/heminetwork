@@ -64,6 +64,8 @@ func (i *txIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexe
 
 func (i *txIndexer) onSyncComplete() {}
 
+func (i *txIndexer) readCacheInfo() string { return "" }
+
 func processTxs(ctx context.Context, block *btcutil.Block, direction int, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
 	blockHash := block.Hash()
 	txs := block.Transactions()

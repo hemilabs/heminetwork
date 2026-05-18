@@ -18,11 +18,12 @@ const EntryOverhead = 128
 
 // Stats contains cache statistics.
 type Stats struct {
-	Hits   int `json:"hits"`
-	Misses int `json:"misses"`
-	Purges int `json:"purges"`
-	Cost   int `json:"cost"`  // current total cost
-	Items  int `json:"items"` // current entry count
+	Hits    int `json:"hits"`
+	Misses  int `json:"misses"`
+	Purges  int `json:"purges"`
+	Cost    int `json:"cost"`     // current total cost
+	MaxCost int `json:"max_cost"` // configured cost budget
+	Items   int `json:"items"`    // current entry count
 }
 
 type entry[K comparable, V any] struct {
@@ -191,11 +192,12 @@ func (c *Cache[K, V]) Stats() Stats {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	return Stats{
-		Hits:   c.hits,
-		Misses: c.misses,
-		Purges: c.purges,
-		Cost:   c.totalCost,
-		Items:  len(c.m),
+		Hits:    c.hits,
+		Misses:  c.misses,
+		Purges:  c.purges,
+		Cost:    c.totalCost,
+		MaxCost: c.maxCost,
+		Items:   len(c.m),
 	}
 }
 

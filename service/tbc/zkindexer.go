@@ -235,3 +235,5 @@ func (i *zkIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexe
 }
 
 func (i *zkIndexer) onSyncComplete() {}
+
+func (i *zkIndexer) readCacheInfo() string { return "" }

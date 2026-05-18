@@ -22,9 +22,10 @@ import (
 type utxoIndexer struct {
 	indexerCommon
 
-	cacheCapacity    int
-	fixupHook        fixupCacheFunc
-	syncCompleteHook func() // called by framework after sync reaches target
+	cacheCapacity     int
+	fixupHook         fixupCacheFunc
+	syncCompleteHook  func() // called by framework after sync reaches target
+	readCacheInfoHook func() string
 }
 
 var (
@@ -34,11 +35,12 @@ var (
 
 type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd.CacheOutput) error
 
-func NewUtxoIndexer(g geometryParams, cacheLen int, f fixupCacheFunc, syncComplete func()) Indexer {
+func NewUtxoIndexer(g geometryParams, cacheLen int, f fixupCacheFunc, syncComplete func(), readCacheInfo func() string) Indexer {
 	uxi := &utxoIndexer{
-		cacheCapacity:    cacheLen,
-		fixupHook:        f,
-		syncCompleteHook: syncComplete,
+		cacheCapacity:     cacheLen,
+		fixupHook:         f,
+		syncCompleteHook:  syncComplete,
+		readCacheInfoHook: readCacheInfo,
 	}
 	uxi.indexerCommon = indexerCommon{
 		name:    "utxo",
@@ -80,6 +82,13 @@ func (i *utxoIndexer) onSyncComplete() {
 	if i.syncCompleteHook != nil {
 		i.syncCompleteHook()
 	}
+}
+
+func (i *utxoIndexer) readCacheInfo() string {
+	if i.readCacheInfoHook != nil {
+		return i.readCacheInfoHook()
+	}
+	return ""
 }
 
 func processUtxos(block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {

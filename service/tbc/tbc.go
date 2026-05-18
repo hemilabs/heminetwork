@@ -281,6 +281,7 @@ type Server struct {
 		mempoolCount, mempoolSize int
 		blockCache                tbcd.CacheStats
 		headerCache               tbcd.CacheStats
+		utxoReadCache             lru.Stats
 		diskFree                  uint64
 	} // periodically updated by promPoll
 	isRunning     bool
@@ -897,6 +898,36 @@ func (s *Server) promHeaderCacheItems() float64 {
 	return deucalion.IntToFloat(s.prom.headerCache.Items)
 }
 
+func (s *Server) promUtxoReadCacheHits() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.utxoReadCache.Hits)
+}
+
+func (s *Server) promUtxoReadCacheMisses() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.utxoReadCache.Misses)
+}
+
+func (s *Server) promUtxoReadCachePurges() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.utxoReadCache.Purges)
+}
+
+func (s *Server) promUtxoReadCacheSize() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.utxoReadCache.Cost)
+}
+
+func (s *Server) promUtxoReadCacheItems() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.utxoReadCache.Items)
+}
+
 func (s *Server) promDiskFree() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -931,6 +962,9 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
 		s.prom.blockCache = s.g.db.BlockCacheStats()
 		s.prom.headerCache = s.g.db.BlockHeaderCacheStats()
+		if s.utxoReadCache != nil {
+			s.prom.utxoReadCache = s.utxoReadCache.Stats()
+		}
 		if s.cfg.MempoolEnabled {
 			s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
 		}
@@ -2948,6 +2982,20 @@ func (s *Server) dbOpen(ctx context.Context) error {
 				cs.Hits, cs.Misses, cs.Purges, cs.Items)
 			s.utxoReadCache.Clear()
 		}
+	}, func() string {
+		if s.utxoReadCache == nil {
+			return ""
+		}
+		cs := s.utxoReadCache.Stats()
+		fill := 0
+		if cs.MaxCost > 0 {
+			fill = cs.Cost * 100 / cs.MaxCost
+		}
+		hitPct := 0
+		if total := cs.Hits + cs.Misses; total > 0 {
+			hitPct = cs.Hits * 100 / total
+		}
+		return fmt.Sprintf(" rcache hits %v%% usage %v%%", hitPct, fill)
 	})
 
 	// Initialize utxo read cache if configured.
@@ -2957,7 +3005,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 			return fmt.Errorf("utxo read cache size: %w", err)
 		}
 		if rcSize > 0 {
-			s.utxoReadCache, err = lru.New[tbcd.Outpoint, tbcd.ScriptHash](
+			s.utxoReadCache, err = lru.New(
 				int(rcSize),
 				func(_ tbcd.Outpoint, _ tbcd.ScriptHash) int {
 					// Outpoint=37 + ScriptHash=32 + overhead
@@ -2968,7 +3016,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("utxo read cache: %w", err)
 			}
-			log.Infof("utxo read cache: %v", humanize.Bytes(rcSize))
+			log.Infof("utxo read cache: %s", s.cfg.UtxoReadCacheSize)
 		}
 	}
 
@@ -3107,6 +3155,31 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "block_cache_items",
 				Help:      "Number of cached blocks",
 			}, s.promBlockCacheItems),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "utxo_read_cache_hits",
+				Help:      "Utxo read cache hits",
+			}, s.promUtxoReadCacheHits),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "utxo_read_cache_misses",
+				Help:      "Utxo read cache misses",
+			}, s.promUtxoReadCacheMisses),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "utxo_read_cache_purges",
+				Help:      "Utxo read cache purges",
+			}, s.promUtxoReadCachePurges),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "utxo_read_cache_size",
+				Help:      "Utxo read cache size in bytes",
+			}, s.promUtxoReadCacheSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "utxo_read_cache_items",
+				Help:      "Number of utxo read cache entries",
+			}, s.promUtxoReadCacheItems),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "disk_free",
