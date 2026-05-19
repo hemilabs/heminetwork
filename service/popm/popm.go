@@ -414,7 +414,7 @@ func (s *Server) estimateFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
 	// Apply max fee cap if configured
 	if s.cfg.MaxFee > 0 && feeAmount.SatsPerVByte > s.cfg.MaxFee {
 		return nil, FeeMaxExceededError(fmt.Sprintf(
-			"Fee estimate of %.2f sats/vB exceeds max fee of %.2f sats/vB",
+			"fee estimate of %.2f sats/vB exceeds max fee of %.2f sats/vB",
 			feeAmount.SatsPerVByte, s.cfg.MaxFee))
 	}
 
