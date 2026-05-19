@@ -3675,17 +3675,13 @@ func (s *Server) populateInscription(ctx context.Context, inscID [36]byte) (*tbc
 	copy(insc.TxID[:], inscID[:32])
 	insc.InputIndex = binary.LittleEndian.Uint32(inscID[32:])
 
-	// Current location of the sat.
-	op, err := s.g.db.OrdinalOutpointBySat(ctx, d.SatNumber)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return nil, fmt.Errorf("outpoint for sat %d: %w", d.SatNumber, err)
+	// Compute sat number on demand if not stored (ordinals2: always 0).
+	if insc.SatNumber == 0 {
+		satNum, err := s.computeInscribedSat(ctx, insc.TxID, insc.InputIndex)
+		if err == nil {
+			insc.SatNumber = satNum
 		}
-		// Sat not tracked (burned or not in UTXO set) — leave zero.
-	} else {
-		txid, _ := chainhash.NewHash(op.TxId())
-		insc.CurrentTxID = *txid
-		insc.CurrentVout = op.TxIndex()
+		// On error, leave as 0 — best effort.
 	}
 
 	if d.Parent != nil {
