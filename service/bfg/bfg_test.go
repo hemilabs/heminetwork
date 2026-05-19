@@ -74,7 +74,7 @@ func TestBFG(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sendFinalityRequests(t, ctx, kssList, s.HTTPAddress().String(), 9, 10000)
+	sendFinalityRequests(ctx, t, kssList, s.HTTPAddress().String(), 9, 10000)
 }
 
 func TestKeystoneFinalityInheritance(t *testing.T) {
@@ -135,7 +135,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sendFinalityRequests(t, ctx, kssList, s.HTTPAddress().String(), 9, 10000)
+	sendFinalityRequests(ctx, t, kssList, s.HTTPAddress().String(), 9, 10000)
 }
 
 func TestFullMockIntegration(t *testing.T) {
@@ -192,7 +192,7 @@ func TestFullMockIntegration(t *testing.T) {
 		defer func() {
 			msgCh <- "finalityRequestDone"
 		}()
-		sendFinalityRequests(t, ctx, kssList, bfgAddr, 0, 0)
+		sendFinalityRequests(ctx, t, kssList, bfgAddr, 0, 0)
 	}()
 
 	// wait until all keystones are mined and broadcast
@@ -244,7 +244,7 @@ func TestFullMockIntegration(t *testing.T) {
 		defer func() {
 			msgCh <- "finalityRequestDone"
 		}()
-		sendFinalityRequests(t, ctx, kssList, bfgAddr, 9, 10000)
+		sendFinalityRequests(ctx, t, kssList, bfgAddr, 9, 10000)
 	}()
 
 	// wait until all keystones are mined and broadcast
@@ -259,7 +259,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 }
 
-func sendFinalityRequests(t *testing.T, ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
+func sendFinalityRequests(ctx context.Context, t *testing.T, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
 	client := &http.Client{}
 	for i := range wantedKeystones {
 		// this will retry until the test times out, as we don't expect errors

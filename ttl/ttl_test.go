@@ -15,7 +15,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
-func callback(ctx context.Context, key any, value any) {
+func callback(_ context.Context, _ any, value any) {
 	v, ok := value.(*sync.WaitGroup)
 	if !ok {
 		panic(fmt.Sprintf("invalid value type: %T", value))
@@ -23,7 +23,7 @@ func callback(ctx context.Context, key any, value any) {
 	v.Done()
 }
 
-func callbackPanic(ctx context.Context, key any, value any) {
+func callbackPanic(_ context.Context, key any, _ any) {
 	panic(fmt.Sprintf("unexpected callback: %v", spew.Sdump(key)))
 }
 

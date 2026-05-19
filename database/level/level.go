@@ -172,7 +172,7 @@ func (l *Database) openRawDB(name string, blockSize int64) error {
 	return nil
 }
 
-func New(ctx context.Context, cfg *Config) (*Database, error) {
+func New(_ context.Context, cfg *Config) (*Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 

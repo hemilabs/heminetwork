@@ -273,7 +273,7 @@ func TestClientReap(t *testing.T) {
 func TestRequestTimeout(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		wg.Wait() // Stupid test server is stupid
 
 		// exit so that we can complete the test. If we don't exit the

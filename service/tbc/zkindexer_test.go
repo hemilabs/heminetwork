@@ -44,7 +44,7 @@ func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64
 	cache := make(map[tbcd.ZKIndexKey][]byte, 5)
 	index := 99
 	blockHash := testutil.RandomHash()
-	txId := testutil.RandomHash()
+	txID := testutil.RandomHash()
 	prevHash := testutil.RandomHash()
 
 	// ScriptHash
@@ -56,22 +56,22 @@ func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64
 
 	// SpentOut
 	spo := tbcd.NewSpentOutput(chainhash.Hash(sh), uint32(index),
-		*blockHash, *txId, *prevHash, uint32(index-1), 0)
+		*blockHash, *txID, *prevHash, uint32(index-1), 0)
 	cache[tbcd.ZKIndexKey(spo[:])] = nil
 
 	// SpendingOut
 	sok := tbcd.NewSpendingOutpointKey(*prevHash,
 		uint32(index), *blockHash, uint32(index-1))
-	cache[tbcd.ZKIndexKey(sok[:])] = tbcd.NewSpendingOutpointValueSlice(*txId, uint32(index))
+	cache[tbcd.ZKIndexKey(sok[:])] = tbcd.NewSpendingOutpointValueSlice(*txID, uint32(index))
 
 	// SpendableOut
 	so := tbcd.NewSpendableOutput(chainhash.Hash(sh), uint32(index),
-		*blockHash, *txId, 0)
+		*blockHash, *txID, 0)
 	cache[tbcd.ZKIndexKey(so[:])] = nil
 
 	// Outpoint
-	op := tbcd.NewOutpoint(*txId, 0)
-	txOut := wire.TxOut{Value: 10, PkScript: txId[:]}
+	op := tbcd.NewOutpoint(*txID, 0)
+	txOut := wire.TxOut{Value: 10, PkScript: txID[:]}
 	cache[tbcd.ZKIndexKey(op[:])] = tbcd.NewTxOut(&txOut)
 
 	// Insert into DB
@@ -97,8 +97,8 @@ func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64
 	if value != rv {
 		t.Fatalf("expected %v, got %v", value, rv)
 	}
-	if !bytes.Equal(txId[:], rid) {
-		t.Fatalf("expected %x, got %x", txId, rid)
+	if !bytes.Equal(txID[:], rid) {
+		t.Fatalf("expected %x, got %x", txID, rid)
 	}
 
 	// ScriptHash
@@ -128,8 +128,8 @@ func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64
 	if !bytes.Equal(blockHash[:], rout.BlockHash[:]) {
 		t.Fatalf("got %x, expected %x", rout.BlockHash, blockHash)
 	}
-	if !bytes.Equal(txId[:], rout.TxID[:]) {
-		t.Fatalf("got %x, expected %x", rout.TxID, txId)
+	if !bytes.Equal(txID[:], rout.TxID[:]) {
+		t.Fatalf("got %x, expected %x", rout.TxID, txID)
 	}
 	if !bytes.Equal(prevHash[:], rout.PrevOutpointHash[:]) {
 		t.Fatalf("got %x, expected %x", rout.PrevOutpointHash, prevHash)
@@ -159,8 +159,8 @@ func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64
 	if !bytes.Equal(blockHash[:], srout.BlockHash[:]) {
 		t.Fatalf("got %x, expected %x", srout.BlockHash, blockHash)
 	}
-	if !bytes.Equal(txId[:], srout.TxID[:]) {
-		t.Fatalf("got %x, expected %x", srout.TxID, txId)
+	if !bytes.Equal(txID[:], srout.TxID[:]) {
+		t.Fatalf("got %x, expected %x", srout.TxID, txID)
 	}
 	if srout.TxOutIndex != 0 {
 		t.Fatalf("expected %v, got %v", srout.TxOutIndex, 0)
@@ -188,8 +188,8 @@ func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64
 		t.Fatalf("expected %v, got %v", sprout.VOutIndex, index)
 	}
 	sv := sprout.SpendingOutpoint
-	if !bytes.Equal(txId[:], sv.TxID[:]) {
-		t.Fatalf("expected %x, got %x", sv.TxID, txId)
+	if !bytes.Equal(txID[:], sv.TxID[:]) {
+		t.Fatalf("expected %x, got %x", sv.TxID, txID)
 	}
 	if uint32(index) != sv.Index {
 		t.Fatalf("expected %v, got %v", sv.Index, index)

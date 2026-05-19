@@ -619,7 +619,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		bh, err := s.BlockHashByTxId(ctx, *chtxid)
+		bh, err := s.BlockHashByTxID(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
@@ -635,7 +635,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		tx, err := s.TxById(ctx, *chtxid)
+		tx, err := s.TxByID(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
@@ -651,7 +651,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		si, err := s.SpentOutputsByTxId(ctx, *chtxid)
+		si, err := s.SpentOutputsByTxID(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("spend outputs by txid: %w", err)
 		}
@@ -670,7 +670,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		si, err := s.SpentOutputsByTxId(ctx, *chtxid)
+		si, err := s.SpentOutputsByTxID(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("spend outputs by txid: %w", err)
 		}
@@ -687,8 +687,8 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return err
 		}
-		txIdBytes := [32]byte(chtxid.CloneBytes())
-		op := tbcd.NewOutpoint(txIdBytes, uint32(idx))
+		txIDBytes := [32]byte(chtxid.CloneBytes())
+		op := tbcd.NewOutpoint(txIDBytes, uint32(idx))
 		// copy(h[:], chtxid[:])
 		// op := tbcd.NewOutpoint(h, uint32(idx))
 		sh, err := s.ScriptHashByOutpoint(ctx, op)

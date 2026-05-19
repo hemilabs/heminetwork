@@ -156,7 +156,7 @@ func (bs *blockstreamGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*c
 	return txidHash, nil
 }
 
-func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
+func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, _ bool, addr btcutil.Address, _, _ uint) ([]*tbcapi.UTXO, error) {
 	u := fmt.Sprintf("%v/address/%v/utxo", bs.url, addr)
 	utxos, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
@@ -171,7 +171,7 @@ func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, filterMempool bo
 		BlockTime   int64          `json:"block_time"`
 	}
 	type utxosJSON struct {
-		TxId   chainhash.Hash `json:"txid"`
+		TxID   chainhash.Hash `json:"txid"`
 		Vout   uint32         `json:"vout"`
 		Value  btcutil.Amount `json:"value"`
 		Status statusJSON     `json:"status"`
@@ -188,7 +188,7 @@ func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, filterMempool bo
 			continue
 		}
 		urv = append(urv, &tbcapi.UTXO{
-			TxId:     v.TxId,
+			TxID:     v.TxID,
 			OutIndex: v.Vout,
 			Value:    v.Value,
 		})
@@ -201,13 +201,13 @@ func (bs *blockstreamGozer) MempoolUtxos(_ context.Context, _ []api.ByteSlice) (
 	return nil, errors.New("mempool utxos not supported by blockstream")
 }
 
-func (bs *blockstreamGozer) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *gozer.BlocksByL2AbrevHashesResponse {
+func (bs *blockstreamGozer) BlocksByL2AbrevHashes(_ context.Context, _ []chainhash.Hash) *gozer.BlocksByL2AbrevHashesResponse {
 	return &gozer.BlocksByL2AbrevHashesResponse{
 		Error: protocol.Errorf("not supported yet"),
 	}
 }
 
-func (bs *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32, depth int) (*gozer.KeystonesByHeightResponse, error) {
+func (bs *blockstreamGozer) KeystonesByHeight(_ context.Context, _ uint32, _ int) (*gozer.KeystonesByHeightResponse, error) {
 	err := errors.New("not supported yet")
 	return &gozer.KeystonesByHeightResponse{
 		Error: protocol.Errorf("%v", err),
@@ -218,7 +218,7 @@ func (bs *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32
 // TxByID is a stub — blockstream support for transaction lookup is
 // not yet implemented.  The only consumer today is ectoplasm which
 // uses tbcGozer.
-func (bs *blockstreamGozer) TxByID(ctx context.Context, txid *chainhash.Hash) (*tbcapi.Tx, error) {
+func (bs *blockstreamGozer) TxByID(_ context.Context, _ *chainhash.Hash) (*tbcapi.Tx, error) {
 	// Blockstream exposes GET /tx/{txid}/hex and GET /tx/{txid},
 	// either of which could be mapped onto *tbcapi.Tx.  Left as
 	// a stub here because the only consumer today is ectoplasm

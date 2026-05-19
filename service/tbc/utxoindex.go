@@ -103,11 +103,11 @@ func processUtxos(block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput
 }
 
 func txOutFromOutPoint(ctx context.Context, db tbcd.Database, op tbcd.Outpoint) (*wire.TxOut, error) {
-	txId := op.TxIdHash()
+	txID := op.TxIDHash()
 	txIndex := op.TxIndex()
 
 	// Find block hashes
-	blockHash, err := db.BlockHashByTxId(ctx, *txId)
+	blockHash, err := db.BlockHashByTxID(ctx, *txID)
 	if err != nil {
 		return nil, fmt.Errorf("block by txid: %w", err)
 	}
@@ -116,7 +116,7 @@ func txOutFromOutPoint(ctx context.Context, db tbcd.Database, op tbcd.Outpoint) 
 		return nil, fmt.Errorf("block by hash: %w", err)
 	}
 	for _, tx := range b.Transactions() {
-		if !tx.Hash().IsEqual(txId) {
+		if !tx.Hash().IsEqual(txID) {
 			continue
 		}
 		txOuts := tx.MsgTx().TxOut

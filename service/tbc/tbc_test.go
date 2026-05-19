@@ -46,7 +46,7 @@ const (
 	levelDbHome = ".testleveldb"
 )
 
-var defaultUpstreamStateId = [32]byte{
+var defaultUpstreamStateID = [32]byte{
 	0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
 	0x44, 0x45, 0x46, 0x41, 0x55, 0x4C, 0x54, 0x55, 0x50, 0x53, // DEFAULTUPS
 	0x54, 0x52, 0x45, 0x41, 0x4D, 0x53, 0x54, 0x41, 0x54, 0x45, // TREAMSTATE
@@ -168,6 +168,7 @@ func TestDbUpgradeFull(t *testing.T) {
 
 	// check if db upgrade finished before checking for bh
 	for !s.Running() {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	_, err = s.BlockHeadersByHeight(ctx, 9)
@@ -277,8 +278,9 @@ func TestDbUpgradeV3(t *testing.T) {
 	}
 
 	// Get all db keys
-	keys := make([]string, 0, len(dbTemp.DB()))
-	for k := range dbTemp.DB() {
+	dbTempPool := level.Pool(dbTemp)
+	keys := make([]string, 0, len(dbTempPool))
+	for k := range dbTempPool {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -340,10 +342,13 @@ func TestDbUpgradeV3(t *testing.T) {
 	t.Log("Comparing DBs")
 
 	// Compare all databases
+	dbv2Pool := level.Pool(dbv2)
+	dbMovePool := level.Pool(dbMove)
+	dbCopyPool := level.Pool(dbCopy)
 	for _, dbs := range keys {
-		a := dbv2.DB()[dbs]
-		b := dbMove.DB()[dbs]
-		c := dbCopy.DB()[dbs]
+		a := dbv2Pool[dbs]
+		b := dbMovePool[dbs]
+		c := dbCopyPool[dbs]
 
 		t.Logf("Comparing original records against dbmove (%v)", dbs)
 		records, err := cmpDB(a, b)
@@ -617,7 +622,7 @@ func TestForksWithGen(t *testing.T) {
 	testTable := []tbcForkTestTableItem{
 		{
 			name: "Split Tip, Single Block",
-			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, _ string, tbcServer *Server) {
 				// block 1A, send 7 btc to otherAddress
 				_, err := runBitcoinCommand(
 					ctx, t, bitcoindContainer,
@@ -713,7 +718,7 @@ func TestForksWithGen(t *testing.T) {
 		},
 		{
 			name: "Split Tip, Multiple Blocks",
-			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, _ string, _ *Server) {
 				lastA := ""
 				lastB := ""
 				earliestA := ""
@@ -831,7 +836,7 @@ func TestForksWithGen(t *testing.T) {
 
 		{
 			name: "Long reorg",
-			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, _ string, tbcServer *Server) {
 				_, err := runBitcoinCommand(
 					ctx,
 					t,
@@ -941,7 +946,7 @@ func TestForksWithGen(t *testing.T) {
 		},
 		{
 			name: "Ancient orphan",
-			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, _ string, tbcServer *Server) {
 				_, err := runBitcoinCommand(
 					ctx,
 					t,
@@ -1146,7 +1151,7 @@ func reconsiderBlock(ctx context.Context, t *testing.T, bitcoindContainer testco
 }
 
 func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
-	id, err := randHexId(6)
+	id, err := randHexID(6)
 	if err != nil {
 		t.Fatal("failed to generate random id:", err)
 	}
@@ -1201,7 +1206,7 @@ func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer test
 	return buf.String()[8 : len(buf.String())-1], nil
 }
 
-func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container) *chainhash.Hash {
+func getRandomTxID(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container) *chainhash.Hash {
 	blockHash, err := runBitcoinCommand(
 		ctx,
 		t,
@@ -1216,7 +1221,7 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 		t.Fatal(err)
 	}
 
-	blockJson, err := runBitcoinCommand(
+	blockJSON, err := runBitcoinCommand(
 		ctx,
 		t,
 		bitcoindContainer,
@@ -1233,7 +1238,7 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 	var parsed struct {
 		Tx []string `json:"tx"`
 	}
-	if err := json.Unmarshal([]byte(blockJson), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(blockJSON), &parsed); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1294,13 +1299,13 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 		}
 	}
 
-	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
-	err = EnsureCanConnect(t, tbcUrl, 5*time.Second)
+	tbcURL := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+	err = EnsureCanConnect(t, tbcURL, 5*time.Second)
 	if err != nil {
-		t.Fatalf("could not connect to %s: %s", tbcUrl, err.Error())
+		t.Fatalf("could not connect to %s: %s", tbcURL, err.Error())
 	}
 
-	return tbcServer, tbcUrl
+	return tbcServer, tbcURL
 }
 
 func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
@@ -1429,7 +1434,7 @@ func bitcoindBestBlock(ctx context.Context, t *testing.T, bitcoindContainer test
 }
 
 func bitcoindBlockByHash(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, blockHash string) *BtcCliBlockHeader {
-	blockHeaderJson, err := runBitcoinCommand(
+	blockHeaderJSON, err := runBitcoinCommand(
 		ctx, t, bitcoindContainer,
 		[]string{
 			"bitcoin-cli",
@@ -1442,7 +1447,7 @@ func bitcoindBlockByHash(ctx context.Context, t *testing.T, bitcoindContainer te
 	}
 
 	var btcCliBlockHeader BtcCliBlockHeader
-	if err = json.Unmarshal([]byte(blockHeaderJson), &btcCliBlockHeader); err != nil {
+	if err = json.Unmarshal([]byte(blockHeaderJSON), &btcCliBlockHeader); err != nil {
 		t.Fatal(fmt.Errorf("unmarshal json output: %w", err))
 	}
 
@@ -1508,7 +1513,7 @@ func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Serve
 		t.Fatal(err)
 	}
 
-	err = tbcServer.ExternalHeaderSetup(ctx, defaultUpstreamStateId[:])
+	err = tbcServer.ExternalHeaderSetup(ctx, defaultUpstreamStateID[:])
 	if err != nil {
 		t.Fatalf("external header setup: %v", err)
 	}
@@ -1727,20 +1732,20 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 			Headers: parsedHeaders,
 		}
 
-		stateId := [32]byte{byte(i)}
-		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, stateId[:])
+		stateID := [32]byte{byte(i)}
+		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, stateID[:])
 		if err != nil {
 			t.Error(err)
 		}
 
-		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		stateIDRet, err := tbc.UpstreamStateID(ctx)
 		if err != nil {
 			t.Errorf("unable to get upstream state id, err: %v", err)
 		}
 
-		if !bytes.Equal(stateIdRet[:], stateId[:]) {
+		if !bytes.Equal(stateIDRet[:], stateID[:]) {
 			t.Errorf("after adding external headers, state id should have been %x but got %x instead",
-				stateId[:], stateIdRet[:])
+				stateID[:], stateIDRet[:])
 		}
 
 		if it != tbcd.ITChainExtend {
@@ -1827,20 +1832,20 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 
 		prevHeaderHash := prevHeaderParsed.BlockHash()
 		// Different from the state IDs used earlier to ensure we differentiate
-		stateId := [32]byte{byte(i), 0xFF}
-		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, stateId[:])
+		stateID := [32]byte{byte(i), 0xFF}
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, stateID[:])
 		if err != nil {
 			t.Error(err)
 		}
 
-		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		stateIDRet, err := tbc.UpstreamStateID(ctx)
 		if err != nil {
 			t.Errorf("unable to get upstream state id, err: %v", err)
 		}
 
-		if !bytes.Equal(stateIdRet[:], stateId[:]) {
+		if !bytes.Equal(stateIDRet[:], stateID[:]) {
 			t.Errorf("after removing external headers, state id should have been %x but got %x instead",
-				stateId[:], stateIdRet[:])
+				stateID[:], stateIDRet[:])
 		}
 
 		prtHash := postRemovalTip.BlockHash()
@@ -1923,7 +1928,7 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 			Headers: parsedHeaders,
 		}
 
-		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, defaultUpstreamStateId[:])
+		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, defaultUpstreamStateID[:])
 		if err != nil {
 			t.Error(err)
 		}
@@ -2027,7 +2032,7 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 			t.Logf("%d: %x", k, bh)
 		}
 
-		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, defaultUpstreamStateId[:])
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, defaultUpstreamStateID[:])
 		if err != nil {
 			t.Error(err)
 		}
@@ -2085,22 +2090,22 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	}
 
 	// arbitrary values
-	origInsertStateId := [32]byte{0xFF, 0x33, 0x99, 0xE3}
-	it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, origInsertStateId[:])
+	origInsertStateID := [32]byte{0xFF, 0x33, 0x99, 0xE3}
+	it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, origInsertStateID[:])
 	if err != nil {
 		t.Error(err)
 	}
 
-	stateIdRet, err := tbc.UpstreamStateId(ctx)
+	stateIDRet, err := tbc.UpstreamStateID(ctx)
 	if err != nil {
 		t.Errorf("unable to get upstream state id, err: %v", err)
 	}
 
-	if !bytes.Equal(stateIdRet[:], origInsertStateId[:]) {
+	if !bytes.Equal(stateIDRet[:], origInsertStateID[:]) {
 		t.Errorf("after adding external headers, state id should have been %x but got %x instead",
-			origInsertStateId[:], stateIdRet[:])
+			origInsertStateID[:], stateIDRet[:])
 	} else {
-		t.Logf("after adding external headers, state id of %x is correct", stateIdRet[:])
+		t.Logf("after adding external headers, state id of %x is correct", stateIDRet[:])
 	}
 
 	if it != tbcd.ITChainExtend {
@@ -2183,8 +2188,8 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 			t.Errorf("unable to parse heacer %x", rawWouldBeCanonical[:])
 		}
 
-		removeStateId := [32]byte{0xAA, 0xBB, 0xCC, 0xDD}
-		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, wouldBeCanonical, removeStateId[:])
+		removeStateID := [32]byte{0xAA, 0xBB, 0xCC, 0xDD}
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, wouldBeCanonical, removeStateID[:])
 		if err == nil {
 			t.Errorf("removing headers from %d to %d when tip is %d should have failed but did not", start, end, canonicalHeightBefore)
 		}
@@ -2198,16 +2203,16 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 			t.Errorf("removing headers from %d to %d when tip is %d should not have returned a non-nil post removal tip", start, end, canonicalHeightBefore)
 		}
 
-		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		stateIDRet, err := tbc.UpstreamStateID(ctx)
 		if err != nil {
 			t.Errorf("unable to get upstream state id, err: %v", err)
 		}
 
-		if !bytes.Equal(stateIdRet[:], origInsertStateId[:]) {
+		if !bytes.Equal(stateIDRet[:], origInsertStateID[:]) {
 			t.Errorf("after failing to remove external headers, state id should have been the original insert id %x but got %x instead",
-				origInsertStateId[:], stateIdRet[:])
+				origInsertStateID[:], stateIDRet[:])
 		} else {
-			t.Logf("after failing to remove external headers, state id of %x is correct", stateIdRet[:])
+			t.Logf("after failing to remove external headers, state id of %x is correct", stateIDRet[:])
 		}
 
 		canonicalHeightAfter, canonicalAfter, err := tbc.BlockHeaderBest(ctx)
@@ -2245,7 +2250,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Errorf("unable to parse heacer %x", rawShouldBeCanonical[:])
 	}
 
-	rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, shouldBeCanonical, defaultUpstreamStateId[:])
+	rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, shouldBeCanonical, defaultUpstreamStateID[:])
 	if err != nil {
 		t.Errorf("removing headers from %d to %d when tip is %d should have succeeded but did not", start, end, canonicalHeightBefore)
 	}
@@ -2258,38 +2263,38 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Errorf("removing headers from %d to %d when tip is %d should have returned a non-nil post removal tip", start, end, canonicalHeightBefore)
 	}
 
-	stateIdRet, err = tbc.UpstreamStateId(ctx)
+	stateIDRet, err = tbc.UpstreamStateID(ctx)
 	if err != nil {
 		t.Errorf("unable to get upstream state id, err: %v", err)
 	}
 
-	if !bytes.Equal(stateIdRet[:], defaultUpstreamStateId[:]) {
+	if !bytes.Equal(stateIDRet[:], defaultUpstreamStateID[:]) {
 		t.Errorf("after successfully removing external headers with no state id specified, state id should "+
 			"have been the default upstream state id %x but got %x instead",
-			defaultUpstreamStateId[:], stateIdRet[:])
+			defaultUpstreamStateID[:], stateIDRet[:])
 	} else {
 		t.Logf("after successfully removing external headers with no state id specified, state id of "+
-			"%x is correct (set to default)", stateIdRet[:])
+			"%x is correct (set to default)", stateIDRet[:])
 	}
 
-	updateStateWithoutModificationsId := [32]byte{0x4C, 0xA1, 0x62, 0xB6}
-	err = tbc.SetUpstreamStateId(ctx, updateStateWithoutModificationsId)
+	updateStateWithoutModificationsID := [32]byte{0x4C, 0xA1, 0x62, 0xB6}
+	err = tbc.SetUpstreamStateID(ctx, updateStateWithoutModificationsID)
 	if err != nil {
 		t.Errorf("unable to set upstream state id, err: %v", err)
 	}
 
-	stateIdRet, err = tbc.UpstreamStateId(ctx)
+	stateIDRet, err = tbc.UpstreamStateID(ctx)
 	if err != nil {
 		t.Errorf("unable to get upstream state id, err: %v", err)
 	}
 
-	if !bytes.Equal(stateIdRet[:], updateStateWithoutModificationsId[:]) {
+	if !bytes.Equal(stateIDRet[:], updateStateWithoutModificationsID[:]) {
 		t.Errorf("after performing an explicit state id update without modifying header data state id should "+
 			"have been %x but got %x instead",
-			updateStateWithoutModificationsId[:], stateIdRet[:])
+			updateStateWithoutModificationsID[:], stateIDRet[:])
 	} else {
 		t.Logf("after performing an explicit state id update without modifying header data state, state id of "+
-			"%x is correct (set to default)", stateIdRet[:])
+			"%x is correct (set to default)", stateIDRet[:])
 	}
 
 	canonicalHeightAfter, canonicalAfter, err := tbc.BlockHeaderBest(ctx)
@@ -2343,7 +2348,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Error(err)
 	}
 
-	it, canon, last, _, err = tbc.AddExternalHeaders(ctx, msgHeaders, defaultUpstreamStateId[:])
+	it, canon, last, _, err = tbc.AddExternalHeaders(ctx, msgHeaders, defaultUpstreamStateID[:])
 	if err != nil {
 		t.Error(err)
 	}

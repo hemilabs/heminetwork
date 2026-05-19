@@ -115,7 +115,7 @@ func (h *dnsHandler) insertDNS(n *node, forward, reverse []dns.RR) {
 	h.nodes[n.DNSName] = n
 }
 
-func (h *dnsHandler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) {
+func (h *dnsHandler) ServeDNS(_ context.Context, w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	dnsutil.SetReply(m, r)
 
@@ -131,7 +131,7 @@ func (h *dnsHandler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.
 func newResolver(resolverAddress string) *net.Resolver {
 	return &net.Resolver{
 		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			d := &net.Dialer{
 				Timeout: 10000 * time.Millisecond,
 			}

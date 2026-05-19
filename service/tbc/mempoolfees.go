@@ -43,14 +43,14 @@ func medianFee(fees []float64) float64 {
 	l := len(fees)
 	if l == 0 {
 		return 0
-	} else if l%2 == 0 {
-		return (fees[l/2-1] + fees[l/2]) / 2
-	} else {
-		return fees[l/2]
 	}
+	if l%2 == 0 {
+		return (fees[l/2-1] + fees[l/2]) / 2
+	}
+	return fees[l/2]
 }
 
-func (m *Mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBlock, err error) {
+func (m *Mempool) generateMempoolBlocks(_ context.Context) (blks []mempoolBlock, err error) {
 	if len(m.txs) == 0 {
 		return blks, nil
 	}

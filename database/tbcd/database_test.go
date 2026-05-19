@@ -36,7 +36,7 @@ func TestNewOutpoint(t *testing.T) {
 			},
 		},
 		{
-			txid:  decodeTxId("369346b9912c5a7ce6986cc7761941eceb7c8c9e7756e4bae045677daa6c0862"),
+			txid:  decodeTxID("369346b9912c5a7ce6986cc7761941eceb7c8c9e7756e4bae045677daa6c0862"),
 			index: 1,
 			want: []byte{
 				// Prefix - 1 byte
@@ -51,7 +51,7 @@ func TestNewOutpoint(t *testing.T) {
 			},
 		},
 		{
-			txid:  decodeTxId("1fce5b19d295e03289dcfa18b0e554d25a7396dbe8e7d83533463d957525bf6d"),
+			txid:  decodeTxID("1fce5b19d295e03289dcfa18b0e554d25a7396dbe8e7d83533463d957525bf6d"),
 			index: 43111,
 			want: []byte{
 				// Prefix - 1 byte
@@ -76,7 +76,7 @@ func TestNewOutpoint(t *testing.T) {
 	}
 }
 
-func decodeTxId(s string) [32]byte {
+func decodeTxID(s string) [32]byte {
 	b := testutil.DecodeHex(s)
 	if len(b) != 32 {
 		panic(fmt.Errorf("invalid txid: %s", s))

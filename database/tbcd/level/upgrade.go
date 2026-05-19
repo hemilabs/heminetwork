@@ -405,7 +405,7 @@ func (l *ldb) v3(ctx context.Context) error {
 		return fmt.Errorf("destination expand: %w", err)
 	}
 	log.Infof("open upgrade db: %v", dcfg.Home)
-	dst, err := New(ctx, &dcfg)
+	dst, err := newLDB(ctx, &dcfg)
 	if err != nil {
 		return fmt.Errorf("open destination database: %w", err)
 	}
@@ -660,7 +660,7 @@ func (l *ldb) v4(ctx context.Context) error {
 //     makes returns the full set for download.
 //
 // First start after the upgrade triggers a full re-download of the
-// chain's block bodies. BlockByHash and TxById return NotFound for
+// chain's block bodies. BlockByHash and TxByID return NotFound for
 // any block that has not yet been re-fetched during that window.
 func (l *ldb) v5(ctx context.Context) error {
 	log.Tracef("v5")

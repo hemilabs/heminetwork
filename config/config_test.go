@@ -16,8 +16,8 @@ type MyConfig struct {
 }
 
 var (
-	cfg        = MyConfig{}
-	cm  CfgMap = CfgMap{
+	cfg = MyConfig{}
+	cm  = CfgMap{
 		"STRING": Config{
 			Value:        &cfg.IamString,
 			DefaultValue: "default",

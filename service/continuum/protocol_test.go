@@ -397,7 +397,7 @@ func TestKeyExchangeErrors(t *testing.T) {
 			curve:         ecdh.P256(),
 			isServer:      true,
 			expectedError: ErrUnsupportedVersion,
-			keyExchange: func(ctx context.Context, c net.Conn) error {
+			keyExchange: func(_ context.Context, c net.Conn) error {
 				pk, err := ecdh.P256().GenerateKey(rand.Reader)
 				if err != nil {
 					return err
@@ -412,7 +412,7 @@ func TestKeyExchangeErrors(t *testing.T) {
 			name:          "unsupported version - client",
 			isServer:      false,
 			expectedError: ErrUnsupportedVersion,
-			keyExchange: func(ctx context.Context, c net.Conn) error {
+			keyExchange: func(_ context.Context, c net.Conn) error {
 				pk, err := ecdh.P256().GenerateKey(rand.Reader)
 				if err != nil {
 					return err
@@ -428,7 +428,7 @@ func TestKeyExchangeErrors(t *testing.T) {
 			curve:         ecdh.P256(),
 			isServer:      true,
 			expectedError: ErrInvalidPublicKey,
-			keyExchange: func(ctx context.Context, c net.Conn) error {
+			keyExchange: func(_ context.Context, c net.Conn) error {
 				return json.NewEncoder(c).Encode(TransportRequest{
 					Version: TransportVersion,
 				})
@@ -439,7 +439,7 @@ func TestKeyExchangeErrors(t *testing.T) {
 			curve:         ecdh.P256(),
 			isServer:      true,
 			expectedError: ErrNoType,
-			keyExchange: func(ctx context.Context, c net.Conn) error {
+			keyExchange: func(_ context.Context, c net.Conn) error {
 				pk, err := ecdh.P521().GenerateKey(rand.Reader)
 				if err != nil {
 					return err
@@ -454,7 +454,7 @@ func TestKeyExchangeErrors(t *testing.T) {
 			name:          "invalid curve",
 			isServer:      false,
 			expectedError: ErrNoType,
-			keyExchange: func(ctx context.Context, c net.Conn) error {
+			keyExchange: func(_ context.Context, c net.Conn) error {
 				return json.NewEncoder(c).Encode(TransportRequest{
 					Version:   TransportVersion,
 					PublicKey: []byte("invalid"),
@@ -544,7 +544,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "unsupported version",
 			curve:         ecdh.P256(),
 			expectedError: ErrUnsupportedVersion,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, s *Secret) error {
 				var ourChallenge [32]byte
 				_, err := rand.Read(ourChallenge[:])
 				if err != nil {
@@ -564,7 +564,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "invalid challenge",
 			curve:         ecdh.P256(),
 			expectedError: ErrInvalidChallenge,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, s *Secret) error {
 				return tr.Write(s.Identity, HelloRequest{
 					Version: ProtocolVersion,
 					Options: map[string]string{
@@ -578,7 +578,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "zero challenge",
 			curve:         ecdh.P256(),
 			expectedError: ErrInvalidChallenge,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, s *Secret) error {
 				return tr.Write(s.Identity, HelloRequest{
 					Version:   ProtocolVersion,
 					Challenge: ZeroChallenge[:],
@@ -593,7 +593,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "malformed signature",
 			curve:         ecdh.P256(),
 			expectedError: ErrNoType,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, s *Secret) error {
 				var ourChallenge [32]byte
 				_, err := rand.Read(ourChallenge[:])
 				if err != nil {
@@ -618,7 +618,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "uncompact signature",
 			curve:         ecdh.P256(),
 			expectedError: ErrNotCompact,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, s *Secret) error {
 				var ourChallenge [32]byte
 				_, err := rand.Read(ourChallenge[:])
 				if err != nil {
@@ -644,7 +644,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "invalid encryption",
 			curve:         ecdh.P256(),
 			expectedError: ErrInvalidSecretboxLength,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, _ *Secret) error {
 				nonce := tr.nonce.Next()
 				msg := []byte("test")
 				var size [4]byte
@@ -658,7 +658,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "unexpected cmd",
 			curve:         ecdh.P256(),
 			expectedError: ErrNoType,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, s *Secret) error {
 				return tr.Write(s.Identity, HelloResponse{
 					Signature: []byte("invalid"),
 				})
@@ -668,7 +668,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "fake signature",
 			curve:         ecdh.P256(),
 			expectedError: ErrIdentityMismatch,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, s *Secret) error {
 				var ourChallenge [32]byte
 				_, err := rand.Read(ourChallenge[:])
 				if err != nil {
@@ -695,7 +695,7 @@ func TestHandshakeErrors(t *testing.T) {
 			name:          "fake identity",
 			curve:         ecdh.P256(),
 			expectedError: ErrIdentityMismatch,
-			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+			handshake: func(_ context.Context, tr *Transport, s *Secret) error {
 				var ourChallenge [32]byte
 				_, err := rand.Read(ourChallenge[:])
 				if err != nil {

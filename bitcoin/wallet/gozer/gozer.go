@@ -146,7 +146,7 @@ type KeystonesByHeightResponse struct {
 	Error            *protocol.Error         `json:"error,omitempty"`
 }
 
-// FilterSpent removes mempool UTXOs whose outpoint (TxId:OutIndex)
+// FilterSpent removes mempool UTXOs whose outpoint (TxID:OutIndex)
 // appears in the spent set.  Use this to exclude outputs that have
 // been spent by another mempool transaction (CPFP chains).
 func FilterSpent(utxos []*tbcapi.MempoolUTXO, spent []tbcapi.OutPoint) []*tbcapi.MempoolUTXO {
@@ -163,7 +163,7 @@ func FilterSpent(utxos []*tbcapi.MempoolUTXO, spent []tbcapi.OutPoint) []*tbcapi
 	}
 	var out []*tbcapi.MempoolUTXO
 	for _, u := range utxos {
-		if _, ok := set[op{Hash: u.TxId, Index: u.OutIndex}]; ok {
+		if _, ok := set[op{Hash: u.TxID, Index: u.OutIndex}]; ok {
 			continue
 		}
 		out = append(out, u)

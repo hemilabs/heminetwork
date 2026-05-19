@@ -90,7 +90,7 @@ func (m *Mempool) txOutByOutpoint(txid chainhash.Hash, index uint32) *wire.TxOut
 	return mptx.tx.TxOut[index]
 }
 
-func (m *Mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
+func (m *Mempool) FilterUtxos(_ context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
 	log.Tracef("filterUtxos")
 	defer log.Tracef("filterUtxos exit")
 
@@ -121,7 +121,7 @@ func (m *Mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 // UnconfirmedUtxos returns all outputs from mempool transactions
 // with their script hashes, plus all outpoints being spent by
 // mempool transactions.
-func (m *Mempool) UnconfirmedUtxos(ctx context.Context) ([]tbcd.Utxo, []tbcd.ScriptHash, []wire.OutPoint, error) {
+func (m *Mempool) UnconfirmedUtxos(_ context.Context) ([]tbcd.Utxo, []tbcd.ScriptHash, []wire.OutPoint, error) {
 	log.Tracef("UnconfirmedUtxos")
 	defer log.Tracef("UnconfirmedUtxos exit")
 
@@ -148,7 +148,7 @@ func (m *Mempool) UnconfirmedUtxos(ctx context.Context) ([]tbcd.Utxo, []tbcd.Scr
 	return utxos, shs, spent, nil
 }
 
-func (m *Mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
+func (m *Mempool) getDataConstruct(_ context.Context) (*wire.MsgGetData, error) {
 	log.Tracef("getDataConstruct")
 	defer log.Tracef("getDataConstruct exit")
 
@@ -182,7 +182,7 @@ func (m *Mempool) txProcessed(txid chainhash.Hash) bool {
 	return m.txs[txid] != nil // return true when tx is not nil
 }
 
-func (m *Mempool) TxInsert(ctx context.Context, mptx *MempoolTx) error {
+func (m *Mempool) TxInsert(_ context.Context, mptx *MempoolTx) error {
 	log.Tracef("txInsert")
 	defer log.Tracef("txInsert exit")
 
@@ -197,7 +197,7 @@ func (m *Mempool) TxInsert(ctx context.Context, mptx *MempoolTx) error {
 	return nil
 }
 
-func (m *Mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
+func (m *Mempool) invTxsInsert(_ context.Context, inv *wire.MsgInv) error {
 	log.Tracef("invTxsInsert")
 	defer log.Tracef("invTxsInsert exit")
 
@@ -225,7 +225,7 @@ func (m *Mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 	return nil
 }
 
-func (m *Mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) {
+func (m *Mempool) txsRemove(_ context.Context, txs []chainhash.Hash) {
 	log.Tracef("txsRemove")
 	defer log.Tracef("txsRemove exit")
 
@@ -281,7 +281,7 @@ func (m *Mempool) reap() {
 	m.reaping = false
 }
 
-func (m *Mempool) stats(ctx context.Context) (int, int) {
+func (m *Mempool) stats(_ context.Context) (int, int) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -289,7 +289,7 @@ func (m *Mempool) stats(ctx context.Context) (int, int) {
 	return len(m.txs), int(m.size) + (len(m.txs) * chainhash.HashSize)
 }
 
-func (m *Mempool) Dump(ctx context.Context) string {
+func (m *Mempool) Dump(_ context.Context) string {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 

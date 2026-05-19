@@ -77,11 +77,11 @@ const (
 	CmdUTXOsByAddressRequest  = "tbcapi-utxos-by-address-request"
 	CmdUTXOsByAddressResponse = "tbcapi-utxos-by-address-response"
 
-	CmdTxByIdRawRequest  = "tbcapi-tx-by-id-raw-request"
-	CmdTxByIdRawResponse = "tbcapi-tx-by-id-raw-response"
+	CmdTxByIDRawRequest  = "tbcapi-tx-by-id-raw-request"
+	CmdTxByIDRawResponse = "tbcapi-tx-by-id-raw-response"
 
-	CmdTxByIdRequest  = "tbcapi-tx-by-id-request"
-	CmdTxByIdResponse = "tbcapi-tx-by-id-response"
+	CmdTxByIDRequest  = "tbcapi-tx-by-id-request"
+	CmdTxByIDResponse = "tbcapi-tx-by-id-response"
 
 	CmdTxBroadcastRequest  = "tbcapi-tx-broadcast-request"
 	CmdTxBroadcastResponse = "tbcapi-tx-broadcast-response"
@@ -194,7 +194,7 @@ type Tx struct {
 
 // UTXO represents a Bitcoin unspent transaction output.
 type UTXO struct {
-	TxId     chainhash.Hash `json:"tx_id"`
+	TxID     chainhash.Hash `json:"tx_id"`
 	Value    btcutil.Amount `json:"value"`
 	OutIndex uint32         `json:"out_index"`
 }
@@ -374,20 +374,20 @@ type UTXOsByAddressResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type TxByIdRawRequest struct {
+type TxByIDRawRequest struct {
 	TxID chainhash.Hash `json:"tx_id"`
 }
 
-type TxByIdRawResponse struct {
+type TxByIDRawResponse struct {
 	Tx    api.ByteSlice   `json:"tx"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type TxByIdRequest struct {
+type TxByIDRequest struct {
 	TxID chainhash.Hash `json:"tx_id"`
 }
 
-type TxByIdResponse struct {
+type TxByIDResponse struct {
 	Tx    *Tx             `json:"tx"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
@@ -540,8 +540,8 @@ type MempoolUtxosRequest struct {
 
 // MempoolUTXO is an output from an unconfirmed mempool transaction.
 type MempoolUTXO struct {
-	// TxId is the transaction hash containing this output.
-	TxId chainhash.Hash `json:"tx_id"`
+	// TxID is the transaction hash containing this output.
+	TxID chainhash.Hash `json:"tx_id"`
 
 	// Value is the output amount in satoshis.
 	Value btcutil.Amount `json:"value"`
@@ -714,10 +714,10 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdUTXOsByAddressRawResponse:                reflect.TypeFor[UTXOsByAddressRawResponse](),
 	CmdUTXOsByAddressRequest:                    reflect.TypeFor[UTXOsByAddressRequest](),
 	CmdUTXOsByAddressResponse:                   reflect.TypeFor[UTXOsByAddressResponse](),
-	CmdTxByIdRawRequest:                         reflect.TypeFor[TxByIdRawRequest](),
-	CmdTxByIdRawResponse:                        reflect.TypeFor[TxByIdRawResponse](),
-	CmdTxByIdRequest:                            reflect.TypeFor[TxByIdRequest](),
-	CmdTxByIdResponse:                           reflect.TypeFor[TxByIdResponse](),
+	CmdTxByIDRawRequest:                         reflect.TypeFor[TxByIDRawRequest](),
+	CmdTxByIDRawResponse:                        reflect.TypeFor[TxByIDRawResponse](),
+	CmdTxByIDRequest:                            reflect.TypeFor[TxByIDRequest](),
+	CmdTxByIDResponse:                           reflect.TypeFor[TxByIDResponse](),
 	CmdTxBroadcastRequest:                       reflect.TypeFor[TxBroadcastRequest](),
 	CmdTxBroadcastResponse:                      reflect.TypeFor[TxBroadcastResponse](),
 	CmdTxBroadcastRawRequest:                    reflect.TypeFor[TxBroadcastRawRequest](),

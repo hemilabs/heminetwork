@@ -90,7 +90,7 @@ func New(network wire.BitcoinNet, id int, address string) (*RawPeer, error) {
 	}, nil
 }
 
-func NewFromConn(conn net.Conn, network wire.BitcoinNet, protocolVersion uint32, id int) (*RawPeer, error) {
+func NewFromConn(conn net.Conn, network wire.BitcoinNet, protocolVersion uint32, _ int) (*RawPeer, error) {
 	return &RawPeer{
 		conn:            conn,
 		connected:       time.Now(),
@@ -104,7 +104,7 @@ func (r *RawPeer) String() string {
 	return r.address
 }
 
-func (r *RawPeer) Id() int {
+func (r *RawPeer) ID() int {
 	return r.id
 }
 
@@ -160,7 +160,7 @@ func (r *RawPeer) Read(timeout time.Duration) (wire.Message, []byte, error) {
 	return msg, buf, err
 }
 
-func (r *RawPeer) handshake(ctx context.Context, conn net.Conn) error {
+func (r *RawPeer) handshake(_ context.Context, conn net.Conn) error {
 	log.Tracef("handshake %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 	defer log.Tracef("handshake exit %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 
