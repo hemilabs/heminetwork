@@ -137,6 +137,12 @@ var (
 			Help:         "number of wanted p2p peers",
 			Print:        config.PrintAll,
 		},
+		"TBC_REQUEST_TIMEOUT": config.Config{
+			Value:        &cfg.RequestTimeout,
+			DefaultValue: 120,
+			Help:         "RPC request timeout in seconds",
+			Print:        config.PrintAll,
+		},
 		"TBC_PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,
 			DefaultValue: "",
