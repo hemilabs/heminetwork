@@ -134,9 +134,6 @@ type keystone struct {
 	keystone *hemi.L2Keystone
 	hash     *chainhash.Hash // map key
 
-	// comes from gozer
-	abbreviated *gozer.L2KeystoneBlockInfo
-
 	expires *time.Time // Used to age out of cache
 
 	// internal state                  /-----> 4
@@ -454,7 +451,6 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 
 		// Always add the entry to cache and rely on Error being !nil
 		// to retry later.
-		ks.abbreviated = &gks.L2KeystoneBlocks[k]
 	}
 
 	return keystones, nil
