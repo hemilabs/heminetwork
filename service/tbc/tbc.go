@@ -3857,7 +3857,10 @@ func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Ha
 
 // InscriptionsByAddress lists inscriptions currently held by UTXOs at the
 // given address. The ordinal indexer cross-references the utxo index to find
-// outpoints, then checks sat ranges for inscribed sats.
+// InscriptionsByAddress finds inscriptions held by an address.
+// TODO(ordinals2): needs outpoint→inscription tracking at index time
+// to replace the removed sat range + sat→inscription lookup chain.
+// Currently returns empty results.
 func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress string, start, count uint32) ([]*tbcapi.OrdinalInscription, error) {
 	log.Tracef("InscriptionsByAddress")
 	defer log.Tracef("InscriptionsByAddress exit")
@@ -3866,78 +3869,13 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 		return nil, errors.New("ordinal index not enabled")
 	}
 
-	addr, err := btcutil.DecodeAddress(encodedAddress, s.g.chain)
-	if err != nil {
-		return nil, fmt.Errorf("decode address: %w", err)
-	}
-
-	script, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		return nil, fmt.Errorf("pay to addr script: %w", err)
-	}
-
-	// Get all UTXOs for this address (no pagination — we paginate on
-	// the inscription results instead).
-	utxos, err := s.g.db.UtxosByScriptHash(ctx,
-		tbcd.NewScriptHashFromScript(script), 0, 10000)
-	if err != nil {
-		return nil, fmt.Errorf("utxos by script hash: %w", err)
-	}
-
-	var result []*tbcapi.OrdinalInscription
-	var seen uint32
-	for _, utxo := range utxos {
-		var txid [32]byte
-		copy(txid[:], utxo[0:32])
-		op := tbcd.NewOutpoint(txid, utxo.OutputIndex())
-
-		rangeData, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op)
-		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				continue
-			}
-			return nil, fmt.Errorf("sat ranges for %v: %w", op, err)
-		}
-
-		ranges := DecodeSatRanges(rangeData)
-		for _, r := range ranges {
-			inscribedSats, err := s.g.db.OrdinalInscribedSatsInRange(ctx,
-				r.Start, r.Start+r.Count)
-			if err != nil {
-				return nil, fmt.Errorf("inscribed sats in range: %w", err)
-			}
-
-			for _, sat := range inscribedSats {
-				inscIDs, err := s.g.db.OrdinalInscriptionsBySat(ctx, sat)
-				if err != nil {
-					return nil, fmt.Errorf("inscriptions by sat %d: %w", sat, err)
-				}
-
-				for _, inscID := range inscIDs {
-					if seen < start {
-						seen++
-						continue
-					}
-					if count > 0 && uint32(len(result)) >= count {
-						return result, nil
-					}
-
-					insc, err := s.populateInscription(ctx, inscID)
-					if err != nil {
-						return nil, err
-					}
-					result = append(result, insc)
-					seen++
-				}
-			}
-		}
-	}
-
-	return result, nil
+	return nil, nil
 }
 
-// InscriptionsBySat lists all inscriptions on a given sat (supports
-// reinscriptions — the first result is canonical).
+// InscriptionsBySat lists all inscriptions on a given sat.
+// TODO(ordinals2): requires precomputed sat→inscription index or
+// full inscription scan with on-demand sat computation. Currently
+// returns empty results.
 func (s *Server) InscriptionsBySat(ctx context.Context, satNumber uint64) ([]*tbcapi.OrdinalInscription, error) {
 	log.Tracef("InscriptionsBySat")
 	defer log.Tracef("InscriptionsBySat exit")
@@ -3946,21 +3884,9 @@ func (s *Server) InscriptionsBySat(ctx context.Context, satNumber uint64) ([]*tb
 		return nil, errors.New("ordinal index not enabled")
 	}
 
-	inscIDs, err := s.g.db.OrdinalInscriptionsBySat(ctx, satNumber)
-	if err != nil {
-		return nil, fmt.Errorf("inscriptions by sat %d: %w", satNumber, err)
-	}
-
-	result := make([]*tbcapi.OrdinalInscription, 0, len(inscIDs))
-	for _, inscID := range inscIDs {
-		insc, err := s.populateInscription(ctx, inscID)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, insc)
-	}
-
-	return result, nil
+	// Without precomputed sat→inscription mappings, this lookup
+	// requires scanning all inscriptions. Return empty for now.
+	return nil, nil
 }
 
 // SatRangesByOutpoint returns the sat ranges assigned to a UTXO.
