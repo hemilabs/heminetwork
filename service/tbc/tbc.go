@@ -192,6 +192,7 @@ type Config struct {
 	DatabaseDebug           bool
 	Network                 string
 	PeersWanted             int
+	RequestTimeout          int // RPC request timeout in seconds
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
@@ -227,6 +228,7 @@ func NewDefaultConfig() *Config {
 		MempoolEnabled:       true,
 		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
 		PeersWanted:          defaultPeersWanted,
+		RequestTimeout:       10,
 		PrometheusNamespace:  appName,
 		ExternalHeaderMode:   false, // Default anyway, but for readability
 		DatabaseDebug:        false, // Default anyway, but dangerous so be explicit
@@ -329,7 +331,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		}
 	}
 
-	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
 		cfg:        cfg,
 		printTime:  time.Now().Add(10 * time.Second),
@@ -342,7 +343,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			Help:      "The total number of successful RPC commands",
 		}),
 		sessions:        make(map[string]*tbcWs),
-		requestTimeout:  defaultRequestTimeout,
+		requestTimeout:  time.Duration(cfg.RequestTimeout) * time.Second,
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
 		invBlocks:       make([]*chainhash.Hash, 0, 16),
 		promPollVerbose: false,
@@ -3718,6 +3719,9 @@ func (s *Server) populateInscription(ctx context.Context, inscID [36]byte) (*tbc
 		satNum, err := s.computeInscribedSat(ctx, insc.TxID, insc.InputIndex)
 		if err == nil {
 			insc.SatNumber = satNum
+		} else if ctx.Err() != nil {
+			return nil, fmt.Errorf("computeInscribedSat %v:%d: %w",
+				insc.TxID, insc.InputIndex, err)
 		} else {
 			log.Errorf("computeInscribedSat %v:%d: %v",
 				insc.TxID, insc.InputIndex, err)
