@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -77,6 +78,29 @@ func TestPopMiner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestPromPollBeforeOpgeth(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		defer cancel()
+
+		// Setup pop miner
+		cfg := NewDefaultConfig()
+		cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+
+		// Create pop miner
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// if we try to do opgeth calls before we have connected at least
+		// once, this will panic.
+		if err := s.promPoll(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("unexpected error %v", err)
+		}
+	})
 }
 
 func TestTickingPopMiner(t *testing.T) {
