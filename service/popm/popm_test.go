@@ -462,6 +462,88 @@ func TestStaticFee(t *testing.T) {
 	}
 }
 
+func TestMaxFee(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	_, kssList := testutil.MakeSharedKeystones(1)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
+
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
+	mtbc.SetFeeEstimate(50.0)
+	defer mtbc.Shutdown()
+
+	// Setup pop miner with max fee of 10 sats/vbyte
+	cfg := NewDefaultConfig()
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+	cfg.MaxFee = 10.0
+
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gozerReady := make(chan struct{})
+	go func() {
+		err := s.gozer.Run(ctx, func() {
+			gozerReady <- struct{}{}
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// Wait for gozer to be ready
+	select {
+	case <-gozerReady:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+
+	// Test that high fee estimate gets capped to MaxFee
+	fee, err := s.estimateFee(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fee.SatsPerVByte != 10.0 {
+		t.Fatalf("expected fee of 10, got %v", fee.SatsPerVByte)
+	}
+
+	// Test that fee below MaxFee is not modified
+	mtbc.SetFeeEstimate(5.0)
+
+	fee, err = s.estimateFee(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fee.SatsPerVByte != 5.0 {
+		t.Fatalf("expected fee of 5, got %v", fee.SatsPerVByte)
+	}
+
+	// Test that MaxFee of 0 disables the cap
+	s.cfg.MaxFee = 0
+
+	mtbc.SetFeeEstimate(100.0)
+
+	fee, err = s.estimateFee(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fee.SatsPerVByte != 100.0 {
+		t.Fatalf("expected fee of 100, got %v", fee.SatsPerVByte)
+	}
+}
+
 func TestOpgethReconnect(t *testing.T) {
 	const (
 		minDelay = 250 * time.Millisecond

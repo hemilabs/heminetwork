@@ -89,6 +89,7 @@ type Config struct {
 	BitcoinSource           string
 	BitcoinURL              string
 	LogLevel                string
+	MaxFee                  float64
 	Network                 string
 	OpgethURL               string
 	PprofListenAddress      string
@@ -193,6 +194,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg.StaticFee != 0 && cfg.StaticFee < minRelayFee {
 		return nil, fmt.Errorf("static fee set to %v, minimum is %v",
 			cfg.StaticFee, minRelayFee)
+	}
+
+	if cfg.MaxFee != 0 && cfg.MaxFee < minRelayFee {
+		return nil, fmt.Errorf("max fee set to %v, minimum is %v",
+			cfg.MaxFee, minRelayFee)
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -388,6 +394,16 @@ func (s *Server) estimateFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
 	feeAmount, err := gozer.FeeByConfirmations(s.cfg.BitcoinConfirmations, feeEstimates)
 	if err != nil {
 		return nil, fmt.Errorf("fee by confirmations: %w", err)
+	}
+
+	// Apply max fee cap if configured
+	if s.cfg.MaxFee > 0 && feeAmount.SatsPerVByte > s.cfg.MaxFee {
+		log.Infof("Fee estimate of %.2f sats/vB exceeds max fee, using %.2f sats/vB",
+			feeAmount.SatsPerVByte, s.cfg.MaxFee)
+		return &tbcapi.FeeEstimate{
+			Blocks:       feeAmount.Blocks,
+			SatsPerVByte: s.cfg.MaxFee,
+		}, nil
 	}
 
 	return feeAmount, nil
