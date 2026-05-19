@@ -178,7 +178,7 @@ To see a full list of runtime settings, execute `popmd` with the **`--help`** fl
 
 ```shell
 ./bin/popmd --h
-# Hemi Proof-of-Proof Miner v2.0.0-dev+76217560a (popmd, go1.24.5 linux/amd64)
+# Hemi Proof-of-Proof Miner v2.1.0-dev+02712517a (popmd, go1.26.3 darwin/arm64)
 # Usage:
 #         help (this help)
 # Environment:
@@ -186,6 +186,7 @@ To see a full list of runtime settings, execute `popmd` with the **`--help`** fl
 #         POPM_BITCOIN_SECRET    : bitcoin secret (mnemonic, seed, xpriv) (required) 
 #         POPM_BITCOIN_URL       : tbc bitcoin url to connect to (default: ws://localhost:8082/v1/ws)
 #         POPM_LOG_LEVEL         : loglevel for various packages; INFO, DEBUG and TRACE (default: popmd=INFO;popm=INFO)
+#         POPM_MAX_FEE           : maximum fee in sats/vbyte for fee estimation; overrides estimated fees higher than itself; 0 disables the cap (default: 0)
 #         POPM_OPGETH_URL        : URL for opgeth (default: localhost:9999)
 #         POPM_PPROF_ADDRESS     : address and port popm pprof listens on (open <address>/debug/pprof to see available profiles) 
 #         POPM_PROMETHEUS_ADDRESS: address and port popm prometheus listens on 
