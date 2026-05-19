@@ -57,7 +57,7 @@ ARG OPTIMISM_COMMIT
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
 
 RUN apt-get update
-RUN apt-get install -y jq yq
+RUN apt-get install -y jq yq xxd
 
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
