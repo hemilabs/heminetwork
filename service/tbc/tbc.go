@@ -3928,6 +3928,7 @@ func (s *Server) InscriptionsBySat(ctx context.Context, satNumber uint64) ([]*tb
 }
 
 // SatRangesByOutpoint returns the sat ranges assigned to a UTXO.
+// Computed on demand by walking backward through the spending chain.
 func (s *Server) SatRangesByOutpoint(ctx context.Context, txid chainhash.Hash, vout uint32) ([]tbcapi.SatRange, error) {
 	log.Tracef("SatRangesByOutpoint")
 	defer log.Tracef("SatRangesByOutpoint exit")
@@ -3936,14 +3937,12 @@ func (s *Server) SatRangesByOutpoint(ctx context.Context, txid chainhash.Hash, v
 		return nil, errors.New("ordinal index not enabled")
 	}
 
-	op := tbcd.NewOutpoint(txid, vout)
-
-	data, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op)
+	memo := make(map[tbcd.Outpoint][]SatRange)
+	ranges, err := s.computeSatRanges(ctx, txid, vout, memo)
 	if err != nil {
 		return nil, fmt.Errorf("sat ranges for %v:%d: %w", txid, vout, err)
 	}
 
-	ranges := DecodeSatRanges(data)
 	result := make([]tbcapi.SatRange, len(ranges))
 	for i, r := range ranges {
 		result[i] = tbcapi.SatRange{
