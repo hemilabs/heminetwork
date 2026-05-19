@@ -457,8 +457,8 @@ func TestStaticFee(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if fee.SatsPerByte != 1.5 {
-		t.Fatalf("expected fee of 1.5 sats/byte, got %v sats/byte", fee.SatsPerByte)
+	if fee.SatsPerVByte != 1.5 {
+		t.Fatalf("expected fee of 1.5 sats/vbyte, got %v sats/vbyte", fee.SatsPerVByte)
 	}
 }
 

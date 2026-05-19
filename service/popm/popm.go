@@ -60,7 +60,7 @@ const (
 	defaultMinReconnectDelay = 5 * time.Second
 	defaultMaxReconnectDelay = 43 * time.Second
 
-	minRelayFee = 1                // sats/byte
+	minRelayFee = 1                // sats/vbyte
 	maxBlockAge = 30 * time.Second // XXX make this configurable?
 )
 
@@ -314,7 +314,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 
 	// Build transaction.
 	popTx, prevOut, err := wallet.PoPTransactionCreate(ks, uint32(btcHeight),
-		feeAmount.SatsPerByte, utxos, payToScript)
+		feeAmount.SatsPerVByte, utxos, payToScript)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction: %w", err)
 	}
@@ -376,8 +376,8 @@ func (s *Server) estimateFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
 
 	if s.cfg.StaticFee != 0 {
 		return &tbcapi.FeeEstimate{
-			Blocks:      s.cfg.BitcoinConfirmations,
-			SatsPerByte: s.cfg.StaticFee,
+			Blocks:       s.cfg.BitcoinConfirmations,
+			SatsPerVByte: s.cfg.StaticFee,
 		}, nil
 	}
 	// Estimate BTC fees.

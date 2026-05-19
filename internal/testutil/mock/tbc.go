@@ -196,16 +196,16 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 	case tbcapi.CmdFeeEstimateRequest:
 		resp = tbcapi.FeeEstimateResponse{
 			FeeEstimates: []*tbcapi.FeeEstimate{
-				{Blocks: 1, SatsPerByte: 1},
-				{Blocks: 2, SatsPerByte: 1},
-				{Blocks: 3, SatsPerByte: 1},
-				{Blocks: 4, SatsPerByte: 1},
-				{Blocks: 5, SatsPerByte: 1},
-				{Blocks: 6, SatsPerByte: 1},
-				{Blocks: 7, SatsPerByte: 1},
-				{Blocks: 8, SatsPerByte: 1},
-				{Blocks: 9, SatsPerByte: 1},
-				{Blocks: 10, SatsPerByte: 1},
+				{Blocks: 1, SatsPerVByte: 1},
+				{Blocks: 2, SatsPerVByte: 1},
+				{Blocks: 3, SatsPerVByte: 1},
+				{Blocks: 4, SatsPerVByte: 1},
+				{Blocks: 5, SatsPerVByte: 1},
+				{Blocks: 6, SatsPerVByte: 1},
+				{Blocks: 7, SatsPerVByte: 1},
+				{Blocks: 8, SatsPerVByte: 1},
+				{Blocks: 9, SatsPerVByte: 1},
+				{Blocks: 10, SatsPerVByte: 1},
 			},
 		}
 	case tbcapi.CmdTxByIdRequest:
