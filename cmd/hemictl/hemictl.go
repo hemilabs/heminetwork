@@ -446,8 +446,11 @@ func tbcdb(pctx context.Context, flags []string) error {
 	cfg.LevelDBHome = leveldbHome
 	cfg.Network = network
 	cfg.DatabaseDebug = *debugFlag
-	cfg.PeersWanted = 0    // disable peer manager
-	cfg.ListenAddress = "" // disable RPC
+	cfg.PeersWanted = 0         // disable peer manager
+	cfg.ListenAddress = ""      // disable RPC
+	cfg.UtxoReadCacheSize = "0" // hemictl doesn't need read cache
+	cfg.BlockCacheSize = "64mb" // smaller for CLI
+	cfg.HeaderCacheSize = "1mb" // smaller for CLI
 	if strings.HasPrefix(action, "ordinal") {
 		cfg.OrdinalIndex = true
 	}
