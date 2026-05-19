@@ -483,6 +483,12 @@ func TestMaxFee(t *testing.T) {
 	cfg.BitcoinSource = "tbc"
 	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+	cfg.MaxFee = 0.5
+
+	if _, err := NewServer(cfg); err == nil {
+		t.Fatal("expected error")
+	}
+
 	cfg.MaxFee = 10.0
 
 	s, err := NewServer(cfg)
