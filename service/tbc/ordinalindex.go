@@ -184,6 +184,7 @@ func ordinalBlockInscriptionKey(blockHash *chainhash.Hash, seq uint32) tbcd.Ordi
 }
 
 func makeInscriptionID(txHash *chainhash.Hash, inputIdx uint32) [36]byte {
+	// Inscription IDs use little-endian index per the ord protocol.
 	var id [36]byte
 	copy(id[:32], txHash[:])
 	binary.LittleEndian.PutUint32(id[32:], inputIdx)

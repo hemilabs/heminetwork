@@ -2613,31 +2613,18 @@ func (l *ldb) OrdinalInscribedSatBounds(ctx context.Context) (uint64, uint64, er
 
 	ordDB := l.pool[level.OrdinalDB]
 
-	// Find first 's' entry.
-	var startKey tbcd.OrdinalKey
-	startKey[0] = 's'
-	it := ordDB.NewIterator(nil, nil)
+	// Use BytesPrefix to bound the iterator to 's' keys only.
+	var prefix [1]byte
+	prefix[0] = 's'
+	it := ordDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
 	defer it.Release()
 
-	if !it.Seek(startKey[:]) || len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 's' {
+	if !it.First() {
 		return 0, 0, database.NotFoundError("no inscribed sats")
 	}
 	minSat := binary.BigEndian.Uint64(it.Key()[1:])
 
-	// Find last 's' entry: seek to 't' (byte after 's') and step back.
-	var endKey [1]byte
-	endKey[0] = 't'
-	if !it.Seek(endKey[:]) {
-		// 't' is past end of DB, go to last entry.
-		if !it.Last() {
-			return 0, 0, database.NotFoundError("no inscribed sats")
-		}
-	} else {
-		if !it.Prev() {
-			return 0, 0, database.NotFoundError("no inscribed sats")
-		}
-	}
-	if len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 's' {
+	if !it.Last() {
 		return 0, 0, database.NotFoundError("no inscribed sats")
 	}
 	maxSat := binary.BigEndian.Uint64(it.Key()[1:])
