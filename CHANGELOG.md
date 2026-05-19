@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   witness-inclusive after a v5 upgrade plus resync
   ([#972](https://github.com/hemilabs/heminetwork/pull/972)).
 
+- Fix inverted conditions in `synced()` causing tbcd to incorrectly report
+  itself as not-synced when an optional indexer is enabled.
+  ([#1036](https://github.com/hemilabs/heminetwork/pull/1036))
+
 ## [v2.0.0]
 
 ### Breaking Changes

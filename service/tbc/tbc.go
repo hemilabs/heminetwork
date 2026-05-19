@@ -2857,16 +2857,11 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
 		!s.indexing && !blksMissing {
-		// If keystone and zk indexers are disabled we are synced.
-		if !s.cfg.HemiIndex && !s.cfg.ZKIndex {
-			si.Synced = true
-			return si
-		}
-		if !(s.cfg.HemiIndex && si.Keystone.Hash.IsEqual(&bhb.Hash)) {
+		if s.cfg.HemiIndex && !si.Keystone.Hash.IsEqual(&bhb.Hash) {
 			// Keystone index not synced
 			return si
 		}
-		if !(s.cfg.ZKIndex && si.ZK.Hash.IsEqual(&bhb.Hash)) {
+		if s.cfg.ZKIndex && !si.ZK.Hash.IsEqual(&bhb.Hash) {
 			// ZK index not synced
 			return si
 		}
