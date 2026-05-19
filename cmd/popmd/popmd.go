@@ -89,7 +89,7 @@ var (
 		"POPM_MAX_FEE": config.Config{
 			Value:        &cfg.MaxFee,
 			DefaultValue: float64(0),
-			Help:         "maximum fee in sats/vbyte for fee estimation; overrides estimated fees higher than itself; 0 disables the cap",
+			Help:         "maximum fee in sats/vbyte for fee estimation, beyond which popm waits for lower fees to remine; 0 disables the cap",
 			Print:        config.PrintAll,
 		},
 	}

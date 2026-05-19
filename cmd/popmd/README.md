@@ -186,7 +186,7 @@ To see a full list of runtime settings, execute `popmd` with the **`--help`** fl
 #         POPM_BITCOIN_SECRET    : bitcoin secret (mnemonic, seed, xpriv) (required) 
 #         POPM_BITCOIN_URL       : tbc bitcoin url to connect to (default: ws://localhost:8082/v1/ws)
 #         POPM_LOG_LEVEL         : loglevel for various packages; INFO, DEBUG and TRACE (default: popmd=INFO;popm=INFO)
-#         POPM_MAX_FEE           : maximum fee in sats/vbyte for fee estimation; overrides estimated fees higher than itself; 0 disables the cap (default: 0)
+#         POPM_MAX_FEE           : maximum fee in sats/vbyte for fee estimation, beyond which popm waits for lower fees to remine; 0 disables the cap (default: 0)
 #         POPM_OPGETH_URL        : URL for opgeth (default: localhost:9999)
 #         POPM_PPROF_ADDRESS     : address and port popm pprof listens on (open <address>/debug/pprof to see available profiles) 
 #         POPM_PROMETHEUS_ADDRESS: address and port popm prometheus listens on 
