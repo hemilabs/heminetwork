@@ -111,3 +111,46 @@ func (s *Server) computeSatRanges(ctx context.Context, txid chainhash.Hash, vout
 
 	return memo[op], nil
 }
+
+// computeInscribedSat derives the sat number for an inscription.
+// The inscribed sat is the first sat of the input at inputIndex,
+// unless a pointer tag overrides it (not yet supported).
+func (s *Server) computeInscribedSat(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error) {
+	blockHash, err := s.g.db.BlockHashByTxId(ctx, txid)
+	if err != nil {
+		return 0, fmt.Errorf("tx %v: %w", txid, err)
+	}
+
+	block, err := s.g.db.BlockByHash(ctx, *blockHash)
+	if err != nil {
+		return 0, fmt.Errorf("block %v: %w", blockHash, err)
+	}
+
+	var tx *btcutil.Tx
+	for _, t := range block.Transactions() {
+		if *t.Hash() == txid {
+			tx = t
+			break
+		}
+	}
+	if tx == nil {
+		return 0, fmt.Errorf("tx %v not in block", txid)
+	}
+
+	if int(inputIndex) >= len(tx.MsgTx().TxIn) {
+		return 0, fmt.Errorf("input %d out of range", inputIndex)
+	}
+
+	prevOut := tx.MsgTx().TxIn[inputIndex].PreviousOutPoint
+	memo := make(map[tbcd.Outpoint][]SatRange)
+	ranges, err := s.computeSatRanges(ctx, prevOut.Hash, prevOut.Index, memo)
+	if err != nil {
+		return 0, fmt.Errorf("sat ranges for input %v: %w", prevOut, err)
+	}
+
+	if len(ranges) == 0 {
+		return 0, fmt.Errorf("no sat ranges for input %v", prevOut)
+	}
+
+	return ranges[0].Start, nil
+}
