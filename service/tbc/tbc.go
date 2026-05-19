@@ -3720,8 +3720,10 @@ func (s *Server) populateInscription(ctx context.Context, inscID [36]byte) (*tbc
 		satNum, err := s.computeInscribedSat(ctx, insc.TxID, insc.InputIndex)
 		if err == nil {
 			insc.SatNumber = satNum
+		} else {
+			log.Errorf("computeInscribedSat %v:%d: %v",
+				insc.TxID, insc.InputIndex, err)
 		}
-		// On error, leave as 0 — best effort.
 	}
 
 	if d.Parent != nil {
