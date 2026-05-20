@@ -100,6 +100,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix bug in `popm` that led to a panic when prometheus called geth before
  the client was set ([#1030](https://github.com/hemilabs/heminetwork/pull/1030)).
 
+- Fix `tbc` accessing the first element of an inventory message list before
+ ensuring it isn't empty. ([#1039](https://github.com/hemilabs/heminetwork/pull/1039))
+
 ## [v2.0.0]
 
 ### Breaking Changes
