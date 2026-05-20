@@ -135,6 +135,7 @@ func TestDbUpgradeFull(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
 		Network:                 "upgradetest",
+		RequestTimeout:          10,
 		PrometheusListenAddress: "",
 		ListenAddress:           "",
 		PeersWanted:             0,
@@ -413,6 +414,7 @@ func TestDbUpgradeV4(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
 		Network:                 "upgradetest",
+		RequestTimeout:          10,
 		PrometheusListenAddress: "",
 		ListenAddress:           "",
 		PeersWanted:             0,
@@ -2483,6 +2485,7 @@ func TestEmptyInvMessage(t *testing.T) {
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{n.Address()},
