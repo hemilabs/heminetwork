@@ -454,6 +454,13 @@ services:
     ports:
       - "18546:8546"
 
+  op-reth-l2-non-sequencing:
+    build:
+      context: https://github.com/hemilabs/optimism.git#a22bfa0853b40668f17b0a2c81fff515e563f539:rust
+      dockerfile: op-reth/DockerfileOp
+    networks:
+      e2e:
+
   op-node-non-sequencing-snap-sync:
     image: optimism-stack:latest
     depends_on:
