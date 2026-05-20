@@ -1618,6 +1618,7 @@ func TestFork(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{n.Address()},
@@ -1859,6 +1860,7 @@ func TestIndexNoFork(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{n.Address()},
@@ -2069,6 +2071,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -2392,6 +2395,7 @@ func TestIndexFork(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -2735,6 +2739,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -3321,6 +3326,7 @@ func TestForkCanonicity(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -3513,6 +3519,7 @@ func TestCacheOverflow(t *testing.T) {
 		MaxCachedTxs:            5,
 		MaxCachedKeystones:      5,
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -3679,6 +3686,7 @@ func TestZKIndexFork(t *testing.T) {
 		MaxCachedKeystones:      1000, // XXX
 		MaxCachedZK:             1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -4248,6 +4256,7 @@ func TestIndexFakeHeaders(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{n.Address()},
@@ -4415,6 +4424,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 		MaxCachedTxs:            1000,
 		MaxCachedOrdinals:       1000,
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
