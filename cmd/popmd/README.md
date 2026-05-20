@@ -54,8 +54,9 @@ We support running `popmd` in Docker or as a standalone binary. We provide pre-b
 
 > [!IMPORTANT]
 > Running a PoP Miner requires URLs for the following services:
->  - [BTC Gozer](../../bitcoin/wallet/README.md) with indexed keystones, such as [`tbcd`](../tbcd/README.md).
->  - [hVM-aware op-geth node](https://github.com/hemilabs/op-geth)
+>
+> * [BTC Gozer](../../bitcoin/wallet/README.md) with indexed keystones, such as [`tbcd`](../tbcd/README.md).
+> * [hVM-aware op-geth node](https://github.com/hemilabs/op-geth)
 
 ### Standalone binary (Recommended)
 
@@ -102,7 +103,7 @@ The `heminetwork` repository provides Docker files, which can be used to build D
 
 #### Prerequisites
 
-- `docker` CLI installed and setup.
+* `docker` CLI installed and setup.
 
 #### Execution
 
@@ -129,8 +130,8 @@ docker run \
 
 #### Prerequisites
 
-- [Go v1.26+](https://go.dev/dl/)
-- `make` (optional)
+* [Go v1.26+](https://go.dev/dl/)
+* `make` (optional)
 
 #### Option 1: Using Makefile
 
@@ -177,7 +178,7 @@ To see a full list of runtime settings, execute `popmd` with the **`--help`** fl
 
 ```shell
 ./bin/popmd --h
-# Hemi Proof-of-Proof Miner v2.0.0-dev+76217560a (popmd, go1.24.5 linux/amd64)
+# Hemi Proof-of-Proof Miner v2.1.0-dev+02712517a (popmd, go1.26.3 darwin/arm64)
 # Usage:
 #         help (this help)
 # Environment:
@@ -185,11 +186,12 @@ To see a full list of runtime settings, execute `popmd` with the **`--help`** fl
 #         POPM_BITCOIN_SECRET    : bitcoin secret (mnemonic, seed, xpriv) (required) 
 #         POPM_BITCOIN_URL       : tbc bitcoin url to connect to (default: ws://localhost:8082/v1/ws)
 #         POPM_LOG_LEVEL         : loglevel for various packages; INFO, DEBUG and TRACE (default: popmd=INFO;popm=INFO)
+#         POPM_MAX_FEE           : maximum fee in sats/vbyte for fee estimation, beyond which popm waits for lower fees to remine; 0 disables the cap (default: 0)
 #         POPM_OPGETH_URL        : URL for opgeth (default: localhost:9999)
 #         POPM_PPROF_ADDRESS     : address and port popm pprof listens on (open <address>/debug/pprof to see available profiles) 
 #         POPM_PROMETHEUS_ADDRESS: address and port popm prometheus listens on 
 #         POPM_REMINE_THRESHOLD  : the number of L2 Keystones behind the latest seen that we are willing to remine, this is handy for re-orgs (default: 0)
-#         POPM_STATIC_FEE        : static fee amount in sats/byte; overrides fee estimation if greater than 0. Can be decimal (ex. 1.5 sats/byte) (default: 0)
+#         POPM_STATIC_FEE        : static fee amount in sats/vbyte; overrides fee estimation if greater than 0. Can be decimal (ex. 1.5 sats/vbyte) (default: 0)
 ```
 
 Namely, ensure the following variables are properly set:
@@ -197,19 +199,19 @@ Namely, ensure the following variables are properly set:
 > [!CAUTION]
 > Running a PoP Miner requires providing a private key for a funded Bitcoin wallet. It is important to keep this
 > private key safe and secure, to prevent loss of funds.
-> 
+>
 > It is recommended to create a new wallet specifically for use by the PoP Miner, and not to reuse existing wallets.
 
-- `POPM_BITCOIN_NETWORK`: This determines what Bitcoin network `popmd` should connect to. This defaults to `mainnet`,
+* `POPM_BITCOIN_NETWORK`: This determines what Bitcoin network `popmd` should connect to. This defaults to `mainnet`,
   however `testnet3`, `testnet4` and `localnet` are also available for test environments.
 
-- `POPM_BITCOIN_SECRET`: A funded Bitcoin address is necessary in order to sign, broadcast, and get rewarded for the
+* `POPM_BITCOIN_SECRET`: A funded Bitcoin address is necessary in order to sign, broadcast, and get rewarded for the
   transactions constructed by `popmd`. The private key for the funded wallet must be provided here.
 
-- `POPM_BITCOIN_URL`*: URL to the Bitcoin node used in order to transmit data to and from the Bitcoin
+* `POPM_BITCOIN_URL`*: URL to the Bitcoin node used in order to transmit data to and from the Bitcoin
   network. [Read more on how to run your own `tbcd` instance here](../tbcd/README.md).
 
-- `POPM_OPGETH_URL`: URL to an accessible hVM-aware op-geth instance, used to retrieve keystones from the Hemi Network.
+* `POPM_OPGETH_URL`: URL to an accessible hVM-aware op-geth instance, used to retrieve keystones from the Hemi Network.
 
 > [!NOTE]
 > \* `TBC` is currently the only functional Bitcoin node providing indexed Hemi keystones.
@@ -220,14 +222,14 @@ Namely, ensure the following variables are properly set:
 
 Hemi L2 Blocks are generated approximately every 12 seconds, and a keystone is generated every 25 blocks. As such:
 
-- `12 * 25` = `300` seconds (5 minutes) between keystones
-- `86400 / 300` = `288` keystones per day
+* `12 * 25` = `300` seconds (5 minutes) between keystones
+* `86400 / 300` = `288` keystones per day
 
 Considering that each transaction created by the PoP Miner has a size of `284 vB` and presuming an average bitcoin
 transaction fee of `3 sats/vB`:
 
-- `284 * 3` = `852 sats` per PoP transaction
-- `852 * 288` = `245376 sats` or `0.00245376 BTC` per day
+* `284 * 3` = `852 sats` per PoP transaction
+* `852 * 288` = `245376 sats` or `0.00245376 BTC` per day
 
 The value of BTC can fluctuate heavily, but presuming a cost of `110,000 USD / BTC`, it would cost `~270 USD` per day
 to run `popmd` on mainnet - assuming the PoP Miner broadcasts a transaction for every generated Hemi keystone.

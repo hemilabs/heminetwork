@@ -56,11 +56,12 @@ const (
 	defaultL2KeystoneMaxAge       = 4 * time.Hour
 	defaultL2KeystonePollTimeout  = 13 * time.Second
 	defaultL2KeystoneRetryTimeout = 15 * time.Second
+	defaultL2KeystoneFeeRetry     = 5 * time.Minute
 
 	defaultMinReconnectDelay = 5 * time.Second
 	defaultMaxReconnectDelay = 43 * time.Second
 
-	minRelayFee = 1                // sats/byte
+	minRelayFee = 1                // sats/vbyte
 	maxBlockAge = 30 * time.Second // XXX make this configurable?
 )
 
@@ -89,6 +90,7 @@ type Config struct {
 	BitcoinSource           string
 	BitcoinURL              string
 	LogLevel                string
+	MaxFee                  float64
 	Network                 string
 	OpgethURL               string
 	PprofListenAddress      string
@@ -119,6 +121,19 @@ func NewDefaultConfig() *Config {
 	}
 }
 
+type FeeMaxExceededError string
+
+func (fme FeeMaxExceededError) Error() string {
+	return string(fme)
+}
+
+func (fme FeeMaxExceededError) Is(target error) bool {
+	_, ok := target.(FeeMaxExceededError)
+	return ok
+}
+
+var ErrFeeMaxExceeded = FeeMaxExceededError("fee exceeded")
+
 type keystoneState int
 
 const (
@@ -134,6 +149,7 @@ type keystone struct {
 	keystone *hemi.L2Keystone
 	hash     *chainhash.Hash // map key
 
+	retry   *time.Time // Used to delay mining if fees are high
 	expires *time.Time // Used to age out of cache
 
 	// internal state                  /-----> 4
@@ -193,6 +209,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg.StaticFee != 0 && cfg.StaticFee < minRelayFee {
 		return nil, fmt.Errorf("static fee set to %v, minimum is %v",
 			cfg.StaticFee, minRelayFee)
+	}
+
+	if cfg.MaxFee != 0 && cfg.MaxFee < minRelayFee {
+		return nil, fmt.Errorf("max fee set to %v, minimum is %v",
+			cfg.MaxFee, minRelayFee)
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -314,7 +335,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 
 	// Build transaction.
 	popTx, prevOut, err := wallet.PoPTransactionCreate(ks, uint32(btcHeight),
-		feeAmount.SatsPerByte, utxos, payToScript)
+		feeAmount.SatsPerVByte, utxos, payToScript)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction: %w", err)
 	}
@@ -376,8 +397,8 @@ func (s *Server) estimateFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
 
 	if s.cfg.StaticFee != 0 {
 		return &tbcapi.FeeEstimate{
-			Blocks:      s.cfg.BitcoinConfirmations,
-			SatsPerByte: s.cfg.StaticFee,
+			Blocks:       s.cfg.BitcoinConfirmations,
+			SatsPerVByte: s.cfg.StaticFee,
 		}, nil
 	}
 	// Estimate BTC fees.
@@ -388,6 +409,13 @@ func (s *Server) estimateFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
 	feeAmount, err := gozer.FeeByConfirmations(s.cfg.BitcoinConfirmations, feeEstimates)
 	if err != nil {
 		return nil, fmt.Errorf("fee by confirmations: %w", err)
+	}
+
+	// Apply max fee cap if configured
+	if s.cfg.MaxFee > 0 && feeAmount.SatsPerVByte > s.cfg.MaxFee {
+		return nil, FeeMaxExceededError(fmt.Sprintf(
+			"fee estimate of %.2f sats/vB exceeds max fee of %.2f sats/vB",
+			feeAmount.SatsPerVByte, s.cfg.MaxFee))
 	}
 
 	return feeAmount, nil
@@ -416,6 +444,7 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 		keystones[*h] = &keystone{
 			keystone: &kr.L2Keystones[k],
 			hash:     h,
+			retry:    timestamp(0), // ready to mine immediately
 		}
 	}
 
@@ -667,10 +696,19 @@ func (s *Server) mine(ctx context.Context) error {
 	for _, ks := range s.keystones {
 		switch ks.state {
 		case keystoneStateNew, keystoneStateError:
+			if !time.Now().After(*ks.retry) {
+				if time.Now().After(*ks.expires) {
+					delete(s.keystones, *ks.hash)
+				}
+				continue
+			}
 			err := s.createAndBroadcastKeystone(ctx, ks.keystone)
 			if err != nil {
 				log.Errorf("new keystone: %v", err)
 				ks.state = keystoneStateError
+				if errors.Is(err, ErrFeeMaxExceeded) {
+					ks.retry = timestamp(defaultL2KeystoneFeeRetry)
+				}
 			} else {
 				ks.state = keystoneStateBroadcast
 			}
@@ -678,6 +716,7 @@ func (s *Server) mine(ctx context.Context) error {
 			// Do nothing, wait for mined.
 		case keystoneStateMined:
 			// Remove if older than max age
+			// XXX (AL-CT): should we check this in every case?
 			if time.Now().After(*ks.expires) {
 				delete(s.keystones, *ks.hash)
 			}

@@ -457,8 +457,226 @@ func TestStaticFee(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if fee.SatsPerByte != 1.5 {
-		t.Fatalf("expected fee of 1.5 sats/byte, got %v sats/byte", fee.SatsPerByte)
+	if fee.SatsPerVByte != 1.5 {
+		t.Fatalf("expected fee of 1.5 sats/vbyte, got %v sats/vbyte", fee.SatsPerVByte)
+	}
+}
+
+func TestMaxFeeRemine(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+
+	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	// Create opgeth test server with the request handler.
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, defaultL2KeystonesCount)
+	defer opgeth.Shutdown()
+
+	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
+
+	// Create tbc test server with the request handler.
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
+	defer mtbc.Shutdown()
+
+	mtbc.SetFeeEstimate(100.0)
+
+	// Setup pop miner
+	cfg := NewDefaultConfig()
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
+	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+	cfg.LogLevel = "popm=TRACE; mock=TRACE"
+	cfg.MaxFee = 50.0
+
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create pop miner
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// keystone expiration is forced below
+	s.cfg.l2KeystoneMaxAge = mock.InfiniteDuration
+
+	// Start pop miner
+	go func() {
+		if err := s.Run(ctx); !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	now := time.Now()
+
+	expectedMsg := map[string]int{
+		"kss_subscribe":              1,
+		"kss_getLatestKeystones":     1,
+		tbcapi.CmdFeeEstimateRequest: wantedKeystones,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that all keystones are waiting to be retried
+
+	s.mtx.Lock()
+
+	if len(s.keystones) != wantedKeystones {
+		t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
+	}
+
+	for i := range s.keystones {
+		if s.keystones[i].state != keystoneStateError {
+			t.Fatalf("expected kss state %d, got %d",
+				keystoneStateError, s.keystones[i].state)
+		}
+		if !s.keystones[i].retry.After(now) {
+			t.Fatalf("keystone not delayed, retry set to %v",
+				time.Until(s.keystones[i].retry.UTC()))
+		}
+	}
+	// add an extra keystone that should expire and be removed
+	fakeHash := testutil.RandomHash()
+	s.keystones[*fakeHash] = &keystone{
+		hash:    fakeHash,
+		state:   keystoneStateError,
+		retry:   timestamp(defaultL2KeystoneFeeRetry),
+		expires: timestamp(0),
+	}
+	s.mtx.Unlock()
+
+	// Manually try to mine and make sure we fail since fees are still high
+	if err := s.mine(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	s.mtx.Lock()
+	if len(s.keystones) != wantedKeystones {
+		t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
+	}
+
+	for i := range s.keystones {
+		if s.keystones[i].state != keystoneStateError {
+			t.Fatalf("expected kss state %d, got %d",
+				keystoneStateError, s.keystones[i].state)
+		}
+		if !s.keystones[i].retry.After(now) {
+			t.Fatalf("keystone not delayed, retry set to %v",
+				time.Until(s.keystones[i].retry.UTC()))
+		}
+		// reset retry
+		s.keystones[i].retry = timestamp(0)
+	}
+	s.mtx.Unlock()
+
+	// lower fees
+	mtbc.SetFeeEstimate(5.0)
+
+	s.workC <- struct{}{}
+
+	// messages we expect to receive
+	expectedMsg = map[string]int{
+		tbcapi.CmdTxBroadcastRequest: wantedKeystones,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaxFee(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	_, kssList := testutil.MakeSharedKeystones(1)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
+
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
+	mtbc.SetFeeEstimate(50.0)
+	defer mtbc.Shutdown()
+
+	// Setup pop miner with max fee of 10 sats/vbyte
+	cfg := NewDefaultConfig()
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+	cfg.MaxFee = 0.5
+
+	if _, err := NewServer(cfg); err == nil {
+		t.Fatal("expected error")
+	}
+
+	cfg.MaxFee = 10.0
+
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gozerReady := make(chan struct{})
+	go func() {
+		err := s.gozer.Run(ctx, func() {
+			gozerReady <- struct{}{}
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// Wait for gozer to be ready
+	select {
+	case <-gozerReady:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+
+	// Test that high fee estimate returns FeeMaxExceededError
+	_, err = s.estimateFee(ctx)
+	if !errors.Is(err, ErrFeeMaxExceeded) {
+		t.Fatalf("expected error %v, got %v", ErrFeeMaxExceeded, err)
+	}
+
+	// Test that fee below MaxFee is returned without error
+	mtbc.SetFeeEstimate(5.0)
+
+	fee, err := s.estimateFee(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fee.SatsPerVByte != 5.0 {
+		t.Fatalf("expected fee of 5, got %v", fee.SatsPerVByte)
+	}
+
+	// Test that MaxFee of 0 disables the cap
+	s.cfg.MaxFee = 0
+
+	mtbc.SetFeeEstimate(100.0)
+
+	fee, err = s.estimateFee(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fee.SatsPerVByte != 100.0 {
+		t.Fatalf("expected fee of 100, got %v", fee.SatsPerVByte)
 	}
 }
 

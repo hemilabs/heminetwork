@@ -179,8 +179,8 @@ func TestTBCGozerCalls(t *testing.T) {
 	if feeEstimate.Blocks != blocks {
 		t.Fatalf("got %v, wanted %v", feeEstimate.Blocks, blocks)
 	}
-	if feeEstimate.SatsPerByte != expectedSats {
-		t.Fatalf("got %v, wanted %v", feeEstimate.SatsPerByte, expectedSats)
+	if feeEstimate.SatsPerVByte != expectedSats {
+		t.Fatalf("got %v, wanted %v", feeEstimate.SatsPerVByte, expectedSats)
 	}
 
 	expectedAmount, _ := btcutil.NewAmount(0.01)
@@ -234,9 +234,9 @@ func TestTBCGozerCalls(t *testing.T) {
 				panic(fmt.Sprintf("got %v != wanted %v",
 					fe.Blocks, feeEstimate.Blocks))
 			}
-			if fe.SatsPerByte != feeEstimate.SatsPerByte {
+			if fe.SatsPerVByte != feeEstimate.SatsPerVByte {
 				panic(fmt.Sprintf("got %v != wanted %v",
-					fe.SatsPerByte, feeEstimate.SatsPerByte))
+					fe.SatsPerVByte, feeEstimate.SatsPerVByte))
 			}
 
 			us, err := b.UtxosByAddress(ctx, true, testAddr, 0, 0)

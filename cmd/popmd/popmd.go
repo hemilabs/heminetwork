@@ -83,7 +83,13 @@ var (
 		"POPM_STATIC_FEE": config.Config{
 			Value:        &cfg.StaticFee,
 			DefaultValue: float64(0),
-			Help:         "static fee amount in sats/byte; overrides fee estimation if greater than 0. Can be decimal (ex. 1.5 sats/byte)",
+			Help:         "static fee amount in sats/vbyte; overrides fee estimation if greater than 0. Can be decimal (ex. 1.5 sats/vbyte)",
+			Print:        config.PrintAll,
+		},
+		"POPM_MAX_FEE": config.Config{
+			Value:        &cfg.MaxFee,
+			DefaultValue: float64(0),
+			Help:         "maximum fee in sats/vbyte for fee estimation, beyond which popm waits for lower fees to remine; 0 disables the cap",
 			Print:        config.PrintAll,
 		},
 	}

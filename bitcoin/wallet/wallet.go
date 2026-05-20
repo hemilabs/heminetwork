@@ -65,12 +65,12 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 type PrevOuts map[string]*wire.TxOut
 
 // TransactionCreate builds an unsigned bitcoin transaction sending amount to
-// address, funded from utxos.  The fee is estimated from satsPerByte and the
+// address, funded from utxos.  The fee is estimated from satsPerVByte and the
 // transaction's virtual size.  Change, if non-dust, is returned to the
 // address encoded in script.  The returned PrevOuts map is keyed by outpoint
 // string and carries the pkScript and value needed for witness sighash
 // computation.
-func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float64, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
+func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerVByte float64, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
 	// Create TxOut
 	payToScript, err := txscript.PayToAddrScript(address)
 	if err != nil {
@@ -83,7 +83,7 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float
 
 	// Calculate fee for worst case input number and assume there is change
 	txSize := txsizes.EstimateSerializeSize(len(utxos), []*wire.TxOut{txOut}, true)
-	fee := btcutil.Amount(float64(txSize) * satsPerByte)
+	fee := btcutil.Amount(float64(txSize) * satsPerVByte)
 
 	// Find utxo list that is big enough for entire transaction
 	utxoList, err := UtxoPickerMultiple(amount, fee, utxos)
@@ -93,7 +93,7 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float
 
 	// Calculate fee for real input number and assume there is change
 	txSize = txsizes.EstimateSerializeSize(len(utxoList), []*wire.TxOut{txOut}, true)
-	fee = btcutil.Amount(float64(txSize) * satsPerByte)
+	fee = btcutil.Amount(float64(txSize) * satsPerVByte)
 
 	// Assemble transaction
 	tx := wire.NewMsgTx(2) // Latest supported version
@@ -120,7 +120,7 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float
 // PoPTransactionCreate builds an unsigned Proof-of-Proof transaction
 // embedding l2keystone in an OP_RETURN output.  The transaction is
 // funded from utxos with change returned to the address in script.
-func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte float64, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
+func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerVByte float64, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
 	// Create OP_RETURN
 	aks := hemi.L2KeystoneAbbreviate(*l2keystone)
 	popTx := pop.TransactionL2{L2Keystone: aks}
@@ -132,7 +132,7 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 
 	// Calculate fee for 1 input and assume there is change
 	txSize := txsizes.EstimateSerializeSize(1, []*wire.TxOut{popTxOut}, true)
-	fee := btcutil.Amount(float64(txSize) * satsPerByte)
+	fee := btcutil.Amount(float64(txSize) * satsPerVByte)
 
 	// Find utxo that is big enough for entire transaction
 	utxo, err := UtxoPickerSingle(0, fee, utxos) // no amount, just fees
