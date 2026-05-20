@@ -1509,11 +1509,11 @@ func TestFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		LevelDBHome:          t.TempDir(),
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		LevelDBHome:     t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -1750,11 +1750,11 @@ func TestIndexNoFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		LevelDBHome:          t.TempDir(),
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		LevelDBHome:     t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -1958,12 +1958,12 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		HemiIndex:            true, // Test keystone index
-		LevelDBHome:          t.TempDir(),
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		HemiIndex:       true, // Test keystone index
+		LevelDBHome:     t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -2283,11 +2283,11 @@ func TestIndexFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		LevelDBHome:          t.TempDir(),
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		LevelDBHome:     t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -2624,12 +2624,12 @@ func TestKeystoneIndexFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		HemiIndex:            true, // Test keystone index
-		LevelDBHome:          t.TempDir(),
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		HemiIndex:       true, // Test keystone index
+		LevelDBHome:     t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -3212,11 +3212,11 @@ func TestForkCanonicity(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		LevelDBHome:          t.TempDir(),
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		LevelDBHome:     t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -3567,12 +3567,12 @@ func TestZKIndexFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		ZKIndex:              true, // Test zk index
-		LevelDBHome:          t.TempDir(),
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		ZKIndex:         true, // Test zk index
+		LevelDBHome:     t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -4139,11 +4139,11 @@ func TestIndexFakeHeaders(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		LevelDBHome:          t.TempDir(),
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+		BlockSanity:     false,
+		LevelDBHome:     t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,

@@ -170,7 +170,7 @@ func h2b(wbh *wire.BlockHeader) [80]byte {
 type Config struct {
 	AutoIndex               bool
 	BlockCacheSize          string
-	BlockheaderCacheSize    string
+	HeaderCacheSize         string
 	BlockSanity             bool
 	HemiIndex               bool
 	LevelDBHome             string
@@ -206,7 +206,7 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		ListenAddress:        tbcapi.DefaultListen,
 		BlockCacheSize:       "1gb",
-		BlockheaderCacheSize: "128mb",
+		HeaderCacheSize:      "128mb",
 		LogLevel:             logLevel,
 		MaxCachedKeystones:   defaultMaxCachedKeystones,
 		MaxCachedTxs:         defaultMaxCachedTxs,
@@ -2911,7 +2911,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 
 	// Open db.
 	cfg, err := level.NewConfig(s.cfg.Network, s.cfg.LevelDBHome,
-		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
+		s.cfg.HeaderCacheSize, s.cfg.BlockCacheSize)
 	if err != nil {
 		return err
 	}

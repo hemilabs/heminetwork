@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Rename `TBC_BLOCKHEADER_CACHE_SIZE` environment variable to
+  `TBC_HEADER_CACHE_SIZE`
+  ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
+
+- `wallet.TransactionCreate` and `wallet.TransactionSign` now use
+  `PrevOuts` (`map[string]*wire.TxOut`) instead of `map[string][]byte`.
+  Witness sighash algorithms require the spent output's value; the old type
+  carried only the pkScript
+  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+
 ### Added
 
+- Add generic `lru` package with cost-based LRU cache (`lru.Cache[K,V]`)
+  ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
 - Add ZK indexers.
 - Add RPC request method whitelist to hproxy ([#691](https://github.com/hemilabs/heminetwork/pull/691)).
 - Add TBC notification system ([#725](https://github.com/hemilabs/heminetwork/pull/725)).
@@ -33,11 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** `wallet.TransactionCreate` and `wallet.TransactionSign` now use
-  `PrevOuts` (`map[string]*wire.TxOut`) instead of `map[string][]byte`.
-  Witness sighash algorithms require the spent output's value; the old type
-  carried only the pkScript
-  ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Replace block and header caches in level package with generic `lru.Cache[K,V]`
+  ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
 
 - Update required Go version to [Go 1.26](https://tip.golang.org/doc/go1.26)
   ([#673](https://github.com/hemilabs/heminetwork/pull/673), [#698](https://github.com/hemilabs/heminetwork/pull/698),

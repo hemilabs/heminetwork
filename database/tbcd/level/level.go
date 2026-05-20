@@ -30,6 +30,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/lru"
 )
 
 // Locking order:
@@ -92,11 +93,11 @@ type ldb struct {
 	pool    level.Pool
 	rawPool level.RawPool
 
-	blockCache *lowIQLRU
+	blockCache *lru.Cache[chainhash.Hash, []byte]
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
-	headerCache *lowIQMap
+	headerCache *lru.Cache[chainhash.Hash, *tbcd.BlockHeader]
 
 	cfg *Config
 }
@@ -133,14 +134,14 @@ func headerHash(header []byte) *chainhash.Hash {
 }
 
 type Config struct {
-	BlockCacheSize       string // size of block cache
-	BlockheaderCacheSize string // size of block header cache
-	Home                 string // home directory
-	Network              string // network e.g. "testnet3", "mainnet" etc
-	blockCacheSize       int    // parsed size of block cache
-	blockheaderCacheSize int    // parsed size of block header cache
-	nonInteractive       bool   // Set to true to prevent user interaction
-	upgradeOpen          bool   // Set to true when doing an open during upgrade
+	BlockCacheSize  string // size of block cache
+	HeaderCacheSize string // size of block header cache
+	Home            string // home directory
+	Network         string // network e.g. "testnet3", "mainnet" etc
+	blockCacheSize  int    // parsed size of block cache
+	headerCacheSize int    // parsed size of block header cache
+	nonInteractive  bool   // Set to true to prevent user interaction
+	upgradeOpen     bool   // Set to true when doing an open during upgrade
 }
 
 func (cfg *Config) SetNoninteractive(x bool) {
@@ -151,15 +152,15 @@ func (cfg *Config) SetUpgradeOpen(x bool) {
 	cfg.upgradeOpen = x
 }
 
-func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
-	if blockheaderCacheSizeS == "" {
-		blockheaderCacheSizeS = "0"
+func NewConfig(network, home, headerCacheSizeS, blockCacheSizeS string) (*Config, error) {
+	if headerCacheSizeS == "" {
+		headerCacheSizeS = "0"
 	}
-	blockheaderCacheSize, err := humanize.ParseBytes(blockheaderCacheSizeS)
+	headerCacheSize, err := humanize.ParseBytes(headerCacheSizeS)
 	if err != nil {
 		return nil, fmt.Errorf("blockheader cache size: %w", err)
 	}
-	if blockheaderCacheSize > math.MaxInt64 {
+	if headerCacheSize > math.MaxInt {
 		return nil, errors.New("blockheader cache size")
 	}
 
@@ -170,7 +171,7 @@ func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*C
 	if err != nil {
 		return nil, fmt.Errorf("block cache size: %w", err)
 	}
-	if blockCacheSize > math.MaxInt64 {
+	if blockCacheSize > math.MaxInt {
 		return nil, errors.New("block cache size")
 	}
 	if home == "" {
@@ -197,13 +198,13 @@ func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*C
 	}
 
 	return &Config{
-		Home:                 homedir,
-		Network:              network,
-		BlockCacheSize:       blockCacheSizeS,
-		blockCacheSize:       int(blockCacheSize),
-		BlockheaderCacheSize: blockheaderCacheSizeS,
-		blockheaderCacheSize: int(blockheaderCacheSize),
-		nonInteractive:       nonInteractive,
+		Home:            homedir,
+		Network:         network,
+		BlockCacheSize:  blockCacheSizeS,
+		blockCacheSize:  int(blockCacheSize),
+		HeaderCacheSize: headerCacheSizeS,
+		headerCacheSize: int(headerCacheSize),
+		nonInteractive:  nonInteractive,
 	}, nil
 }
 
@@ -222,7 +223,13 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 
 	welcome := make([]string, 0, 10)
 	if cfg.blockCacheSize > 0 {
-		l.blockCache, err = lowIQLRUSizeNew(cfg.blockCacheSize)
+		l.blockCache, err = lru.New[chainhash.Hash, []byte](
+			cfg.blockCacheSize,
+			func(_ chainhash.Hash, v []byte) int {
+				return chainhash.HashSize + len(v) + lru.EntryOverhead
+			},
+			lru.FlagPromoteOnly,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 		}
@@ -231,13 +238,20 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 	} else {
 		welcome = append(welcome, "Block cache: DISABLED")
 	}
-	if cfg.blockheaderCacheSize > 0 {
-		l.headerCache, err = lowIQMapSizeNew(cfg.blockheaderCacheSize)
+	if cfg.headerCacheSize > 0 {
+		const blockHeaderCost = 8 + 32 + 80 + 8 // rough tbcd.BlockHeader size
+		l.headerCache, err = lru.New[chainhash.Hash, *tbcd.BlockHeader](
+			cfg.headerCacheSize,
+			func(_ chainhash.Hash, _ *tbcd.BlockHeader) int {
+				return blockHeaderCost + lru.EntryOverhead
+			},
+			0,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block header cache: %w", err)
 		}
 		welcome = append(welcome, fmt.Sprintf("blockheader cache: %v",
-			humanize.Bytes(uint64(cfg.blockheaderCacheSize))))
+			humanize.Bytes(uint64(cfg.headerCacheSize))))
 	} else {
 		welcome = append(welcome, "Blockheader cache: DISABLED")
 	}
@@ -547,7 +561,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*tbcd
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
-	if l.cfg.blockheaderCacheSize > 0 {
+	if l.cfg.headerCacheSize > 0 {
 		// Try cache first
 		if b, ok := l.headerCache.Get(hash); ok {
 			return b, nil
@@ -569,8 +583,8 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*tbcd
 	bh := decodeBlockHeader(ebh)
 
 	// Insert into cache, roughly 150 byte cost.
-	if l.cfg.blockheaderCacheSize > 0 {
-		l.headerCache.Put(*bh)
+	if l.cfg.headerCacheSize > 0 {
+		l.headerCache.Put(bh.Hash, bh)
 	}
 
 	return bh, nil
@@ -1054,7 +1068,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	hhBatch := new(leveldb.Batch)
 
 	var bhCacheBatch []*chainhash.Hash
-	if l.cfg.blockheaderCacheSize > 0 {
+	if l.cfg.headerCacheSize > 0 {
 		// cache batch to delete blockheaders
 		bhCacheBatch = make([]*chainhash.Hash, 0, len(headersParsed))
 	}
@@ -1069,7 +1083,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		bhsBatch.Delete(bhash[:])
 
 		// Remove from header cache as well in a batch
-		if l.cfg.blockheaderCacheSize > 0 {
+		if l.cfg.headerCacheSize > 0 {
 			bhCacheBatch = append(bhCacheBatch, &bhash)
 		}
 
@@ -1077,9 +1091,11 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		hhKey := heightHashToKey(fh.Height, bhash[:])
 		hhBatch.Delete(hhKey)
 	}
-	if l.cfg.blockheaderCacheSize > 0 {
+	if l.cfg.headerCacheSize > 0 {
 		// Delete right away. Cache can always be rehydrated.
-		l.headerCache.PurgeBatch(bhCacheBatch)
+		for _, k := range bhCacheBatch {
+			l.headerCache.Delete(*k)
+		}
 	}
 
 	// Insert updated canonical tip after removal of the provided block headers
@@ -2396,16 +2412,26 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 	return nil
 }
 
+func lruStatsToCacheStats(s lru.Stats) tbcd.CacheStats {
+	return tbcd.CacheStats{
+		Hits:   s.Hits,
+		Misses: s.Misses,
+		Purges: s.Purges,
+		Size:   s.Cost,
+		Items:  s.Items,
+	}
+}
+
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
-	if l.cfg.blockheaderCacheSize == 0 {
+	if l.cfg.headerCacheSize == 0 {
 		return noStats
 	}
-	return l.headerCache.Stats()
+	return lruStatsToCacheStats(l.headerCache.Stats())
 }
 
 func (l *ldb) BlockCacheStats() tbcd.CacheStats {
 	if l.cfg.blockCacheSize == 0 {
 		return noStats
 	}
-	return l.blockCache.Stats()
+	return lruStatsToCacheStats(l.blockCache.Stats())
 }

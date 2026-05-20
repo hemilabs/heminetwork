@@ -47,8 +47,8 @@ var (
 			Help:         "size of block cache",
 			Print:        config.PrintAll,
 		},
-		"TBC_BLOCKHEADER_CACHE_SIZE": config.Config{
-			Value:        &cfg.BlockheaderCacheSize,
+		"TBC_HEADER_CACHE_SIZE": config.Config{
+			Value:        &cfg.HeaderCacheSize,
 			DefaultValue: bhsDefaultSize,
 			Help:         "size of blockheader cache",
 			Print:        config.PrintAll,
