@@ -107,6 +107,12 @@ var (
 			Help:         "maximum cached zk rows during indexing",
 			Print:        config.PrintAll,
 		},
+		"TBC_UTXO_READ_CACHE_SIZE": config.Config{
+			Value:        &cfg.UtxoReadCacheSize,
+			DefaultValue: "1gb",
+			Help:         "size of utxo read LRU cache (0 to disable)",
+			Print:        config.PrintAll,
+		},
 		"TBC_MEMPOOL_ENABLED": config.Config{
 			Value:        &cfg.MempoolEnabled,
 			DefaultValue: true,

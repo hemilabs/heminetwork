@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -84,6 +84,8 @@ type indexer interface {
 	process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error // Process block
 	commit(ctx context.Context, direction int, hash chainhash.Hash, c indexerCache) error   // Commit index cache to disk
 	fixupCacheHook(ctx context.Context, block *btcutil.Block, c indexerCache) error         // Fixup cache
+	onSyncComplete()                                                                        // Called after sync reaches target
+	readCacheInfo() string                                                                  // Optional read cache stats for log line
 }
 
 // indexerCache exposes Cache management functions.
@@ -129,7 +131,11 @@ func (c *indexerCommon) IndexToBest(ctx context.Context) error {
 	}
 	defer c.indexing.Store(0)
 
-	return c.toBest(ctx)
+	if err := c.toBest(ctx); err != nil {
+		return err
+	}
+	c.p.onSyncComplete()
+	return nil
 }
 
 func (c *indexerCommon) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
@@ -143,7 +149,11 @@ func (c *indexerCommon) IndexToHash(ctx context.Context, hash chainhash.Hash) er
 	}
 	defer c.indexing.Store(0)
 
-	return c.windOrUnwind(ctx, hash)
+	if err := c.windOrUnwind(ctx, hash); err != nil {
+		return err
+	}
+	c.p.onSyncComplete()
+	return nil
 }
 
 func (c *indexerCommon) IndexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -445,7 +455,8 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 		// Try not to overshoot the cache to prevent costly allocations
 		_, _, pct := cache.Stats()
 		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
-			log.Infof("%v indexer: %v cache %v%%", c, hh, pct)
+			log.Infof("%v indexer: %v cache %v%%%v", c, hh, pct,
+				c.p.readCacheInfo())
 		}
 
 		// Exit if we processed the provided end hash or hit 95% cache full.
@@ -517,7 +528,8 @@ func (c *indexerCommon) parseBlocksReverse(ctx context.Context, endHash *chainha
 		// Try not to overshoot the cache to prevent costly allocations
 		_, _, pct := cache.Stats()
 		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
-			log.Infof("%v unindexer: %v cache %v%%", c, hh, pct)
+			log.Infof("%v unindexer: %v cache %v%%%v", c, hh, pct,
+				c.p.readCacheInfo())
 		}
 
 		// Move to previous block

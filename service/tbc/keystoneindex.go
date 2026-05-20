@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -66,6 +66,10 @@ func (i *keystoneIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ 
 	// Not needed for keystone indexer.
 	return nil
 }
+
+func (i *keystoneIndexer) onSyncComplete() {}
+
+func (i *keystoneIndexer) readCacheInfo() string { return "" }
 
 // BlockKeystonesByHash returns all keystones within a block. If hash is not
 // nil then it returns *only* the keystone transactions where the L2
