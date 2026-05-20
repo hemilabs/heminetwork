@@ -41,6 +41,7 @@ func TestTBCGozerConnection(t *testing.T) {
 		LogLevel:                "tbcd=INFO:level=INFO:tbcgozer=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 "localnet",
+		RequestTimeout:          10,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:18444"},

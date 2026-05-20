@@ -332,6 +332,10 @@ func NewServer(cfg *Config) (*Server, error) {
 		}
 	}
 
+	if cfg.RequestTimeout <= 0 {
+		return nil, errors.New("request timeout must be greater than zero")
+	}
+
 	s := &Server{
 		cfg:        cfg,
 		printTime:  time.Now().Add(10 * time.Second),
@@ -3073,9 +3077,6 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 	s.ui = NewUtxoIndexer(s.g, s.cfg.MaxCachedTxs, s.fixupCache, func() {
 		if s.utxoReadCache != nil {
-			cs := s.utxoReadCache.Stats()
-			log.Infof("utxo read cache at tip: hits %v misses %v purges %v items %v",
-				cs.Hits, cs.Misses, cs.Purges, cs.Items)
 			s.utxoReadCache.Clear()
 		}
 	}, func() string {

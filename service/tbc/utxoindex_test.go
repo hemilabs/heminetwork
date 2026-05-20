@@ -295,6 +295,7 @@ func TestUtxoReadCacheIntegration(t *testing.T) {
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            3, // small write cache to force flushes
 		Network:                 networkLocalnet,
+		RequestTimeout:          10,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          false,
