@@ -1092,6 +1092,11 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 	return blk, nil
 }
 
+func (b *btcNode) SendMsg(ctx context.Context, msg wire.Message) error {
+	b.t.Logf("send wire msg %s", msg.Command())
+	return b.p.Write(defaultCmdTimeout, msg)
+}
+
 func (b *btcNode) MineAndSendEmpty(ctx context.Context) error {
 	b.t.Logf("send empty headers message")
 	return b.p.Write(defaultCmdTimeout, wire.NewMsgHeaders())
