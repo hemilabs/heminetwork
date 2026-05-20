@@ -113,6 +113,12 @@ var (
 			Help:         "size of utxo read LRU cache (0 to disable)",
 			Print:        config.PrintAll,
 		},
+		"TBC_MAX_CACHED_ORDINALS": config.Config{
+			Value:        &cfg.MaxCachedOrdinals,
+			DefaultValue: int(1e6),
+			Help:         "maximum cached ordinal entries during indexing",
+			Print:        config.PrintAll,
+		},
 		"TBC_MEMPOOL_ENABLED": config.Config{
 			Value:        &cfg.MempoolEnabled,
 			DefaultValue: true,
@@ -129,6 +135,12 @@ var (
 			Value:        &cfg.PeersWanted,
 			DefaultValue: 64,
 			Help:         "number of wanted p2p peers",
+			Print:        config.PrintAll,
+		},
+		"TBC_REQUEST_TIMEOUT": config.Config{
+			Value:        &cfg.RequestTimeout,
+			DefaultValue: 120,
+			Help:         "RPC request timeout in seconds",
 			Print:        config.PrintAll,
 		},
 		"TBC_PROMETHEUS_ADDRESS": config.Config{
@@ -153,6 +165,12 @@ var (
 			Value:        &cfg.ZKIndex,
 			DefaultValue: false,
 			Help:         "enable/disable various zk related indexes",
+			Print:        config.PrintAll,
+		},
+		"TBC_ORDINAL_INDEX": config.Config{
+			Value:        &cfg.OrdinalIndex,
+			DefaultValue: false,
+			Help:         "enable/disable ordinal (sat range + inscription) indexer",
 			Print:        config.PrintAll,
 		},
 	}

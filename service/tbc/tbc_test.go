@@ -180,8 +180,8 @@ func TestDbUpgradeFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 {
-		t.Fatalf("expected version 5, got %v", version)
+	if version != 6 {
+		t.Fatalf("expected version 6, got %v", version)
 	}
 
 	// version 2 checks
@@ -454,8 +454,8 @@ func TestDbUpgradeV4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 {
-		t.Fatalf("expected version 5, got %v", version)
+	if version != 6 {
+		t.Fatalf("expected version 6, got %v", version)
 	}
 
 	keystoneHashes := []string{
@@ -1281,6 +1281,67 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	}()
 
 	// Wait for HTTP server to start
+	var tbcAddr string
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := tbcServer.HTTPAddress(); addr != nil {
+			tbcAddr = addr.String()
+			break
+		}
+	}
+
+	tbcUrl := fmt.Sprintf("http://%s%s", tbcAddr, tbcapi.RouteWebsocket)
+	err = EnsureCanConnect(t, tbcUrl, 5*time.Second)
+	if err != nil {
+		t.Fatalf("could not connect to %s: %s", tbcUrl, err.Error())
+	}
+
+	return tbcServer, tbcUrl
+}
+
+// createTbcServerWithOrdinals creates a TBC server connected to a bitcoind
+// peer with ordinal indexing enabled. Identical to createTbcServer except
+// cfg.OrdinalIndex = true.
+func createTbcServerWithOrdinals(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
+	t.Helper()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home := fmt.Sprintf("%s/%s", wd, levelDbHome)
+
+	if err := os.RemoveAll(home); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := NewDefaultConfig()
+	cfg.LevelDBHome = home
+	cfg.Network = networkLocalnet
+	cfg.ListenAddress = "127.0.0.1:0"
+	cfg.OrdinalIndex = true
+	cfg.Seeds = []string{
+		"127.0.0.1:" + mappedPeerPort.Port(),
+	}
+
+	tbcServer, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := tbcServer.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// Wait for HTTP server to start.
 	var tbcAddr string
 	for {
 		select {
