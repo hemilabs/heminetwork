@@ -1884,7 +1884,10 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	return nil
 }
 
-func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgInv, raw []byte) error {
+func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgInv, _ []byte) error {
+	if len(msg.InvList) == 0 {
+		return nil
+	}
 	switch msg.InvList[0].Type {
 	case wire.InvTypeTx:
 	case wire.InvTypeBlock:

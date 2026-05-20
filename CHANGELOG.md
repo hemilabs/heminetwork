@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Fix a remote crash vulnerability in `tbc` caused by the first element
+  of an inventory message list being accessed before ensuring the slice
+  isn't empty ([#1039](https://github.com/hemilabs/heminetwork/pull/1039)).
+
 ### Breaking Changes
 
 - Rename `TBC_BLOCKHEADER_CACHE_SIZE` environment variable to

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sort"
 	"strconv"
@@ -39,6 +40,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
+	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
 )
 
 const (
@@ -2453,5 +2455,83 @@ func TestExternalHeaderModeRunReturnsTypedError(t *testing.T) {
 	}
 	if ehn.Op != "Run" {
 		t.Fatalf("expected operation Run, got %s", ehn.Op)
+	}
+}
+
+func TestEmptyInvMessage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 17*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		BlockSanity:             false,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+		// LogLevel:             "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	if err := n.SendMsg(ctx, wire.NewMsgInv()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.SendMsg(ctx, wire.NewMsgPing(10)); err != nil {
+		t.Fatal(err)
+	}
+
+	// wait for node to connect as peer
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case msg := <-n.msgCh:
+			if msg == "pong" {
+				return
+			}
+		}
 	}
 }
