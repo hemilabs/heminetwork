@@ -705,13 +705,10 @@ type TxNotification struct {
 type OrdinalInscription struct {
 	TxID               chainhash.Hash  `json:"tx_id"`
 	InputIndex         uint32          `json:"input_index"`
-	InscriptionNumber  int64           `json:"inscription_number"`
 	SatNumber          uint64          `json:"sat_number"`
 	Cursed             bool            `json:"cursed"`
 	BlockHash          chainhash.Hash  `json:"block_hash"`
 	BlockHeight        uint64          `json:"block_height"`
-	CurrentTxID        chainhash.Hash  `json:"current_tx_id"`
-	CurrentVout        uint32          `json:"current_vout"`
 	ParentTxID         *chainhash.Hash `json:"parent_tx_id,omitempty"`
 	ParentInputIndex   *uint32         `json:"parent_input_index,omitempty"`
 	DelegateTxID       *chainhash.Hash `json:"delegate_tx_id,omitempty"`
