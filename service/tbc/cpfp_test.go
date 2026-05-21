@@ -218,6 +218,18 @@ func (stubDB) BlockOrdinalWorkUpdate(context.Context, map[tbcd.OrdinalWorkKey]tb
 	panic("stub")
 }
 
+func (stubDB) ReadOrdinalWork(context.Context, uint32, int) ([]tbcd.OrdinalWorkEntry, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalWatermarkGet(context.Context) (uint32, bool, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalPopulatorUpdate(context.Context, map[tbcd.OrdinalKey]tbcd.OrdinalValue, map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue) error {
+	panic("stub")
+}
+
 // TestTxOutByOutpoint verifies that txOutByOutpoint resolves an
 // output from a parent transaction that is in the mempool.
 func TestTxOutByOutpoint(t *testing.T) {

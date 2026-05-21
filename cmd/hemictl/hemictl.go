@@ -416,6 +416,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tordinalinscriptioncontent txid=<txid> [index=<input_index>]")
 		fmt.Println("\tordinalinscriptionsbyblock hash=<block_hash>")
 		fmt.Println("\tordinalinscriptionsbysat sat=<sat_number>")
+		fmt.Println("\tordinalinscriptionsbyaddress address=<address> [start=<n>] [count=<n>]")
 		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
@@ -1250,6 +1251,38 @@ func tbcdb(pctx context.Context, flags []string) error {
 		inscriptions, err := s.InscriptionsBySat(ctx, satNumber)
 		if err != nil {
 			return fmt.Errorf("inscriptions by sat: %w", err)
+		}
+		for _, insc := range inscriptions {
+			fmt.Printf("txid       : %v\n", insc.TxID)
+			fmt.Printf("input index: %d\n", insc.InputIndex)
+			fmt.Printf("sat number : %d\n", insc.SatNumber)
+			fmt.Printf("cursed     : %v\n\n", insc.Cursed)
+		}
+		fmt.Printf("total: %d\n", len(inscriptions))
+
+	case "ordinalinscriptionsbyaddress":
+		address := args["address"]
+		if address == "" {
+			return errors.New("address: must be set")
+		}
+		var start, count uint32
+		if sv := args["start"]; sv != "" {
+			v, err := strconv.ParseUint(sv, 10, 32)
+			if err != nil {
+				return fmt.Errorf("start: %w", err)
+			}
+			start = uint32(v)
+		}
+		if cv := args["count"]; cv != "" {
+			v, err := strconv.ParseUint(cv, 10, 32)
+			if err != nil {
+				return fmt.Errorf("count: %w", err)
+			}
+			count = uint32(v)
+		}
+		inscriptions, err := s.InscriptionsByAddress(ctx, address, start, count)
+		if err != nil {
+			return fmt.Errorf("inscriptions by address: %w", err)
 		}
 		for _, insc := range inscriptions {
 			fmt.Printf("txid       : %v\n", insc.TxID)
