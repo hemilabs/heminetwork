@@ -4008,5 +4008,80 @@ func TestRpcOrdinalInscriptionE2E(t *testing.T) {
 	}
 	t.Logf("reveal output sat ranges: %v", satResp.SatRanges)
 
-	t.Log("full inscription E2E pipeline verified: gozer → TBC → bitcoind → block → TBC ordinal indexer → RPC")
+	// Query inscriptions by block.
+	revealBlockHash := inscResp.Inscription.BlockHash
+	if err := tbcapi.Write(ctx, tws.conn, "insc-4", tbcapi.OrdinalInscriptionsByBlockRequest{
+		Hash: revealBlockHash,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v = readResponse(t)
+	if v.Header.Command != tbcapi.CmdOrdinalInscriptionsByBlockResponse {
+		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+	var blockResp tbcapi.OrdinalInscriptionsByBlockResponse
+	if err := json.Unmarshal(v.Payload, &blockResp); err != nil {
+		t.Fatal(err)
+	}
+	if blockResp.Error != nil {
+		t.Fatalf("inscriptions by block error: %v", blockResp.Error)
+	}
+	if len(blockResp.Inscriptions) != 1 {
+		t.Fatalf("expected 1 inscription in block, got %d", len(blockResp.Inscriptions))
+	}
+	t.Logf("InscriptionsByBlock verified: %v", blockResp.Inscriptions[0].TxID)
+
+	// Query inscriptions by sat — 'a' prefix should have data (regtest blocks
+	// have recent timestamps, so the watermark is set and full computation runs).
+	revealSat := inscResp.Inscription.SatNumber
+	if err := tbcapi.Write(ctx, tws.conn, "insc-5", tbcapi.OrdinalInscriptionsBySatRequest{
+		SatNumber: revealSat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v = readResponse(t)
+	if v.Header.Command != tbcapi.CmdOrdinalInscriptionsBySatResponse {
+		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+	var satInscResp tbcapi.OrdinalInscriptionsBySatResponse
+	if err := json.Unmarshal(v.Payload, &satInscResp); err != nil {
+		t.Fatal(err)
+	}
+	if satInscResp.Error != nil {
+		t.Fatalf("inscriptions by sat error: %v", satInscResp.Error)
+	}
+	if len(satInscResp.Inscriptions) != 1 {
+		t.Fatalf("expected 1 inscription for sat %d, got %d",
+			revealSat, len(satInscResp.Inscriptions))
+	}
+	t.Logf("InscriptionsBySat verified: sat=%d has inscription %v",
+		revealSat, satInscResp.Inscriptions[0].TxID)
+
+	// Query inscriptions by address — reveal output pays to p2pkhAddr.
+	if err := tbcapi.Write(ctx, tws.conn, "insc-6", tbcapi.OrdinalInscriptionsByAddressRequest{
+		Address: p2pkhAddr.EncodeAddress(),
+		Start:   0,
+		Count:   10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v = readResponse(t)
+	if v.Header.Command != tbcapi.CmdOrdinalInscriptionsByAddressResponse {
+		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+	var addrResp tbcapi.OrdinalInscriptionsByAddressResponse
+	if err := json.Unmarshal(v.Payload, &addrResp); err != nil {
+		t.Fatal(err)
+	}
+	if addrResp.Error != nil {
+		t.Fatalf("inscriptions by address error: %v", addrResp.Error)
+	}
+	if len(addrResp.Inscriptions) != 1 {
+		t.Fatalf("expected 1 inscription at %s, got %d",
+			p2pkhAddr.EncodeAddress(), len(addrResp.Inscriptions))
+	}
+	t.Logf("InscriptionsByAddress verified: %s holds inscription %v",
+		p2pkhAddr.EncodeAddress(), addrResp.Inscriptions[0].TxID)
+
+	t.Log("all 6 ordinal RPCs verified end-to-end")
 }

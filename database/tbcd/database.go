@@ -150,6 +150,9 @@ type Database interface {
 	BlockHeaderByOrdinalIndex(ctx context.Context) (*BlockHeader, error)
 	BlockOrdinalUpdate(ctx context.Context, direction int, data map[OrdinalKey]OrdinalValue, ordinalIndexHash chainhash.Hash) error
 	BlockOrdinalWorkUpdate(ctx context.Context, data map[OrdinalWorkKey]OrdinalWorkValue) error
+	ReadOrdinalWork(ctx context.Context, belowHeight uint32, limit int) ([]OrdinalWorkEntry, error)
+	OrdinalWatermarkGet(ctx context.Context) (uint32, bool, error)
+	OrdinalPopulatorUpdate(ctx context.Context, ordData map[OrdinalKey]OrdinalValue, workData map[OrdinalWorkKey]OrdinalWorkValue) error
 	OrdinalSatRangesByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error)
 	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
@@ -665,12 +668,35 @@ func (v OrdinalValue) Bytes() []byte  { return []byte(v) }
 // by a background populator.
 type OrdinalWorkKey [7]byte
 
-func (k OrdinalWorkKey) Prefix() byte { return k[0] }
+func (k OrdinalWorkKey) Prefix() byte   { return k[0] }
+func (k OrdinalWorkKey) Height() uint32 { return binary.BigEndian.Uint32(k[1:5]) }
+func (k OrdinalWorkKey) Seq() uint16    { return binary.BigEndian.Uint16(k[5:7]) }
 
-// OrdinalWorkValue wraps work queue values. A nil value signals deletion.
-type OrdinalWorkValue []byte
+// OrdinalWorkValue wraps work queue values as a fixed-size array.
+// Layout: commit_txid(32) + commit_vout(4) + inscription_id(36) = 72 bytes.
+// Fixed size avoids heap-allocated backing arrays and aliasing issues
+// that []byte slices can cause with LevelDB batch writes.
+type OrdinalWorkValue [72]byte
 
-func (v OrdinalWorkValue) IsDelete() bool { return v == nil }
+// OrdinalWorkValueDelete is the sentinel value signaling deletion.
+var OrdinalWorkValueDelete OrdinalWorkValue
+
+func init() {
+	for i := range OrdinalWorkValueDelete {
+		OrdinalWorkValueDelete[i] = 0xff
+	}
+}
+
+func (v OrdinalWorkValue) IsDelete() bool { return v == OrdinalWorkValueDelete }
+
+// OrdinalWorkEntry is a decoded work queue entry for the populator.
+type OrdinalWorkEntry struct {
+	Height     uint32
+	Seq        uint16
+	CommitTxid chainhash.Hash
+	CommitVout uint32
+	InscID     [36]byte
+}
 
 func BEUint64(x uint64) []byte {
 	var b [8]byte

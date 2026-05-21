@@ -202,6 +202,7 @@ type Config struct {
 	UtxoReadCacheSize       string // LRU read cache for utxo fixup; "0" or "" disables
 	OrdinalIndex            bool
 	MaxCachedOrdinals       int
+	OrdinalWatermarkGap     time.Duration
 
 	// Admin API
 	JWTSecret string // Hex-encoded JWT token for admin RPC authentication
@@ -226,6 +227,7 @@ func NewDefaultConfig() *Config {
 		MaxCachedZK:          defaultMaxZK,
 		UtxoReadCacheSize:    "1gb",
 		MaxCachedOrdinals:    defaultMaxCachedOrdinals,
+		OrdinalWatermarkGap:  24 * time.Hour,
 		MempoolEnabled:       true,
 		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
 		PeersWanted:          defaultPeersWanted,
@@ -3130,7 +3132,8 @@ func (s *Server) dbOpen(ctx context.Context) error {
 
 	if s.cfg.OrdinalIndex {
 		s.oi = NewOrdinalIndexer(s.g, s.cfg.MaxCachedOrdinals,
-			s.cfg.OrdinalIndex, s.ordinalGenesis)
+			s.cfg.OrdinalIndex, s.ordinalGenesis,
+			s.computeInscribedSat, s.cfg.OrdinalWatermarkGap)
 	}
 
 	return nil
@@ -3863,11 +3866,8 @@ func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Ha
 }
 
 // InscriptionsByAddress lists inscriptions currently held by UTXOs at the
-// given address. The ordinal indexer cross-references the utxo index to find
-// InscriptionsByAddress finds inscriptions held by an address.
-// TODO(ordinals2): needs outpoint→inscription tracking at index time
-// to replace the removed sat range + sat→inscription lookup chain.
-// Currently returns empty results.
+// given address. Uses the 'a' prefix (sat→inscription) populated by the
+// indexer/populator, combined with backward walk sat range computation.
 func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress string, start, count uint32) ([]*tbcapi.OrdinalInscription, error) {
 	log.Tracef("InscriptionsByAddress")
 	defer log.Tracef("InscriptionsByAddress exit")
@@ -3876,13 +3876,68 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 		return nil, errors.New("ordinal index not enabled")
 	}
 
-	return nil, nil
+	addr, err := btcutil.DecodeAddress(encodedAddress, s.g.chain)
+	if err != nil {
+		return nil, fmt.Errorf("decode address: %w", err)
+	}
+	script, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, fmt.Errorf("address to script: %w", err)
+	}
+	sh := tbcd.NewScriptHashFromScript(script)
+
+	utxos, err := s.g.db.UtxosByScriptHash(ctx, sh, 0, 10000)
+	if err != nil {
+		return nil, fmt.Errorf("utxos for %s: %w", encodedAddress, err)
+	}
+
+	memo := make(map[tbcd.Outpoint][]SatRange)
+	var result []*tbcapi.OrdinalInscription
+	for _, utxo := range utxos {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		ranges, err := s.computeSatRanges(ctx, *utxo.ChainHash(),
+			utxo.OutputIndex(), memo)
+		if err != nil {
+			continue
+		}
+		for _, r := range ranges {
+			inscribedSats, err := s.g.db.OrdinalInscribedSatsInRange(
+				ctx, r.Start, r.Start+r.Count)
+			if err != nil {
+				continue
+			}
+			for _, sat := range inscribedSats {
+				inscIDs, err := s.g.db.OrdinalInscriptionsBySat(ctx, sat)
+				if err != nil {
+					continue
+				}
+				for _, inscID := range inscIDs {
+					insc, err := s.populateInscription(ctx, inscID)
+					if err != nil {
+						return nil, err
+					}
+					result = append(result, insc)
+				}
+			}
+		}
+	}
+
+	// Apply pagination.
+	if uint32(len(result)) <= start {
+		return nil, nil
+	}
+	result = result[start:]
+	if count > 0 && uint32(len(result)) > count {
+		result = result[:count]
+	}
+	return result, nil
 }
 
 // InscriptionsBySat lists all inscriptions on a given sat.
-// TODO(ordinals2): requires precomputed sat→inscription index or
-// full inscription scan with on-demand sat computation. Currently
-// returns empty results.
+// Scans the 'a' prefix (sat→inscription reverse index) populated at
+// wind time (above watermark) or by the background populator.
 func (s *Server) InscriptionsBySat(ctx context.Context, satNumber uint64) ([]*tbcapi.OrdinalInscription, error) {
 	log.Tracef("InscriptionsBySat")
 	defer log.Tracef("InscriptionsBySat exit")
@@ -3891,9 +3946,19 @@ func (s *Server) InscriptionsBySat(ctx context.Context, satNumber uint64) ([]*tb
 		return nil, errors.New("ordinal index not enabled")
 	}
 
-	// Without precomputed sat→inscription mappings, this lookup
-	// requires scanning all inscriptions. Return empty for now.
-	return nil, nil
+	inscIDs, err := s.g.db.OrdinalInscriptionsBySat(ctx, satNumber)
+	if err != nil {
+		return nil, fmt.Errorf("inscriptions by sat %d: %w", satNumber, err)
+	}
+	result := make([]*tbcapi.OrdinalInscription, 0, len(inscIDs))
+	for _, inscID := range inscIDs {
+		insc, err := s.populateInscription(ctx, inscID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, insc)
+	}
+	return result, nil
 }
 
 // SatRangesByOutpoint returns the sat ranges assigned to a UTXO.

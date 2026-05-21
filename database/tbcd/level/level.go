@@ -2559,12 +2559,124 @@ func (l *ldb) BlockOrdinalWorkUpdate(ctx context.Context, data map[tbcd.OrdinalW
 		if v.IsDelete() {
 			batch.Delete(k[:])
 		} else {
-			batch.Put(k[:], v)
+			batch.Put(k[:], v[:])
 		}
 		delete(data, k)
 	}
 	if err := ordDB.Write(batch, nil); err != nil {
 		return fmt.Errorf("ordinal work update: %w", err)
+	}
+	return nil
+}
+
+func (l *ldb) ReadOrdinalWork(ctx context.Context, belowHeight uint32, limit int) ([]tbcd.OrdinalWorkEntry, error) {
+	log.Tracef("ReadOrdinalWork")
+	defer log.Tracef("ReadOrdinalWork exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Range: all 'w' keys from [start, limit) where limit = belowHeight.
+	var startKey tbcd.OrdinalWorkKey
+	startKey[0] = 'w'
+	// height=0, seq=0 — lowest possible 'w' key
+
+	var limitKey tbcd.OrdinalWorkKey
+	limitKey[0] = 'w'
+	binary.BigEndian.PutUint32(limitKey[1:5], belowHeight)
+	// seq=0 — excludes belowHeight itself
+
+	it := ordDB.NewIterator(&util.Range{Start: startKey[:], Limit: limitKey[:]}, nil)
+	defer it.Release()
+
+	// Seek to the end and iterate backward (descending height order).
+	var result []tbcd.OrdinalWorkEntry
+	if !it.Last() {
+		return nil, nil
+	}
+	for {
+		k := it.Key()
+		if len(k) != len(tbcd.OrdinalWorkKey{}) || k[0] != 'w' {
+			break
+		}
+		v := it.Value()
+		if len(v) != 72 {
+			return nil, fmt.Errorf("invalid work entry value length: %d", len(v))
+		}
+		var entry tbcd.OrdinalWorkEntry
+		entry.Height = binary.BigEndian.Uint32(k[1:5])
+		entry.Seq = binary.BigEndian.Uint16(k[5:7])
+		copy(entry.CommitTxid[:], v[:32])
+		entry.CommitVout = binary.BigEndian.Uint32(v[32:36])
+		copy(entry.InscID[:], v[36:72])
+		result = append(result, entry)
+		if len(result) >= limit {
+			break
+		}
+		if !it.Prev() {
+			break
+		}
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("read ordinal work: %w", err)
+	}
+	return result, nil
+}
+
+func (l *ldb) OrdinalWatermarkGet(ctx context.Context) (uint32, bool, error) {
+	log.Tracef("OrdinalWatermarkGet")
+	defer log.Tracef("OrdinalWatermarkGet exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+	var key tbcd.OrdinalKey
+	key[0] = 'm'
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("ordinal watermark get: %w", err)
+	}
+	if len(v) != 4 {
+		return 0, false, fmt.Errorf("ordinal watermark invalid length: %d", len(v))
+	}
+	return binary.BigEndian.Uint32(v), true, nil
+}
+
+// OrdinalPopulatorUpdate atomically writes ordinal data ('i' updates,
+// 'a' entries, watermark) and deletes work queue entries ('w') in a
+// single LevelDB transaction. Used exclusively by the background populator.
+func (l *ldb) OrdinalPopulatorUpdate(ctx context.Context, ordData map[tbcd.OrdinalKey]tbcd.OrdinalValue, workData map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue) error {
+	log.Tracef("OrdinalPopulatorUpdate")
+	defer log.Tracef("OrdinalPopulatorUpdate exit")
+
+	ordTx, ordCommit, ordDiscard, err := l.startTransaction(level.OrdinalDB)
+	if err != nil {
+		return fmt.Errorf("ordinal populator: %w", err)
+	}
+	defer ordDiscard()
+
+	batch := new(leveldb.Batch)
+	for k, v := range ordData {
+		if v.IsDelete() {
+			batch.Delete(k[:])
+		} else {
+			batch.Put(k[:], v.Bytes())
+		}
+		delete(ordData, k)
+	}
+	for k, v := range workData {
+		if v.IsDelete() {
+			batch.Delete(k[:])
+		} else {
+			batch.Put(k[:], v[:])
+		}
+		delete(workData, k)
+	}
+	if err := ordTx.Write(batch, nil); err != nil {
+		return fmt.Errorf("ordinal populator write: %w", err)
+	}
+	if err := ordCommit(); err != nil {
+		return fmt.Errorf("ordinal populator commit: %w", err)
 	}
 	return nil
 }
@@ -2642,13 +2754,14 @@ func (l *ldb) OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64
 
 	ordDB := l.pool[level.OrdinalDB]
 
-	// Range scan on 's' prefix for sat numbers in [start, end).
+	// Range scan on 'a' prefix for sat numbers in [start, end).
+	// 'a' key: sat_number(8) + inscription_id(36). Sat at bytes 1:9.
 	var startKey tbcd.OrdinalKey
-	startKey[0] = 's'
+	startKey[0] = 'a'
 	binary.BigEndian.PutUint64(startKey[1:], start)
 
 	var endKey tbcd.OrdinalKey
-	endKey[0] = 's'
+	endKey[0] = 'a'
 	binary.BigEndian.PutUint64(endKey[1:], end)
 
 	var result []uint64
@@ -2656,7 +2769,7 @@ func (l *ldb) OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64
 	defer it.Release()
 	for it.Next() {
 		k := it.Key()
-		if len(k) != len(tbcd.OrdinalKey{}) || k[0] != 's' {
+		if len(k) != len(tbcd.OrdinalKey{}) || k[0] != 'a' {
 			continue
 		}
 		sat := binary.BigEndian.Uint64(k[1:])
@@ -2677,22 +2790,22 @@ func (l *ldb) OrdinalInscribedSatBounds(ctx context.Context) (uint64, uint64, er
 
 	ordDB := l.pool[level.OrdinalDB]
 
-	// Find first 's' entry.
+	// Find first 'a' entry.
 	var startKey tbcd.OrdinalKey
-	startKey[0] = 's'
+	startKey[0] = 'a'
 	it := ordDB.NewIterator(nil, nil)
 	defer it.Release()
 
-	if !it.Seek(startKey[:]) || len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 's' {
+	if !it.Seek(startKey[:]) || len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 'a' {
 		return 0, 0, database.NotFoundError("no inscribed sats")
 	}
 	minSat := binary.BigEndian.Uint64(it.Key()[1:])
 
-	// Find last 's' entry: seek to 't' (byte after 's') and step back.
+	// Find last 'a' entry: seek to 'b' (byte after 'a') and step back.
 	var endKey [1]byte
-	endKey[0] = 't'
+	endKey[0] = 'b'
 	if !it.Seek(endKey[:]) {
-		// 't' is past end of DB, go to last entry.
+		// 'b' is past end of DB, go to last entry.
 		if !it.Last() {
 			return 0, 0, database.NotFoundError("no inscribed sats")
 		}
@@ -2701,7 +2814,7 @@ func (l *ldb) OrdinalInscribedSatBounds(ctx context.Context) (uint64, uint64, er
 			return 0, 0, database.NotFoundError("no inscribed sats")
 		}
 	}
-	if len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 's' {
+	if len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 'a' {
 		return 0, 0, database.NotFoundError("no inscribed sats")
 	}
 	maxSat := binary.BigEndian.Uint64(it.Key()[1:])
