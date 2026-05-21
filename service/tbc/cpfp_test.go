@@ -214,6 +214,10 @@ func (stubDB) OrdinalInscriptionsBySat(context.Context, uint64) ([][36]byte, err
 	panic("stub")
 }
 
+func (stubDB) BlockOrdinalWorkUpdate(context.Context, map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue) error {
+	panic("stub")
+}
+
 // TestTxOutByOutpoint verifies that txOutByOutpoint resolves an
 // output from a parent transaction that is in the mempool.
 func TestTxOutByOutpoint(t *testing.T) {

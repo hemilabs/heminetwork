@@ -149,6 +149,7 @@ type Database interface {
 	// Ordinals
 	BlockHeaderByOrdinalIndex(ctx context.Context) (*BlockHeader, error)
 	BlockOrdinalUpdate(ctx context.Context, direction int, data map[OrdinalKey]OrdinalValue, ordinalIndexHash chainhash.Hash) error
+	BlockOrdinalWorkUpdate(ctx context.Context, data map[OrdinalWorkKey]OrdinalWorkValue) error
 	OrdinalSatRangesByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error)
 	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
@@ -656,6 +657,20 @@ type OrdinalValue []byte
 
 func (v OrdinalValue) IsDelete() bool { return v == nil }
 func (v OrdinalValue) Bytes() []byte  { return []byte(v) }
+
+// OrdinalWorkKey is a 7-byte key for the inscription work queue.
+// Layout: 'w'(1) + block_height(4) + seq(2).
+// Different size from OrdinalKey — a simple len check distinguishes them.
+// The work queue records inscriptions that need sat number computation
+// by a background populator.
+type OrdinalWorkKey [7]byte
+
+func (k OrdinalWorkKey) Prefix() byte { return k[0] }
+
+// OrdinalWorkValue wraps work queue values. A nil value signals deletion.
+type OrdinalWorkValue []byte
+
+func (v OrdinalWorkValue) IsDelete() bool { return v == nil }
 
 func BEUint64(x uint64) []byte {
 	var b [8]byte
