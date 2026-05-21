@@ -21,6 +21,7 @@ type ordinalIndexer struct {
 	indexerCommon
 
 	cacheCapacity int
+	workCache     map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue
 }
 
 var (
@@ -31,6 +32,7 @@ var (
 func NewOrdinalIndexer(g geometryParams, cacheLen int, enabled bool, ordinalGenesis *HashHeight) Indexer {
 	oi := &ordinalIndexer{
 		cacheCapacity: cacheLen,
+		workCache:     make(map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue),
 	}
 	oi.indexerCommon = indexerCommon{
 		name:    "ordinal",
@@ -71,15 +73,25 @@ func (i *ordinalIndexer) process(ctx context.Context, direction int, block *btcu
 	}
 }
 
-// windBlock processes a single block in the forward direction.
-//
-// Architecture:
-//   - Pre-scan: O(block_inputs) cache reads + O(1) DB scan for the
-//     merged input range. Builds blockInscribedSats set.
-//   - Pass 1: process non-coinbase txs via windTx, collect fee ranges.
-//   - Pass 2: process coinbase with subsidy + fee sats.
-//
-// Time: O(block_inputs + block_outputs + inscribed_sats_in_range)
+// ordinalWorkKey builds a 'w' prefix key for the inscription work queue.
+// Layout: 'w'(1) + block_height(4) + seq(2) = 7 bytes.
+func ordinalWorkKey(blockHeight uint32, seq uint16) tbcd.OrdinalWorkKey {
+	var key tbcd.OrdinalWorkKey
+	key[0] = 'w'
+	binary.BigEndian.PutUint32(key[1:5], blockHeight)
+	binary.BigEndian.PutUint16(key[5:7], seq)
+	return key
+}
+
+// encodeWorkValue encodes the commit outpoint for the populator.
+// Layout: commit_txid(32) + commit_vout(4) = 36 bytes.
+func encodeWorkValue(commitTxid chainhash.Hash, commitVout uint32) tbcd.OrdinalWorkValue {
+	v := make([]byte, 36)
+	copy(v[:32], commitTxid[:])
+	binary.BigEndian.PutUint32(v[32:], commitVout)
+	return tbcd.OrdinalWorkValue(v)
+}
+
 // windBlock scans a block for inscription envelopes and records reveals.
 // All transfer tracking and sat number derivation is deferred to query time.
 func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) error {
@@ -99,13 +111,17 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			inscID := makeInscriptionID(tx.Hash(), uint32(inputIdx))
 			cursed := isInscriptionCursed(blockHeight, inputIdx, envelope)
 
-			// Store inscription content and metadata. Sat number
-			// is zero — derived on demand at query time via
-			// backward walk to coinbase.
+			// 'i': inscription metadata (sat=0, computed later by populator).
 			cache[ordinalInscriptionKey(inscID)] = encodeInscriptionValue(
 				0, blockHash, cursed, envelope)
 
+			// 'n': block→inscription index.
 			cache[ordinalBlockInscriptionKey(blockHash, inscriptionSeq)] = inscID[:]
+
+			// 'w': work queue entry for background sat computation.
+			prevOut := txIn.PreviousOutPoint
+			i.workCache[ordinalWorkKey(blockHeight, uint16(inscriptionSeq))] = encodeWorkValue(prevOut.Hash, prevOut.Index)
+
 			inscriptionSeq++
 		}
 	}
@@ -123,6 +139,7 @@ func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, bl
 	for seq, inscID := range inscIDs {
 		cache[ordinalInscriptionKey(inscID)] = nil
 		cache[ordinalBlockInscriptionKey(blockHash, uint32(seq))] = nil
+		i.workCache[ordinalWorkKey(blockHeight, uint16(seq))] = nil
 	}
 
 	return nil
@@ -130,7 +147,10 @@ func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, bl
 
 func (i *ordinalIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
 	cache := c.(*Cache[tbcd.OrdinalKey, tbcd.OrdinalValue])
-	return i.g.db.BlockOrdinalUpdate(ctx, direction, cache.Map(), atHash)
+	if err := i.g.db.BlockOrdinalUpdate(ctx, direction, cache.Map(), atHash); err != nil {
+		return err
+	}
+	return i.g.db.BlockOrdinalWorkUpdate(ctx, i.workCache)
 }
 
 // fetchSatRangesParallel fetches sat ranges for a single outpoint and
