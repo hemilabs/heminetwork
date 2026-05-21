@@ -61,7 +61,7 @@ const (
 	defaultMaxCachedKeystones = 1e6 // number of cached keystones prior to flush
 	defaultMaxCachedTxs       = 1e6 // dual purpose cache, max key 69, max value 36
 	defaultMaxZK              = 1e6
-	defaultMaxCachedOrdinals  = 1e6 // number of cached zk rows prior to flush
+	defaultMaxCachedOrdinals  = 1e6 // number of cached ordinal entries prior to flush
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
@@ -231,7 +231,7 @@ func NewDefaultConfig() *Config {
 		MempoolEnabled:       true,
 		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
 		PeersWanted:          defaultPeersWanted,
-		RequestTimeout:       10,
+		RequestTimeout:       120,
 		PrometheusNamespace:  appName,
 		ExternalHeaderMode:   false, // Default anyway, but for readability
 		DatabaseDebug:        false, // Default anyway, but dangerous so be explicit
@@ -2997,10 +2997,6 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 			return si
 		}
 		if s.cfg.ZKIndex && !si.ZK.Hash.IsEqual(&bhb.Hash) {
-			// Keystone index not synced
-			return si
-		}
-		if s.cfg.ZKIndex && !si.ZK.Hash.IsEqual(&bhb.Hash) {
 			// ZK index not synced
 			return si
 		}
@@ -3131,7 +3127,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	if s.cfg.OrdinalIndex {
-		s.oi = NewOrdinalIndexer(s.g, s.cfg.MaxCachedOrdinals,
+		s.oi = NewOrdinalIndexer(ctx, s.g, s.cfg.MaxCachedOrdinals,
 			s.cfg.OrdinalIndex, s.ordinalGenesis,
 			s.computeInscribedSat, s.cfg.OrdinalWatermarkGap)
 	}
@@ -3897,10 +3893,21 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		ranges, err := s.computeSatRanges(ctx, *utxo.ChainHash(),
-			utxo.OutputIndex(), memo)
-		if err != nil {
-			continue
+
+		op := tbcd.NewOutpoint(*utxo.ChainHash(), utxo.OutputIndex())
+
+		// Try 'r' from DB first (above watermark or populator).
+		var ranges []SatRange
+		if rVal, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op); err == nil {
+			ranges = DecodeSatRanges(rVal)
+		} else {
+			// Fall back to backward walk.
+			computed, err := s.computeSatRanges(ctx, *utxo.ChainHash(),
+				utxo.OutputIndex(), memo)
+			if err != nil {
+				continue
+			}
+			ranges = computed
 		}
 		for _, r := range ranges {
 			inscribedSats, err := s.g.db.OrdinalInscribedSatsInRange(
@@ -3971,6 +3978,18 @@ func (s *Server) SatRangesByOutpoint(ctx context.Context, txid chainhash.Hash, v
 		return nil, errors.New("ordinal index not enabled")
 	}
 
+	// Check 'r' from DB first (above watermark or populator).
+	op := tbcd.NewOutpoint(txid, vout)
+	if rVal, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op); err == nil {
+		decoded := DecodeSatRanges(rVal)
+		result := make([]tbcapi.SatRange, len(decoded))
+		for i, r := range decoded {
+			result[i] = tbcapi.SatRange{Start: r.Start, Count: r.Count}
+		}
+		return result, nil
+	}
+
+	// Fall back to backward walk.
 	memo := make(map[tbcd.Outpoint][]SatRange)
 	ranges, err := s.computeSatRanges(ctx, txid, vout, memo)
 	if err != nil {

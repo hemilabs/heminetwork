@@ -4547,6 +4547,26 @@ func TestOrdinalIndexFork(t *testing.T) {
 		if string(content) != wantContent {
 			t.Fatalf("[%s] content: got %q, want %q", label, string(content), wantContent)
 		}
+
+		// 's': OrdinalOutpointBySat — inscribed sat must point at an outpoint
+		op, err := s.g.db.OrdinalOutpointBySat(ctx, inscByID.SatNumber)
+		if err != nil {
+			t.Fatalf("[%s] 's' OrdinalOutpointBySat(%d): %v",
+				label, inscByID.SatNumber, err)
+		}
+		t.Logf("[%s] 's' sat %d -> outpoint %x", label, inscByID.SatNumber, *op)
+
+		// 'r': SatRangesByOutpoint — coinbase output must have ranges
+		cbTxid := *blk.TxByIndex(0).Hash()
+		cbRanges, err := s.SatRangesByOutpoint(ctx, cbTxid, 0)
+		if err != nil {
+			t.Fatalf("[%s] 'r' coinbase SatRangesByOutpoint: %v", label, err)
+		}
+		if len(cbRanges) == 0 {
+			t.Fatalf("[%s] 'r' coinbase expected ranges, got none", label)
+		}
+		t.Logf("[%s] 'r' coinbase: %d ranges", label, len(cbRanges))
+
 		t.Logf("[%s] verified: sat=%d type=%q content=%q",
 			label, inscByID.SatNumber, contentType, string(content))
 
@@ -4574,6 +4594,11 @@ func TestOrdinalIndexFork(t *testing.T) {
 			if len(satInscs) != 0 {
 				t.Fatalf("[%s] 'a' sat %d should have 0 inscriptions, got %d",
 					label, satNumber, len(satInscs))
+			}
+			// 's' should also be gone.
+			_, serr := s.g.db.OrdinalOutpointBySat(ctx, satNumber)
+			if serr == nil {
+				t.Fatalf("[%s] 's' sat %d should be gone after unwind", label, satNumber)
 			}
 		}
 		t.Logf("[%s] all entries verified absent", label)
