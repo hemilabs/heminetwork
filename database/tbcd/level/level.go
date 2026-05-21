@@ -2545,6 +2545,30 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 	return nil
 }
 
+func (l *ldb) BlockOrdinalWorkUpdate(ctx context.Context, data map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue) error {
+	log.Tracef("BlockOrdinalWorkUpdate")
+	defer log.Tracef("BlockOrdinalWorkUpdate exit")
+
+	if len(data) == 0 {
+		return nil
+	}
+
+	ordDB := l.pool[level.OrdinalDB]
+	batch := new(leveldb.Batch)
+	for k, v := range data {
+		if v.IsDelete() {
+			batch.Delete(k[:])
+		} else {
+			batch.Put(k[:], v)
+		}
+		delete(data, k)
+	}
+	if err := ordDB.Write(batch, nil); err != nil {
+		return fmt.Errorf("ordinal work update: %w", err)
+	}
+	return nil
+}
+
 func (l *ldb) OrdinalSatRangesByOutpoint(ctx context.Context, op tbcd.Outpoint) ([]byte, error) {
 	log.Tracef("OrdinalSatRangesByOutpoint")
 	defer log.Tracef("OrdinalSatRangesByOutpoint exit")
