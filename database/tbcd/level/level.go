@@ -2748,6 +2748,39 @@ func (l *ldb) OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chai
 	return result, nil
 }
 
+// OrdinalInscriptionsByOutpoint returns the inscription IDs located at the
+// given outpoint, by prefix-scanning 'o' + txid + vout. Results are in
+// offset order (the key sorts by offset). Used by InscriptionsByAddress.
+func (l *ldb) OrdinalInscriptionsByOutpoint(ctx context.Context, op tbcd.Outpoint) ([][36]byte, error) {
+	log.Tracef("OrdinalInscriptionsByOutpoint")
+	defer log.Tracef("OrdinalInscriptionsByOutpoint exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Prefix: 'o' + txid(32) + vout(4) = 37 bytes. Outpoint is
+	// [u-prefix(1) + txid(32) + vout(4)]; copy op[1:37].
+	var prefix [1 + 32 + 4]byte
+	prefix[0] = 'o'
+	copy(prefix[1:], op[1:37])
+
+	var result [][36]byte
+	it := ordDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
+	defer it.Release()
+	for it.Next() {
+		v := it.Value()
+		if len(v) != 36 {
+			return nil, fmt.Errorf("invalid inscription ID length: %d", len(v))
+		}
+		var inscID [36]byte
+		copy(inscID[:], v)
+		result = append(result, inscID)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("ordinal inscriptions by outpoint: %w", err)
+	}
+	return result, nil
+}
+
 func (l *ldb) OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error) {
 	log.Tracef("OrdinalInscribedSatsInRange")
 	defer log.Tracef("OrdinalInscribedSatsInRange exit")

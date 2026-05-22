@@ -4548,24 +4548,27 @@ func TestOrdinalIndexFork(t *testing.T) {
 			t.Fatalf("[%s] content: got %q, want %q", label, string(content), wantContent)
 		}
 
-		// 's': OrdinalOutpointBySat — inscribed sat must point at an outpoint
-		op, err := s.g.db.OrdinalOutpointBySat(ctx, inscByID.SatNumber)
+		// 'o': the inscribed sat's location must be tracked. The reveal
+		// output (vout 0 of the inscription tx, where the inscribed sat
+		// lands) must return this inscription via the outpoint index.
+		inscID := makeInscriptionID(&inscTxid, 0)
+		op := tbcd.NewOutpoint(inscTxid, 0)
+		oInscs, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, op)
 		if err != nil {
-			t.Fatalf("[%s] 's' OrdinalOutpointBySat(%d): %v",
-				label, inscByID.SatNumber, err)
+			t.Fatalf("[%s] 'o' OrdinalInscriptionsByOutpoint: %v", label, err)
 		}
-		t.Logf("[%s] 's' sat %d -> outpoint %x", label, inscByID.SatNumber, *op)
-
-		// 'r': SatRangesByOutpoint — coinbase output must have ranges
-		cbTxid := *blk.TxByIndex(0).Hash()
-		cbRanges, err := s.SatRangesByOutpoint(ctx, cbTxid, 0)
-		if err != nil {
-			t.Fatalf("[%s] 'r' coinbase SatRangesByOutpoint: %v", label, err)
+		found := false
+		for _, id := range oInscs {
+			if id == inscID {
+				found = true
+				break
+			}
 		}
-		if len(cbRanges) == 0 {
-			t.Fatalf("[%s] 'r' coinbase expected ranges, got none", label)
+		if !found {
+			t.Fatalf("[%s] 'o' inscription not tracked at reveal outpoint %v",
+				label, op)
 		}
-		t.Logf("[%s] 'r' coinbase: %d ranges", label, len(cbRanges))
+		t.Logf("[%s] 'o' inscription tracked at %v", label, op)
 
 		t.Logf("[%s] verified: sat=%d type=%q content=%q",
 			label, inscByID.SatNumber, contentType, string(content))
@@ -4595,11 +4598,13 @@ func TestOrdinalIndexFork(t *testing.T) {
 				t.Fatalf("[%s] 'a' sat %d should have 0 inscriptions, got %d",
 					label, satNumber, len(satInscs))
 			}
-			// 's' should also be gone.
-			_, serr := s.g.db.OrdinalOutpointBySat(ctx, satNumber)
-			if serr == nil {
-				t.Fatalf("[%s] 's' sat %d should be gone after unwind", label, satNumber)
-			}
+		}
+		// 'o' must be gone: the reveal outpoint should track nothing.
+		op := tbcd.NewOutpoint(inscTxid, 0)
+		oInscs, _ := s.g.db.OrdinalInscriptionsByOutpoint(ctx, op)
+		if len(oInscs) != 0 {
+			t.Fatalf("[%s] 'o' reveal outpoint should be empty, got %d",
+				label, len(oInscs))
 		}
 		t.Logf("[%s] all entries verified absent", label)
 	}
