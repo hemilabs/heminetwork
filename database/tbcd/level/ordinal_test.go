@@ -95,7 +95,7 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 	cache[nKey] = tbcd.OrdinalValue(inscID[:])
 
 	indexHash := chainhash.Hash{0x11, 0x22}
-	if err := db.BlockOrdinalUpdate(ctx, 1, maps.Clone(cache), indexHash); err != nil {
+	if err := db.BlockOrdinalUpdate(ctx, 1, maps.Clone(cache), nil, indexHash); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,7 +269,7 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 		// Delete the sat range entry by passing nil value.
 		unwindCache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
 		unwindCache[rKey] = nil // mark for delete
-		if err := db.BlockOrdinalUpdate(ctx, -1, unwindCache, chainhash.Hash{}); err != nil {
+		if err := db.BlockOrdinalUpdate(ctx, -1, unwindCache, nil, chainhash.Hash{}); err != nil {
 			t.Fatal(err)
 		}
 		// Verify it's gone.
@@ -287,7 +287,7 @@ func TestBlockOrdinalUpdateEmptyCache(t *testing.T) {
 	db := createOrdinalDB(ctx, t)
 
 	// Empty cache should not fail.
-	err := db.BlockOrdinalUpdate(ctx, 1, nil, chainhash.Hash{})
+	err := db.BlockOrdinalUpdate(ctx, 1, nil, nil, chainhash.Hash{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestDbUpgradeV6(t *testing.T) {
 	cache := map[tbcd.OrdinalKey]tbcd.OrdinalValue{
 		rKey: tbcd.OrdinalValue([]byte{0xaa, 0xbb}),
 	}
-	if err := db2.BlockOrdinalUpdate(ctx, 1, cache, chainhash.Hash{}); err != nil {
+	if err := db2.BlockOrdinalUpdate(ctx, 1, cache, nil, chainhash.Hash{}); err != nil {
 		t.Fatalf("BlockOrdinalUpdate after upgrade: %v", err)
 	}
 	got2, err := db2.OrdinalSatRangesByOutpoint(ctx, outpoint)
@@ -381,5 +381,169 @@ func TestDbUpgradeV6(t *testing.T) {
 	}
 	if len(got2) != 2 || got2[0] != 0xaa || got2[1] != 0xbb {
 		t.Fatalf("ordinal round-trip after upgrade: got %x", got2)
+	}
+}
+
+// oKey builds an 'o' tracker key: 'o'(1) + txid(32) + vout(4) + offset(8).
+// Mirrors service/tbc.ordinalOutpointKey; duplicated here because that
+// helper is in another package and the layout is the contract under test.
+func oKey(op tbcd.Outpoint, offset uint64) tbcd.OrdinalKey {
+	var k tbcd.OrdinalKey
+	k[0] = 'o'
+	copy(k[1:37], op[1:37]) // txid(32) + vout(4)
+	binary.BigEndian.PutUint64(k[37:], offset)
+	return k
+}
+
+// TestOrdinalInscriptionsByOutpointWithOffset exercises the 'o' tracker
+// read path that backs forward FIFO transfer detection. It specifically
+// covers multiple inscriptions at one outpoint (distinct offsets), which
+// is the case that exposes []byte aliasing if the decoder slices a reused
+// loop variable into the result.
+func TestOrdinalInscriptionsByOutpointWithOffset(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db := createOrdinalDB(ctx, t)
+
+	txid := chainhash.Hash{0xde, 0xad, 0xbe, 0xef}
+	op := tbcd.NewOutpoint(txid, 0)
+
+	// Three distinct inscriptions at three distinct offsets in one output.
+	// Distinct first bytes so an aliasing bug (all entries pointing at the
+	// last decoded value) is caught.
+	type want struct {
+		offset uint64
+		inscID [36]byte
+	}
+	wants := []want{
+		{offset: 0, inscID: [36]byte{0x01}},
+		{offset: 100, inscID: [36]byte{0x02}},
+		{offset: 999, inscID: [36]byte{0x03}},
+	}
+
+	cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
+	for _, w := range wants {
+		id := w.inscID // copy; do not alias the loop var
+		cache[oKey(op, w.offset)] = tbcd.OrdinalValue(id[:])
+	}
+	if err := db.BlockOrdinalUpdate(ctx, 1, maps.Clone(cache), nil, chainhash.Hash{0x01}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("WithOffset returns all entries in offset order", func(t *testing.T) {
+		got, err := db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(wants) {
+			t.Fatalf("got %d entries, want %d", len(got), len(wants))
+		}
+		for i, w := range wants {
+			if got[i].Offset != w.offset {
+				t.Errorf("entry %d: offset got %d want %d", i, got[i].Offset, w.offset)
+			}
+			if got[i].InscID != w.inscID {
+				t.Errorf("entry %d: inscID got %x want %x", i, got[i].InscID, w.inscID)
+			}
+		}
+	})
+
+	t.Run("ByOutpoint delegates and preserves order", func(t *testing.T) {
+		got, err := db.OrdinalInscriptionsByOutpoint(ctx, op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != len(wants) {
+			t.Fatalf("got %d entries, want %d", len(got), len(wants))
+		}
+		for i, w := range wants {
+			if got[i] != w.inscID {
+				t.Errorf("entry %d: inscID got %x want %x", i, got[i], w.inscID)
+			}
+		}
+	})
+
+	t.Run("unknown outpoint returns empty", func(t *testing.T) {
+		other := tbcd.NewOutpoint(chainhash.Hash{0x99}, 7)
+		got, err := db.OrdinalInscriptionsByOutpointWithOffset(ctx, other)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("got %d entries, want 0", len(got))
+		}
+	})
+
+	t.Run("malformed value length is rejected", func(t *testing.T) {
+		bad := tbcd.NewOutpoint(chainhash.Hash{0x55}, 0)
+		badCache := map[tbcd.OrdinalKey]tbcd.OrdinalValue{
+			oKey(bad, 0): tbcd.OrdinalValue([]byte{0x01, 0x02}), // 2 bytes, not 36
+		}
+		if err := db.BlockOrdinalUpdate(ctx, 1, badCache, nil, chainhash.Hash{0x02}); err != nil {
+			t.Fatal(err)
+		}
+		_, err := db.OrdinalInscriptionsByOutpointWithOffset(ctx, bad)
+		if err == nil {
+			t.Fatal("expected error for malformed value length, got nil")
+		}
+	})
+}
+
+// TestBlockOrdinalUpdateAtomicData verifies that index data and work
+// queue entries passed to a single BlockOrdinalUpdate land together.
+// Before this was one call, the 'o'/'i'/'n' data and the 'w' work queue
+// committed in separate LevelDB transactions, so a crash between them
+// left the ordinal DB observing a partial block. This test proves both
+// maps commit in the same call.
+func TestBlockOrdinalUpdateAtomicData(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db := createOrdinalDB(ctx, t)
+
+	// Index data: one 'o' entry.
+	txid := chainhash.Hash{0xab, 0xcd}
+	op := tbcd.NewOutpoint(txid, 0)
+	inscID := [36]byte{0x07}
+	data := map[tbcd.OrdinalKey]tbcd.OrdinalValue{
+		oKey(op, 0): tbcd.OrdinalValue(inscID[:]),
+	}
+
+	// Work entry: 'w' + height(4) + seq(2).
+	var wKey tbcd.OrdinalWorkKey
+	wKey[0] = 'w'
+	binary.BigEndian.PutUint32(wKey[1:5], 42)
+	binary.BigEndian.PutUint16(wKey[5:7], 0)
+	var wVal tbcd.OrdinalWorkValue
+	copy(wVal[:36], inscID[:])
+	work := map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue{wKey: wVal}
+
+	indexHash := chainhash.Hash{0x11}
+	if err := db.BlockOrdinalUpdate(ctx, 1, data, work, indexHash); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both must be present after the single commit.
+	got, err := db.OrdinalInscriptionsByOutpoint(ctx, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != inscID {
+		t.Fatalf("'o' data not committed: got %v", got)
+	}
+
+	entries, err := db.ReadOrdinalWork(ctx, 100, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Height == 42 && e.InscID == inscID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("'w' work entry not committed in same call: got %d entries", len(entries))
 	}
 }
