@@ -198,6 +198,10 @@ func (stubDB) OrdinalInscriptionsByBlockHash(context.Context, chainhash.Hash) ([
 	panic("stub")
 }
 
+func (stubDB) OrdinalInscriptionsByOutpoint(context.Context, tbcd.Outpoint) ([][36]byte, error) {
+	panic("stub")
+}
+
 func (stubDB) OrdinalInscribedSatsInRange(context.Context, uint64, uint64) ([]uint64, error) {
 	panic("stub")
 }
