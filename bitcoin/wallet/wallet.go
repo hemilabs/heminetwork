@@ -64,6 +64,28 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 // spent amount, so the amount must be available at signing time.
 type PrevOuts map[string]*wire.TxOut
 
+// estimateVSize returns the estimated virtual size of a transaction with
+// numInputs inputs spending from the address type encoded in script.  The
+// script is classified once; all inputs are assumed to be the same type
+// (the wallet's own UTXOs).  Unknown script types fall through to P2PKH
+// which overestimates — safe for fee calculation, never underpays.
+func estimateVSize(numInputs int, script []byte, txOuts []*wire.TxOut) int {
+	changeSize := len(script)
+	switch {
+	case txscript.IsPayToTaproot(script):
+		return txsizes.EstimateVirtualSize(0, numInputs, 0, 0, txOuts, changeSize)
+	case txscript.IsPayToWitnessPubKeyHash(script):
+		return txsizes.EstimateVirtualSize(0, 0, numInputs, 0, txOuts, changeSize)
+	case txscript.IsPayToScriptHash(script):
+		// Assume P2SH-P2WPKH (nested segwit), the only P2SH variant
+		// the wallet produces.
+		return txsizes.EstimateVirtualSize(0, 0, 0, numInputs, txOuts, changeSize)
+	default:
+		// P2PKH or unknown — use legacy sizing (safe overestimate).
+		return txsizes.EstimateVirtualSize(numInputs, 0, 0, 0, txOuts, changeSize)
+	}
+}
+
 // TransactionCreate builds an unsigned bitcoin transaction sending amount to
 // address, funded from utxos.  The fee is estimated from satsPerVByte and the
 // transaction's virtual size.  Change, if non-dust, is returned to the
@@ -82,8 +104,8 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerVByte floa
 	}
 
 	// Calculate fee for worst case input number and assume there is change
-	txSize := txsizes.EstimateSerializeSize(len(utxos), []*wire.TxOut{txOut}, true)
-	fee := btcutil.Amount(float64(txSize) * satsPerVByte)
+	txVSize := estimateVSize(len(utxos), script, []*wire.TxOut{txOut})
+	fee := btcutil.Amount(float64(txVSize) * satsPerVByte)
 
 	// Find utxo list that is big enough for entire transaction
 	utxoList, err := UtxoPickerMultiple(amount, fee, utxos)
@@ -92,8 +114,8 @@ func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerVByte floa
 	}
 
 	// Calculate fee for real input number and assume there is change
-	txSize = txsizes.EstimateSerializeSize(len(utxoList), []*wire.TxOut{txOut}, true)
-	fee = btcutil.Amount(float64(txSize) * satsPerVByte)
+	txVSize = estimateVSize(len(utxoList), script, []*wire.TxOut{txOut})
+	fee = btcutil.Amount(float64(txVSize) * satsPerVByte)
 
 	// Assemble transaction
 	tx := wire.NewMsgTx(2) // Latest supported version
@@ -131,8 +153,8 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerV
 	popTxOut := wire.NewTxOut(0, popTxOpReturn)
 
 	// Calculate fee for 1 input and assume there is change
-	txSize := txsizes.EstimateSerializeSize(1, []*wire.TxOut{popTxOut}, true)
-	fee := btcutil.Amount(float64(txSize) * satsPerVByte)
+	txVSize := estimateVSize(1, script, []*wire.TxOut{popTxOut})
+	fee := btcutil.Amount(float64(txVSize) * satsPerVByte)
 
 	// Find utxo that is big enough for entire transaction
 	utxo, err := UtxoPickerSingle(0, fee, utxos) // no amount, just fees
