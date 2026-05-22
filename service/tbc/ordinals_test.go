@@ -2212,3 +2212,72 @@ func TestDecodeInscriptionValueMetaprotocolFlagNoParentNoDelegate(t *testing.T) 
 		t.Error("unexpected parent/delegate")
 	}
 }
+
+// TestOutpointValueRoundTrip exercises the 'o' value codec for both reveal
+// (sentinel source) and transfer entries, plus the malformed-length error
+// path. The 'o' value is what makes unwind self-contained, so its encode/
+// decode must be exact and must distinguish reveal from transfer.
+func TestOutpointValueRoundTrip(t *testing.T) {
+	inscID := [36]byte{0x01, 0x02, 0x03}
+	for i := range inscID {
+		inscID[i] = byte(i + 1)
+	}
+
+	tests := []struct {
+		name        string
+		srcInputIdx uint16
+		srcOffset   uint64
+		wantXfer    bool
+	}{
+		{"reveal sentinel", ordinalRevealSentinel, 0, false},
+		{"transfer input 0 offset 0", 0, 0, true},
+		{"transfer input 3 offset 12345", 3, 12345, true},
+		{"transfer max offset", 7, math.MaxUint64, true},
+		{"transfer high input idx", 0xFFFE, 1, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := encodeOutpointValue(inscID, tt.srcInputIdx, tt.srcOffset)
+			if len(v) != ordinalOutpointValueLen {
+				t.Fatalf("encoded length %d, want %d", len(v), ordinalOutpointValueLen)
+			}
+			gotID, gotIdx, gotOff, xfer, err := decodeOutpointValue(v)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if gotID != inscID {
+				t.Errorf("inscID got %x want %x", gotID, inscID)
+			}
+			if gotIdx != tt.srcInputIdx {
+				t.Errorf("srcInputIdx got %d want %d", gotIdx, tt.srcInputIdx)
+			}
+			if gotOff != tt.srcOffset {
+				t.Errorf("srcOffset got %d want %d", gotOff, tt.srcOffset)
+			}
+			if xfer != tt.wantXfer {
+				t.Errorf("isTransfer got %v want %v", xfer, tt.wantXfer)
+			}
+		})
+	}
+
+	t.Run("malformed length rejected", func(t *testing.T) {
+		for _, n := range []int{0, 35, 36, 45, 47, 81} {
+			_, _, _, _, err := decodeOutpointValue(make([]byte, n))
+			if err == nil {
+				t.Errorf("len %d: expected error, got nil", n)
+			}
+		}
+	})
+}
+
+// FuzzDecodeOutpointValue ensures the 'o' value decoder never panics on
+// arbitrary bytes (it reads fixed offsets after a length guard).
+func FuzzDecodeOutpointValue(f *testing.F) {
+	f.Add([]byte{})
+	f.Add(make([]byte, ordinalOutpointValueLen))
+	f.Add(append([]byte("inscid"), make([]byte, 40)...))
+	f.Fuzz(func(t *testing.T, v []byte) {
+		_, _, _, _, _ = decodeOutpointValue(v)
+	})
+}

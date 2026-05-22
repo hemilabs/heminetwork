@@ -6,6 +6,7 @@ package tbc
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
 )
@@ -124,7 +126,7 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 		}))
 
 	cloned := maps.Clone(cache)
-	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, chainhash.Hash{}); err != nil {
+	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, nil, chainhash.Hash{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -616,4 +618,85 @@ func TestPrometheusOrdinalMetric(t *testing.T) {
 		t.Fatal("ordinal_sync_height metric not found in /metrics output")
 	}
 	t.Logf("ordinal_sync_height found in prometheus output")
+}
+
+// TestInputOutputValueUnknownTx verifies inputOutputValue returns a
+// wrapped error when the txid is not in the database. This is the error
+// path windBlock/unwindBlock rely on to fail loudly rather than silently
+// mis-place an inscribed sat. The vout-out-of-range and tx-not-in-block
+// paths require a fully mined block and are covered by the fork test's
+// transfer scenarios.
+func TestInputOutputValueUnknownTx(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	home := t.TempDir()
+	cfg, err := level.NewConfig("localnet", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	unknown := chainhash.Hash{0xde, 0xad}
+	_, err = inputOutputValue(ctx, db, unknown, 0)
+	if err == nil {
+		t.Fatal("expected error for unknown txid, got nil")
+	}
+	if !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+// BenchmarkLocatedAtOutpoint measures the cache-overlay cost of the unwind
+// lookup as the pending batch cache grows. The DB lookup returns nothing
+// (unknown op), so this isolates the O(C) cache scan that dominates unwind
+// of a batch. Run: go test -bench BenchmarkLocatedAtOutpoint -benchmem
+//
+// Establishes the number behind locatedAtOutpoint's documented O(D+C)
+// bound so a future deep-reorg profile can be compared against it rather
+// than guessed at.
+func BenchmarkLocatedAtOutpoint(b *testing.B) {
+	ctx, cancel := context.WithCancel(b.Context())
+	defer cancel()
+
+	home := b.TempDir()
+	cfg, err := level.NewConfig("localnet", home, "", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	db, err := level.New(ctx, cfg)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = db.Close() })
+
+	oi := &ordinalIndexer{indexerCommon: indexerCommon{g: geometryParams{db: db}}}
+	op := tbcd.NewOutpoint(chainhash.Hash{0xab}, 0)
+
+	for _, cacheSize := range []int{100, 1000, 10000} {
+		cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue, cacheSize)
+		for n := 0; n < cacheSize; n++ {
+			var txid chainhash.Hash
+			binary.BigEndian.PutUint64(txid[:8], uint64(n))
+			k := ordinalOutpointKey(tbcd.NewOutpoint(txid, 0), 0)
+			cache[k] = encodeOutpointValue([36]byte{byte(n)}, ordinalRevealSentinel, 0)
+		}
+		b.Run(fmt.Sprintf("cache=%d", cacheSize), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_, err := oi.locatedAtOutpoint(ctx, cache, op)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

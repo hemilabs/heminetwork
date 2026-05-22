@@ -182,7 +182,7 @@ func (stubDB) BlockHeaderByOrdinalIndex(context.Context) (*tbcd.BlockHeader, err
 	panic("stub")
 }
 
-func (stubDB) BlockOrdinalUpdate(context.Context, int, map[tbcd.OrdinalKey]tbcd.OrdinalValue, chainhash.Hash) error {
+func (stubDB) BlockOrdinalUpdate(context.Context, int, map[tbcd.OrdinalKey]tbcd.OrdinalValue, map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue, chainhash.Hash) error {
 	panic("stub")
 }
 
@@ -202,6 +202,10 @@ func (stubDB) OrdinalInscriptionsByOutpoint(context.Context, tbcd.Outpoint) ([][
 	panic("stub")
 }
 
+func (stubDB) OrdinalInscriptionsByOutpointWithOffset(context.Context, tbcd.Outpoint) ([]tbcd.OrdinalLocatedInscription, error) {
+	panic("stub")
+}
+
 func (stubDB) OrdinalInscribedSatsInRange(context.Context, uint64, uint64) ([]uint64, error) {
 	panic("stub")
 }
@@ -215,10 +219,6 @@ func (stubDB) OrdinalOutpointBySat(context.Context, uint64) (*tbcd.Outpoint, err
 }
 
 func (stubDB) OrdinalInscriptionsBySat(context.Context, uint64) ([][36]byte, error) {
-	panic("stub")
-}
-
-func (stubDB) BlockOrdinalWorkUpdate(context.Context, map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue) error {
 	panic("stub")
 }
 
