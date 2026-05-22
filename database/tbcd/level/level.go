@@ -2507,7 +2507,7 @@ func (l *ldb) BlockHeaderByOrdinalIndex(ctx context.Context) (*tbcd.BlockHeader,
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
-func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.OrdinalKey]tbcd.OrdinalValue, ordinalIndexHash chainhash.Hash) error {
+func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.OrdinalKey]tbcd.OrdinalValue, work map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error {
 	log.Tracef("BlockOrdinalUpdate")
 	defer log.Tracef("BlockOrdinalUpdate exit")
 
@@ -2522,7 +2522,9 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 	defer ordDiscard()
 
 	// The cache is updated in a way that makes the direction
-	// irrelevant.
+	// irrelevant. The block's index data ('o'/'i'/'n'/'a'/watermark),
+	// the work queue ('w'), and the index-hash pointer all commit in a
+	// single batch so the ordinal DB never observes a partial block.
 	ordBatch := new(leveldb.Batch)
 	for k, v := range data {
 		if v.IsDelete() {
@@ -2531,6 +2533,14 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 			ordBatch.Put(k[:], v.Bytes())
 		}
 		delete(data, k)
+	}
+	for k, v := range work {
+		if v.IsDelete() {
+			ordBatch.Delete(k[:])
+		} else {
+			ordBatch.Put(k[:], v[:])
+		}
+		delete(work, k)
 	}
 
 	ordBatch.Put(ordinalIndexHashKey, ordinalIndexHash[:])
@@ -2542,30 +2552,6 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 		return fmt.Errorf("ordinal commit: %w", err)
 	}
 
-	return nil
-}
-
-func (l *ldb) BlockOrdinalWorkUpdate(ctx context.Context, data map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue) error {
-	log.Tracef("BlockOrdinalWorkUpdate")
-	defer log.Tracef("BlockOrdinalWorkUpdate exit")
-
-	if len(data) == 0 {
-		return nil
-	}
-
-	ordDB := l.pool[level.OrdinalDB]
-	batch := new(leveldb.Batch)
-	for k, v := range data {
-		if v.IsDelete() {
-			batch.Delete(k[:])
-		} else {
-			batch.Put(k[:], v[:])
-		}
-		delete(data, k)
-	}
-	if err := ordDB.Write(batch, nil); err != nil {
-		return fmt.Errorf("ordinal work update: %w", err)
-	}
 	return nil
 }
 
@@ -2599,15 +2585,13 @@ func (l *ldb) ReadOrdinalWork(ctx context.Context, belowHeight uint32, limit int
 			break
 		}
 		v := it.Value()
-		if len(v) != 72 {
+		if len(v) != len(tbcd.OrdinalWorkValue{}) {
 			return nil, fmt.Errorf("invalid work entry value length: %d", len(v))
 		}
 		var entry tbcd.OrdinalWorkEntry
 		entry.Height = binary.BigEndian.Uint32(k[1:5])
 		entry.Seq = binary.BigEndian.Uint16(k[5:7])
-		copy(entry.CommitTxid[:], v[:32])
-		entry.CommitVout = binary.BigEndian.Uint32(v[32:36])
-		copy(entry.InscID[:], v[36:72])
+		copy(entry.InscID[:], v[:36])
 		result = append(result, entry)
 		if len(result) >= limit {
 			break
@@ -2748,12 +2732,13 @@ func (l *ldb) OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chai
 	return result, nil
 }
 
-// OrdinalInscriptionsByOutpoint returns the inscription IDs located at the
-// given outpoint, by prefix-scanning 'o' + txid + vout. Results are in
-// offset order (the key sorts by offset). Used by InscriptionsByAddress.
-func (l *ldb) OrdinalInscriptionsByOutpoint(ctx context.Context, op tbcd.Outpoint) ([][36]byte, error) {
-	log.Tracef("OrdinalInscriptionsByOutpoint")
-	defer log.Tracef("OrdinalInscriptionsByOutpoint exit")
+// OrdinalInscriptionsByOutpointWithOffset returns the inscriptions located
+// at the given outpoint along with each one's byte offset within the
+// output, by prefix-scanning 'o' + txid + vout. Results are in offset
+// order (the key sorts by offset). Used by forward FIFO transfer tracking.
+func (l *ldb) OrdinalInscriptionsByOutpointWithOffset(ctx context.Context, op tbcd.Outpoint) ([]tbcd.OrdinalLocatedInscription, error) {
+	log.Tracef("OrdinalInscriptionsByOutpointWithOffset")
+	defer log.Tracef("OrdinalInscriptionsByOutpointWithOffset exit")
 
 	ordDB := l.pool[level.OrdinalDB]
 
@@ -2763,20 +2748,49 @@ func (l *ldb) OrdinalInscriptionsByOutpoint(ctx context.Context, op tbcd.Outpoin
 	prefix[0] = 'o'
 	copy(prefix[1:], op[1:37])
 
-	var result [][36]byte
+	var result []tbcd.OrdinalLocatedInscription
 	it := ordDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
 	defer it.Release()
 	for it.Next() {
-		v := it.Value()
-		if len(v) != 36 {
-			return nil, fmt.Errorf("invalid inscription ID length: %d", len(v))
+		k := it.Key()
+		// Defensive against on-disk corruption: every 'o' key written
+		// by this code is exactly len(OrdinalKey) and every value is a
+		// 36-byte inscription ID. A mismatch means a corrupt store.
+		if len(k) != len(tbcd.OrdinalKey{}) {
+			return nil, fmt.Errorf("invalid 'o' key length: %d", len(k))
 		}
-		var inscID [36]byte
-		copy(inscID[:], v)
-		result = append(result, inscID)
+		v := it.Value()
+		// The 'o' value is inscID(36) + source location; the read path
+		// only needs the inscID prefix. Guard against a short/corrupt
+		// value.
+		if len(v) < 36 {
+			return nil, fmt.Errorf("invalid 'o' value length: %d", len(v))
+		}
+		var li tbcd.OrdinalLocatedInscription
+		copy(li.InscID[:], v[:36])
+		li.Offset = binary.BigEndian.Uint64(k[37:45])
+		li.Value = append([]byte(nil), v...) // copy; iterator reuses v
+		result = append(result, li)
 	}
 	if err := it.Error(); err != nil {
-		return nil, fmt.Errorf("ordinal inscriptions by outpoint: %w", err)
+		return nil, fmt.Errorf("ordinal inscriptions by outpoint w/offset: %w", err)
+	}
+	return result, nil
+}
+
+// OrdinalInscriptionsByOutpoint returns the inscription IDs located at the
+// given outpoint, in offset order. Used by InscriptionsByAddress.
+func (l *ldb) OrdinalInscriptionsByOutpoint(ctx context.Context, op tbcd.Outpoint) ([][36]byte, error) {
+	log.Tracef("OrdinalInscriptionsByOutpoint")
+	defer log.Tracef("OrdinalInscriptionsByOutpoint exit")
+
+	located, err := l.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][36]byte, len(located))
+	for i, li := range located {
+		result[i] = li.InscID
 	}
 	return result, nil
 }

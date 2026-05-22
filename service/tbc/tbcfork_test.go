@@ -4501,7 +4501,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 	// ordinalVerifyWound checks 'n', 'i', 'a' entries and content
 	// exist for a block containing an inscription tx at index 1.
 	// Returns the inscription's sat number (real sat, above watermark).
-	ordinalVerifyWound := func(t *testing.T, label string, blk *block) uint64 {
+	ordinalVerifyWound := func(t *testing.T, label string, blk *block, expectedOP ...tbcd.Outpoint) uint64 {
 		t.Helper()
 		blockHash := *blk.Hash()
 		inscTx := blk.TxByIndex(1)
@@ -4553,6 +4553,9 @@ func TestOrdinalIndexFork(t *testing.T) {
 		// lands) must return this inscription via the outpoint index.
 		inscID := makeInscriptionID(&inscTxid, 0)
 		op := tbcd.NewOutpoint(inscTxid, 0)
+		if len(expectedOP) > 0 {
+			op = expectedOP[0] // inscription transferred to a new outpoint
+		}
 		oInscs, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, op)
 		if err != nil {
 			t.Fatalf("[%s] 'o' OrdinalInscriptionsByOutpoint: %v", label, err)
@@ -4623,9 +4626,25 @@ func TestOrdinalIndexFork(t *testing.T) {
 		t.Fatalf("ordinal index at %v, want %v", ordBH.Hash, b3.Hash())
 	}
 
-	b2SatNumber := ordinalVerifyWound(t, "b2@b3", b2)
+	// b3 transfers the inscription: height-3 tx (index 1) spends b2's
+	// inscription output, then tx2 (index 2) spends that in the same
+	// block. The inscribed sat FIFO-follows to b3's tx2 output 0.
+	b3LastTx := b3.TxByIndex(len(b3.MsgBlock().Transactions) - 1)
+	transferredOP := tbcd.NewOutpoint(*b3LastTx.Hash(), 0)
+	b2SatNumber := ordinalVerifyWound(t, "b2@b3", b2, transferredOP)
 	ordinalVerifyUnwound(t, "b2a@b3", b2a, 0, false)
 	ordinalVerifyUnwound(t, "b2b@b3", b2b, 0, false)
+
+	// --- Partial unwind to b2: reverse ONLY b3's transfer ---
+	// This proves unwindOutpointTracker RESTORES the inscription at its
+	// pre-transfer location, not merely deletes it. A delete-only bug
+	// would still pass the genesis check below (absence), so the restore
+	// must be asserted here while b2 is still wound.
+	t.Log("=== unwind to b2 (reverse b3 transfer) ===")
+	if err := s.SyncIndexersToHash(ctx, *b2.Hash()); err != nil {
+		t.Fatalf("unwind to b2: %v", err)
+	}
+	ordinalVerifyWound(t, "b2@b2", b2) // default OP = reveal outpoint; transfer reversed
 
 	// --- Unwind to genesis ---
 	t.Log("=== unwind to genesis ===")
