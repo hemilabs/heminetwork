@@ -156,6 +156,7 @@ type Database interface {
 	OrdinalSatRangesByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error)
 	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
+	OrdinalInscriptionsByOutpoint(ctx context.Context, op Outpoint) ([][36]byte, error)
 	OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error)
 	OrdinalInscribedSatBounds(ctx context.Context) (minSat, maxSat uint64, err error)
 	OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*Outpoint, error)
@@ -653,6 +654,7 @@ func (k OrdinalKey) IsSat() bool              { return k[0] == 's' }
 func (k OrdinalKey) IsInscription() bool      { return k[0] == 'i' }
 func (k OrdinalKey) IsSatInscription() bool   { return k[0] == 'a' }
 func (k OrdinalKey) IsBlockInscription() bool { return k[0] == 'n' }
+func (k OrdinalKey) IsOutpoint() bool         { return k[0] == 'o' }
 
 // OrdinalValue wraps ordinal index values. A nil value signals deletion,
 // mirroring CacheOutput.IsDelete() for the utxo indexer.
