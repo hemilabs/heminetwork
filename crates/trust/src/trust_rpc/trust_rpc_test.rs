@@ -7,6 +7,129 @@ use std::net::TcpListener;
 use std::time::Duration;
 use tokio_tungstenite::accept_async;
 
+#[cfg(test)]
+mod container_tests {
+    use super::*;
+    use testcontainers::{
+        GenericBuildableImage, GenericImage, ImageExt,
+        core::{BuildImageOptions, ContainerPort, Host, WaitFor},
+        runners::{AsyncBuilder, AsyncRunner},
+    };
+
+    // JWT secret used for tbcd admin WebSocket auth.  
+    const JWT_SECRET: [u8; 32] = [0u8; 32];
+    const JWT_SECRET_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    // tbcd serves the admin WebSocket (which handles all commands) at this path.
+    const TBCD_WS_PATH: &str = "/v1/admin/ws";
+    const TBCD_WS_PORT: u16 = 8082;
+
+    fn skip_docker() -> bool {
+        let res = match std::env::var("HEMI_DOCKER_TESTS") {
+            Ok(v) => v,
+            Err(_) => return true,
+        };
+        return !matches!(res.as_str(), "true" | "t" | "1")
+    }
+
+    #[test]
+    fn test_synced_with_tbc_container() {
+        if skip_docker() {
+            return;
+        }
+
+        let tbcd_root = project_root::get_project_root().unwrap();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let (_bitcoind, _tbcd, url) = rt.block_on(async {
+
+            // Starts bitcoind (regtest)
+            let bitcoind = GenericImage::new("kylemanna/bitcoind", "latest")
+                .with_exposed_port(ContainerPort::Tcp(18444))
+                .with_wait_for(WaitFor::message_on_stdout("dnsseed thread exit"))
+                .with_cmd([
+                    "bitcoind",
+                    "-regtest=1",
+                    "-debug=1",
+                    "-rpcallowip=0.0.0.0/0",
+                    "-rpcbind=0.0.0.0:18443",
+                    "-txindex=1",
+                    "-noonion",
+                    "-listenonion=0",
+                    "-fallbackfee=0.01",
+                    "-peerbloomfilters=1",
+                ])
+                .start()
+                .await
+                .expect("bitcoind failed to start");
+
+            let bitcoind_p2p_port = bitcoind
+                .get_host_port_ipv4(18444)
+                .await
+                .expect("bitcoind p2p port not mapped");
+
+            let tbc_seeds = format!("host.docker.internal:{}", bitcoind_p2p_port);
+
+            // Starts tbcd.
+            // It logs "handle (tbc admin): /v1/admin/ws" to stderr
+            // once it has registered the admin WebSocket handler.
+            let tbcd = GenericBuildableImage::new("hemilabs/tbcd", "latest")
+                .with_dockerfile(tbcd_root.join("docker/tbcd/Dockerfile"))
+                .with_file(tbcd_root.join("go.mod"), "./go.mod")
+                .with_file(tbcd_root.join("go.sum"), "./go.sum")
+                .with_file(tbcd_root.join("Makefile"), "./Makefile")
+                .with_file(tbcd_root.join("cmd"), "./cmd")
+                .with_file(tbcd_root.join("service"), "./service")
+                .with_file(tbcd_root.join("api"), "./api")
+                .with_file(tbcd_root.join("bitcoin"), "./bitcoin")
+                .with_file(tbcd_root.join("database"), "./database")
+                .with_file(tbcd_root.join("lru"), "./lru")
+                .with_file(tbcd_root.join("rawdb"), "./rawdb")
+                .build_image_with(BuildImageOptions::new().with_skip_if_exists(true))
+                .await
+                .unwrap()
+                .with_exposed_port(ContainerPort::Tcp(TBCD_WS_PORT))
+                .with_wait_for(WaitFor::message_on_stderr("handle (tbc admin)"))
+                .with_env_var("TBC_NETWORK", "localnet")
+                .with_env_var("TBC_SEEDS", tbc_seeds)
+                .with_env_var("TBC_LISTEN_ADDRESS", "0.0.0.0:8082")
+                .with_env_var("TBC_LEVELDB_HOME", "/tmp/tbcd")
+                .with_env_var("TBC_JWT_TOKEN", JWT_SECRET_HEX)
+                .with_env_var("TBC_BLOCK_CACHE_SIZE", "10mb")
+                .with_env_var("TBC_BLOCKHEADER_CACHE_SIZE", "1mb")
+                .with_host("host.docker.internal", Host::HostGateway)
+                .start()
+                .await
+                .expect("tbcd failed to start");
+
+            let tbcd_port = tbcd
+                .get_host_port_ipv4(TBCD_WS_PORT)
+                .await
+                .expect("tbcd port not mapped");
+
+            let url = format!("ws://127.0.0.1:{}{}", tbcd_port, TBCD_WS_PATH);
+            (bitcoind, tbcd, url)
+        });
+
+        // Starts trust
+        let config = Config {
+            url: url.clone(),
+            jwt_secret: JWT_SECRET,
+            cmd_timeout: Duration::from_secs(15),
+            backoff_initial: Duration::from_millis(500),
+            backoff_max: Duration::from_secs(5),
+        };
+
+        let mut rpc = TrustRPC::new(config).unwrap();
+
+        println!("{:?}", rpc.synced().expect("synced() returned an error"));
+    }
+}
+
 fn test_config(url: &str) -> Config {
     Config {
         url: url.to_string(),
@@ -96,22 +219,18 @@ const TEST_JOB_ID: &str = "test_job_id";
 const TEST_JOB_TYPE: &str = "test_job_type";
 
 async fn send_job_update(write: &mut WsSink, id: &str, status: protocol::JobStatus) {
-    let notif = protocol::encode(
-        id,
-        &protocol::Payload::JobUpdateNotification(protocol::JobUpdateNotification {
-            job: protocol::JobInfo {
-                job_id: TEST_JOB_ID.into(),
-                job_type: TEST_JOB_TYPE.into(),
-                status,
-            },
-            error: None,
-        }),
-    )
+    let notif = protocol::Payload::JobUpdateNotification(protocol::JobUpdateNotification {
+        job: protocol::JobInfo {
+            job_id: TEST_JOB_ID.into(),
+            job_type: TEST_JOB_TYPE.into(),
+            status,
+        },
+        error: None,
+    })
+    .encode(id)
     .unwrap();
     write
-        .send(tungstenite::Message::text(
-            protocol::marshal(&notif).unwrap(),
-        ))
+        .send(tungstenite::Message::text(notif.marshal().unwrap()))
         .await
         .unwrap();
 }
@@ -132,18 +251,14 @@ fn test_rpc_call_idempotence() {
                     let msg = read.next().await.unwrap().unwrap();
                     let text = msg.into_text().unwrap();
                     let received: protocol::Message = serde_json::from_str(&text).unwrap();
-                    let response = protocol::encode(
-                        &received.header.id,
-                        &protocol::Payload::PingResponse(protocol::PingResponse {
-                            origin_timestamp: 10,
-                            timestamp: 20,
-                        }),
-                    )
+                    let response = &&protocol::Payload::PingResponse(protocol::PingResponse {
+                        origin_timestamp: 10,
+                        timestamp: 20,
+                    })
+                    .encode(&received.header.id)
                     .unwrap();
                     write
-                        .send(tungstenite::Message::text(
-                            protocol::marshal(&response).unwrap(),
-                        ))
+                        .send(tungstenite::Message::text(response.marshal().unwrap()))
                         .await
                         .unwrap();
                 }
@@ -155,8 +270,8 @@ fn test_rpc_call_idempotence() {
 
     // Second call should hang if the message routing
     // channel is not reset and substituted.
-    rpc.ping().unwrap();
-    rpc.ping().unwrap();
+    rpc.running().unwrap();
+    rpc.running().unwrap();
 
     server_handle.join().unwrap();
 }
@@ -245,7 +360,7 @@ fn test_sync_indexers_to_hash_fail() {
 }
 
 #[test]
-fn test_ping_disconnect() {
+fn test_disconnect() {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap().to_string();
 
@@ -262,7 +377,7 @@ fn test_ping_disconnect() {
     let url = format!("ws://{}", addr);
     let mut rpc = TrustRPC::new(test_config(&url)).unwrap();
 
-    let res = rpc.ping();
+    let res = rpc.synced();
     assert!(matches!(res, Err(TrustRPCError::ConnectionLost)));
 
     server_handle.join().unwrap();
@@ -364,7 +479,7 @@ fn test_cmd_timeout() {
     cfg.cmd_timeout = Duration::from_millis(0);
     let mut rpc = TrustRPC::new(cfg).unwrap();
 
-    let res = rpc.ping();
+    let res = rpc.synced();
     assert!(matches!(res, Err(TrustRPCError::Timeout(_))));
 
     let hash = bitcoin::BlockHash::all_zeros();
@@ -393,19 +508,15 @@ fn test_non_text_message_ignored() {
                     .await
                     .unwrap();
 
-                let response = protocol::encode(
-                    "1",
-                    &protocol::Payload::PingResponse(protocol::PingResponse {
-                        origin_timestamp: 10,
-                        timestamp: 20,
-                    }),
-                )
+                let response = protocol::Payload::PingResponse(protocol::PingResponse {
+                    origin_timestamp: 10,
+                    timestamp: 20,
+                })
+                .encode("1")
                 .unwrap();
 
                 write
-                    .send(tungstenite::Message::text(
-                        protocol::marshal(&response).unwrap(),
-                    ))
+                    .send(tungstenite::Message::text(response.marshal().unwrap()))
                     .await
                     .unwrap();
             }))
@@ -414,7 +525,7 @@ fn test_non_text_message_ignored() {
     let url = format!("ws://{}", addr);
     let mut rpc = TrustRPC::new(test_config(&url)).unwrap();
 
-    rpc.ping().unwrap();
+    rpc.running().unwrap();
 
     server_handle.join().unwrap();
 }
@@ -434,9 +545,8 @@ fn test_job_protocol_error() {
                 let text = msg.into_text().unwrap();
                 let received: protocol::Message = serde_json::from_str(&text).unwrap();
 
-                let notif = protocol::encode(
-                    &received.header.id,
-                    &protocol::Payload::JobUpdateNotification(protocol::JobUpdateNotification {
+                let notif =
+                    protocol::Payload::JobUpdateNotification(protocol::JobUpdateNotification {
                         job: protocol::JobInfo {
                             job_id: TEST_JOB_ID.into(),
                             job_type: TEST_JOB_TYPE.into(),
@@ -447,14 +557,12 @@ fn test_job_protocol_error() {
                             trace: None,
                             message: "fail".into(),
                         }),
-                    }),
-                )
-                .unwrap();
+                    })
+                    .encode(&received.header.id)
+                    .unwrap();
 
                 write
-                    .send(tungstenite::Message::text(
-                        protocol::marshal(&notif).unwrap(),
-                    ))
+                    .send(tungstenite::Message::text(notif.marshal().unwrap()))
                     .await
                     .unwrap();
             }))
