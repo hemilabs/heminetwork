@@ -110,8 +110,8 @@ func (m *Mempool) GetRecommendedFees(ctx context.Context) ([]*tbcapi.FeeEstimate
 	recFees := make([]*tbcapi.FeeEstimate, 6)
 	for k := range 6 {
 		recFees[k] = &tbcapi.FeeEstimate{
-			Blocks:      uint(k + 1),
-			SatsPerByte: defaultMinFee,
+			Blocks:       uint(k + 1),
+			SatsPerVByte: defaultMinFee,
 		}
 	}
 
@@ -125,7 +125,7 @@ func (m *Mempool) GetRecommendedFees(ctx context.Context) ([]*tbcapi.FeeEstimate
 			if err != nil {
 				return nil, err
 			}
-			recFees[k].SatsPerByte = math.Max(defaultMinFee, prevMedianFee)
+			recFees[k].SatsPerVByte = math.Max(defaultMinFee, prevMedianFee)
 		} else {
 			break
 		}

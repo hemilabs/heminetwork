@@ -229,8 +229,8 @@ type L2KeystoneBlockInfo struct {
 }
 
 type FeeEstimate struct {
-	Blocks      uint    `json:"blocks"`
-	SatsPerByte float64 `json:"sats_per_byte"`
+	Blocks       uint    `json:"blocks"`
+	SatsPerVByte float64 `json:"sats_per_vbyte"`
 }
 
 // BlockByHashRequest requests a [Block] by its hash.

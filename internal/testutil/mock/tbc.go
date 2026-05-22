@@ -35,10 +35,11 @@ import (
 
 type TBCMockHandler struct {
 	mockHandler
-	keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev
-	btcTip    uint
-	utxoNum   uint
-	kssMtx    sync.RWMutex
+	keystones   map[chainhash.Hash]*hemi.L2KeystoneAbrev
+	btcTip      uint
+	utxoNum     uint
+	feeEstimate float64
+	kssMtx      sync.RWMutex
 }
 
 func (f *TBCMockHandler) GetKeystones() map[chainhash.Hash]*hemi.L2KeystoneAbrev {
@@ -47,6 +48,12 @@ func (f *TBCMockHandler) GetKeystones() map[chainhash.Hash]*hemi.L2KeystoneAbrev
 	maps.Copy(cpy, f.keystones)
 	f.kssMtx.RUnlock()
 	return cpy
+}
+
+func (f *TBCMockHandler) SetFeeEstimate(fee float64) {
+	f.kssMtx.Lock()
+	f.feeEstimate = fee
+	f.kssMtx.Unlock()
 }
 
 func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip, utxoNum uint) *TBCMockHandler {
@@ -58,9 +65,10 @@ func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keyst
 			pctx:  pctx,
 			conns: make([]*websocket.Conn, 0),
 		},
-		keystones: keystones,
-		btcTip:    btcTip,
-		utxoNum:   utxoNum,
+		keystones:   keystones,
+		btcTip:      btcTip,
+		utxoNum:     utxoNum,
+		feeEstimate: 1,
 	}
 	th.handleFunc = th.mockTBCHandleFunc
 	th.server = httptest.NewServer(&th)
@@ -194,18 +202,21 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 		}
 
 	case tbcapi.CmdFeeEstimateRequest:
+		f.kssMtx.RLock()
+		fee := f.feeEstimate
+		f.kssMtx.RUnlock()
 		resp = tbcapi.FeeEstimateResponse{
 			FeeEstimates: []*tbcapi.FeeEstimate{
-				{Blocks: 1, SatsPerByte: 1},
-				{Blocks: 2, SatsPerByte: 1},
-				{Blocks: 3, SatsPerByte: 1},
-				{Blocks: 4, SatsPerByte: 1},
-				{Blocks: 5, SatsPerByte: 1},
-				{Blocks: 6, SatsPerByte: 1},
-				{Blocks: 7, SatsPerByte: 1},
-				{Blocks: 8, SatsPerByte: 1},
-				{Blocks: 9, SatsPerByte: 1},
-				{Blocks: 10, SatsPerByte: 1},
+				{Blocks: 1, SatsPerVByte: fee},
+				{Blocks: 2, SatsPerVByte: fee},
+				{Blocks: 3, SatsPerVByte: fee},
+				{Blocks: 4, SatsPerVByte: fee},
+				{Blocks: 5, SatsPerVByte: fee},
+				{Blocks: 6, SatsPerVByte: fee},
+				{Blocks: 7, SatsPerVByte: fee},
+				{Blocks: 8, SatsPerVByte: fee},
+				{Blocks: 9, SatsPerVByte: fee},
+				{Blocks: 10, SatsPerVByte: fee},
 			},
 		}
 	case tbcapi.CmdTxByIdRequest:

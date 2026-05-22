@@ -179,7 +179,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	tx, prevOut, err := TransactionCreate(uint32(time.Now().Unix()),
-		btcutil.Amount(550), feeEstimateForTx.SatsPerByte, addr, utxos, pkscript)
+		btcutil.Amount(550), feeEstimateForTx.SatsPerVByte, addr, utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	popTx, prevOut, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
-		feeEstimateForPop.SatsPerByte+0.5, utxos, pkscript)
+		feeEstimateForPop.SatsPerVByte+0.5, utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}

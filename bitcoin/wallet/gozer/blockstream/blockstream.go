@@ -104,7 +104,7 @@ func (bs *blockstreamGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEsti
 
 	frv := make([]*tbcapi.FeeEstimate, 0, len(fm))
 	for k, v := range fm {
-		frv = append(frv, &tbcapi.FeeEstimate{Blocks: k, SatsPerByte: v})
+		frv = append(frv, &tbcapi.FeeEstimate{Blocks: k, SatsPerVByte: v})
 	}
 
 	return frv, nil
