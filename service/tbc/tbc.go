@@ -2717,7 +2717,11 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 		}
 	}
 
-	// Ordinal indexes
+	// Ordinal index. Runs last: its wind reads tx output amounts (FIFO
+	// placement) from the tx index, so the tx index must be current
+	// first. Its unwind is self-contained (the 'o' value records each
+	// inscription's source location), so unwind has no ordering
+	// dependency on the other indexes.
 	if s.cfg.OrdinalIndex {
 		if err := s.oi.IndexToHash(ctx, hash); err != nil {
 			return fmt.Errorf("ordinal indexer: %w", err)
@@ -2767,6 +2771,10 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		}
 	}
 
+	// Ordinal index runs last: its wind reads tx output amounts for FIFO
+	// placement (tx index must be current); its unwind is self-contained
+	// (source location stored in the 'o' value), so it has no ordering
+	// dependency on unwind.
 	if s.cfg.OrdinalIndex {
 		if err := s.oi.IndexToBest(ctx); err != nil {
 			return err
