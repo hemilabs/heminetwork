@@ -326,7 +326,6 @@ func (c *indexerCommon) wind(ctx context.Context, startBH, endBH *tbcd.BlockHead
 		// leveldb does all kinds of allocations, force GC to lower
 		// memory pressure.
 		logMemStats()
-		runtime.GC()
 
 		log.Infof("Flushing %vs complete %v took %v",
 			c, cached, time.Since(start))
@@ -384,7 +383,6 @@ func (c *indexerCommon) unwind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 		// leveldb does all kinds of allocations, force GC to lower
 		// memory pressure.
 		logMemStats()
-		runtime.GC()
 
 		log.Infof("Flushing unwind %vs complete %v took %v",
 			c, cached, time.Since(start))
