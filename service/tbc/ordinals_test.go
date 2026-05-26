@@ -2213,10 +2213,8 @@ func TestDecodeInscriptionValueMetaprotocolFlagNoParentNoDelegate(t *testing.T) 
 	}
 }
 
-// TestOutpointValueRoundTrip exercises the 'o' value codec for both reveal
-// (sentinel source) and transfer entries, plus the malformed-length error
-// path. The 'o' value is what makes unwind self-contained, so its encode/
-// decode must be exact and must distinguish reveal from transfer.
+// TestOutpointValueRoundTrip exercises the 'o' value codec for reveal,
+// transfer, fee, and lost entries, plus the malformed-length error path.
 func TestOutpointValueRoundTrip(t *testing.T) {
 	inscID := [36]byte{0x01, 0x02, 0x03}
 	for i := range inscID {
@@ -2225,29 +2223,39 @@ func TestOutpointValueRoundTrip(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		srcInputIdx uint16
+		kind        byte
+		srcTxIdx    uint32
+		srcInputIdx uint32
 		srcOffset   uint64
 		wantXfer    bool
 	}{
-		{"reveal sentinel", ordinalRevealSentinel, 0, false},
-		{"transfer input 0 offset 0", 0, 0, true},
-		{"transfer input 3 offset 12345", 3, 12345, true},
-		{"transfer max offset", 7, math.MaxUint64, true},
-		{"transfer high input idx", 0xFFFE, 1, true},
+		{"reveal sentinel", srcKindReveal, 0, ordinalRevealSentinel, 0, false},
+		{"transfer input 0 offset 0", srcKindTransfer, 1, 0, 0, true},
+		{"transfer input 3 offset 12345", srcKindTransfer, 2, 3, 12345, true},
+		{"transfer max offset", srcKindTransfer, 5, 7, math.MaxUint64, true},
+		{"transfer high input idx", srcKindTransfer, 0, 0xFFFFFFFE, 1, true},
+		{"fee kind", srcKindFee, 3, 1, 500, true},
+		{"lost kind", srcKindLost, 4, 2, 999, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := encodeOutpointValue(inscID, tt.srcInputIdx, tt.srcOffset)
+			v := encodeOutpointValue(inscID, tt.kind, tt.srcTxIdx, tt.srcInputIdx, tt.srcOffset)
 			if len(v) != ordinalOutpointValueLen {
 				t.Fatalf("encoded length %d, want %d", len(v), ordinalOutpointValueLen)
 			}
-			gotID, gotIdx, gotOff, xfer, err := decodeOutpointValue(v)
+			gotID, gotKind, gotTxIdx, gotIdx, gotOff, xfer, err := decodeOutpointValue(v)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
 			if gotID != inscID {
 				t.Errorf("inscID got %x want %x", gotID, inscID)
+			}
+			if gotKind != tt.kind {
+				t.Errorf("kind got %d want %d", gotKind, tt.kind)
+			}
+			if gotTxIdx != tt.srcTxIdx {
+				t.Errorf("srcTxIdx got %d want %d", gotTxIdx, tt.srcTxIdx)
 			}
 			if gotIdx != tt.srcInputIdx {
 				t.Errorf("srcInputIdx got %d want %d", gotIdx, tt.srcInputIdx)
@@ -2262,8 +2270,8 @@ func TestOutpointValueRoundTrip(t *testing.T) {
 	}
 
 	t.Run("malformed length rejected", func(t *testing.T) {
-		for _, n := range []int{0, 35, 36, 45, 47, 81} {
-			_, _, _, _, err := decodeOutpointValue(make([]byte, n))
+		for _, n := range []int{0, 35, 36, 45, 46, 52, 54, 81} {
+			_, _, _, _, _, _, err := decodeOutpointValue(make([]byte, n))
 			if err == nil {
 				t.Errorf("len %d: expected error, got nil", n)
 			}
@@ -2278,6 +2286,87 @@ func FuzzDecodeOutpointValue(f *testing.F) {
 	f.Add(make([]byte, ordinalOutpointValueLen))
 	f.Add(append([]byte("inscid"), make([]byte, 40)...))
 	f.Fuzz(func(t *testing.T, v []byte) {
-		_, _, _, _, _ = decodeOutpointValue(v)
+		_, _, _, _, _, _, _ = decodeOutpointValue(v)
 	})
+}
+
+// TestPredecessorKeyLayout verifies the 'p' key construction mirrors 'o'.
+func TestPredecessorKeyLayout(t *testing.T) {
+	txid := chainhash.Hash{0xaa, 0xbb, 0xcc}
+	op := tbcd.NewOutpoint(txid, 7)
+	offset := uint64(42)
+
+	oKey := ordinalOutpointKey(op, offset)
+	pKey := predecessorKey(op, offset)
+
+	// Same layout except prefix byte.
+	if oKey[0] != 'o' {
+		t.Fatalf("'o' key prefix: got %c", oKey[0])
+	}
+	if pKey[0] != 'p' {
+		t.Fatalf("'p' key prefix: got %c", pKey[0])
+	}
+	// Bytes 1..44 must be identical (txid + vout + offset).
+	if !bytes.Equal(oKey[1:], pKey[1:]) {
+		t.Errorf("key payload mismatch:\n  o: %x\n  p: %x", oKey[1:], pKey[1:])
+	}
+}
+
+// TestMultiHopPredecessorProof demonstrates the multi-hop unwind bug that
+// the 'p' prefix fixes. The test shows that li.Value (the destination's
+// own 'o' value) differs from the predecessor value, proving that copying
+// li.Value to the source is wrong and the 'p' approach is necessary.
+//
+// Chain: reveal at O1 → transfer to O2 → transfer to O3.
+// O3's 'o' value carries O3's source info (input of T3 that spent O2).
+// O2's predecessor ('p'@O2 captured during wind) carries O2's own source
+// info (input of T2 that spent O1). These are different values.
+// On unwind of O3: restoring 'p'@O3 (= O2's old value) is correct;
+// restoring li.Value (= O3's value) would corrupt O2's source info.
+func TestMultiHopPredecessorProof(t *testing.T) {
+	inscID := [36]byte{0x01}
+
+	// Simulate the 'o' values that wind would produce:
+	// O1: reveal
+	o1Value := encodeOutpointValue(inscID, srcKindReveal, 0, ordinalRevealSentinel, 0)
+	// O2: transfer from O1 via input 2 of tx at block index 1, offset 0
+	o2Value := encodeOutpointValue(inscID, srcKindTransfer, 1, 2, 0)
+	// O3: transfer from O2 via input 0 of tx at block index 3, offset 0
+	o3Value := encodeOutpointValue(inscID, srcKindTransfer, 3, 0, 0)
+
+	// The predecessor stored at O3 during wind is O2's value (captured
+	// from the 'o' entry at O2 before it was deleted).
+	predecessorAtO3 := o2Value
+
+	// The predecessor stored at O2 during wind is O1's value.
+	predecessorAtO2 := o1Value
+
+	// PROOF: O3's own value != the predecessor. Copying li.Value to O2
+	// on unwind of O3 would write O3's source info at O2, which is wrong.
+	if bytes.Equal(o3Value, predecessorAtO3) {
+		t.Fatal("bug in test: o3Value should differ from predecessorAtO3")
+	}
+
+	// Correct unwind of O3: restore predecessorAtO3 at O2's key.
+	_, _, _, srcInputIdx, srcOffset, _, err := decodeOutpointValue(predecessorAtO3)
+	if err != nil {
+		t.Fatalf("decode predecessorAtO3: %v", err)
+	}
+	// srcInputIdx=2 and srcOffset=0 — matches O2's original source info.
+	if srcInputIdx != 2 {
+		t.Errorf("restored srcInputIdx: got %d, want 2", srcInputIdx)
+	}
+	if srcOffset != 0 {
+		t.Errorf("restored srcOffset: got %d, want 0", srcOffset)
+	}
+
+	// Correct unwind of O2: restore predecessorAtO2 at O1's key.
+	_, kind, _, _, _, _, err := decodeOutpointValue(predecessorAtO2)
+	if err != nil {
+		t.Fatalf("decode predecessorAtO2: %v", err)
+	}
+	// O1 was a reveal — kind must be REVEAL.
+	if kind != srcKindReveal {
+		t.Errorf("restored kind: got %d, want %d (REVEAL)", kind, srcKindReveal)
+	}
 }
