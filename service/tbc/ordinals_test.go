@@ -781,81 +781,6 @@ func TestDecodeInscriptionValue(t *testing.T) {
 	})
 }
 
-func TestSatAtOutputOffset(t *testing.T) {
-	tests := []struct {
-		name         string
-		outputRanges map[uint32][]SatRange
-		txOuts       []*wire.TxOut
-		offset       uint64
-		want         uint64
-	}{
-		{
-			name: "first sat of first output",
-			outputRanges: map[uint32][]SatRange{
-				0: {{Start: 100, Count: 50}},
-			},
-			txOuts: []*wire.TxOut{{Value: 50}},
-			offset: 0,
-			want:   100,
-		},
-		{
-			name: "middle of first output",
-			outputRanges: map[uint32][]SatRange{
-				0: {{Start: 100, Count: 50}},
-			},
-			txOuts: []*wire.TxOut{{Value: 50}},
-			offset: 25,
-			want:   125,
-		},
-		{
-			name: "into second output",
-			outputRanges: map[uint32][]SatRange{
-				0: {{Start: 100, Count: 30}},
-				1: {{Start: 500, Count: 20}},
-			},
-			txOuts: []*wire.TxOut{{Value: 30}, {Value: 20}},
-			offset: 35,
-			want:   505,
-		},
-		{
-			name: "multi-range output",
-			outputRanges: map[uint32][]SatRange{
-				0: {
-					{Start: 100, Count: 10},
-					{Start: 200, Count: 10},
-				},
-			},
-			txOuts: []*wire.TxOut{{Value: 20}},
-			offset: 15,
-			want:   205,
-		},
-		{
-			name: "offset beyond total falls back",
-			outputRanges: map[uint32][]SatRange{
-				0: {{Start: 100, Count: 10}},
-			},
-			txOuts: []*wire.TxOut{{Value: 10}},
-			offset: 999,
-			want:   100, // fallback to first sat
-		},
-		{
-			name:         "empty outputs falls back to zero",
-			outputRanges: map[uint32][]SatRange{},
-			txOuts:       []*wire.TxOut{},
-			offset:       0,
-			want:         0,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := satAtOutputOffset(tt.outputRanges, tt.txOuts, tt.offset)
-			if got != tt.want {
-				t.Errorf("got %d want %d", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMakeInscriptionID(t *testing.T) {
 	var txHash chainhash.Hash
 	txHash[0] = 0xab
@@ -883,35 +808,6 @@ func TestMakeInscriptionID(t *testing.T) {
 }
 
 func TestKeyConstruction(t *testing.T) {
-	t.Run("ordinalRangeKey prefix", func(t *testing.T) {
-		op := tbcd.NewOutpoint(chainhash.Hash{0x01}, 42)
-		k := ordinalRangeKey(op)
-		if !k.IsRange() {
-			t.Errorf("prefix: got %c want r", k[0])
-		}
-		// Outpoint bytes should follow directly.
-		for i := range op {
-			if k[1+i] != op[i] {
-				t.Errorf("outpoint byte %d mismatch", i)
-				break
-			}
-		}
-	})
-
-	t.Run("ordinalSatKey prefix and encoding", func(t *testing.T) {
-		k := ordinalSatKey(0x0102030405060708)
-		if !k.IsSat() {
-			t.Errorf("prefix: got %c want s", k[0])
-		}
-		// Big-endian encoding.
-		expected := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
-		for i, b := range expected {
-			if k[1+i] != b {
-				t.Errorf("byte %d: got 0x%02x want 0x%02x", i, k[1+i], b)
-			}
-		}
-	})
-
 	t.Run("ordinalInscriptionKey prefix", func(t *testing.T) {
 		var inscID [36]byte
 		inscID[0] = 0xff
@@ -942,27 +838,17 @@ func TestOrdinalKeyIsMethods(t *testing.T) {
 	tests := []struct {
 		name            string
 		key             tbcd.OrdinalKey
-		wantRange       bool
-		wantSat         bool
 		wantInscription bool
 		wantSatInsc     bool
 		wantBlockInsc   bool
 	}{
-		{"range key", ordinalRangeKey(tbcd.NewOutpoint(chainhash.Hash{}, 0)), true, false, false, false, false},
-		{"sat key", ordinalSatKey(42), false, true, false, false, false},
-		{"inscription key", ordinalInscriptionKey([36]byte{}), false, false, true, false, false},
-		{"sat inscription key", ordinalSatInscriptionKey(42, [36]byte{}), false, false, false, true, false},
-		{"block inscription key", ordinalBlockInscriptionKey(&chainhash.Hash{}, 0), false, false, false, false, true},
-		{"zero key", tbcd.OrdinalKey{}, false, false, false, false, false},
+		{"inscription key", ordinalInscriptionKey([36]byte{}), true, false, false},
+		{"sat inscription key", ordinalSatInscriptionKey(42, [36]byte{}), false, true, false},
+		{"block inscription key", ordinalBlockInscriptionKey(&chainhash.Hash{}, 0), false, false, true},
+		{"zero key", tbcd.OrdinalKey{}, false, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.key.IsRange(); got != tt.wantRange {
-				t.Errorf("IsRange() = %v, want %v", got, tt.wantRange)
-			}
-			if got := tt.key.IsSat(); got != tt.wantSat {
-				t.Errorf("IsSat() = %v, want %v", got, tt.wantSat)
-			}
 			if got := tt.key.IsInscription(); got != tt.wantInscription {
 				t.Errorf("IsInscription() = %v, want %v", got, tt.wantInscription)
 			}

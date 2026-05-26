@@ -43,18 +43,12 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 	db := createOrdinalDB(ctx, t)
 
 	txid := chainhash.Hash{0x01, 0x02, 0x03, 0x04}
-	outpoint := tbcd.NewOutpoint(txid, 0)
 	blockHash := chainhash.Hash{0xaa, 0xbb, 0xcc}
 	satNumber := uint64(5_000_000_000)
 
 	// Build inscription ID: txid(32) + input_index(4 LE).
 	var inscID [36]byte
 	copy(inscID[:32], txid[:])
-
-	// Sat range value: 16 bytes (start 8 + count 8).
-	satRangeVal := make([]byte, 16)
-	binary.BigEndian.PutUint64(satRangeVal[0:], satNumber)
-	binary.BigEndian.PutUint64(satRangeVal[8:], 5_000_000_000)
 
 	// Inscription value: minimal 41 bytes (sat 8 + blockhash 32 + flags 1).
 	inscVal := make([]byte, 41)
@@ -63,23 +57,11 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 
 	cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
 
-	// 'r': sat range for outpoint.
-	var rKey tbcd.OrdinalKey
-	rKey[0] = 'r'
-	copy(rKey[1:], outpoint[:])
-	cache[rKey] = tbcd.OrdinalValue(satRangeVal)
-
 	// 'i': inscription by ID.
 	var iKey tbcd.OrdinalKey
 	iKey[0] = 'i'
 	copy(iKey[1:], inscID[:])
 	cache[iKey] = tbcd.OrdinalValue(inscVal)
-
-	// 's': sat → outpoint.
-	var sKey tbcd.OrdinalKey
-	sKey[0] = 's'
-	binary.BigEndian.PutUint64(sKey[1:], satNumber)
-	cache[sKey] = tbcd.OrdinalValue(outpoint[:])
 
 	// 'a': sat → inscription.
 	var aKey tbcd.OrdinalKey
@@ -100,21 +82,6 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 	}
 
 	// --- Positive queries ---
-
-	t.Run("OrdinalSatRangesByOutpoint positive", func(t *testing.T) {
-		got, err := db.OrdinalSatRangesByOutpoint(ctx, outpoint)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 16 {
-			t.Fatalf("expected 16 bytes, got %d", len(got))
-		}
-		start := binary.BigEndian.Uint64(got[0:8])
-		count := binary.BigEndian.Uint64(got[8:16])
-		if start != satNumber || count != 5_000_000_000 {
-			t.Errorf("sat range: start=%d count=%d", start, count)
-		}
-	})
 
 	t.Run("OrdinalInscriptionByID positive", func(t *testing.T) {
 		got, err := db.OrdinalInscriptionByID(ctx, inscID)
@@ -156,16 +123,6 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 		}
 	})
 
-	t.Run("OrdinalOutpointBySat positive", func(t *testing.T) {
-		op, err := db.OrdinalOutpointBySat(ctx, satNumber)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if *op != outpoint {
-			t.Errorf("outpoint mismatch: got %x, want %x", op[:], outpoint[:])
-		}
-	})
-
 	t.Run("BlockHeaderByOrdinalIndex returns error without headers", func(t *testing.T) {
 		// BlockHeaderByOrdinalIndex reads the index hash then calls
 		// BlockHeaderByHash — without block headers in DB this returns
@@ -177,17 +134,6 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 	})
 
 	// --- Negative queries ---
-
-	t.Run("OrdinalSatRangesByOutpoint not found", func(t *testing.T) {
-		fakeOp := tbcd.NewOutpoint(chainhash.Hash{0xde, 0xad}, 99)
-		_, err := db.OrdinalSatRangesByOutpoint(ctx, fakeOp)
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !errors.Is(err, database.ErrNotFound) {
-			t.Errorf("expected ErrNotFound, got %v", err)
-		}
-	})
 
 	t.Run("OrdinalInscriptionByID not found", func(t *testing.T) {
 		fakeID := [36]byte{0xde, 0xad}
@@ -218,16 +164,6 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 		}
 		if len(ids) != 0 {
 			t.Errorf("expected 0 inscriptions, got %d", len(ids))
-		}
-	})
-
-	t.Run("OrdinalOutpointBySat not found", func(t *testing.T) {
-		_, err := db.OrdinalOutpointBySat(ctx, 999_999_999)
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !errors.Is(err, database.ErrNotFound) {
-			t.Errorf("expected ErrNotFound, got %v", err)
 		}
 	})
 
@@ -266,14 +202,14 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 	// --- Unwind (direction = -1) ---
 
 	t.Run("BlockOrdinalUpdate unwind", func(t *testing.T) {
-		// Delete the sat range entry by passing nil value.
+		// Delete the inscription entry by passing nil value.
 		unwindCache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
-		unwindCache[rKey] = nil // mark for delete
+		unwindCache[iKey] = nil // mark for delete
 		if err := db.BlockOrdinalUpdate(ctx, -1, unwindCache, nil, chainhash.Hash{}); err != nil {
 			t.Fatal(err)
 		}
 		// Verify it's gone.
-		_, err := db.OrdinalSatRangesByOutpoint(ctx, outpoint)
+		_, err := db.OrdinalInscriptionByID(ctx, inscID)
 		if !errors.Is(err, database.ErrNotFound) {
 			t.Errorf("expected not-found after unwind, got %v", err)
 		}
@@ -364,20 +300,22 @@ func TestDbUpgradeV6(t *testing.T) {
 	}
 
 	// Assertion 3: ordinal DB is functional — can write and read back.
-	txid := chainhash.Hash{0x01, 0x02}
-	outpoint := tbcd.NewOutpoint(txid, 0)
-	var rKey tbcd.OrdinalKey
-	rKey[0] = 'r'
-	copy(rKey[1:], outpoint[:])
+	// Use an 'i' prefix key for a round-trip test.
+	var testInscID [36]byte
+	testInscID[0] = 0x01
+	testInscID[1] = 0x02
+	var testIKey tbcd.OrdinalKey
+	testIKey[0] = 'i'
+	copy(testIKey[1:], testInscID[:])
 	cache := map[tbcd.OrdinalKey]tbcd.OrdinalValue{
-		rKey: tbcd.OrdinalValue([]byte{0xaa, 0xbb}),
+		testIKey: tbcd.OrdinalValue([]byte{0xaa, 0xbb}),
 	}
 	if err := db2.BlockOrdinalUpdate(ctx, 1, cache, nil, chainhash.Hash{}); err != nil {
 		t.Fatalf("BlockOrdinalUpdate after upgrade: %v", err)
 	}
-	got2, err := db2.OrdinalSatRangesByOutpoint(ctx, outpoint)
+	got2, err := db2.OrdinalInscriptionByID(ctx, testInscID)
 	if err != nil {
-		t.Fatalf("OrdinalSatRangesByOutpoint after upgrade: %v", err)
+		t.Fatalf("OrdinalInscriptionByID after upgrade: %v", err)
 	}
 	if len(got2) != 2 || got2[0] != 0xaa || got2[1] != 0xbb {
 		t.Fatalf("ordinal round-trip after upgrade: got %x", got2)

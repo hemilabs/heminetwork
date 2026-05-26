@@ -152,14 +152,12 @@ type Database interface {
 	ReadOrdinalWork(ctx context.Context, belowHeight uint32, limit int) ([]OrdinalWorkEntry, error)
 	OrdinalWatermarkGet(ctx context.Context) (uint32, bool, error)
 	OrdinalPopulatorUpdate(ctx context.Context, ordData map[OrdinalKey]OrdinalValue, workData map[OrdinalWorkKey]OrdinalWorkValue) error
-	OrdinalSatRangesByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error)
 	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
 	OrdinalInscriptionsByOutpoint(ctx context.Context, op Outpoint) ([][36]byte, error)
 	OrdinalInscriptionsByOutpointWithOffset(ctx context.Context, op Outpoint) ([]OrdinalLocatedInscription, error)
 	OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error)
 	OrdinalInscribedSatBounds(ctx context.Context) (minSat, maxSat uint64, err error)
-	OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*Outpoint, error)
 	OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error)
 	OrdinalValueByKey(ctx context.Context, key OrdinalKey) ([]byte, error)
 }
@@ -650,8 +648,6 @@ type ZKIndexKey string // ugh to make []byte comparable
 // Shorter keys are zero-padded; the prefix byte disambiguates.
 type OrdinalKey [45]byte
 
-func (k OrdinalKey) IsRange() bool            { return k[0] == 'r' }
-func (k OrdinalKey) IsSat() bool              { return k[0] == 's' }
 func (k OrdinalKey) IsInscription() bool      { return k[0] == 'i' }
 func (k OrdinalKey) IsSatInscription() bool   { return k[0] == 'a' }
 func (k OrdinalKey) IsBlockInscription() bool { return k[0] == 'n' }
