@@ -222,6 +222,10 @@ func (stubDB) OrdinalInscriptionsBySat(context.Context, uint64) ([][36]byte, err
 	panic("stub")
 }
 
+func (stubDB) OrdinalValueByKey(context.Context, tbcd.OrdinalKey) ([]byte, error) {
+	panic("stub")
+}
+
 func (stubDB) ReadOrdinalWork(context.Context, uint32, int) ([]tbcd.OrdinalWorkEntry, error) {
 	panic("stub")
 }

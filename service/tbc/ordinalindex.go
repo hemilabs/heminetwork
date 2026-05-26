@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 
+	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
@@ -166,14 +168,27 @@ type flotsam struct {
 	// free on unwind from tx.TxIn[srcInputIdx].PreviousOutPoint, so it is
 	// not stored. srcOffset is the inscription's offset within the spent
 	// output. A reveal sets srcInputIdx = ordinalRevealSentinel.
-	srcInputIdx uint16
+	srcInputIdx uint32
 	srcOffset   uint64
+	// prevValue is the raw 'o' value that was at the source outpoint
+	// before this transfer moved it. Stored under the 'p' prefix at the
+	// destination so unwind can restore it. Nil for reveals.
+	prevValue []byte
 }
 
 // ordinalRevealSentinel marks an 'o' entry as a reveal (no prior location
-// to restore on unwind). 0xFFFF cannot be a real input index in any
+// to restore on unwind). 0xFFFFFFFF cannot be a real input index in any
 // consensus-valid transaction.
-const ordinalRevealSentinel uint16 = 0xFFFF
+const ordinalRevealSentinel uint32 = 0xFFFFFFFF
+
+// srcKind values for the 'o' entry. Describes how the inscribed sat
+// arrived at its current holding outpoint.
+const (
+	srcKindReveal   byte = 0x00 // Inscription revealed here; no prior location.
+	srcKindTransfer byte = 0x01 // Sat moved within the holding tx.
+	srcKindFee      byte = 0x02 // Sat paid as fee, landed in coinbase output.
+	srcKindLost     byte = 0x03 // Sat paid as fee, exceeded coinbase output value.
+)
 
 // windBlock scans a block for inscription envelopes and records reveals.
 // Below watermark: fast path (sat=0, writes 'w' work queue entry).
@@ -200,7 +215,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 	fullComputation := wm != nil
 
-	for _, tx := range txs {
+	for txBlockIdx, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
 			continue
 		}
@@ -229,10 +244,13 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				fl = append(fl, flotsam{
 					inscID:      t.InscID,
 					pos:         inputValue + t.Offset,
-					srcInputIdx: uint16(inputIdx),
+					srcInputIdx: uint32(inputIdx),
 					srcOffset:   t.Offset,
+					prevValue:   append([]byte(nil), t.Value...),
 				})
 				// Remove the old 'o' entry — the sat is moving.
+				// Do NOT delete 'p' at the spent outpoint; it is needed
+				// if this block (or the source's block) is unwound later.
 				cache[ordinalOutpointKey(spentOP, t.Offset)] = nil
 			}
 
@@ -291,13 +309,20 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 
 			// 'o': ownership tracker. The !landed case (sat lands in
-			// the fee) is handled in the fee/coinbase phase per
-			// ordinals5-forward-tracker-proof.md "Operation D". Until
-			// then a fee-bound inscribed sat is not re-tracked.
+			// the fee) is deferred to Phase D2 (fee→coinbase).
 			if landed {
+				kind := srcKindTransfer
+				if f.isReveal {
+					kind = srcKindReveal
+				}
 				op := tbcd.NewOutpoint(txid, locVout)
 				cache[ordinalOutpointKey(op, locOffset)] = encodeOutpointValue(
-					f.inscID, f.srcInputIdx, f.srcOffset)
+					f.inscID, kind, uint32(txBlockIdx), f.srcInputIdx, f.srcOffset)
+				// 'p': store predecessor value for correct unwind.
+				// Reveals have no predecessor; only transfers write 'p'.
+				if kind == srcKindTransfer {
+					cache[predecessorKey(op, locOffset)] = f.prevValue
+				}
 			}
 		}
 	}
@@ -446,7 +471,6 @@ func (i *ordinalIndexer) unwindOutpointTracker(ctx context.Context, block *btcut
 		if blockchain.IsCoinBase(tx) {
 			continue
 		}
-		txIns := tx.MsgTx().TxIn
 
 		for _, ob := range outpointsOf(tx) {
 			located, lerr := i.locatedAtOutpoint(ctx, cache, ob.op)
@@ -454,32 +478,61 @@ func (i *ordinalIndexer) unwindOutpointTracker(ctx context.Context, block *btcut
 				return fmt.Errorf("unwind tracked lookup %v: %w", ob.op, lerr)
 			}
 			for _, li := range located {
-				_, srcInputIdx, srcOffset, isTransfer, derr := decodeOutpointValue(li.Value)
+				_, kind, _, srcInputIdx, srcOffset, isTransfer, derr := decodeOutpointValue(li.Value)
 				if derr != nil {
 					// We wrote this 'o' value; a malformed read means the
 					// ordinal index is corrupt. Crash, don't limp on.
 					panic(fmt.Sprintf("bug: ordinal unwind: corrupt 'o' value at %v: %v", ob.op, derr))
 				}
 
-				// Delete the 'o' entry at the current location.
+				// Read the predecessor value BEFORE tombstoning the 'p'
+				// entry — once tombstoned, the cache overlay hides it.
+				pKey := predecessorKey(ob.op, li.Offset)
+				var prevValue tbcd.OrdinalValue
+				if isTransfer {
+					var perr error
+					prevValue, perr = i.predecessorValue(ctx, cache, pKey)
+					if perr != nil {
+						return fmt.Errorf("predecessor at %v: %w", ob.op, perr)
+					}
+				}
+
+				// Delete the 'o' and 'p' entries at the current location.
 				cache[ordinalOutpointKey(ob.op, li.Offset)] = nil
+				cache[pKey] = nil
 
 				// Reveal: nothing to restore.
 				if !isTransfer {
 					continue
 				}
 
-				// Transfer: recover the source outpoint from the block
-				// (the input this sat was spent through) and restore. A
-				// srcInputIdx past the tx's inputs means the stored value
-				// is corrupt — crash rather than index garbage.
-				if int(srcInputIdx) >= len(txIns) {
-					panic(fmt.Sprintf("bug: ordinal unwind: 'o' at %v src input %d out of range (%d inputs)",
-						ob.op, srcInputIdx, len(txIns)))
+				// Determine the source tx. For TRANSFER, the holding tx
+				// IS the source tx. For FEE/LOST, srcTxIdx names a
+				// different tx in the block (Phase D2, not yet wired).
+				var srcTx *wire.MsgTx
+				switch kind {
+				case srcKindTransfer:
+					srcTx = tx.MsgTx()
+				default:
+					// FEE/LOST: Phase D2. For now, panic on unexpected kind.
+					panic(fmt.Sprintf("bug: ordinal unwind: unhandled srcKind %d at %v", kind, ob.op))
 				}
-				prevOut := txIns[srcInputIdx].PreviousOutPoint
+
+				if int(srcInputIdx) >= len(srcTx.TxIn) {
+					panic(fmt.Sprintf("bug: ordinal unwind: 'o' at %v src input %d out of range (%d inputs)",
+						ob.op, srcInputIdx, len(srcTx.TxIn)))
+				}
+
+				if len(prevValue) == 0 {
+					// No predecessor means the source was never tracked
+					// (e.g. a reveal whose sat was transferred before
+					// the 'p' prefix existed). Nothing to restore.
+					continue
+				}
+
+				prevOut := srcTx.TxIn[srcInputIdx].PreviousOutPoint
 				srcOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
-				cache[ordinalOutpointKey(srcOP, srcOffset)] = li.Value
+				cache[ordinalOutpointKey(srcOP, srcOffset)] = prevValue
 			}
 		}
 	}
@@ -794,6 +847,38 @@ func ordinalOutpointKey(op tbcd.Outpoint, offset uint64) tbcd.OrdinalKey {
 	return key
 }
 
+// predecessorKey builds a 'p' prefix key for the predecessor value store.
+// Layout mirrors 'o': 'p'(1) + txid(32) + vout(4) + offset(8) = 45 bytes.
+// The value is the raw 'o' value that was at the source outpoint before the
+// sat was moved here. Used by unwind to restore the correct predecessor.
+func predecessorKey(op tbcd.Outpoint, offset uint64) tbcd.OrdinalKey {
+	var key tbcd.OrdinalKey
+	key[0] = 'p'
+	copy(key[1:37], op[1:37])
+	binary.BigEndian.PutUint64(key[37:], offset)
+	return key
+}
+
+// predecessorValue retrieves a 'p' entry from the cache (with tombstone
+// awareness) or falls back to the DB. Returns nil if no predecessor exists
+// (reveals) or if the entry has been tombstoned.
+func (i *ordinalIndexer) predecessorValue(ctx context.Context, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue, key tbcd.OrdinalKey) (tbcd.OrdinalValue, error) {
+	if v, ok := cache[key]; ok {
+		if v == nil {
+			return nil, nil // tombstoned
+		}
+		return v, nil
+	}
+	v, err := i.g.db.OrdinalValueByKey(ctx, key)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("predecessor get: %w", err)
+	}
+	return v, nil
+}
+
 func makeInscriptionID(txHash *chainhash.Hash, inputIdx uint32) [36]byte {
 	var id [36]byte
 	copy(id[:32], txHash[:])
@@ -801,37 +886,44 @@ func makeInscriptionID(txHash *chainhash.Hash, inputIdx uint32) [36]byte {
 	return id
 }
 
-// 'o' value layout: inscID(36) + srcInputIdx(2) + srcOffset(8) = 46 bytes.
-// srcInputIdx is the index, within the spending tx, of the input that
-// consumed the inscribed sat on a transfer; the source outpoint is
-// recovered on unwind from tx.TxIn[srcInputIdx].PreviousOutPoint (free
-// from the block), so it is not stored. srcOffset is the inscription's
-// offset within the spent output. A reveal stores srcInputIdx =
-// ordinalRevealSentinel (no prior location to restore). This lets unwind
-// reverse transfers from our own index alone — no input amounts, no
-// tx/utxo index reads.
-const ordinalOutpointValueLen = 36 + 2 + 8
+// 'o' value layout: inscID(36) + srcKind(1) + srcTxIdx(4) + srcInputIdx(4) + srcOffset(8) = 53 bytes.
+// srcKind describes how the sat arrived at this holding outpoint:
+//
+//	0x00 REVEAL   — no prior location to restore.
+//	0x01 TRANSFER — sat moved within the holding tx.
+//	0x02 FEE      — sat paid as fee, landed in coinbase. srcTxIdx names the paying tx.
+//	0x03 LOST     — sat paid as fee, exceeded coinbase output. srcTxIdx names the paying tx.
+//
+// srcTxIdx is the block-relative index of the source tx. Only consulted
+// for FEE/LOST; for TRANSFER, the holding tx IS the source tx.
+// srcInputIdx is the input index within the source tx that spent the
+// prior outpoint. srcOffset is the sat's byte offset within the spent output.
+const ordinalOutpointValueLen = 36 + 1 + 4 + 4 + 8
 
-func encodeOutpointValue(inscID [36]byte, srcInputIdx uint16, srcOffset uint64) tbcd.OrdinalValue {
+func encodeOutpointValue(inscID [36]byte, kind byte, srcTxIdx uint32, srcInputIdx uint32, srcOffset uint64) tbcd.OrdinalValue {
 	v := make([]byte, ordinalOutpointValueLen)
 	copy(v[:36], inscID[:])
-	binary.BigEndian.PutUint16(v[36:38], srcInputIdx)
-	binary.BigEndian.PutUint64(v[38:46], srcOffset)
+	v[36] = kind
+	binary.BigEndian.PutUint32(v[37:41], srcTxIdx)
+	binary.BigEndian.PutUint32(v[41:45], srcInputIdx)
+	binary.BigEndian.PutUint64(v[45:53], srcOffset)
 	return v
 }
 
-// decodeOutpointValue returns the inscription ID, the source input index,
-// the source offset, and whether the entry is a transfer (true) or reveal
-// (false, sentinel source).
-func decodeOutpointValue(v []byte) (inscID [36]byte, srcInputIdx uint16, srcOffset uint64, isTransfer bool, err error) {
+// decodeOutpointValue returns the inscription ID, the source kind, the
+// source tx index, the source input index, the source offset, and whether
+// the entry is a transfer/fee/lost (true) or reveal (false).
+func decodeOutpointValue(v []byte) (inscID [36]byte, kind byte, srcTxIdx uint32, srcInputIdx uint32, srcOffset uint64, isTransfer bool, err error) {
 	if len(v) != ordinalOutpointValueLen {
-		return inscID, 0, 0, false, fmt.Errorf("invalid 'o' value length: %d", len(v))
+		return inscID, 0, 0, 0, 0, false, fmt.Errorf("invalid 'o' value length: %d", len(v))
 	}
 	copy(inscID[:], v[:36])
-	srcInputIdx = binary.BigEndian.Uint16(v[36:38])
-	srcOffset = binary.BigEndian.Uint64(v[38:46])
-	isTransfer = srcInputIdx != ordinalRevealSentinel
-	return inscID, srcInputIdx, srcOffset, isTransfer, nil
+	kind = v[36]
+	srcTxIdx = binary.BigEndian.Uint32(v[37:41])
+	srcInputIdx = binary.BigEndian.Uint32(v[41:45])
+	srcOffset = binary.BigEndian.Uint64(v[45:53])
+	isTransfer = kind != srcKindReveal
+	return inscID, kind, srcTxIdx, srcInputIdx, srcOffset, isTransfer, nil
 }
 
 // satAtOutputOffset finds the sat number at a given offset within the

@@ -161,6 +161,7 @@ type Database interface {
 	OrdinalInscribedSatBounds(ctx context.Context) (minSat, maxSat uint64, err error)
 	OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*Outpoint, error)
 	OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error)
+	OrdinalValueByKey(ctx context.Context, key OrdinalKey) ([]byte, error)
 }
 
 type Keystone struct {

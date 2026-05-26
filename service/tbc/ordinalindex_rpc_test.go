@@ -687,7 +687,7 @@ func BenchmarkLocatedAtOutpoint(b *testing.B) {
 			var txid chainhash.Hash
 			binary.BigEndian.PutUint64(txid[:8], uint64(n))
 			k := ordinalOutpointKey(tbcd.NewOutpoint(txid, 0), 0)
-			cache[k] = encodeOutpointValue([36]byte{byte(n)}, ordinalRevealSentinel, 0)
+			cache[k] = encodeOutpointValue([36]byte{byte(n)}, srcKindReveal, 0, ordinalRevealSentinel, 0)
 		}
 		b.Run(fmt.Sprintf("cache=%d", cacheSize), func(b *testing.B) {
 			b.ReportAllocs()
