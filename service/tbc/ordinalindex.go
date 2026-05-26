@@ -215,6 +215,9 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 	fullComputation := wm != nil
 
+	var feeList []feeCarry
+	var blockFeeBase uint64
+
 	for txBlockIdx, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
 			continue
@@ -276,11 +279,17 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		}
 
 		if len(fl) == 0 {
+			// No inscriptions in this tx, but still accumulate its fee
+			// for the block-wide fee pool offset.
+			outTotal := txOutTotal(tx.MsgTx().TxOut)
+			blockFeeBase += inputValue - outTotal
 			continue
 		}
 
 		// Place all flotsam in offset order (ord sorts before placing).
 		sort.Slice(fl, func(a, b int) bool { return fl[a].pos < fl[b].pos })
+
+		outTotal := txOutTotal(tx.MsgTx().TxOut)
 
 		for _, f := range fl {
 			f := f // local copy; f.inscID[:] is sliced into the cache below
@@ -308,8 +317,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				inscriptionSeq++
 			}
 
-			// 'o': ownership tracker. The !landed case (sat lands in
-			// the fee) is deferred to Phase D2 (fee→coinbase).
+			// 'o': ownership tracker.
 			if landed {
 				kind := srcKindTransfer
 				if f.isReveal {
@@ -323,6 +331,60 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				if kind == srcKindTransfer {
 					cache[predecessorKey(op, locOffset)] = f.prevValue
 				}
+			} else {
+				// Sat lands in the fee — carry to the coinbase phase.
+				feeInternal := f.pos - outTotal
+				feeList = append(feeList, feeCarry{
+					inscID:      f.inscID,
+					feePoolOff:  blockFeeBase + feeInternal,
+					srcTxIdx:    uint32(txBlockIdx),
+					srcInputIdx: f.srcInputIdx,
+					srcOffset:   f.srcOffset,
+					prevValue:   f.prevValue,
+				})
+			}
+		}
+
+		// Accumulate this tx's fee for the block-wide fee pool offset.
+		blockFeeBase += inputValue - outTotal
+	}
+
+	// Coinbase phase: place fee-carried inscriptions into coinbase outputs
+	// or the lost sentinel. Processed after all non-coinbase txs so
+	// blockFeeBase is complete.
+	if len(feeList) > 0 {
+		coinbaseTx := txs[0]
+		cbTxid := *coinbaseTx.Hash()
+		subsidyCount := SubsidyAtHeight(blockHeight)
+		cbOutTotal := txOutTotal(coinbaseTx.MsgTx().TxOut)
+
+		// Sort by fee pool offset (ord sorts before placing).
+		sort.Slice(feeList, func(a, b int) bool {
+			return feeList[a].feePoolOff < feeList[b].feePoolOff
+		})
+
+		var lostSeq uint32
+		for _, e := range feeList {
+			posCB := subsidyCount + e.feePoolOff
+			if posCB < cbOutTotal {
+				// Sat lands in a coinbase output.
+				vout, offset, _ := placeInOutputs(coinbaseTx.MsgTx().TxOut, posCB)
+				op := tbcd.NewOutpoint(cbTxid, vout)
+				cache[ordinalOutpointKey(op, offset)] = encodeOutpointValue(
+					e.inscID, srcKindFee, e.srcTxIdx, e.srcInputIdx, e.srcOffset)
+				if len(e.prevValue) > 0 {
+					cache[predecessorKey(op, offset)] = e.prevValue
+				}
+			} else {
+				// Sat exceeds claimed reward — LOST.
+				op := lostSentinelOutpoint()
+				lostOff := lostSatOffset(blockHeight, lostSeq)
+				lostSeq++
+				cache[ordinalOutpointKey(op, lostOff)] = encodeOutpointValue(
+					e.inscID, srcKindLost, e.srcTxIdx, e.srcInputIdx, e.srcOffset)
+				if len(e.prevValue) > 0 {
+					cache[predecessorKey(op, lostOff)] = e.prevValue
+				}
 			}
 		}
 	}
@@ -333,8 +395,8 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 // placeInOutputs locates FIFO position pos within a tx's outputs.
 // Returns (vout, offset_within_output, true) if the sat lands in an
 // output, or (0, 0, false) if pos falls beyond all outputs (the sat is
-// in the fee — Phase D handles fee→coinbase placement). Zero-value
-// outputs (OP_RETURN etc.) hold no sats and are skipped.
+// in the fee — fee→coinbase placement handles it). Zero-value outputs
+// (OP_RETURN etc.) hold no sats and are skipped.
 func placeInOutputs(txOut []*wire.TxOut, pos uint64) (uint32, uint64, bool) {
 	var cum uint64
 	for vout, out := range txOut {
@@ -347,6 +409,44 @@ func placeInOutputs(txOut []*wire.TxOut, pos uint64) (uint32, uint64, bool) {
 		cum += uint64(out.Value)
 	}
 	return 0, 0, false
+}
+
+// feeCarry is an inscribed sat that landed in fees during a non-coinbase tx.
+// Accumulated per block, then placed into coinbase outputs (or lost sentinel)
+// after all non-coinbase txs are processed.
+type feeCarry struct {
+	inscID      [36]byte
+	feePoolOff  uint64 // position in the block-wide fee pool
+	srcTxIdx    uint32 // block index of the paying tx
+	srcInputIdx uint32
+	srcOffset   uint64
+	prevValue   []byte // predecessor 'o' value (nil for reveals)
+}
+
+// lostSentinelOutpoint returns the reserved outpoint for lost (unclaimed fee)
+// sats. All-zero txid, vout 0xFFFFFFFF. Fixed-size, no nil.
+func lostSentinelOutpoint() tbcd.Outpoint {
+	return tbcd.NewOutpoint(chainhash.Hash{}, 0xFFFFFFFF)
+}
+
+// lostSatOffset encodes a unique offset for a lost sat. The block height is
+// embedded so that unwind can identify which lost entries belong to a block.
+func lostSatOffset(blockHeight uint32, seq uint32) uint64 {
+	return (uint64(blockHeight) << 32) | uint64(seq)
+}
+
+// lostSatBlockHeight extracts the block height from a lost sat offset.
+func lostSatBlockHeight(offset uint64) uint32 {
+	return uint32(offset >> 32)
+}
+
+// txOutTotal returns the sum of all output values in a transaction.
+func txOutTotal(txOut []*wire.TxOut) uint64 {
+	var total uint64
+	for _, out := range txOut {
+		total += uint64(out.Value)
+	}
+	return total
 }
 
 // trackedInBlock finds 'o' entries written earlier in the current block's
@@ -458,85 +558,110 @@ func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, bl
 }
 
 // unwindOutpointTracker reverses the 'o' ownership entries windBlock placed
-// for every non-coinbase tx in the block. For each inscription now sitting
-// in a tx output it deletes the entry; if the entry is a transfer it
-// restores the prior 'o' entry at the spent outpoint, recovered from the
-// block via the stored source input index, with the stored source offset.
-// Self-contained: reads only the ordinal index and the block in hand — no
-// input amounts, no tx/utxo index.
+// for every tx in the block (including coinbase and lost sentinel). For each
+// inscription at a tx output, it deletes the entry; if the entry is a
+// transfer/fee/lost, it restores the prior 'o' entry from the 'p' prefix.
+// Self-contained: reads only the ordinal index and the block in hand.
 func (i *ordinalIndexer) unwindOutpointTracker(ctx context.Context, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) error {
 	txs := block.Transactions()
+
+	// Process txs in reverse order. Coinbase is NOT skipped — fee sats
+	// placed in coinbase outputs during wind must be reversed.
 	for ti := len(txs) - 1; ti >= 0; ti-- {
 		tx := txs[ti]
-		if blockchain.IsCoinBase(tx) {
-			continue
-		}
 
 		for _, ob := range outpointsOf(tx) {
-			located, lerr := i.locatedAtOutpoint(ctx, cache, ob.op)
-			if lerr != nil {
-				return fmt.Errorf("unwind tracked lookup %v: %w", ob.op, lerr)
-			}
-			for _, li := range located {
-				_, kind, _, srcInputIdx, srcOffset, isTransfer, derr := decodeOutpointValue(li.Value)
-				if derr != nil {
-					// We wrote this 'o' value; a malformed read means the
-					// ordinal index is corrupt. Crash, don't limp on.
-					panic(fmt.Sprintf("bug: ordinal unwind: corrupt 'o' value at %v: %v", ob.op, derr))
-				}
-
-				// Read the predecessor value BEFORE tombstoning the 'p'
-				// entry — once tombstoned, the cache overlay hides it.
-				pKey := predecessorKey(ob.op, li.Offset)
-				var prevValue tbcd.OrdinalValue
-				if isTransfer {
-					var perr error
-					prevValue, perr = i.predecessorValue(ctx, cache, pKey)
-					if perr != nil {
-						return fmt.Errorf("predecessor at %v: %w", ob.op, perr)
-					}
-				}
-
-				// Delete the 'o' and 'p' entries at the current location.
-				cache[ordinalOutpointKey(ob.op, li.Offset)] = nil
-				cache[pKey] = nil
-
-				// Reveal: nothing to restore.
-				if !isTransfer {
-					continue
-				}
-
-				// Determine the source tx. For TRANSFER, the holding tx
-				// IS the source tx. For FEE/LOST, srcTxIdx names a
-				// different tx in the block (Phase D2, not yet wired).
-				var srcTx *wire.MsgTx
-				switch kind {
-				case srcKindTransfer:
-					srcTx = tx.MsgTx()
-				default:
-					// FEE/LOST: Phase D2. For now, panic on unexpected kind.
-					panic(fmt.Sprintf("bug: ordinal unwind: unhandled srcKind %d at %v", kind, ob.op))
-				}
-
-				if int(srcInputIdx) >= len(srcTx.TxIn) {
-					panic(fmt.Sprintf("bug: ordinal unwind: 'o' at %v src input %d out of range (%d inputs)",
-						ob.op, srcInputIdx, len(srcTx.TxIn)))
-				}
-
-				if len(prevValue) == 0 {
-					// No predecessor means the source was never tracked
-					// (e.g. a reveal whose sat was transferred before
-					// the 'p' prefix existed). Nothing to restore.
-					continue
-				}
-
-				prevOut := srcTx.TxIn[srcInputIdx].PreviousOutPoint
-				srcOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
-				cache[ordinalOutpointKey(srcOP, srcOffset)] = prevValue
+			if err := i.unwindOutpointEntries(ctx, block, cache, ob.op); err != nil {
+				return err
 			}
 		}
 	}
 
+	// Scan the lost sentinel for entries created by this block.
+	// unwindOutpointEntries filters by block height internally.
+	sentinel := lostSentinelOutpoint()
+	if err := i.unwindOutpointEntries(ctx, block, cache, sentinel); err != nil {
+		return fmt.Errorf("unwind lost sentinel: %w", err)
+	}
+
+	return nil
+}
+
+// unwindOutpointEntries reverses all 'o' entries at the given outpoint.
+func (i *ordinalIndexer) unwindOutpointEntries(ctx context.Context, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue, op tbcd.Outpoint) error {
+	txs := block.Transactions()
+	blockHeight := uint32(block.Height())
+	isLostSentinel := op == lostSentinelOutpoint()
+
+	located, lerr := i.locatedAtOutpoint(ctx, cache, op)
+	if lerr != nil {
+		return fmt.Errorf("unwind tracked lookup %v: %w", op, lerr)
+	}
+	for _, li := range located {
+		// For lost sentinel: skip entries from other blocks.
+		if isLostSentinel && lostSatBlockHeight(li.Offset) != blockHeight {
+			continue
+		}
+
+		_, kind, srcTxIdx, srcInputIdx, srcOffset, isTransfer, derr := decodeOutpointValue(li.Value)
+		if derr != nil {
+			panic(fmt.Sprintf("bug: ordinal unwind: corrupt 'o' value at %v: %v", op, derr))
+		}
+
+		// Read the predecessor value BEFORE tombstoning.
+		pKey := predecessorKey(op, li.Offset)
+		var prevValue tbcd.OrdinalValue
+		if isTransfer {
+			var perr error
+			prevValue, perr = i.predecessorValue(ctx, cache, pKey)
+			if perr != nil {
+				return fmt.Errorf("predecessor at %v: %w", op, perr)
+			}
+		}
+
+		// Delete the 'o' and 'p' entries at the current location.
+		cache[ordinalOutpointKey(op, li.Offset)] = nil
+		cache[pKey] = nil
+
+		// Reveal: nothing to restore.
+		if !isTransfer {
+			continue
+		}
+
+		// Determine the source tx.
+		var srcTx *wire.MsgTx
+		switch kind {
+		case srcKindTransfer:
+			if int(srcTxIdx) >= len(txs) {
+				panic(fmt.Sprintf("bug: ordinal unwind: srcTxIdx %d out of range (%d txs)",
+					srcTxIdx, len(txs)))
+			}
+			srcTx = txs[srcTxIdx].MsgTx()
+		case srcKindFee, srcKindLost:
+			// Source is a non-coinbase tx identified by srcTxIdx.
+			if int(srcTxIdx) >= len(txs) {
+				panic(fmt.Sprintf("bug: ordinal unwind: srcTxIdx %d out of range (%d txs)",
+					srcTxIdx, len(txs)))
+			}
+			srcTx = txs[srcTxIdx].MsgTx()
+		default:
+			panic(fmt.Sprintf("bug: ordinal unwind: unhandled srcKind %d at %v", kind, op))
+		}
+
+		if int(srcInputIdx) >= len(srcTx.TxIn) {
+			panic(fmt.Sprintf("bug: ordinal unwind: 'o' at %v src input %d out of range (%d inputs)",
+				op, srcInputIdx, len(srcTx.TxIn)))
+		}
+
+		if len(prevValue) == 0 {
+			// No predecessor (reveal that landed in fees). Nothing to restore.
+			continue
+		}
+
+		prevOut := srcTx.TxIn[srcInputIdx].PreviousOutPoint
+		srcOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
+		cache[ordinalOutpointKey(srcOP, srcOffset)] = prevValue
+	}
 	return nil
 }
 
