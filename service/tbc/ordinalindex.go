@@ -298,7 +298,12 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			if f.isReveal {
 				if fullComputation {
 					revealInput := binary.LittleEndian.Uint32(f.inscID[32:36])
+					satStart := time.Now()
 					satNumber, err := i.computeInscSat(ctx, txid, revealInput)
+					if d := time.Since(satStart); d > 500*time.Millisecond {
+						log.Infof("slow sat computation: height %d %v:%d took %v",
+							blockHeight, txid, revealInput, d.Round(time.Millisecond))
+					}
 					if err != nil {
 						return fmt.Errorf("compute inscribed sat at %v:%d: %w",
 							txid, revealInput, err)
