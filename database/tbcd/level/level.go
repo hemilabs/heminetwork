@@ -2703,6 +2703,21 @@ func (l *ldb) OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]by
 	return v, nil
 }
 
+func (l *ldb) OrdinalValueByKey(ctx context.Context, key tbcd.OrdinalKey) ([]byte, error) {
+	log.Tracef("OrdinalValueByKey")
+	defer log.Tracef("OrdinalValueByKey exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("ordinal key: %x", key[:]))
+		}
+		return nil, fmt.Errorf("ordinal get: %w", err)
+	}
+	return bytes.Clone(v), nil
+}
+
 func (l *ldb) OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error) {
 	log.Tracef("OrdinalInscriptionsByBlockHash")
 	defer log.Tracef("OrdinalInscriptionsByBlockHash exit")
