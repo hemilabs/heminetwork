@@ -2665,25 +2665,6 @@ func (l *ldb) OrdinalPopulatorUpdate(ctx context.Context, ordData map[tbcd.Ordin
 	return nil
 }
 
-func (l *ldb) OrdinalSatRangesByOutpoint(ctx context.Context, op tbcd.Outpoint) ([]byte, error) {
-	log.Tracef("OrdinalSatRangesByOutpoint")
-	defer log.Tracef("OrdinalSatRangesByOutpoint exit")
-
-	ordDB := l.pool[level.OrdinalDB]
-	var key tbcd.OrdinalKey
-	key[0] = 'r'
-	copy(key[1:], op[:])
-
-	v, err := ordDB.Get(key[:], nil)
-	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.NotFoundError(fmt.Sprintf("ordinal sat ranges: %v", op))
-		}
-		return nil, fmt.Errorf("ordinal sat ranges: %w", err)
-	}
-	return v, nil
-}
-
 func (l *ldb) OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error) {
 	log.Tracef("OrdinalInscriptionByID")
 	defer log.Tracef("OrdinalInscriptionByID exit")
@@ -2885,30 +2866,6 @@ func (l *ldb) OrdinalInscribedSatBounds(ctx context.Context) (uint64, uint64, er
 		return 0, 0, fmt.Errorf("ordinal inscribed sat bounds: %w", err)
 	}
 	return minSat, maxSat, nil
-}
-
-func (l *ldb) OrdinalOutpointBySat(ctx context.Context, satNumber uint64) (*tbcd.Outpoint, error) {
-	log.Tracef("OrdinalOutpointBySat")
-	defer log.Tracef("OrdinalOutpointBySat exit")
-
-	ordDB := l.pool[level.OrdinalDB]
-	var key tbcd.OrdinalKey
-	key[0] = 's'
-	binary.BigEndian.PutUint64(key[1:], satNumber)
-
-	v, err := ordDB.Get(key[:], nil)
-	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.NotFoundError(fmt.Sprintf("ordinal outpoint by sat: %d", satNumber))
-		}
-		return nil, fmt.Errorf("ordinal outpoint by sat: %w", err)
-	}
-	if len(v) != len(tbcd.Outpoint{}) {
-		return nil, fmt.Errorf("invalid outpoint length: %d", len(v))
-	}
-	var op tbcd.Outpoint
-	copy(op[:], v)
-	return &op, nil
 }
 
 func (l *ldb) OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error) {

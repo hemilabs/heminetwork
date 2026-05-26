@@ -4548,9 +4548,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 			t.Fatalf("[%s] content: got %q, want %q", label, string(content), wantContent)
 		}
 
-		// 'o': the inscribed sat's location must be tracked. The reveal
-		// output (vout 0 of the inscription tx, where the inscribed sat
-		// lands) must return this inscription via the outpoint index.
+		// 'o': the inscribed sat's location must be tracked.
 		inscID := makeInscriptionID(&inscTxid, 0)
 		op := tbcd.NewOutpoint(inscTxid, 0)
 		if len(expectedOP) > 0 {
@@ -4568,18 +4566,60 @@ func TestOrdinalIndexFork(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Fatalf("[%s] 'o' inscription not tracked at reveal outpoint %v",
+			t.Fatalf("[%s] 'o' inscription not tracked at outpoint %v",
 				label, op)
 		}
-		t.Logf("[%s] 'o' inscription tracked at %v", label, op)
 
-		t.Logf("[%s] verified: sat=%d type=%q content=%q",
-			label, inscByID.SatNumber, contentType, string(content))
+		// InscriptionsByAddress: derive address from the holding
+		// output via the tx index and verify the RPC finds it.
+		holdingBlockHash, berr := s.g.db.BlockHashByTxId(ctx, *op.TxIdHash())
+		if berr != nil {
+			t.Fatalf("[%s] BlockHashByTxId(%v): %v", label, op.TxIdHash(), berr)
+		}
+		holdingBlock, berr := s.BlockByHash(ctx, *holdingBlockHash)
+		if berr != nil {
+			t.Fatalf("[%s] BlockByHash(%v): %v", label, holdingBlockHash, berr)
+		}
+		vout := op.TxIndex()
+		var holdingPkScript []byte
+		for _, tx := range holdingBlock.Transactions() {
+			if *tx.Hash() == *op.TxIdHash() {
+				holdingPkScript = tx.MsgTx().TxOut[vout].PkScript
+				break
+			}
+		}
+		if holdingPkScript == nil {
+			t.Fatalf("[%s] holding tx %v not found in block", label, op.TxIdHash())
+		}
+		_, addrs, _, aerr := txscript.ExtractPkScriptAddrs(holdingPkScript, s.g.chain)
+		if aerr != nil || len(addrs) == 0 {
+			t.Fatalf("[%s] derive address: %v", label, aerr)
+		}
+		holdingAddr := addrs[0].EncodeAddress()
+		addrInscs, aerr := s.InscriptionsByAddress(ctx, holdingAddr, 0, 100)
+		if aerr != nil {
+			t.Fatalf("[%s] InscriptionsByAddress(%s): %v", label, holdingAddr, aerr)
+		}
+		foundByAddr := false
+		for _, ai := range addrInscs {
+			if ai.TxID == inscTxid {
+				foundByAddr = true
+				break
+			}
+		}
+		if !foundByAddr {
+			t.Fatalf("[%s] InscriptionsByAddress(%s): inscription %v not found",
+				label, holdingAddr, inscTxid)
+		}
+
+		t.Logf("[%s] verified: sat=%d type=%q content=%q addr=%s",
+			label, inscByID.SatNumber, contentType, string(content), holdingAddr)
 
 		return inscByID.SatNumber
 	}
 
-	// ordinalVerifyUnwound checks 'n', 'i', 'a' entries are all gone.
+	// ordinalVerifyUnwound checks 'n', 'i', 'a', 'o' entries are all gone
+	// and InscriptionsByAddress does not return the inscription.
 	// checkSat=false skips 'a' check when another fork inscribes the same sat.
 	ordinalVerifyUnwound := func(t *testing.T, label string, blk *block, satNumber uint64, checkSat bool) {
 		t.Helper()
@@ -4608,6 +4648,22 @@ func TestOrdinalIndexFork(t *testing.T) {
 		if len(oInscs) != 0 {
 			t.Fatalf("[%s] 'o' reveal outpoint should be empty, got %d",
 				label, len(oInscs))
+		}
+		// InscriptionsByAddress: derive address from the reveal
+		// output's pkScript (raw block data persists after unwind).
+		// After unwind the UTXO is gone, so the inscription must
+		// not appear.
+		revealPkScript := inscTx.MsgTx().TxOut[0].PkScript
+		_, addrs, _, aerr := txscript.ExtractPkScriptAddrs(revealPkScript, s.g.chain)
+		if aerr == nil && len(addrs) > 0 {
+			revealAddr := addrs[0].EncodeAddress()
+			addrInscs, _ := s.InscriptionsByAddress(ctx, revealAddr, 0, 100)
+			for _, ai := range addrInscs {
+				if ai.TxID == inscTxid {
+					t.Fatalf("[%s] InscriptionsByAddress(%s): unwound inscription %v still visible",
+						label, revealAddr, inscTxid)
+				}
+			}
 		}
 		t.Logf("[%s] all entries verified absent", label)
 	}
