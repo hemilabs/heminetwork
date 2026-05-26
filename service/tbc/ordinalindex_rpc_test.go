@@ -125,6 +125,20 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 			Metaprotocol: []byte("brc-20"),
 		}))
 
+	// 'o': outpoint ownership tracker for inscription at seed.outpoint.
+	// InscriptionsByAddress scans 'o' entries at each UTXO outpoint.
+	cache[ordinalOutpointKey(seed.outpoint, 0)] = encodeOutpointValue(
+		seed.inscID, srcKindReveal, 0, ordinalRevealSentinel, 0)
+
+	// Second 'o' entry: inscID2 at a second outpoint (txid2:0).
+	// Tests that InscriptionsByAddress accumulates across UTXOs.
+	outpoint2 := tbcd.NewOutpoint(seed.txid2, 0)
+	cache[ordinalOutpointKey(outpoint2, 0)] = encodeOutpointValue(
+		seed.inscID2, srcKindReveal, 0, ordinalRevealSentinel, 0)
+
+	// 'a': sat→inscription mapping for InscriptionsBySat.
+	cache[ordinalSatInscriptionKey(seed.satNumber, seed.inscID)] = []byte{}
+
 	cloned := maps.Clone(cache)
 	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, nil, chainhash.Hash{}); err != nil {
 		t.Fatal(err)
@@ -141,9 +155,11 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	pkScript, _ := txscript.PayToAddrScript(p2pkhAddr)
 	sh := tbcd.NewScriptHashFromScript(pkScript)
 	co := tbcd.NewCacheOutput([32]byte(sh), 5_000_000_000, 0)
+	co2 := tbcd.NewCacheOutput([32]byte(sh), 10_000_000_000, 0)
 
 	utxoCache := map[tbcd.Outpoint]tbcd.CacheOutput{
 		seed.outpoint: co,
+		outpoint2:     co2,
 	}
 	if err := db.BlockUtxoUpdate(ctx, 1, utxoCache, chainhash.Hash{}); err != nil {
 		t.Fatal(err)
@@ -404,7 +420,6 @@ func TestRpcOrdinal(t *testing.T) {
 		},
 		{
 			name: "InscriptionsBySat positive",
-			skip: "ordinals2: sat tracking removed from index",
 			req: tbcapi.OrdinalInscriptionsBySatRequest{
 				SatNumber: seed.satNumber,
 			},
@@ -429,7 +444,6 @@ func TestRpcOrdinal(t *testing.T) {
 		},
 		{
 			name: "InscriptionsBySat empty",
-			skip: "ordinals2: sat tracking removed from index",
 			req: tbcapi.OrdinalInscriptionsBySatRequest{
 				SatNumber: 999_999_999,
 			},
@@ -468,7 +482,6 @@ func TestRpcOrdinal(t *testing.T) {
 		},
 		{
 			name: "InscriptionsByAddress positive",
-			skip: "ordinals2: address lookup uses removed sat tracking",
 			req: tbcapi.OrdinalInscriptionsByAddressRequest{
 				Address: seed.address,
 				Start:   0,
@@ -483,12 +496,17 @@ func TestRpcOrdinal(t *testing.T) {
 				if r.Error != nil {
 					return r.Error
 				}
-				if len(r.Inscriptions) != 1 {
-					return protocol.Errorf("expected 1 inscription, got %d",
+				if len(r.Inscriptions) != 2 {
+					return protocol.Errorf("expected 2 inscriptions, got %d",
 						len(r.Inscriptions))
 				}
-				if r.Inscriptions[0].TxID != seed.txid {
-					return protocol.Errorf("txid mismatch")
+				// Both seed inscriptions must be present (order not guaranteed).
+				found := map[chainhash.Hash]bool{}
+				for _, insc := range r.Inscriptions {
+					found[insc.TxID] = true
+				}
+				if !found[seed.txid] || !found[seed.txid2] {
+					return protocol.Errorf("missing inscription: found %v", found)
 				}
 				return nil
 			},
@@ -506,8 +524,102 @@ func TestRpcOrdinal(t *testing.T) {
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
 				}
-				// Empty or nil — both cover the handler.
+				if r.Error != nil {
+					return r.Error
+				}
+				if len(r.Inscriptions) != 0 {
+					return protocol.Errorf("expected 0 inscriptions, got %d",
+						len(r.Inscriptions))
+				}
 				return nil
+			},
+		},
+		{
+			name: "InscriptionsByAddress pagination skip",
+			req: tbcapi.OrdinalInscriptionsByAddressRequest{
+				Address: seed.address,
+				Start:   1,
+				Count:   1,
+			},
+			respHeader: tbcapi.CmdOrdinalInscriptionsByAddressResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.OrdinalInscriptionsByAddressResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Error != nil {
+					return r.Error
+				}
+				if len(r.Inscriptions) != 1 {
+					return protocol.Errorf("expected 1 inscription (skipped 1), got %d",
+						len(r.Inscriptions))
+				}
+				return nil
+			},
+		},
+		{
+			name: "InscriptionsByAddress pagination count limit",
+			req: tbcapi.OrdinalInscriptionsByAddressRequest{
+				Address: seed.address,
+				Start:   0,
+				Count:   1,
+			},
+			respHeader: tbcapi.CmdOrdinalInscriptionsByAddressResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.OrdinalInscriptionsByAddressResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Error != nil {
+					return r.Error
+				}
+				if len(r.Inscriptions) != 1 {
+					return protocol.Errorf("expected 1 inscription (count-limited from 2), got %d",
+						len(r.Inscriptions))
+				}
+				return nil
+			},
+		},
+		{
+			name: "InscriptionsByAddress pagination past end",
+			req: tbcapi.OrdinalInscriptionsByAddressRequest{
+				Address: seed.address,
+				Start:   100,
+				Count:   10,
+			},
+			respHeader: tbcapi.CmdOrdinalInscriptionsByAddressResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.OrdinalInscriptionsByAddressResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Error != nil {
+					return r.Error
+				}
+				if len(r.Inscriptions) != 0 {
+					return protocol.Errorf("expected 0 inscriptions (past end), got %d",
+						len(r.Inscriptions))
+				}
+				return nil
+			},
+		},
+		{
+			name: "InscriptionsByAddress bad address",
+			req: tbcapi.OrdinalInscriptionsByAddressRequest{
+				Address: "not-a-valid-address",
+				Start:   0,
+				Count:   10,
+			},
+			respHeader: tbcapi.CmdOrdinalInscriptionsByAddressResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.OrdinalInscriptionsByAddressResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				return r.Error
+			},
+			expectedError: &protocol.Error{
+				Message: "internal error",
 			},
 		},
 	}

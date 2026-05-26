@@ -925,20 +925,6 @@ func (i *ordinalIndexer) readCacheInfo() string { return "" }
 
 // Key construction helpers. These match the SOW prefix scheme exactly.
 
-func ordinalRangeKey(op tbcd.Outpoint) tbcd.OrdinalKey {
-	var key tbcd.OrdinalKey
-	key[0] = 'r'
-	copy(key[1:], op[:])
-	return key
-}
-
-func ordinalSatKey(satNumber uint64) tbcd.OrdinalKey {
-	var key tbcd.OrdinalKey
-	key[0] = 's'
-	binary.BigEndian.PutUint64(key[1:], satNumber)
-	return key
-}
-
 func ordinalInscriptionKey(inscID [36]byte) tbcd.OrdinalKey {
 	var key tbcd.OrdinalKey
 	key[0] = 'i'
@@ -1054,31 +1040,4 @@ func decodeOutpointValue(v []byte) (inscID [36]byte, kind byte, srcTxIdx uint32,
 	srcOffset = binary.BigEndian.Uint64(v[45:53])
 	isTransfer = kind != srcKindReveal
 	return inscID, kind, srcTxIdx, srcInputIdx, srcOffset, isTransfer, nil
-}
-
-// satAtOutputOffset finds the sat number at a given offset within the
-// concatenated output sat ranges. Used for pointer tag (tag 2) handling.
-//
-// Time: O(outputs * ranges_per_output). Linear scan is justified
-// because outputs are ordered and offset is a position in the
-// concatenated sequence — binary search would require precomputing
-// cumulative sums.
-func satAtOutputOffset(outputRanges map[uint32][]SatRange, txOuts []*wire.TxOut, offset uint64) uint64 {
-	var pos uint64
-	for txOutIdx := range txOuts {
-		ranges, ok := outputRanges[uint32(txOutIdx)]
-		if !ok {
-			continue
-		}
-		for _, sr := range ranges {
-			if offset < pos+sr.Count {
-				return sr.Start + (offset - pos)
-			}
-			pos += sr.Count
-		}
-	}
-	if ranges, ok := outputRanges[0]; ok && len(ranges) > 0 {
-		return ranges[0].Start
-	}
-	return 0
 }

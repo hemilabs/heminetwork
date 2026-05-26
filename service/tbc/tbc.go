@@ -3870,8 +3870,8 @@ func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Ha
 }
 
 // InscriptionsByAddress lists inscriptions currently held by UTXOs at the
-// given address. Uses the 'a' prefix (sat→inscription) populated by the
-// indexer/populator, combined with backward walk sat range computation.
+// given address. Iterates outpoints for the address (from the utxo index)
+// and scans 'o' entries at each outpoint.
 func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress string, start, count uint32) ([]*tbcapi.OrdinalInscription, error) {
 	log.Tracef("InscriptionsByAddress")
 	defer log.Tracef("InscriptionsByAddress exit")
@@ -3890,13 +3890,16 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 	}
 	sh := tbcd.NewScriptHashFromScript(script)
 
-	utxos, err := s.g.db.UtxosByScriptHash(ctx, sh, 0, 10000)
+	// XXX(marco): fetches ALL UTXOs into memory. For high-activity
+	// addresses (exchange hot wallets) this is a memory bomb. Paginate
+	// UtxosByScriptHash in batches and break early once start+count
+	// inscriptions are accumulated.
+	utxos, err := s.g.db.UtxosByScriptHash(ctx, sh, 0, ^uint64(0))
 	if err != nil {
 		return nil, fmt.Errorf("utxos for %s: %w", encodedAddress, err)
 	}
 
-	memo := make(map[tbcd.Outpoint][]SatRange)
-	var result []*tbcapi.OrdinalInscription
+	result := make([]*tbcapi.OrdinalInscription, 0)
 	for _, utxo := range utxos {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -3904,44 +3907,24 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 
 		op := tbcd.NewOutpoint(*utxo.ChainHash(), utxo.OutputIndex())
 
-		// Try 'r' from DB first (above watermark or populator).
-		var ranges []SatRange
-		if rVal, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op); err == nil {
-			ranges = DecodeSatRanges(rVal)
-		} else {
-			// Fall back to backward walk.
-			computed, err := s.computeSatRanges(ctx, *utxo.ChainHash(),
-				utxo.OutputIndex(), memo)
-			if err != nil {
-				continue
-			}
-			ranges = computed
+		// Scan 'o' entries at this outpoint for tracked inscriptions.
+		located, err := s.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+		if err != nil {
+			log.Warningf("InscriptionsByAddress: scan 'o' at %v: %v", op, err)
+			continue
 		}
-		for _, r := range ranges {
-			inscribedSats, err := s.g.db.OrdinalInscribedSatsInRange(
-				ctx, r.Start, r.Start+r.Count)
+		for _, li := range located {
+			insc, err := s.populateInscription(ctx, li.InscID)
 			if err != nil {
-				continue
+				return nil, err
 			}
-			for _, sat := range inscribedSats {
-				inscIDs, err := s.g.db.OrdinalInscriptionsBySat(ctx, sat)
-				if err != nil {
-					continue
-				}
-				for _, inscID := range inscIDs {
-					insc, err := s.populateInscription(ctx, inscID)
-					if err != nil {
-						return nil, err
-					}
-					result = append(result, insc)
-				}
-			}
+			result = append(result, insc)
 		}
 	}
 
 	// Apply pagination.
 	if uint32(len(result)) <= start {
-		return nil, nil
+		return result[:0], nil
 	}
 	result = result[start:]
 	if count > 0 && uint32(len(result)) > count {
@@ -3986,18 +3969,6 @@ func (s *Server) SatRangesByOutpoint(ctx context.Context, txid chainhash.Hash, v
 		return nil, errors.New("ordinal index not enabled")
 	}
 
-	// Check 'r' from DB first (above watermark or populator).
-	op := tbcd.NewOutpoint(txid, vout)
-	if rVal, err := s.g.db.OrdinalSatRangesByOutpoint(ctx, op); err == nil {
-		decoded := DecodeSatRanges(rVal)
-		result := make([]tbcapi.SatRange, len(decoded))
-		for i, r := range decoded {
-			result[i] = tbcapi.SatRange{Start: r.Start, Count: r.Count}
-		}
-		return result, nil
-	}
-
-	// Fall back to backward walk.
 	memo := make(map[tbcd.Outpoint][]SatRange)
 	ranges, err := s.computeSatRanges(ctx, txid, vout, memo)
 	if err != nil {
