@@ -78,7 +78,7 @@ jobs:
       - name: "Test"
         env:
           HEMI_DOCKER_TESTS: "1"
-        run: cargo test --workspace --verbose --locked
+        run: cargo test --workspace --verbose --locked -- --test-threads=1
 
   deny:
     name: "Deny"
