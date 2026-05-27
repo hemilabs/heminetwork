@@ -4,3 +4,4 @@
 /.gocache/
 *.sw?
 target
+e2e
