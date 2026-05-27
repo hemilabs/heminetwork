@@ -578,7 +578,7 @@ pub fn decode_header(
 }
 
 pub fn decode_header_batch(
-    raw: &Vec<Vec<u8>>,
+    raw: &[Vec<u8>],
 ) -> Result<Vec<bitcoin::block::Header>, bitcoin::consensus::encode::Error> {
     raw.iter()
         .map(|bytes| {

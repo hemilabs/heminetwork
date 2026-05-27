@@ -1,4 +1,4 @@
-use crate::trust_rpc::protocol::{ProtocolErrable, JobStatus, Payload};
+use crate::trust_rpc::protocol::{JobStatus, Payload, ProtocolErrable};
 use base64::Engine as _;
 use bitcoin::consensus::Encodable;
 use futures_util::{SinkExt, StreamExt};
@@ -226,13 +226,10 @@ impl TrustRPC {
                                 };
 
                                 if pmsg.header.id == "0" {
-                                    match pmsg.parse_command() {
-                                        Ok(p) => match p {
-                                            protocol::Command::PingRequest => continue,
-                                            _ => {}, // XXX unexpected first message, log
-                                        },
-                                        Err(_) => {} // XXX log
-                                    };
+                                    if let Ok(protocol::Command::PingRequest) = pmsg.parse_command() {
+                                        continue
+                                    }
+                                    // XXX unexpected first message, log error
                                     continue
                                 }
 
@@ -325,10 +322,7 @@ impl TrustRPC {
                     _ = self.cancel.cancelled() => Err(TrustRPCError::Cancelled),
                     event = rcv.recv() => match event {
                         Some(ChannelEvent::Message(resp)) => {
-                            match resp.decode() {
-                                Ok(r) => return Ok(r),
-                                Err(e) => return Err(e),
-                            };
+                            resp.decode()
                         }
                         _ => Err(TrustRPCError::ConnectionLost)
                     },
@@ -354,7 +348,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn utxos_by_address(
@@ -381,7 +375,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn tx_by_id(&mut self, tx_id: bitcoin::transaction::Txid) -> Result<bitcoin::Transaction> {
@@ -399,7 +393,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn keystone_txs_by_hash(
@@ -422,7 +416,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn block_by_hash(&mut self, hash: bitcoin::BlockHash) -> Result<bitcoin::Block> {
@@ -440,7 +434,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn block_insert(&mut self, block: bitcoin::Block) -> Result<bitcoin::BlockHash> {
@@ -467,7 +461,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn block_in_tx_index(&mut self, hash: bitcoin::BlockHash) -> Result<bool> {
@@ -485,7 +479,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn full_block_available(&mut self, hash: bitcoin::BlockHash) -> Result<bool> {
@@ -503,7 +497,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn block_hash_by_tx_id(
@@ -531,7 +525,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn block_header_best(&mut self) -> Result<(u64, bitcoin::block::Header)> {
@@ -550,7 +544,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn block_header_by_hash(
@@ -574,7 +568,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn block_headers_by_height(&mut self, height: u32) -> Result<Vec<bitcoin::block::Header>> {
@@ -592,7 +586,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn script_hash_available_to_spend(
@@ -615,7 +609,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn download_block_from_random_peers(
@@ -640,7 +634,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn running(&mut self) -> Result<bool> {
@@ -662,7 +656,7 @@ impl TrustRPC {
             }
         };
 
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn synced(&mut self) -> Result<protocol::SyncStatusResponse> {
@@ -677,7 +671,7 @@ impl TrustRPC {
                 return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
             }
         };
-        return Ok(pl);
+        Ok(pl)
     }
 
     pub fn sync_indexers_to_hash(&mut self, hash: bitcoin::BlockHash) -> Result<()> {

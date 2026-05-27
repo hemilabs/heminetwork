@@ -7,16 +7,18 @@ use std::net::TcpListener;
 use std::time::Duration;
 use tokio_tungstenite::accept_async;
 
-#[cfg(test)]
 mod container_tests {
     use super::*;
+    use std::thread::sleep;
     use testcontainers::{
         GenericBuildableImage, GenericImage, ImageExt,
-        core::{BuildImageOptions, ContainerPort, Host, WaitFor},
+        core::{BuildImageOptions, ContainerPort, ExecCommand, Host, WaitFor},
         runners::{AsyncBuilder, AsyncRunner},
     };
 
-    // JWT secret used for tbcd admin WebSocket auth.  
+    const REGNET_TEST_ADDR: &str = "2MxGhR8wmKPC8Dwz3v4KpW3HGqUgrRmdur2";
+
+    // JWT secret used for tbcd admin WebSocket auth.
     const JWT_SECRET: [u8; 32] = [0u8; 32];
     const JWT_SECRET_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -29,7 +31,7 @@ mod container_tests {
             Ok(v) => v,
             Err(_) => return true,
         };
-        return !matches!(res.as_str(), "true" | "t" | "1")
+        !matches!(res.as_str(), "true" | "t" | "1")
     }
 
     #[test]
@@ -45,8 +47,7 @@ mod container_tests {
             .build()
             .unwrap();
 
-        let (_bitcoind, _tbcd, url) = rt.block_on(async {
-
+        let (bitcoind, tbcd, url) = rt.block_on(async {
             // Starts bitcoind (regtest)
             let bitcoind = GenericImage::new("kylemanna/bitcoind", "latest")
                 .with_exposed_port(ContainerPort::Tcp(18444))
@@ -66,6 +67,17 @@ mod container_tests {
                 .start()
                 .await
                 .expect("bitcoind failed to start");
+
+            // Generate 10 blocks
+            let cmd = ExecCommand::new([
+                "bitcoin-cli",
+                "-regtest=1",
+                "generatetoaddress",
+                "10",
+                REGNET_TEST_ADDR,
+            ]);
+
+            bitcoind.exec(cmd).await.unwrap();
 
             let bitcoind_p2p_port = bitcoind
                 .get_host_port_ipv4(18444)
@@ -126,7 +138,23 @@ mod container_tests {
 
         let mut rpc = TrustRPC::new(config).unwrap();
 
-        println!("{:?}", rpc.synced().expect("synced() returned an error"));
+        // Wait up to 25 seconds for tbcd to sync
+        let mut synced = false;
+        for _ in 0..100 {
+            let sync = rpc.synced().expect("synced should return valid response");
+            if sync.synced && sync.blockheader_index_height.height == 10 {
+                synced = true;
+                break;
+            }
+            println!("received sync status: {:?}", sync);
+            sleep(Duration::from_millis(250));
+        }
+        assert!(synced);
+
+        rt.block_on(async move {
+            bitcoind.stop().await.unwrap();
+            tbcd.stop().await.unwrap();
+        });
     }
 }
 
