@@ -674,6 +674,40 @@ impl TrustRPC {
         Ok(pl)
     }
 
+    pub fn block_headers_insert(
+        &mut self,
+        headers: &[bitcoin::block::Header],
+    ) -> Result<(String, bitcoin::block::Header, bitcoin::block::Header, u32)> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let block_headers = headers
+            .iter()
+            .map(|h| protocol::BlockHeader::from(*h))
+            .collect();
+        let req = protocol::BlockHeadersInsertRequest { block_headers };
+        let msg = Payload::BlockHeadersInsertRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockHeadersInsertResponse(s) => {
+                let s = s.into_result()?;
+                let canonical = s
+                    .canonical_header
+                    .ok_or_else(|| TrustRPCError::Other("canonical_header is None".into()))?
+                    .try_into()?;
+                let last = s
+                    .last_header
+                    .ok_or_else(|| TrustRPCError::Other("last_header is None".into()))?
+                    .try_into()?;
+                (s.insert_type, canonical, last, s.inserted_count)
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
     pub fn sync_indexers_to_hash(&mut self, hash: bitcoin::BlockHash) -> Result<()> {
         let (id, rcv, _guard) = self.add_chan()?;
         let req = protocol::SyncIndexersToHashRequest {

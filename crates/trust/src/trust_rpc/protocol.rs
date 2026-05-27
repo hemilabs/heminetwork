@@ -62,6 +62,10 @@ pub enum Command {
     PingResponse,
 
     // TBC Admin API commands
+    #[serde(rename = "tbcadmin-block-headers-insert-request")]
+    BlockHeadersInsertRequest,
+    #[serde(rename = "tbcadmin-block-headers-insert-response")]
+    BlockHeadersInsertResponse,
     #[serde(rename = "tbcadmin-sync-indexers-to-hash-request")]
     SyncIndexersToHashRequest,
     #[serde(rename = "tbcadmin-job-status-request")]
@@ -164,6 +168,8 @@ pub enum Payload {
     JobListRequest(JobListRequest),
     JobListResponse(JobListResponse),
     JobUpdateNotification(JobUpdateNotification),
+    BlockHeadersInsertRequest(BlockHeadersInsertRequest),
+    BlockHeadersInsertResponse(BlockHeadersInsertResponse),
     BlockHeaderBestRequest(BlockHeaderBestRequest),
     BlockHeaderBestResponse(BlockHeaderBestResponse),
     BlockHeadersByHeightRequest(BlockHeadersByHeightRequest),
@@ -322,6 +328,67 @@ pub struct JobUpdateNotification {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncIndexersToHashRequest {
     pub hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BlockHeader {
+    pub version: i32,
+    pub prev_hash: String,
+    pub merkle_root: String,
+    pub timestamp: i64,
+    pub bits: String,
+    pub nonce: u32,
+}
+
+impl From<bitcoin::block::Header> for BlockHeader {
+    fn from(h: bitcoin::block::Header) -> Self {
+        Self {
+            version: h.version.to_consensus(),
+            prev_hash: h.prev_blockhash.to_string(),
+            merkle_root: h.merkle_root.to_string(),
+            timestamp: h.time as i64,
+            bits: format!("{:x}", h.bits.to_consensus()),
+            nonce: h.nonce,
+        }
+    }
+}
+
+impl TryFrom<BlockHeader> for bitcoin::block::Header {
+    type Error = super::TrustRPCError;
+
+    fn try_from(h: BlockHeader) -> Result<Self, Self::Error> {
+        use std::str::FromStr as _;
+        Ok(bitcoin::block::Header {
+            version: bitcoin::block::Version::from_consensus(h.version),
+            prev_blockhash: bitcoin::BlockHash::from_str(&h.prev_hash)
+                .map_err(|e| super::TrustRPCError::Other(e.to_string()))?,
+            merkle_root: bitcoin::TxMerkleNode::from_str(&h.merkle_root)
+                .map_err(|e| super::TrustRPCError::Other(e.to_string()))?,
+            time: h.timestamp as u32,
+            bits: bitcoin::CompactTarget::from_consensus(
+                u32::from_str_radix(&h.bits, 16)
+                    .map_err(|e| super::TrustRPCError::Other(e.to_string()))?,
+            ),
+            nonce: h.nonce,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BlockHeadersInsertRequest {
+    pub block_headers: Vec<BlockHeader>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BlockHeadersInsertResponse {
+    pub insert_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_header: Option<BlockHeader>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_header: Option<BlockHeader>,
+    pub inserted_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ProtocolError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -598,6 +665,8 @@ impl_protocol_sync!(
     JobListRequest,
     JobListResponse,
     JobUpdateNotification,
+    BlockHeadersInsertRequest,
+    BlockHeadersInsertResponse,
     BlockHeaderBestRequest,
     BlockHeaderBestResponse,
     BlockHeadersByHeightRequest,
@@ -631,6 +700,7 @@ impl_protocol_sync!(
 );
 
 impl_into_result!(
+    BlockHeadersInsertResponse,
     JobCancelResponse,
     JobListResponse,
     JobUpdateNotification,
