@@ -70,15 +70,9 @@ jobs:
       - name: "Install toolchain"
         run: rustup toolchain install --no-self-update
 
-      - name: "Setup Rust cache"
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          shared-key: "build-test"
-
       - name: "Test"
         env:
           HEMI_DOCKER_TESTS: "1"
-          RUST_TEST_TIME_UNIT: "120,600"
         run: cargo test --workspace --verbose --locked
 
   deny:
