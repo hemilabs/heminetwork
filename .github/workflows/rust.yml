@@ -76,6 +76,8 @@ jobs:
           shared-key: "build-test"
 
       - name: "Test"
+        env:
+          HEMI_DOCKER_TESTS: "1"
         run: cargo test --workspace --verbose --locked
 
   deny:

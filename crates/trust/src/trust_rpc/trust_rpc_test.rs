@@ -12,7 +12,7 @@ mod container_tests {
     use std::thread::sleep;
     use testcontainers::{
         GenericBuildableImage, GenericImage, ImageExt,
-        core::{BuildImageOptions, ContainerPort, ExecCommand, Host, WaitFor},
+        core::{BuildImageOptions, ContainerPort, ExecCommand, WaitFor},
         runners::{AsyncBuilder, AsyncRunner},
     };
 
@@ -47,11 +47,16 @@ mod container_tests {
             .build()
             .unwrap();
 
+        let x: u8 = rand::random();
+        let bitcoind_container_name = format!("bitcoind-{}", x);
+
         let (bitcoind, tbcd, url) = rt.block_on(async {
             // Starts bitcoind (regtest)
             let bitcoind = GenericImage::new("kylemanna/bitcoind", "latest")
                 .with_exposed_port(ContainerPort::Tcp(18444))
                 .with_wait_for(WaitFor::message_on_stdout("dnsseed thread exit"))
+                .with_network("trust_tests")
+                .with_container_name(&bitcoind_container_name)
                 .with_cmd([
                     "bitcoind",
                     "-regtest=1",
@@ -79,31 +84,20 @@ mod container_tests {
 
             bitcoind.exec(cmd).await.unwrap();
 
-            let bitcoind_p2p_port = bitcoind
-                .get_host_port_ipv4(18444)
-                .await
-                .expect("bitcoind p2p port not mapped");
-
-            let tbc_seeds = format!("host.docker.internal:{}", bitcoind_p2p_port);
+            let tbc_seeds = format!("{}:18444", bitcoind_container_name);
 
             // Starts tbcd.
             // It logs "handle (tbc admin): /v1/admin/ws" to stderr
             // once it has registered the admin WebSocket handler.
-            let tbcd = GenericBuildableImage::new("hemilabs/tbcd", "latest")
+            let tbcd_image = GenericBuildableImage::new("hemilabs/tbcd-test", "latest")
                 .with_dockerfile(tbcd_root.join("docker/tbcd/Dockerfile"))
-                .with_file(tbcd_root.join("go.mod"), "./go.mod")
-                .with_file(tbcd_root.join("go.sum"), "./go.sum")
-                .with_file(tbcd_root.join("Makefile"), "./Makefile")
-                .with_file(tbcd_root.join("cmd"), "./cmd")
-                .with_file(tbcd_root.join("service"), "./service")
-                .with_file(tbcd_root.join("api"), "./api")
-                .with_file(tbcd_root.join("bitcoin"), "./bitcoin")
-                .with_file(tbcd_root.join("database"), "./database")
-                .with_file(tbcd_root.join("lru"), "./lru")
-                .with_file(tbcd_root.join("rawdb"), "./rawdb")
+                .with_file(tbcd_root, ".")
                 .build_image_with(BuildImageOptions::new().with_skip_if_exists(true))
                 .await
-                .unwrap()
+                .expect("could not build docker image for tbcd");
+
+
+            let tbcd = tbcd_image
                 .with_exposed_port(ContainerPort::Tcp(TBCD_WS_PORT))
                 .with_wait_for(WaitFor::message_on_stderr("handle (tbc admin)"))
                 .with_env_var("TBC_NETWORK", "localnet")
@@ -113,10 +107,11 @@ mod container_tests {
                 .with_env_var("TBC_JWT_TOKEN", JWT_SECRET_HEX)
                 .with_env_var("TBC_BLOCK_CACHE_SIZE", "10mb")
                 .with_env_var("TBC_BLOCKHEADER_CACHE_SIZE", "1mb")
-                .with_host("host.docker.internal", Host::HostGateway)
+                .with_network("trust_tests")
                 .start()
                 .await
                 .expect("tbcd failed to start");
+    
 
             let tbcd_port = tbcd
                 .get_host_port_ipv4(TBCD_WS_PORT)
