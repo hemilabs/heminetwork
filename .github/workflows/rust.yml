@@ -70,6 +70,12 @@ jobs:
       - name: "Install toolchain"
         run: rustup toolchain install --no-self-update
 
+      # docker image building is painful in testcontainers-rust, for whatever
+      # reason, so let's build the tbcd image here to cache it for further
+      # builds
+      - name: "Build Docker Image for Caching"
+        run: docker build -f ./docker/tbcd/Dockerfile .
+
       - name: "Test"
         env:
           HEMI_DOCKER_TESTS: "1"
