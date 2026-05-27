@@ -1,59 +1,87 @@
-# Copyright (c) 2024-2025 Hemi Labs, Inc.
+# Copyright (c) 2024-2026 Hemi Labs, Inc.
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
 # PROJECTPATH is the project root directory.
 # This Makefile is stored in the project root directory, so the directory is
 # retrieved by getting the directory of this Makefile.
-PROJECTPATH = $(abspath $(dir $(realpath $(firstword $(MAKEFILE_LIST)))))
+PROJECTPATH := $(abspath $(dir $(realpath $(firstword $(MAKEFILE_LIST)))))
 
-export GOBIN=$(PROJECTPATH)/bin
-export GOCACHE=$(PROJECTPATH)/.gocache
-export GOPKG=$(PROJECTPATH)/pkg
-
-GO_LDFLAGS=
+GO_LDFLAGS ?=
+export GOCACHE ?= $(PROJECTPATH)/.gocache
+export GOBIN ?= $(shell go env GOPATH)/bin
+PROJECT_BIN := $(PROJECTPATH)/bin
 
 # renovate: datasource=github-releases depName=golangci/golangci-lint versioning=semver
-GOLANGCI_LINT_VERSION="v2.12.2"
+GOLANGCI_LINT_VERSION := v2.12.2
 # renovate: datasource=github-releases depName=joshuasing/golicenser versioning=semver
-GOLICENSER_VERSION="v0.3.1"
+GOLICENSER_VERSION := v0.3.1
 # renovate: datasource=github-releases depName=mvdan/gofumpt versioning=semver
-GOFUMPT_VERSION="v0.10.0"
+GOFUMPT_VERSION := v0.10.0
+# renovate: datasource=go depName=golang.org/x/vuln versioning=semver
+GOVULNCHECK_VERSION := v1.1.4
 
-cmds = \
-	bfgd			\
-	hemictl			\
-	hproxyd			\
-	keygen			\
-	popmd			\
-	tbcd			\
-	transfunctionerd	\
+cmds := \
+	bfgd \
+	btctool \
+	hemictl \
+	hproxyd \
+	keygen \
+	popmd \
+	tbcd \
+	transfunctionerd
 
-.PHONY: all clean deps go-deps $(cmds) build install lint lint-deps tidy race test vulncheck \
-	vulncheck-deps
-
+.PHONY: all
 all: tidy build lint test install
 
+.PHONY: clean
 clean: clean-test
-	rm -rf $(GOBIN) $(GOCACHE) $(GOPKG)
+	go clean -cache
+	rm -rf $(PROJECT_BIN)
 
+# TODO: This should not be necessary, all test files should be in a tempdir.
+.PHONY: clean-test
 clean-test:
 	rm -rf $(PROJECTPATH)/service/tbc/.testleveldb/
 
+.PHONY: deps
 deps: lint-deps vulncheck-deps go-deps
 
+.PHONY: go-deps
 go-deps:
 	go mod download
-	go mod tidy
 	go mod verify
 
-$(cmds):
-	go build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(GOBIN)/$@ ./cmd/$@
+.PHONY: tidy
+tidy:
+	go mod tidy
 
+.PHONY: build
 build:
-	go build ./...
+	go build -trimpath -ldflags "$(GO_LDFLAGS)" ./...
 
+.PHONY: install
 install: $(cmds)
+
+.PHONY: $(cmds)
+$(cmds):
+	go build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(PROJECT_BIN)/$@ ./cmd/$@
+
+.PHONY: test
+test:
+	go test -race -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
+		-covermode=atomic -ldflags "$(GO_LDFLAGS)" ./...
+
+.PHONY: race
+race: test
+
+.PHONY: cover
+cover: test
+	go tool cover -html=$(PROJECTPATH)/coverage.out
+
+.PHONY: synctest
+synctest:
+	go -C $(PROJECTPATH)/synctest test -v -timeout=1m ./...
 
 define LICENSE_HEADER
 Copyright (c) {{.year}} {{.author}}
@@ -61,32 +89,34 @@ Use of this source code is governed by the MIT License,
 which can be found in the LICENSE file.
 endef
 export LICENSE_HEADER
+LICENSE_AUTHOR := Hemi Labs, Inc.
 
-lint:
-	$(shell go env GOPATH)/bin/golangci-lint fmt ./...
-	$(shell go env GOPATH)/bin/golangci-lint run --fix ./...
-	$(shell go env GOPATH)/bin/golicenser -tmpl="$$LICENSE_HEADER" -author="Hemi Labs, Inc." -year-mode=git-range -fix ./...
+.PHONY: fmt
+fmt:
+	$(GOBIN)/golangci-lint fmt ./...
+	$(GOBIN)/golicenser -tmpl="$$LICENSE_HEADER" -author="$(LICENSE_AUTHOR)" -year-mode=git-range -fix ./...
 
+.PHONY: lint
+lint: fmt
+	$(GOBIN)/golangci-lint run --fix ./...
+
+.PHONY: lint-check
+lint-check:
+	$(GOBIN)/golangci-lint fmt --diff ./...
+	$(GOBIN)/golangci-lint run ./...
+	$(GOBIN)/golicenser -tmpl="$$LICENSE_HEADER" -author="$(LICENSE_AUTHOR)" -year-mode=git-range ./...
+
+.PHONY: lint-deps
 lint-deps:
-	@echo "Installing with $(shell go env GOVERSION)"
-	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-	GOBIN=$(shell go env GOPATH)/bin go install github.com/joshuasing/golicenser/cmd/golicenser@$(GOLICENSER_VERSION)
-	GOBIN=$(shell go env GOPATH)/bin go install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
+	@echo "Installing with $(shell go version)"
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	go install github.com/joshuasing/golicenser/cmd/golicenser@$(GOLICENSER_VERSION)
+	go install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
 
-tidy:
-	go mod tidy
-
-race:
-	go test -v -race ./...
-
-test:
-	go test -test.timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out -covermode=atomic ./...
-
-synctest-test:
-	cd ./synctest && go test -v -test.timeout=1m ./...
-
+.PHONY: vulncheck
 vulncheck:
-	$(shell go env GOPATH)/bin/govulncheck ./...
+	$(GOBIN)/govulncheck ./...
 
+.PHONY: vulncheck-deps
 vulncheck-deps:
-	GOBIN=$(shell go env GOPATH)/bin go install golang.org/x/vuln/cmd/govulncheck@latest
+	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
