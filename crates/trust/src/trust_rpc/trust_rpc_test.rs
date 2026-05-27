@@ -96,7 +96,6 @@ mod container_tests {
                 .await
                 .expect("could not build docker image for tbcd");
 
-
             let tbcd = tbcd_image
                 .with_exposed_port(ContainerPort::Tcp(TBCD_WS_PORT))
                 .with_wait_for(WaitFor::message_on_stderr("handle (tbc admin)"))
@@ -111,7 +110,6 @@ mod container_tests {
                 .start()
                 .await
                 .expect("tbcd failed to start");
-    
 
             let tbcd_port = tbcd
                 .get_host_port_ipv4(TBCD_WS_PORT)
