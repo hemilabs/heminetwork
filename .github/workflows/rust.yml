@@ -70,6 +70,9 @@ jobs:
       - name: "Install toolchain"
         run: rustup toolchain install --no-self-update
 
+      - name: "build tbcd"
+        run: docker build -f ./docker/tbcd/Dockerfile -t hemilabs/tbcd-test:latest .
+
       - name: "Test"
         env:
           HEMI_DOCKER_TESTS: "1"
