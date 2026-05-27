@@ -69,11 +69,13 @@ $(cmds):
 
 .PHONY: test
 test:
-	go test -race -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
+	go test -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
 		-covermode=atomic -ldflags "$(GO_LDFLAGS)" ./...
 
 .PHONY: race
-race: test
+race:
+	go test -race -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
+		-covermode=atomic -ldflags "$(GO_LDFLAGS)" ./...
 
 .PHONY: cover
 cover: test
