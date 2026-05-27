@@ -94,7 +94,7 @@ type ldb struct {
 	pool    level.Pool
 	rawPool level.RawPool
 
-	blockCache *lru.Cache[chainhash.Hash, *btcutil.Block]
+	blockCache *lru.Cache[chainhash.Hash, []byte]
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
@@ -224,10 +224,10 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 
 	welcome := make([]string, 0, 10)
 	if cfg.blockCacheSize > 0 {
-		l.blockCache, err = lru.New[chainhash.Hash, *btcutil.Block](
+		l.blockCache, err = lru.New[chainhash.Hash, []byte](
 			cfg.blockCacheSize,
-			func(_ chainhash.Hash, v *btcutil.Block) int {
-				return chainhash.HashSize + v.MsgBlock().SerializeSize() + lru.EntryOverhead
+			func(_ chainhash.Hash, v []byte) int {
+				return chainhash.HashSize + len(v) + lru.EntryOverhead
 			},
 			lru.FlagPromoteOnly,
 		)
@@ -1528,12 +1528,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 		if l.cfg.blockCacheSize > 0 {
-			// Cache parsed block without raw bytes to avoid
-			// double memory (raw in struct + raw on disk).
-			cb, err := btcutil.NewBlockFromReader(bytes.NewReader(raw))
-			if err == nil {
-				l.blockCache.Put(*b.Hash(), cb)
-			}
+			l.blockCache.Put(*b.Hash(), raw)
 		}
 	}
 
@@ -1569,32 +1564,35 @@ func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Bl
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
-	// Try cache first — returns parsed block directly, no deserialization.
+	// get from cache
+	var (
+		eb  []byte
+		err error
+	)
 	if l.cfg.blockCacheSize > 0 {
-		if b, ok := l.blockCache.Get(hash); ok {
-			return b, nil
-		}
+		// Try cache first
+		eb, _ = l.blockCache.Get(hash)
 	}
 
-	// Cache miss — read raw bytes from LevelDB.
-	bDB := l.rawPool[level.BlocksDB]
-	eb, err := bDB.Get(hash[:])
-	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.BlockNotFoundError{Hash: hash}
+	// get from db
+	if eb == nil {
+		bDB := l.rawPool[level.BlocksDB]
+		eb, err = bDB.Get(hash[:])
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return nil, database.BlockNotFoundError{Hash: hash}
+			}
+			return nil, fmt.Errorf("block get: %w", err)
 		}
-		return nil, fmt.Errorf("block get: %w", err)
+		if l.cfg.blockCacheSize > 0 {
+			l.blockCache.Put(hash, eb)
+		}
 	}
-
-	// Parse via NewBlockFromReader so serializedBlock stays nil —
-	// avoids holding raw + parsed in memory simultaneously.
-	b, err := btcutil.NewBlockFromReader(bytes.NewReader(eb))
+	// if we get here eb MUST exist
+	// XXX should we set block height? despite being an expensive lookup?
+	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))
-	}
-
-	if l.cfg.blockCacheSize > 0 {
-		l.blockCache.Put(hash, b)
 	}
 	return b, nil
 }
