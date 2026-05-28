@@ -5,7 +5,6 @@
 package tbc
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -44,6 +43,83 @@ var (
 	_ indexer = (*ordinalIndexer)(nil)
 )
 
+// OrdinalCache wraps map[Outpoint]*OrdinalCacheEntry for the indexer
+// framework. Len() returns a running count of sub-entry writes
+// (inscriptions + predecessors + aux) — this drives the flush decision
+// so the cache accurately reflects DB operation count, not outpoint count.
+// Overwrites cause slight overcount; flush threshold is 95% so early
+// flushing is harmless.
+type OrdinalCache struct {
+	capacity   int
+	entryCount int
+	m          map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry
+}
+
+func NewOrdinalCache(capacity int) *OrdinalCache {
+	return &OrdinalCache{
+		capacity: capacity,
+		m:        make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, capacity),
+	}
+}
+
+func (c *OrdinalCache) Clear() {
+	clear(c.m)
+	c.entryCount = 0
+}
+
+// Len returns the running count of sub-entry writes since the last Clear.
+func (c *OrdinalCache) Len() int {
+	return c.entryCount
+}
+
+func (c *OrdinalCache) Cap() int {
+	return c.capacity
+}
+
+func (c *OrdinalCache) Stats() (length int, capacity int, pct int) {
+	length = c.Len()
+	return length, c.Cap(), length * 100 / c.Cap()
+}
+
+func (c *OrdinalCache) Map() map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry {
+	return c.m
+}
+
+// PutInscription writes an 'o' sub-entry and increments the counter.
+func (c *OrdinalCache) PutInscription(op tbcd.Outpoint, offset uint64, v []byte) {
+	e := getEntry(c.m, op)
+	e.Inscriptions[offset] = v
+	c.entryCount++
+}
+
+// PutPredecessor writes a 'p' sub-entry and increments the counter.
+func (c *OrdinalCache) PutPredecessor(op tbcd.Outpoint, offset uint64, v []byte) {
+	e := getEntry(c.m, op)
+	e.Predecessors[offset] = v
+	c.entryCount++
+}
+
+// PutAux writes a non-outpoint sub-entry ('i','n','a','m') and increments the counter.
+func (c *OrdinalCache) PutAux(op tbcd.Outpoint, key tbcd.OrdinalKey, v tbcd.OrdinalValue) {
+	e := getEntry(c.m, op)
+	e.Aux[key] = v
+	c.entryCount++
+}
+
+// getEntry returns the cache entry for op, creating it if absent.
+func getEntry(cache map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, op tbcd.Outpoint) *tbcd.OrdinalCacheEntry {
+	e, ok := cache[op]
+	if !ok {
+		e = &tbcd.OrdinalCacheEntry{
+			Inscriptions: make(map[uint64][]byte),
+			Predecessors: make(map[uint64][]byte),
+			Aux:          make(map[tbcd.OrdinalKey]tbcd.OrdinalValue),
+		}
+		cache[op] = e
+	}
+	return e
+}
+
 func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enabled bool, ordinalGenesis *HashHeight, computeInscSat func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error), watermarkGap time.Duration) Indexer {
 	oi := &ordinalIndexer{
 		runCtx:         ctx,
@@ -63,7 +139,7 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enab
 }
 
 func (i *ordinalIndexer) newCache() indexerCache {
-	return NewCache[tbcd.OrdinalKey, tbcd.OrdinalValue](i.cacheCapacity)
+	return NewOrdinalCache(i.cacheCapacity)
 }
 
 func (i *ordinalIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -71,13 +147,13 @@ func (i *ordinalIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, erro
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-// satRanges retrieves sat ranges for an outpoint from cache or DB.
+// process dispatches a single block to windBlock or unwindBlock based on direction.
 func (i *ordinalIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
 	if block.Height() == btcutil.BlockHeightUnknown {
 		panic("diagnostic: block height not set")
 	}
 
-	cache := c.(*Cache[tbcd.OrdinalKey, tbcd.OrdinalValue]).Map()
+	cache := c.(*OrdinalCache)
 	blockHash := block.Hash()
 	blockHeight := uint32(block.Height())
 
@@ -117,6 +193,13 @@ func watermarkOrdinalKey() tbcd.OrdinalKey {
 	var key tbcd.OrdinalKey
 	key[0] = 'm'
 	return key
+}
+
+// watermarkSentinelOutpoint returns a reserved outpoint used to carry
+// the watermark 'm' entry through the cache's aux mechanism. All-zero
+// txid, vout 0xFFFFFFFE. Distinct from the lost sentinel (0xFFFFFFFF).
+func watermarkSentinelOutpoint() tbcd.Outpoint {
+	return tbcd.NewOutpoint(chainhash.Hash{}, 0xFFFFFFFE)
 }
 
 // getWatermark returns the cached watermark, loading from DB on first call.
@@ -193,7 +276,7 @@ const (
 // windBlock scans a block for inscription envelopes and records reveals.
 // Below watermark: fast path (sat=0, writes 'w' work queue entry).
 // Above watermark: full computation (backward walk, writes 'a' and real sat).
-func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) error {
+func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache *OrdinalCache) error {
 	txs := block.Transactions()
 	var inscriptionSeq uint32
 
@@ -224,25 +307,36 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		}
 		txid := *tx.Hash()
 
-		// Gather flotsam (inscribed sats in flight) for this tx, walking
-		// inputs once and accumulating the input-stream value. A reveal
-		// sits at the running value (offset 0 of its input). A transfer
-		// sits at running value + the inscription's offset in the spent
-		// output.
 		var fl []flotsam
 		var inputValue uint64
 		for inputIdx, txIn := range tx.MsgTx().TxIn {
 			prevOut := txIn.PreviousOutPoint
 
-			// Transfers: does this input spend a tracked outpoint?
 			spentOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
+
+			// DB lookup (committed data).
 			tracked, terr := i.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, spentOP)
 			if terr != nil {
 				return fmt.Errorf("tracked lookup %v: %w", spentOP, terr)
 			}
-			// Also check the in-block cache: an outpoint created earlier
-			// in THIS block won't be in the DB yet.
-			tracked = append(tracked, trackedInBlock(cache, spentOP)...)
+			// Cache overlay: an outpoint created earlier in THIS block
+			// won't be in the DB yet. O(1) lookup replaces the O(n)
+			// trackedInBlock scan.
+			if entry, ok := cache.m[spentOP]; ok {
+				for offset, v := range entry.Inscriptions {
+					if v == nil {
+						continue // tombstoned
+					}
+					if len(v) < 36 {
+						continue // malformed
+					}
+					var li tbcd.OrdinalLocatedInscription
+					copy(li.InscID[:], v[:36])
+					li.Offset = offset
+					li.Value = append([]byte(nil), v...)
+					tracked = append(tracked, li)
+				}
+			}
 			for _, t := range tracked {
 				fl = append(fl, flotsam{
 					inscID:      t.InscID,
@@ -251,10 +345,8 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 					srcOffset:   t.Offset,
 					prevValue:   append([]byte(nil), t.Value...),
 				})
-				// Remove the old 'o' entry — the sat is moving.
-				// Do NOT delete 'p' at the spent outpoint; it is needed
-				// if this block (or the source's block) is unwound later.
-				cache[ordinalOutpointKey(spentOP, t.Offset)] = nil
+				// Tombstone the old 'o' entry — the sat is moving.
+				cache.PutInscription(spentOP, t.Offset, nil)
 			}
 
 			// Reveals: does this input carry an inscription envelope?
@@ -279,23 +371,26 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		}
 
 		if len(fl) == 0 {
-			// No inscriptions in this tx, but still accumulate its fee
-			// for the block-wide fee pool offset.
 			outTotal := txOutTotal(tx.MsgTx().TxOut)
 			blockFeeBase += inputValue - outTotal
 			continue
 		}
 
-		// Place all flotsam in offset order (ord sorts before placing).
 		sort.Slice(fl, func(a, b int) bool { return fl[a].pos < fl[b].pos })
 
 		outTotal := txOutTotal(tx.MsgTx().TxOut)
 
 		for _, f := range fl {
-			f := f // local copy; f.inscID[:] is sliced into the cache below
+			f := f
 			locVout, locOffset, landed := placeInOutputs(tx.MsgTx().TxOut, f.pos)
 
 			if f.isReveal {
+				// Aux entries ('i','n','a','w') are keyed by inscID, not
+				// by the sat's landing location. Host them on the reveal
+				// tx's vout 0 unconditionally — unwind derives the same
+				// outpoint from inscID[:32] + vout 0 for tombstoning.
+				auxOP := tbcd.NewOutpoint(txid, 0)
+
 				if fullComputation {
 					revealInput := binary.LittleEndian.Uint32(f.inscID[32:36])
 					satStart := time.Now()
@@ -308,14 +403,17 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 						return fmt.Errorf("compute inscribed sat at %v:%d: %w",
 							txid, revealInput, err)
 					}
-					cache[ordinalInscriptionKey(f.inscID)] = encodeInscriptionValue(
-						satNumber, blockHash, f.cursed, f.envelope)
-					cache[ordinalBlockInscriptionKey(blockHash, inscriptionSeq)] = f.inscID[:]
-					cache[ordinalSatInscriptionKey(satNumber, f.inscID)] = []byte{}
+					cache.PutAux(auxOP, ordinalInscriptionKey(f.inscID),
+						encodeInscriptionValue(satNumber, blockHash, f.cursed, f.envelope))
+					cache.PutAux(auxOP, ordinalBlockInscriptionKey(blockHash, inscriptionSeq),
+						f.inscID[:])
+					cache.PutAux(auxOP, ordinalSatInscriptionKey(satNumber, f.inscID),
+						[]byte{})
 				} else {
-					cache[ordinalInscriptionKey(f.inscID)] = encodeInscriptionValue(
-						0, blockHash, f.cursed, f.envelope)
-					cache[ordinalBlockInscriptionKey(blockHash, inscriptionSeq)] = f.inscID[:]
+					cache.PutAux(auxOP, ordinalInscriptionKey(f.inscID),
+						encodeInscriptionValue(0, blockHash, f.cursed, f.envelope))
+					cache.PutAux(auxOP, ordinalBlockInscriptionKey(blockHash, inscriptionSeq),
+						f.inscID[:])
 					// 'w': work queue for background sat-number populator.
 					i.workCache[ordinalWorkKey(blockHeight, uint16(inscriptionSeq))] = encodeWorkValue(f.inscID)
 				}
@@ -329,15 +427,14 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 					kind = srcKindReveal
 				}
 				op := tbcd.NewOutpoint(txid, locVout)
-				cache[ordinalOutpointKey(op, locOffset)] = encodeOutpointValue(
-					f.inscID, kind, uint32(txBlockIdx), f.srcInputIdx, f.srcOffset)
+				cache.PutInscription(op, locOffset, encodeOutpointValue(
+					f.inscID, kind, uint32(txBlockIdx), f.srcInputIdx, f.srcOffset))
 				// 'p': store predecessor value for correct unwind.
 				// Reveals have no predecessor; only transfers write 'p'.
 				if kind == srcKindTransfer {
-					cache[predecessorKey(op, locOffset)] = f.prevValue
+					cache.PutPredecessor(op, locOffset, f.prevValue)
 				}
 			} else {
-				// Sat lands in the fee — carry to the coinbase phase.
 				feeInternal := f.pos - outTotal
 				feeList = append(feeList, feeCarry{
 					inscID:      f.inscID,
@@ -350,20 +447,16 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 		}
 
-		// Accumulate this tx's fee for the block-wide fee pool offset.
 		blockFeeBase += inputValue - outTotal
 	}
 
-	// Coinbase phase: place fee-carried inscriptions into coinbase outputs
-	// or the lost sentinel. Processed after all non-coinbase txs so
-	// blockFeeBase is complete.
+	// Coinbase phase.
 	if len(feeList) > 0 {
 		coinbaseTx := txs[0]
 		cbTxid := *coinbaseTx.Hash()
 		subsidyCount := SubsidyAtHeight(blockHeight)
 		cbOutTotal := txOutTotal(coinbaseTx.MsgTx().TxOut)
 
-		// Sort by fee pool offset (ord sorts before placing).
 		sort.Slice(feeList, func(a, b int) bool {
 			return feeList[a].feePoolOff < feeList[b].feePoolOff
 		})
@@ -372,23 +465,21 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		for _, e := range feeList {
 			posCB := subsidyCount + e.feePoolOff
 			if posCB < cbOutTotal {
-				// Sat lands in a coinbase output.
 				vout, offset, _ := placeInOutputs(coinbaseTx.MsgTx().TxOut, posCB)
 				op := tbcd.NewOutpoint(cbTxid, vout)
-				cache[ordinalOutpointKey(op, offset)] = encodeOutpointValue(
-					e.inscID, srcKindFee, e.srcTxIdx, e.srcInputIdx, e.srcOffset)
+				cache.PutInscription(op, offset, encodeOutpointValue(
+					e.inscID, srcKindFee, e.srcTxIdx, e.srcInputIdx, e.srcOffset))
 				if len(e.prevValue) > 0 {
-					cache[predecessorKey(op, offset)] = e.prevValue
+					cache.PutPredecessor(op, offset, e.prevValue)
 				}
 			} else {
-				// Sat exceeds claimed reward — LOST.
 				op := lostSentinelOutpoint()
 				lostOff := lostSatOffset(blockHeight, lostSeq)
 				lostSeq++
-				cache[ordinalOutpointKey(op, lostOff)] = encodeOutpointValue(
-					e.inscID, srcKindLost, e.srcTxIdx, e.srcInputIdx, e.srcOffset)
+				cache.PutInscription(op, lostOff, encodeOutpointValue(
+					e.inscID, srcKindLost, e.srcTxIdx, e.srcInputIdx, e.srcOffset))
 				if len(e.prevValue) > 0 {
-					cache[predecessorKey(op, lostOff)] = e.prevValue
+					cache.PutPredecessor(op, lostOff, e.prevValue)
 				}
 			}
 		}
@@ -454,43 +545,6 @@ func txOutTotal(txOut []*wire.TxOut) uint64 {
 	return total
 }
 
-// trackedInBlock finds 'o' entries written earlier in the current block's
-// cache that match the spent outpoint (create-and-spend within one block).
-// The DB doesn't yet have these — they live only in the pending cache.
-// Returns located inscriptions (inscID + offset); skips tombstoned (nil)
-// entries.
-// trackedInBlock resolves create-and-spend within a single block: an
-// outpoint created earlier in this block is not yet in the DB, so scan
-// the pending cache for 'o' entries matching the spent outpoint.
-//
-// Cost is O(cache) per call, O(inputs*cache) per block. Bounded by one
-// block's pending writes; acceptable until measured. Revisit in Phase D
-// if mass-inscription blocks make this quadratic scan a hot spot.
-func trackedInBlock(cache map[tbcd.OrdinalKey]tbcd.OrdinalValue, op tbcd.Outpoint) []tbcd.OrdinalLocatedInscription {
-	var prefix [37]byte
-	prefix[0] = 'o'
-	copy(prefix[1:], op[1:37])
-
-	var result []tbcd.OrdinalLocatedInscription
-	for k, v := range cache {
-		if k[0] != 'o' {
-			continue
-		}
-		if !bytes.Equal(k[1:37], prefix[1:37]) {
-			continue
-		}
-		if len(v) < 36 {
-			continue // tombstone or malformed
-		}
-		var li tbcd.OrdinalLocatedInscription
-		copy(li.InscID[:], v[:36])
-		li.Offset = binary.BigEndian.Uint64(k[37:45])
-		li.Value = append([]byte(nil), v...)
-		result = append(result, li)
-	}
-	return result
-}
-
 // inputOutputValue looks up the value of a specific outpoint.
 func inputOutputValue(ctx context.Context, db tbcd.Database, txid chainhash.Hash, vout uint32) (uint64, error) {
 	blockHash, err := db.BlockHashByTxId(ctx, txid)
@@ -517,7 +571,7 @@ func inputOutputValue(ctx context.Context, db tbcd.Database, txid chainhash.Hash
 //
 // A reorg reaching below the watermark means a reorg deeper than
 // OrdinalWatermarkGap (default 24h) — catastrophic for Bitcoin.
-func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) error {
+func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, blockHash *chainhash.Hash, block *btcutil.Block, cache *OrdinalCache) error {
 	wm, err := i.getWatermark(ctx)
 	if err != nil {
 		return err
@@ -535,6 +589,11 @@ func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, bl
 		return fmt.Errorf("inscriptions by block %v: %w", blockHash, err)
 	}
 	for seq, inscID := range inscIDs {
+		// Derive the reveal outpoint as host for aux tombstones.
+		var revealTxid chainhash.Hash
+		copy(revealTxid[:], inscID[:32])
+		revealOP := tbcd.NewOutpoint(revealTxid, 0)
+
 		// Read 'i' to recover the sat number (if computed) for 'a'
 		// deletion. The inscID came from this block's 'n' index, so the
 		// 'i' entry MUST exist; its absence (or any read error) means the
@@ -548,12 +607,12 @@ func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, bl
 		if len(iValue) >= 8 {
 			satNumber := binary.BigEndian.Uint64(iValue[:8])
 			if satNumber != 0 {
-				cache[ordinalSatInscriptionKey(satNumber, inscID)] = nil
+				cache.PutAux(revealOP, ordinalSatInscriptionKey(satNumber, inscID), nil)
 			}
 		}
 
-		cache[ordinalInscriptionKey(inscID)] = nil
-		cache[ordinalBlockInscriptionKey(blockHash, uint32(seq))] = nil
+		cache.PutAux(revealOP, ordinalInscriptionKey(inscID), nil)
+		cache.PutAux(revealOP, ordinalBlockInscriptionKey(blockHash, uint32(seq)), nil)
 		// Harmless no-op if 'w' doesn't exist (above watermark).
 		i.workCache[ordinalWorkKey(blockHeight, uint16(seq))] = tbcd.OrdinalWorkValueDelete
 	}
@@ -567,7 +626,7 @@ func (i *ordinalIndexer) unwindBlock(ctx context.Context, blockHeight uint32, bl
 // inscription at a tx output, it deletes the entry; if the entry is a
 // transfer/fee/lost, it restores the prior 'o' entry from the 'p' prefix.
 // Self-contained: reads only the ordinal index and the block in hand.
-func (i *ordinalIndexer) unwindOutpointTracker(ctx context.Context, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue) error {
+func (i *ordinalIndexer) unwindOutpointTracker(ctx context.Context, block *btcutil.Block, cache *OrdinalCache) error {
 	txs := block.Transactions()
 
 	// Process txs in reverse order. Coinbase is NOT skipped — fee sats
@@ -593,12 +652,12 @@ func (i *ordinalIndexer) unwindOutpointTracker(ctx context.Context, block *btcut
 }
 
 // unwindOutpointEntries reverses all 'o' entries at the given outpoint.
-func (i *ordinalIndexer) unwindOutpointEntries(ctx context.Context, block *btcutil.Block, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue, op tbcd.Outpoint) error {
+func (i *ordinalIndexer) unwindOutpointEntries(ctx context.Context, block *btcutil.Block, cache *OrdinalCache, op tbcd.Outpoint) error {
 	txs := block.Transactions()
 	blockHeight := uint32(block.Height())
 	isLostSentinel := op == lostSentinelOutpoint()
 
-	located, lerr := i.locatedAtOutpoint(ctx, cache, op)
+	located, lerr := i.locatedAtOutpoint(ctx, cache.m, op)
 	if lerr != nil {
 		return fmt.Errorf("unwind tracked lookup %v: %w", op, lerr)
 	}
@@ -614,19 +673,18 @@ func (i *ordinalIndexer) unwindOutpointEntries(ctx context.Context, block *btcut
 		}
 
 		// Read the predecessor value BEFORE tombstoning.
-		pKey := predecessorKey(op, li.Offset)
-		var prevValue tbcd.OrdinalValue
+		var prevValue []byte
 		if isTransfer {
 			var perr error
-			prevValue, perr = i.predecessorValue(ctx, cache, pKey)
+			prevValue, perr = i.predecessorValue(ctx, cache.m, op, li.Offset)
 			if perr != nil {
 				return fmt.Errorf("predecessor at %v: %w", op, perr)
 			}
 		}
 
 		// Delete the 'o' and 'p' entries at the current location.
-		cache[ordinalOutpointKey(op, li.Offset)] = nil
-		cache[pKey] = nil
+		cache.PutInscription(op, li.Offset, nil)
+		cache.PutPredecessor(op, li.Offset, nil)
 
 		// Reveal: nothing to restore.
 		if !isTransfer {
@@ -665,7 +723,7 @@ func (i *ordinalIndexer) unwindOutpointEntries(ctx context.Context, block *btcut
 
 		prevOut := srcTx.TxIn[srcInputIdx].PreviousOutPoint
 		srcOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
-		cache[ordinalOutpointKey(srcOP, srcOffset)] = prevValue
+		cache.PutInscription(srcOP, srcOffset, prevValue)
 	}
 	return nil
 }
@@ -685,63 +743,48 @@ type txOutpointBase struct {
 // tx's unwind must then observe — that entry was never committed to the
 // DB, so a DB-only lookup would miss it and break the restore chain.
 //
-// Complexity: O(D + C) per call, where D is the DB entries at op (a keyed
-// prefix scan, typically 0-1) and C is the pending cache size for the
-// current unwind batch. The cache scan dominates: unwinding a batch of B
-// blocks is O(outputs * C). C is bounded by the inscriptions in the batch,
-// which are sparse (reorgs are shallow; inscriptions are rare per block),
-// so this is not a steady-state hot path — unwind runs only on reorg and
-// rebuild. If a deep reorg over inscription-dense blocks ever shows up in
-// a profile, give the cache a prefix index; until then a scan is correct
-// and simpler. See BenchmarkLocatedAtOutpoint:
-//
-//	cache=100    ~1.9µs/op   776 B/op   13 allocs/op
-//	cache=1000   ~14µs/op    776 B/op   13 allocs/op
-//	cache=10000  ~128µs/op   776 B/op   13 allocs/op
-//
-// Linear in cache size, flat allocations. A realistic reorg batch holds
-// tens of 'o' entries, so this is microseconds per lookup.
-func (i *ordinalIndexer) locatedAtOutpoint(ctx context.Context, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue, op tbcd.Outpoint) ([]tbcd.OrdinalLocatedInscription, error) {
+// Complexity: O(D + I) per call, where D is the DB entries at op (a keyed
+// prefix scan, typically 0-1) and I is the number of inscriptions cached
+// at this outpoint. Both are typically 0-1. This is O(1) in practice —
+// the linear cache scan from the old design is eliminated.
+func (i *ordinalIndexer) locatedAtOutpoint(ctx context.Context, cache map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, op tbcd.Outpoint) ([]tbcd.OrdinalLocatedInscription, error) {
 	dbLocated, err := i.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
 	if err != nil {
 		return nil, err
 	}
 
-	byKey := make(map[tbcd.OrdinalKey]tbcd.OrdinalLocatedInscription, len(dbLocated))
-	var order []tbcd.OrdinalKey
+	// Build a map keyed by offset for overlay merging.
+	byOffset := make(map[uint64]tbcd.OrdinalLocatedInscription, len(dbLocated))
+	var order []uint64
 	for _, li := range dbLocated {
-		k := ordinalOutpointKey(op, li.Offset)
-		if _, ok := byKey[k]; !ok {
-			order = append(order, k)
+		if _, ok := byOffset[li.Offset]; !ok {
+			order = append(order, li.Offset)
 		}
-		byKey[k] = li
+		byOffset[li.Offset] = li
 	}
 
-	// Overlay the pending cache: tombstone removes, a value adds/overrides.
-	var prefix [37]byte
-	prefix[0] = 'o'
-	copy(prefix[1:], op[1:37])
-	for k, v := range cache {
-		if k[0] != 'o' || !bytes.Equal(k[1:37], prefix[1:37]) {
-			continue
+	// O(1) cache overlay: check cache[op].inscriptions directly.
+	if entry, ok := cache[op]; ok {
+		for offset, v := range entry.Inscriptions {
+			if len(v) < 36 {
+				// Tombstone — remove from result.
+				delete(byOffset, offset)
+				continue
+			}
+			if _, ok := byOffset[offset]; !ok {
+				order = append(order, offset)
+			}
+			var li tbcd.OrdinalLocatedInscription
+			copy(li.InscID[:], v[:36])
+			li.Offset = offset
+			li.Value = append([]byte(nil), v...)
+			byOffset[offset] = li
 		}
-		if len(v) < 36 { // tombstone
-			delete(byKey, k)
-			continue
-		}
-		if _, ok := byKey[k]; !ok {
-			order = append(order, k)
-		}
-		var li tbcd.OrdinalLocatedInscription
-		copy(li.InscID[:], v[:36])
-		li.Offset = binary.BigEndian.Uint64(k[37:45])
-		li.Value = append([]byte(nil), v...)
-		byKey[k] = li
 	}
 
-	result := make([]tbcd.OrdinalLocatedInscription, 0, len(byKey))
-	for _, k := range order {
-		if li, ok := byKey[k]; ok {
+	result := make([]tbcd.OrdinalLocatedInscription, 0, len(byOffset))
+	for _, offset := range order {
+		if li, ok := byOffset[offset]; ok {
 			result = append(result, li)
 		}
 	}
@@ -768,13 +811,15 @@ func outpointsOf(tx *btcutil.Tx) []txOutpointBase {
 }
 
 func (i *ordinalIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
-	cache := c.(*Cache[tbcd.OrdinalKey, tbcd.OrdinalValue])
+	cache := c.(*OrdinalCache)
 
-	// Write watermark into the ordinal cache so it's committed atomically.
+	// Write watermark into the cache's aux mechanism so it's committed
+	// atomically with ordinal data. The DB layer will unpack it via the
+	// aux map on the sentinel outpoint.
 	if i.watermarkDirty && i.watermark != nil {
 		var v [4]byte
 		binary.BigEndian.PutUint32(v[:], *i.watermark)
-		cache.Map()[watermarkOrdinalKey()] = tbcd.OrdinalValue(v[:])
+		cache.PutAux(watermarkSentinelOutpoint(), watermarkOrdinalKey(), tbcd.OrdinalValue(v[:]))
 		i.watermarkDirty = false
 	}
 
@@ -784,9 +829,7 @@ func (i *ordinalIndexer) commit(ctx context.Context, direction int, atHash chain
 	return nil
 }
 
-// fetchSatRangesParallel fetches sat ranges for a single outpoint and
-// writes them into the cache under the indexer mutex. Mirrors
-// Server.fetchOPParallel from utxoindex.go.
+// fixupCacheHook is unused by the ordinal indexer.
 func (i *ordinalIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {
 	return nil
 }
@@ -948,21 +991,6 @@ func ordinalBlockInscriptionKey(blockHash *chainhash.Hash, seq uint32) tbcd.Ordi
 	return key
 }
 
-// ordinalOutpointKey: 'o' + txid(32) + vout(4) + offset(8) = 45 bytes.
-// Maps an inscribed sat's location (outpoint + byte offset within the
-// output) to its inscription. Prefix-scannable by 'o'+txid+vout to list
-// all inscriptions on an outpoint in offset order. The offset in the key
-// guarantees uniqueness — no two inscribed sats share a location.
-// Note: Outpoint is [u-prefix(1) + txid(32) + vout(4)] = 37 bytes; we copy
-// only the txid+vout payload (op[1:37]).
-func ordinalOutpointKey(op tbcd.Outpoint, offset uint64) tbcd.OrdinalKey {
-	var key tbcd.OrdinalKey
-	key[0] = 'o'
-	copy(key[1:37], op[1:37]) // txid(32) + vout(4)
-	binary.BigEndian.PutUint64(key[37:], offset)
-	return key
-}
-
 // predecessorKey builds a 'p' prefix key for the predecessor value store.
 // Layout mirrors 'o': 'p'(1) + txid(32) + vout(4) + offset(8) = 45 bytes.
 // The value is the raw 'o' value that was at the source outpoint before the
@@ -978,14 +1006,17 @@ func predecessorKey(op tbcd.Outpoint, offset uint64) tbcd.OrdinalKey {
 // predecessorValue retrieves a 'p' entry from the cache (with tombstone
 // awareness) or falls back to the DB. Returns nil if no predecessor exists
 // (reveals) or if the entry has been tombstoned.
-func (i *ordinalIndexer) predecessorValue(ctx context.Context, cache map[tbcd.OrdinalKey]tbcd.OrdinalValue, key tbcd.OrdinalKey) (tbcd.OrdinalValue, error) {
-	if v, ok := cache[key]; ok {
-		if v == nil {
-			return nil, nil // tombstoned
+func (i *ordinalIndexer) predecessorValue(ctx context.Context, cache map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, op tbcd.Outpoint, offset uint64) ([]byte, error) {
+	if entry, ok := cache[op]; ok {
+		if v, pok := entry.Predecessors[offset]; pok {
+			if v == nil {
+				return nil, nil // tombstoned
+			}
+			return v, nil
 		}
-		return v, nil
 	}
-	v, err := i.g.db.OrdinalValueByKey(ctx, key)
+	pKey := predecessorKey(op, offset)
+	v, err := i.g.db.OrdinalValueByKey(ctx, pKey)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return nil, nil

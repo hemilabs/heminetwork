@@ -2505,7 +2505,7 @@ func (l *ldb) BlockHeaderByOrdinalIndex(ctx context.Context) (*tbcd.BlockHeader,
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
-func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.OrdinalKey]tbcd.OrdinalValue, work map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error {
+func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, work map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error {
 	log.Tracef("BlockOrdinalUpdate")
 	defer log.Tracef("BlockOrdinalUpdate exit")
 
@@ -2520,17 +2520,51 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 	defer ordDiscard()
 
 	// The cache is updated in a way that makes the direction
-	// irrelevant. The block's index data ('o'/'i'/'n'/'a'/watermark),
+	// irrelevant. The block's index data ('o'/'p'/'i'/'n'/'a'/watermark),
 	// the work queue ('w'), and the index-hash pointer all commit in a
 	// single batch so the ordinal DB never observes a partial block.
+	//
+	// Unpack each OrdinalCacheEntry into LevelDB batch operations,
+	// constructing DB keys from Outpoint + offset. Same pattern as
+	// BlockUtxoUpdate constructing 'u'+'h' keys from Outpoint→CacheOutput.
 	ordBatch := new(leveldb.Batch)
-	for k, v := range data {
-		if v.IsDelete() {
-			ordBatch.Delete(k[:])
-		} else {
-			ordBatch.Put(k[:], v.Bytes())
+	for op, entry := range data {
+		// 'o' entries: 'o' + txid(32) + vout(4) + offset(8) = 45 bytes
+		for offset, v := range entry.Inscriptions {
+			var key [45]byte
+			key[0] = 'o'
+			copy(key[1:37], op[1:37]) // txid + vout
+			binary.BigEndian.PutUint64(key[37:], offset)
+			if v == nil {
+				ordBatch.Delete(key[:])
+			} else {
+				ordBatch.Put(key[:], v)
+			}
 		}
-		delete(data, k)
+
+		// 'p' entries: 'p' + txid(32) + vout(4) + offset(8) = 45 bytes
+		for offset, v := range entry.Predecessors {
+			var key [45]byte
+			key[0] = 'p'
+			copy(key[1:37], op[1:37])
+			binary.BigEndian.PutUint64(key[37:], offset)
+			if v == nil {
+				ordBatch.Delete(key[:])
+			} else {
+				ordBatch.Put(key[:], v)
+			}
+		}
+
+		// Auxiliary entries ('i', 'n', 'a', 'm'): already in DB key format.
+		for k, v := range entry.Aux {
+			if v.IsDelete() {
+				ordBatch.Delete(k[:])
+			} else {
+				ordBatch.Put(k[:], v.Bytes())
+			}
+		}
+
+		delete(data, op)
 	}
 	for k, v := range work {
 		if v.IsDelete() {
