@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"maps"
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -36,6 +35,20 @@ func createOrdinalDB(ctx context.Context, t *testing.T) *ldb {
 	return db
 }
 
+// testGetEntry is a test-local helper matching the tbc package's getEntry.
+func testGetEntry(cache map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, op tbcd.Outpoint) *tbcd.OrdinalCacheEntry {
+	e, ok := cache[op]
+	if !ok {
+		e = &tbcd.OrdinalCacheEntry{
+			Inscriptions: make(map[uint64][]byte),
+			Predecessors: make(map[uint64][]byte),
+			Aux:          make(map[tbcd.OrdinalKey]tbcd.OrdinalValue),
+		}
+		cache[op] = e
+	}
+	return e
+}
+
 func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -55,29 +68,35 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 	binary.BigEndian.PutUint64(inscVal[0:8], satNumber)
 	copy(inscVal[8:40], blockHash[:])
 
-	cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
+	op := tbcd.NewOutpoint(txid, 0)
+	cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+	entry := testGetEntry(cache, op)
 
 	// 'i': inscription by ID.
 	var iKey tbcd.OrdinalKey
 	iKey[0] = 'i'
 	copy(iKey[1:], inscID[:])
-	cache[iKey] = tbcd.OrdinalValue(inscVal)
+	entry.Aux[iKey] = tbcd.OrdinalValue(inscVal)
 
 	// 'a': sat → inscription.
 	var aKey tbcd.OrdinalKey
 	aKey[0] = 'a'
 	binary.BigEndian.PutUint64(aKey[1:], satNumber)
 	copy(aKey[9:], inscID[:])
-	cache[aKey] = tbcd.OrdinalValue(inscID[:])
+	entry.Aux[aKey] = tbcd.OrdinalValue(inscID[:])
 
 	// 'n': block → inscription.
 	var nKey tbcd.OrdinalKey
 	nKey[0] = 'n'
 	copy(nKey[1:33], blockHash[:])
-	cache[nKey] = tbcd.OrdinalValue(inscID[:])
+	entry.Aux[nKey] = tbcd.OrdinalValue(inscID[:])
 
 	indexHash := chainhash.Hash{0x11, 0x22}
-	if err := db.BlockOrdinalUpdate(ctx, 1, maps.Clone(cache), nil, indexHash); err != nil {
+	cloned := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, len(cache))
+	for k, v := range cache {
+		cloned[k] = v
+	}
+	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, nil, indexHash); err != nil {
 		t.Fatal(err)
 	}
 
@@ -202,9 +221,10 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 	// --- Unwind (direction = -1) ---
 
 	t.Run("BlockOrdinalUpdate unwind", func(t *testing.T) {
-		// Delete the inscription entry by passing nil value.
-		unwindCache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
-		unwindCache[iKey] = nil // mark for delete
+		// Delete the inscription entry by passing nil value in aux.
+		unwindCache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+		unwindEntry := testGetEntry(unwindCache, op)
+		unwindEntry.Aux[iKey] = nil // mark for delete
 		if err := db.BlockOrdinalUpdate(ctx, -1, unwindCache, nil, chainhash.Hash{}); err != nil {
 			t.Fatal(err)
 		}
@@ -307,10 +327,10 @@ func TestDbUpgradeV6(t *testing.T) {
 	var testIKey tbcd.OrdinalKey
 	testIKey[0] = 'i'
 	copy(testIKey[1:], testInscID[:])
-	cache := map[tbcd.OrdinalKey]tbcd.OrdinalValue{
-		testIKey: tbcd.OrdinalValue([]byte{0xaa, 0xbb}),
-	}
-	if err := db2.BlockOrdinalUpdate(ctx, 1, cache, nil, chainhash.Hash{}); err != nil {
+	upgradeCache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+	upgradeEntry := testGetEntry(upgradeCache, tbcd.NewOutpoint(chainhash.Hash{}, 0))
+	upgradeEntry.Aux[testIKey] = tbcd.OrdinalValue([]byte{0xaa, 0xbb})
+	if err := db2.BlockOrdinalUpdate(ctx, 1, upgradeCache, nil, chainhash.Hash{}); err != nil {
 		t.Fatalf("BlockOrdinalUpdate after upgrade: %v", err)
 	}
 	got2, err := db2.OrdinalInscriptionByID(ctx, testInscID)
@@ -320,17 +340,6 @@ func TestDbUpgradeV6(t *testing.T) {
 	if len(got2) != 2 || got2[0] != 0xaa || got2[1] != 0xbb {
 		t.Fatalf("ordinal round-trip after upgrade: got %x", got2)
 	}
-}
-
-// oKey builds an 'o' tracker key: 'o'(1) + txid(32) + vout(4) + offset(8).
-// Mirrors service/tbc.ordinalOutpointKey; duplicated here because that
-// helper is in another package and the layout is the contract under test.
-func oKey(op tbcd.Outpoint, offset uint64) tbcd.OrdinalKey {
-	var k tbcd.OrdinalKey
-	k[0] = 'o'
-	copy(k[1:37], op[1:37]) // txid(32) + vout(4)
-	binary.BigEndian.PutUint64(k[37:], offset)
-	return k
 }
 
 // TestOrdinalInscriptionsByOutpointWithOffset exercises the 'o' tracker
@@ -360,12 +369,17 @@ func TestOrdinalInscriptionsByOutpointWithOffset(t *testing.T) {
 		{offset: 999, inscID: [36]byte{0x03}},
 	}
 
-	cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
+	cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+	entry := testGetEntry(cache, op)
 	for _, w := range wants {
 		id := w.inscID // copy; do not alias the loop var
-		cache[oKey(op, w.offset)] = tbcd.OrdinalValue(id[:])
+		entry.Inscriptions[w.offset] = id[:]
 	}
-	if err := db.BlockOrdinalUpdate(ctx, 1, maps.Clone(cache), nil, chainhash.Hash{0x01}); err != nil {
+	cloned := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, len(cache))
+	for k, v := range cache {
+		cloned[k] = v
+	}
+	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, nil, chainhash.Hash{0x01}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -415,9 +429,9 @@ func TestOrdinalInscriptionsByOutpointWithOffset(t *testing.T) {
 
 	t.Run("malformed value length is rejected", func(t *testing.T) {
 		bad := tbcd.NewOutpoint(chainhash.Hash{0x55}, 0)
-		badCache := map[tbcd.OrdinalKey]tbcd.OrdinalValue{
-			oKey(bad, 0): tbcd.OrdinalValue([]byte{0x01, 0x02}), // 2 bytes, not 36
-		}
+		badCache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+		badEntry := testGetEntry(badCache, bad)
+		badEntry.Inscriptions[0] = []byte{0x01, 0x02} // 2 bytes, not 36
 		if err := db.BlockOrdinalUpdate(ctx, 1, badCache, nil, chainhash.Hash{0x02}); err != nil {
 			t.Fatal(err)
 		}
@@ -444,9 +458,9 @@ func TestBlockOrdinalUpdateAtomicData(t *testing.T) {
 	txid := chainhash.Hash{0xab, 0xcd}
 	op := tbcd.NewOutpoint(txid, 0)
 	inscID := [36]byte{0x07}
-	data := map[tbcd.OrdinalKey]tbcd.OrdinalValue{
-		oKey(op, 0): tbcd.OrdinalValue(inscID[:]),
-	}
+	data := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+	dataEntry := testGetEntry(data, op)
+	dataEntry.Inscriptions[0] = inscID[:]
 
 	// Work entry: 'w' + height(4) + seq(2).
 	var wKey tbcd.OrdinalWorkKey

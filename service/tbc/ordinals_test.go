@@ -2182,7 +2182,13 @@ func TestPredecessorKeyLayout(t *testing.T) {
 	op := tbcd.NewOutpoint(txid, 7)
 	offset := uint64(42)
 
-	oKey := ordinalOutpointKey(op, offset)
+	// Construct 'o' key inline — the production code now builds this
+	// in the DB layer (level.go BlockOrdinalUpdate), not via a helper.
+	var oKey tbcd.OrdinalKey
+	oKey[0] = 'o'
+	copy(oKey[1:37], op[1:37])
+	binary.BigEndian.PutUint64(oKey[37:], offset)
+
 	pKey := predecessorKey(op, offset)
 
 	// Same layout except prefix byte.
