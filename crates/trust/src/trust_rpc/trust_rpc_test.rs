@@ -17,7 +17,7 @@ mod container_tests {
     use testcontainers::{
         GenericImage, ImageExt,
         core::{ContainerPort, ExecCommand, WaitFor},
-        runners::{AsyncRunner},
+        runners::AsyncRunner,
     };
     use walkdir::WalkDir;
 
