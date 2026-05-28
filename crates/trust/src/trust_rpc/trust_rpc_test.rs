@@ -15,9 +15,9 @@ mod container_tests {
     use testcontainers::bollard::Docker;
     use testcontainers::bollard::body_full;
     use testcontainers::{
-        GenericBuildableImage, GenericImage, ImageExt,
-        core::{BuildImageOptions, ContainerPort, ExecCommand, WaitFor},
-        runners::{AsyncBuilder, AsyncRunner},
+        GenericImage, ImageExt,
+        core::{ContainerPort, ExecCommand, WaitFor},
+        runners::{AsyncRunner},
     };
     use walkdir::WalkDir;
 
@@ -111,12 +111,7 @@ mod container_tests {
             // Starts tbcd.
             // It logs "handle (tbc admin): /v1/admin/ws" to stderr
             // once it has registered the admin WebSocket handler.
-            let tbcd_image = GenericBuildableImage::new("hemilabs/tbcd-test", "latest")
-                .with_dockerfile(tbcd_root.join("docker/tbcd/Dockerfile"))
-                .with_file(tbcd_root, ".")
-                .build_image_with(BuildImageOptions::new().with_skip_if_exists(true))
-                .await
-                .expect("could not build docker image for tbcd");
+            let tbcd_image = GenericImage::new("hemilabs/tbcd-test", "latest");
 
             let tbcd = tbcd_image
                 .with_exposed_port(ContainerPort::Tcp(TBCD_WS_PORT))
