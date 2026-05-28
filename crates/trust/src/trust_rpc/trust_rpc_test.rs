@@ -9,12 +9,17 @@ use tokio_tungstenite::accept_async;
 
 mod container_tests {
     use super::*;
+    use futures_util::StreamExt;
     use std::thread::sleep;
+    use tar::Builder;
+    use testcontainers::bollard::Docker;
+    use testcontainers::bollard::body_full;
     use testcontainers::{
         GenericBuildableImage, GenericImage, ImageExt,
         core::{BuildImageOptions, ContainerPort, ExecCommand, WaitFor},
         runners::{AsyncBuilder, AsyncRunner},
     };
+    use walkdir::WalkDir;
 
     const REGNET_TEST_ADDR: &str = "2MxGhR8wmKPC8Dwz3v4KpW3HGqUgrRmdur2";
 
@@ -50,7 +55,24 @@ mod container_tests {
         let x: u8 = rand::random();
         let bitcoind_container_name = format!("bitcoind-{}", x);
 
+        let docker = Docker::connect_with_local_defaults().unwrap();
+
+        let tar_bytes = create_build_context(tbcd_root.to_str().unwrap());
+
+        let options = testcontainers::bollard::query_parameters::BuildImageOptions {
+            dockerfile: "docker/tbcd/Dockerfile".to_string(),
+            t: Some("hemilabs/tbcd-test:latest".to_string()),
+            q: true,
+            ..Default::default()
+        };
+
+        let mut build_stream = docker.build_image(options, None, Some(body_full(tar_bytes.into())));
+
         let (bitcoind, tbcd, url) = rt.block_on(async {
+            while let Some(msg) = build_stream.next().await {
+                println!("Message: {msg:?}");
+            }
+
             // Starts bitcoind (regtest)
             let bitcoind = GenericImage::new("kylemanna/bitcoind", "latest")
                 .with_exposed_port(ContainerPort::Tcp(18444))
@@ -148,6 +170,36 @@ mod container_tests {
             bitcoind.stop().await.unwrap();
             tbcd.stop().await.unwrap();
         });
+    }
+
+    fn create_build_context(dir: &str) -> Vec<u8> {
+        let mut tar_buf = Vec::new();
+        {
+            let mut tar = Builder::new(&mut tar_buf);
+            for entry in WalkDir::new(dir).follow_links(true) {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                let relative = path.strip_prefix(dir).unwrap();
+
+                if relative.as_os_str().is_empty()
+                    || str::starts_with(relative.to_str().unwrap(), ".git")
+                    || str::starts_with(relative.to_str().unwrap(), "target")
+                {
+                    // println!("skipping {}", relative.display());
+                    continue;
+                }
+
+                println!("{}, {}", path.display(), relative.display());
+
+                if path.is_file() {
+                    tar.append_path_with_name(path, relative).unwrap();
+                } else if path.is_dir() {
+                    tar.append_dir(relative, path).unwrap();
+                }
+            }
+            tar.finish().unwrap();
+        }
+        tar_buf
     }
 }
 
