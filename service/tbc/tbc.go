@@ -2353,12 +2353,12 @@ func (s *Server) BlockInTxIndex(ctx context.Context, blkid chainhash.Hash) (bool
 	return s.g.db.BlockInTxIndex(ctx, blkid)
 }
 
-func (s *Server) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error) {
+func (s *Server) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, *wire.TxLoc, error) {
 	log.Tracef("BlockHashByTxId")
 	defer log.Tracef("BlockHashByTxId exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, NewExternalHeaderNotAllowedError("BlockHashByTxId")
+		return nil, nil, NewExternalHeaderNotAllowedError("BlockHashByTxId")
 	}
 
 	return s.g.db.BlockHashByTxId(ctx, txId)
@@ -2372,10 +2372,29 @@ func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, 
 		return nil, NewExternalHeaderNotAllowedError("TxById")
 	}
 
-	blockHash, err := s.g.db.BlockHashByTxId(ctx, txId)
+	blockHash, loc, err := s.g.db.BlockHashByTxId(ctx, txId)
 	if err != nil {
 		return nil, err
 	}
+
+	// Fast path: TxLoc available, deserialize only this tx.
+	if loc != nil {
+		raw, err := s.g.db.BlockRawByHash(ctx, *blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("block raw %v: %w", blockHash, err)
+		}
+		if loc.TxStart+loc.TxLen > len(raw) {
+			return nil, fmt.Errorf("tx loc out of range: %d+%d > %d",
+				loc.TxStart, loc.TxLen, len(raw))
+		}
+		var msgTx wire.MsgTx
+		if err := msgTx.Deserialize(bytes.NewReader(raw[loc.TxStart : loc.TxStart+loc.TxLen])); err != nil {
+			return nil, fmt.Errorf("deserialize tx at offset %d: %w", loc.TxStart, err)
+		}
+		return &msgTx, nil
+	}
+
+	// Slow path: legacy entry, full block scan.
 	block, err := s.g.db.BlockByHash(ctx, *blockHash)
 	if err != nil {
 		return nil, err

@@ -619,7 +619,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		bh, err := s.BlockHashByTxId(ctx, *chtxid)
+		bh, _, err := s.BlockHashByTxId(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}

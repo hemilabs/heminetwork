@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+- `BlockHashByTxId` now returns `(*chainhash.Hash, wire.TxLoc, error)`;
+  callers that only need the hash use `bh, _, err :=`
+  ([#1052](https://github.com/hemilabs/heminetwork/pull/1052)).
 - Rename `TBC_BLOCKHEADER_CACHE_SIZE` environment variable to
   `TBC_HEADER_CACHE_SIZE`
   ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
@@ -39,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `BlockRawByHash` to DB interface and `lazyBlock` type for zero-copy
   per-tx block access without full deserialization
   ([#1051](https://github.com/hemilabs/heminetwork/pull/1051)).
+- Store tx byte location (`TxLoc`) in tx index `'t'` entry values for
+  O(1) tx lookup; DB version 5 → 6
+  ([#1052](https://github.com/hemilabs/heminetwork/pull/1052)).
 - Add generic `lru` package with cost-based LRU cache (`lru.Cache[K,V]`)
   ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
 - Add utxo read LRU cache (`TBC_UTXO_READ_CACHE_SIZE`) to reduce LevelDB
@@ -69,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `BlockTxUpdate` uses stack-allocated reusable buffers instead of slicing
+  loop variables, avoiding potential data integrity issues
+  ([#1052](https://github.com/hemilabs/heminetwork/pull/1052),
+  [#1050](https://github.com/hemilabs/heminetwork/issues/1050)).
 - Replace block and header caches in level package with generic `lru.Cache[K,V]`
   ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
 
