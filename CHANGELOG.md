@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `BlockRawByHash` to DB interface and `lazyBlock` type for zero-copy
+  per-tx block access without full deserialization
+  ([#1051](https://github.com/hemilabs/heminetwork/pull/1051)).
 - Add generic `lru` package with cost-based LRU cache (`lru.Cache[K,V]`)
   ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
 - Add utxo read LRU cache (`TBC_UTXO_READ_CACHE_SIZE`) to reduce LevelDB

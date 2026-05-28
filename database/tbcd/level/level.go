@@ -1589,6 +1589,23 @@ func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Bl
 	return b, nil
 }
 
+// BlockRawByHash returns the raw block bytes. Not cached, unlike BlockByHash.
+func (l *ldb) BlockRawByHash(ctx context.Context, hash chainhash.Hash) ([]byte, error) {
+	log.Tracef("BlockRawByHash")
+	defer log.Tracef("BlockRawByHash exit")
+
+	bDB := l.rawPool[level.BlocksDB]
+	eb, err := bDB.Get(hash[:])
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.BlockNotFoundError{Hash: hash}
+		}
+		return nil, fmt.Errorf("block raw get: %w", err)
+	}
+
+	return eb, nil
+}
+
 func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool, error) {
 	log.Tracef("BlockExistsByHash")
 	defer log.Tracef("BlockExistsByHash exit")

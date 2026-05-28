@@ -82,6 +82,10 @@ func (stubDB) BlockByHash(context.Context, chainhash.Hash) (*btcutil.Block, erro
 	panic("stub")
 }
 
+func (stubDB) BlockRawByHash(context.Context, chainhash.Hash) ([]byte, error) {
+	panic("stub")
+}
+
 func (stubDB) BlockExistsByHash(context.Context, chainhash.Hash) (bool, error) {
 	panic("stub")
 }
