@@ -254,7 +254,7 @@ func TestBlockOrdinalUpdateEmptyCache(t *testing.T) {
 //   - create the OrdinalDB LevelDB (happens automatically via openDB);
 //   - bump the schema version from 5 to 6;
 //   - leave all existing data intact.
-func TestDbUpgradeV6(t *testing.T) {
+func TestDbUpgradeV7(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -281,7 +281,7 @@ func TestDbUpgradeV6(t *testing.T) {
 
 	// Stamp version to 5.
 	v5 := make([]byte, 8)
-	binary.BigEndian.PutUint64(v5, 5)
+	binary.BigEndian.PutUint64(v5, 6)
 	if err := db.MetadataPut(ctx, versionKey, v5); err != nil {
 		t.Fatal(err)
 	}
@@ -306,8 +306,8 @@ func TestDbUpgradeV6(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ver != 6 {
-		t.Fatalf("version: got %d, want 6", ver)
+	if ver != 7 {
+		t.Fatalf("version: got %d, want 7", ver)
 	}
 
 	// Assertion 2: survivor data is intact.
