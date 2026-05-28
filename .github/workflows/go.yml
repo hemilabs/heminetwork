@@ -82,10 +82,10 @@ jobs:
 
       - name: "Download and verify dependencies"
         id: deps
-        run: make GOCACHE="$(go env GOCACHE)" go-deps
+        run: GOCACHE="$(go env GOCACHE)" make go-deps
 
       - name: "make build"
-        run: make GOCACHE="$(go env GOCACHE)" build
+        run: GOCACHE="$(go env GOCACHE)" make build
 
   test:
     name: "Test"
@@ -100,16 +100,15 @@ jobs:
           go-version-file: "go.mod"
 
       - name: "Download and verify dependencies"
-        id: deps
-        run: make GOCACHE="$(go env GOCACHE)" go-deps
+        run: GOCACHE="$(go env GOCACHE)" make go-deps
 
       - name: "test synctest"
-        run: make synctest-test
+        run: GOCACHE="$(go env GOCACHE)" make synctest
 
       - name: "make test (with E2E tests)"
         env:
           HEMI_DOCKER_TESTS: "1"
-        run: make GOCACHE="$(go env GOCACHE)" test
+        run: GOCACHE="$(go env GOCACHE)" make test
 
       - name: "Upload coverage reports to Codecov"
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
@@ -131,7 +130,7 @@ jobs:
 
       - name: "Download and verify dependencies"
         id: deps
-        run: make GOCACHE="$(go env GOCACHE)" go-deps
+        run: GOCACHE="$(go env GOCACHE)" make go-deps
 
       - name: "make race"
-        run: make GOCACHE="$(go env GOCACHE)" race
+        run: GOCACHE="$(go env GOCACHE)" make race
