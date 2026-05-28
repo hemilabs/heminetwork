@@ -37,7 +37,7 @@ func (t *satTracer) findTx(block *btcutil.Block, txid chainhash.Hash) *btcutil.T
 
 // inputValue looks up the value of a specific outpoint.
 func (t *satTracer) inputValue(ctx context.Context, txid chainhash.Hash, vout uint32) (uint64, error) {
-	blockHash, err := t.s.g.db.BlockHashByTxId(ctx, txid)
+	blockHash, _, err := t.s.g.db.BlockHashByTxId(ctx, txid)
 	if err != nil {
 		return 0, fmt.Errorf("tx %v: %w", txid, err)
 	}
@@ -63,7 +63,7 @@ func (t *satTracer) traceSat(ctx context.Context, txid chainhash.Hash, vout uint
 		if err := ctx.Err(); err != nil {
 			return 0, fmt.Errorf("traceSat cancelled at depth %d: %w", depth, err)
 		}
-		blockHash, err := t.s.g.db.BlockHashByTxId(ctx, txid)
+		blockHash, _, err := t.s.g.db.BlockHashByTxId(ctx, txid)
 		if err != nil {
 			return 0, fmt.Errorf("tx %v: %w", txid, err)
 		}
@@ -204,7 +204,7 @@ func (s *Server) ComputeInscribedSatPublic(ctx context.Context, txid chainhash.H
 }
 
 func (s *Server) computeInscribedSat(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error) {
-	blockHash, err := s.g.db.BlockHashByTxId(ctx, txid)
+	blockHash, _, err := s.g.db.BlockHashByTxId(ctx, txid)
 	if err != nil {
 		return 0, fmt.Errorf("tx %v: %w", txid, err)
 	}
@@ -260,7 +260,7 @@ func (c *satRangeContext) compute(ctx context.Context, txid chainhash.Hash, vout
 		return nil, errors.New("sat range computation exceeded 500k outpoints")
 	}
 
-	blockHash, err := c.s.g.db.BlockHashByTxId(ctx, txid)
+	blockHash, _, err := c.s.g.db.BlockHashByTxId(ctx, txid)
 	if err != nil {
 		return nil, fmt.Errorf("tx %v not found: %w", txid, err)
 	}
