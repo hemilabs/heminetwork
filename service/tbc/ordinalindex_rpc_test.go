@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -87,24 +86,21 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	copy(seed.inscID[:32], seed.txid[:])
 	// input_index 0 → little-endian [0,0,0,0] (already zero)
 
-	cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue)
+	cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+
+	// Aux entries ('i', 'n', 'a') are carried on the outpoint they relate to.
+	// Use seed.outpoint as the host for the first inscription's aux.
+	entry1 := getEntry(cache, seed.outpoint)
 
 	// 'i': inscription value (sat number + block hash + flags).
-	var iKey tbcd.OrdinalKey
-	iKey[0] = 'i'
-	copy(iKey[1:], seed.inscID[:])
-	cache[iKey] = tbcd.OrdinalValue(encodeInscriptionValue(
+	entry1.Aux[ordinalInscriptionKey(seed.inscID)] = tbcd.OrdinalValue(encodeInscriptionValue(
 		seed.satNumber, &seed.blockHash, false, &InscriptionEnvelope{
 			ContentType: []byte("text/plain"),
 			Content:     []byte("test inscription"),
 		}))
 
 	// 'n': block→inscription mapping (seq 0).
-	var nKey tbcd.OrdinalKey
-	nKey[0] = 'n'
-	copy(nKey[1:33], seed.blockHash[:])
-	// seq 0 → bytes already zero
-	cache[nKey] = tbcd.OrdinalValue(seed.inscID[:])
+	entry1.Aux[ordinalBlockInscriptionKey(&seed.blockHash, 0)] = tbcd.OrdinalValue(seed.inscID[:])
 
 	// --- Second inscription with parent, delegate, metaprotocol ---
 	seed.txid2 = chainhash.Hash{0x11, 0x12, 0x13, 0x14}
@@ -113,10 +109,11 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 
 	parent := [36]byte{0xaa, 0xbb, 0xcc}   // parent inscription ID
 	delegate := [36]byte{0xdd, 0xee, 0xff} // delegate inscription ID
-	var iKey2 tbcd.OrdinalKey
-	iKey2[0] = 'i'
-	copy(iKey2[1:], seed.inscID2[:])
-	cache[iKey2] = tbcd.OrdinalValue(encodeInscriptionValue(
+
+	outpoint2 := tbcd.NewOutpoint(seed.txid2, 0)
+	entry2 := getEntry(cache, outpoint2)
+
+	entry2.Aux[ordinalInscriptionKey(seed.inscID2)] = tbcd.OrdinalValue(encodeInscriptionValue(
 		seed.sat2, &seed.blockHash, true, &InscriptionEnvelope{
 			ContentType:  []byte("application/json"),
 			Content:      []byte(`{"p":"brc-20"}`),
@@ -127,19 +124,21 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 
 	// 'o': outpoint ownership tracker for inscription at seed.outpoint.
 	// InscriptionsByAddress scans 'o' entries at each UTXO outpoint.
-	cache[ordinalOutpointKey(seed.outpoint, 0)] = encodeOutpointValue(
+	entry1.Inscriptions[0] = encodeOutpointValue(
 		seed.inscID, srcKindReveal, 0, ordinalRevealSentinel, 0)
 
 	// Second 'o' entry: inscID2 at a second outpoint (txid2:0).
 	// Tests that InscriptionsByAddress accumulates across UTXOs.
-	outpoint2 := tbcd.NewOutpoint(seed.txid2, 0)
-	cache[ordinalOutpointKey(outpoint2, 0)] = encodeOutpointValue(
+	entry2.Inscriptions[0] = encodeOutpointValue(
 		seed.inscID2, srcKindReveal, 0, ordinalRevealSentinel, 0)
 
 	// 'a': sat→inscription mapping for InscriptionsBySat.
-	cache[ordinalSatInscriptionKey(seed.satNumber, seed.inscID)] = []byte{}
+	entry1.Aux[ordinalSatInscriptionKey(seed.satNumber, seed.inscID)] = []byte{}
 
-	cloned := maps.Clone(cache)
+	cloned := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, len(cache))
+	for k, v := range cache {
+		cloned[k] = v
+	}
 	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, nil, chainhash.Hash{}); err != nil {
 		t.Fatal(err)
 	}
@@ -794,12 +793,13 @@ func BenchmarkLocatedAtOutpoint(b *testing.B) {
 	op := tbcd.NewOutpoint(chainhash.Hash{0xab}, 0)
 
 	for _, cacheSize := range []int{100, 1000, 10000} {
-		cache := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue, cacheSize)
+		cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, cacheSize)
 		for n := 0; n < cacheSize; n++ {
 			var txid chainhash.Hash
 			binary.BigEndian.PutUint64(txid[:8], uint64(n))
-			k := ordinalOutpointKey(tbcd.NewOutpoint(txid, 0), 0)
-			cache[k] = encodeOutpointValue([36]byte{byte(n)}, srcKindReveal, 0, ordinalRevealSentinel, 0)
+			nop := tbcd.NewOutpoint(txid, 0)
+			entry := getEntry(cache, nop)
+			entry.Inscriptions[0] = encodeOutpointValue([36]byte{byte(n)}, srcKindReveal, 0, ordinalRevealSentinel, 0)
 		}
 		b.Run(fmt.Sprintf("cache=%d", cacheSize), func(b *testing.B) {
 			b.ReportAllocs()
@@ -810,5 +810,76 @@ func BenchmarkLocatedAtOutpoint(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// TestOrdinalCacheLenCountsSubEntries verifies that OrdinalCache.Len()
+// returns the total number of sub-entries (inscriptions + predecessors +
+// aux) across all outpoints, not len(map). This is the core invariant
+// of the cache redesign — flush decisions must reflect actual DB
+// operation count.
+func TestOrdinalCacheLenCountsSubEntries(t *testing.T) {
+	cache := NewOrdinalCache(1000)
+
+	if cache.Len() != 0 {
+		t.Fatalf("empty cache: Len() = %d, want 0", cache.Len())
+	}
+
+	// One outpoint with 3 inscriptions, 2 predecessors, 1 aux entry = 6 writes.
+	txid := chainhash.Hash{0x01}
+	op := tbcd.NewOutpoint(txid, 0)
+	cache.PutInscription(op, 0, []byte{0x01})
+	cache.PutInscription(op, 100, []byte{0x02})
+	cache.PutInscription(op, 200, nil) // tombstone — still a DB operation
+	cache.PutPredecessor(op, 0, []byte{0x03})
+	cache.PutPredecessor(op, 100, nil) // tombstone
+	cache.PutAux(op, ordinalInscriptionKey([36]byte{0x01}), []byte{0x04})
+
+	if got := cache.Len(); got != 6 {
+		t.Fatalf("6 writes: Len() = %d, want 6", got)
+	}
+
+	// Second outpoint with 1 inscription = total 7.
+	op2 := tbcd.NewOutpoint(chainhash.Hash{0x02}, 0)
+	cache.PutInscription(op2, 0, []byte{0x05})
+
+	if got := cache.Len(); got != 7 {
+		t.Fatalf("7 writes: Len() = %d, want 7", got)
+	}
+
+	// Stats must reflect write count, not outpoint count.
+	length, capacity, pct := cache.Stats()
+	if length != 7 || capacity != 1000 {
+		t.Fatalf("Stats: length=%d capacity=%d, want 7/1000", length, capacity)
+	}
+	if pct != 0 { // 7*100/1000 = 0 (integer division)
+		t.Fatalf("Stats: pct=%d, want 0", pct)
+	}
+
+	// Clear resets everything.
+	cache.Clear()
+	if cache.Len() != 0 {
+		t.Fatalf("after Clear: Len() = %d, want 0", cache.Len())
+	}
+	if len(cache.m) != 0 {
+		t.Fatalf("after Clear: len(map) = %d, want 0", len(cache.m))
+	}
+}
+
+// TestGetEntryCreateAndReuse verifies getEntry creates on miss and
+// returns existing on hit without overwriting data.
+func TestGetEntryCreateAndReuse(t *testing.T) {
+	cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+	op := tbcd.NewOutpoint(chainhash.Hash{0x01}, 0)
+
+	e1 := getEntry(cache, op)
+	e1.Inscriptions[0] = []byte{0xaa}
+
+	e2 := getEntry(cache, op)
+	if e2 != e1 {
+		t.Fatal("getEntry returned different pointer on hit")
+	}
+	if len(e2.Inscriptions) != 1 || e2.Inscriptions[0][0] != 0xaa {
+		t.Fatal("getEntry overwrote existing entry data")
 	}
 }

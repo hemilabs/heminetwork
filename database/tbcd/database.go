@@ -148,7 +148,7 @@ type Database interface {
 
 	// Ordinals
 	BlockHeaderByOrdinalIndex(ctx context.Context) (*BlockHeader, error)
-	BlockOrdinalUpdate(ctx context.Context, direction int, data map[OrdinalKey]OrdinalValue, work map[OrdinalWorkKey]OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error
+	BlockOrdinalUpdate(ctx context.Context, direction int, data map[Outpoint]*OrdinalCacheEntry, work map[OrdinalWorkKey]OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error
 	ReadOrdinalWork(ctx context.Context, belowHeight uint32, limit int) ([]OrdinalWorkEntry, error)
 	OrdinalWatermarkGet(ctx context.Context) (uint32, bool, error)
 	OrdinalPopulatorUpdate(ctx context.Context, ordData map[OrdinalKey]OrdinalValue, workData map[OrdinalWorkKey]OrdinalWorkValue) error
@@ -695,6 +695,41 @@ type OrdinalWorkEntry struct {
 	Height uint32
 	Seq    uint16
 	InscID [36]byte
+}
+
+// OrdinalCacheEntry holds all ordinal data tracked at a single outpoint.
+// The ordinal indexer's cache is map[Outpoint]*OrdinalCacheEntry; this
+// replaces the previous map[OrdinalKey]OrdinalValue where the 45-byte
+// DB key format prevented O(1) lookup by outpoint.
+//
+// All cache access goes through cache[outpoint]. Cache miss falls through
+// to DB. nil values in inscriptions/predecessors are tombstones (delete
+// from DB on commit).
+type OrdinalCacheEntry struct {
+	// 'o' entries: inscriptions tracked at this outpoint.
+	// Key is the byte offset within the output.
+	// Value is the 53-byte 'o' value (inscID + srcKind + srcTxIdx +
+	// srcInputIdx + srcOffset). nil = tombstone (delete from DB on commit).
+	Inscriptions map[uint64][]byte
+
+	// 'p' entries: predecessor values at this outpoint.
+	// Key is the same byte offset as the inscription it belongs to.
+	// Value is the raw 'o' value that was at the source outpoint before
+	// the sat moved here. nil = tombstone.
+	Predecessors map[uint64][]byte
+
+	// Auxiliary entries: data generated at this outpoint that uses
+	// non-outpoint DB keys ('i', 'n', 'a'). Write-only from the cache
+	// perspective — never read back from cache during processing.
+	// Flushed alongside 'o'/'p' entries. nil value = delete.
+	Aux map[OrdinalKey]OrdinalValue
+}
+
+// EntryCount returns the total number of sub-entries (inscriptions +
+// predecessors + aux) in this cache entry. This drives the flush
+// decision — the cache must track real DB entry count, not outpoint count.
+func (e *OrdinalCacheEntry) EntryCount() int {
+	return len(e.Inscriptions) + len(e.Predecessors) + len(e.Aux)
 }
 
 // OrdinalLocatedInscription is an inscription at a known byte offset within
