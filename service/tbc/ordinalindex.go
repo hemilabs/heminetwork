@@ -5,6 +5,7 @@
 package tbc
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -584,7 +585,7 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 	}
 
 	// Cache miss: find which block contains this tx.
-	blockHash, err := i.g.db.BlockHashByTxId(ctx, txid)
+	blockHash, loc, err := i.g.db.BlockHashByTxId(ctx, txid)
 	if err != nil {
 		return 0, fmt.Errorf("tx %v: %w", txid, err)
 	}
@@ -595,18 +596,34 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 		return 0, fmt.Errorf("block raw %v: %w", blockHash, err)
 	}
 
-	// Lazy scan: compute txids from raw bytes until we find the match.
-	lb := newLazyBlock(raw)
-	idx, err := lb.FindTx(txid)
-	if err != nil {
-		return 0, fmt.Errorf("tx %v not in block %v: %w", txid, blockHash, err)
+	var vals []uint64
+	if loc.TxLen > 0 {
+		// Fast path: TxLoc available, extract output values directly.
+		if loc.TxStart+loc.TxLen > len(raw) {
+			return 0, fmt.Errorf("tx loc out of range: %d+%d > %d",
+				loc.TxStart, loc.TxLen, len(raw))
+		}
+		var msgTx wire.MsgTx
+		if err := msgTx.Deserialize(bytes.NewReader(raw[loc.TxStart : loc.TxStart+loc.TxLen])); err != nil {
+			return 0, fmt.Errorf("deserialize tx at offset %d: %w", loc.TxStart, err)
+		}
+		vals = make([]uint64, len(msgTx.TxOut))
+		for j, out := range msgTx.TxOut {
+			vals[j] = uint64(out.Value)
+		}
+	} else {
+		// Slow path: legacy entry, scan with lazyBlock.
+		lb := newLazyBlock(raw)
+		idx, err := lb.FindTx(txid)
+		if err != nil {
+			return 0, fmt.Errorf("tx %v not in block %v: %w", txid, blockHash, err)
+		}
+		vals, err = lb.TxOutputValues(idx)
+		if err != nil {
+			return 0, fmt.Errorf("tx %v output values: %w", txid, err)
+		}
 	}
 
-	// Extract only this tx's output values — no other tx is touched.
-	vals, err := lb.TxOutputValues(idx)
-	if err != nil {
-		return 0, fmt.Errorf("tx %v output values: %w", txid, err)
-	}
 	if int(vout) >= len(vals) {
 		return 0, fmt.Errorf("vout %d out of range (%d outputs)", vout, len(vals))
 	}
