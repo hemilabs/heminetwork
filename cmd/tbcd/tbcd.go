@@ -119,6 +119,12 @@ var (
 			Help:         "maximum cached ordinal entries during indexing",
 			Print:        config.PrintAll,
 		},
+		"TBC_ORDINAL_OUTPUT_CACHE_SIZE": config.Config{
+			Value:        &cfg.OrdinalOutputCacheSize,
+			DefaultValue: "256mb",
+			Help:         "size of ordinal tx output value LRU cache (0 to disable)",
+			Print:        config.PrintAll,
+		},
 		"TBC_MEMPOOL_ENABLED": config.Config{
 			Value:        &cfg.MempoolEnabled,
 			DefaultValue: true,
