@@ -202,6 +202,7 @@ type Config struct {
 	UtxoReadCacheSize       string // LRU read cache for utxo fixup; "0" or "" disables
 	OrdinalIndex            bool
 	MaxCachedOrdinals       int
+	OrdinalOutputCacheSize  string // LRU read cache for tx output values; "0" or "" disables
 	OrdinalWatermarkGap     time.Duration
 
 	// Admin API
@@ -218,23 +219,24 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress:        tbcapi.DefaultListen,
-		BlockCacheSize:       "1gb",
-		HeaderCacheSize:      "128mb",
-		LogLevel:             logLevel,
-		MaxCachedKeystones:   defaultMaxCachedKeystones,
-		MaxCachedTxs:         defaultMaxCachedTxs,
-		MaxCachedZK:          defaultMaxZK,
-		UtxoReadCacheSize:    "1gb",
-		MaxCachedOrdinals:    defaultMaxCachedOrdinals,
-		OrdinalWatermarkGap:  24 * time.Hour,
-		MempoolEnabled:       true,
-		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
-		PeersWanted:          defaultPeersWanted,
-		RequestTimeout:       120,
-		PrometheusNamespace:  appName,
-		ExternalHeaderMode:   false, // Default anyway, but for readability
-		DatabaseDebug:        false, // Default anyway, but dangerous so be explicit
+		ListenAddress:          tbcapi.DefaultListen,
+		BlockCacheSize:         "1gb",
+		HeaderCacheSize:        "128mb",
+		LogLevel:               logLevel,
+		MaxCachedKeystones:     defaultMaxCachedKeystones,
+		MaxCachedTxs:           defaultMaxCachedTxs,
+		MaxCachedZK:            defaultMaxZK,
+		UtxoReadCacheSize:      "1gb",
+		MaxCachedOrdinals:      defaultMaxCachedOrdinals,
+		OrdinalOutputCacheSize: "256mb",
+		OrdinalWatermarkGap:    24 * time.Hour,
+		MempoolEnabled:         true,
+		NotificationBlocking:   false, // Default anyway, but dangerous so be explicit
+		PeersWanted:            defaultPeersWanted,
+		RequestTimeout:         120,
+		PrometheusNamespace:    appName,
+		ExternalHeaderMode:     false, // Default anyway, but for readability
+		DatabaseDebug:          false, // Default anyway, but dangerous so be explicit
 	}
 }
 
@@ -299,6 +301,7 @@ type Server struct {
 		blockCache                tbcd.CacheStats
 		headerCache               tbcd.CacheStats
 		utxoReadCache             lru.Stats
+		ordinalOutputCache        lru.Stats
 		diskFree                  uint64
 	} // periodically updated by promPoll
 	isRunning     bool
@@ -955,6 +958,36 @@ func (s *Server) promUtxoReadCacheItems() float64 {
 	return deucalion.IntToFloat(s.prom.utxoReadCache.Items)
 }
 
+func (s *Server) promOrdinalOutputCacheHits() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Hits)
+}
+
+func (s *Server) promOrdinalOutputCacheMisses() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Misses)
+}
+
+func (s *Server) promOrdinalOutputCachePurges() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Purges)
+}
+
+func (s *Server) promOrdinalOutputCacheSize() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Cost)
+}
+
+func (s *Server) promOrdinalOutputCacheItems() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Items)
+}
+
 func (s *Server) promDiskFree() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -991,6 +1024,9 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.headerCache = s.g.db.BlockHeaderCacheStats()
 		if s.utxoReadCache != nil {
 			s.prom.utxoReadCache = s.utxoReadCache.Stats()
+		}
+		if oi, ok := s.oi.(*ordinalIndexer); ok && oi.outputValueCache != nil {
+			s.prom.ordinalOutputCache = oi.outputValueCache.Stats()
 		}
 		if s.cfg.MempoolEnabled {
 			s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
@@ -3135,9 +3171,17 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	if s.cfg.OrdinalIndex {
+		var ovcSize int
+		if s.cfg.OrdinalOutputCacheSize != "" && s.cfg.OrdinalOutputCacheSize != "0" {
+			parsed, err := humanize.ParseBytes(s.cfg.OrdinalOutputCacheSize)
+			if err != nil {
+				return fmt.Errorf("ordinal output cache size: %w", err)
+			}
+			ovcSize = int(parsed)
+		}
 		s.oi = NewOrdinalIndexer(ctx, s.g, s.cfg.MaxCachedOrdinals,
 			s.cfg.OrdinalIndex, s.ordinalGenesis,
-			s.computeInscribedSat, s.cfg.OrdinalWatermarkGap)
+			s.computeInscribedSat, s.cfg.OrdinalWatermarkGap, ovcSize)
 	}
 
 	return nil
@@ -3289,6 +3333,31 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "utxo_read_cache_items",
 				Help:      "Number of utxo read cache entries",
 			}, s.promUtxoReadCacheItems),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_hits",
+				Help:      "Ordinal output value cache hits",
+			}, s.promOrdinalOutputCacheHits),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_misses",
+				Help:      "Ordinal output value cache misses",
+			}, s.promOrdinalOutputCacheMisses),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_purges",
+				Help:      "Ordinal output value cache purges",
+			}, s.promOrdinalOutputCachePurges),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_size",
+				Help:      "Ordinal output value cache size in bytes",
+			}, s.promOrdinalOutputCacheSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_items",
+				Help:      "Number of ordinal output value cache entries",
+			}, s.promOrdinalOutputCacheItems),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "disk_free",

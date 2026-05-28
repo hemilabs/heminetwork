@@ -757,7 +757,9 @@ func TestInputOutputValueUnknownTx(t *testing.T) {
 	})
 
 	unknown := chainhash.Hash{0xde, 0xad}
-	_, err = inputOutputValue(ctx, db, unknown, 0)
+	oi := &ordinalIndexer{}
+	oi.g.db = db
+	_, err = oi.inputOutputValue(ctx, unknown, 0)
 	if err == nil {
 		t.Fatal("expected error for unknown txid, got nil")
 	}
