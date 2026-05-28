@@ -4572,7 +4572,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 
 		// InscriptionsByAddress: derive address from the holding
 		// output via the tx index and verify the RPC finds it.
-		holdingBlockHash, berr := s.g.db.BlockHashByTxId(ctx, *op.TxIdHash())
+		holdingBlockHash, _, berr := s.g.db.BlockHashByTxId(ctx, *op.TxIdHash())
 		if berr != nil {
 			t.Fatalf("[%s] BlockHashByTxId(%v): %v", label, op.TxIdHash(), berr)
 		}
