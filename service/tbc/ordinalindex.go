@@ -20,6 +20,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/lru"
 )
 
 type ordinalIndexer struct {
@@ -36,6 +37,13 @@ type ordinalIndexer struct {
 	// via the 'm' prefix OrdinalKey in the ordinal cache.
 	watermark      *uint32 // nil = not loaded yet
 	watermarkDirty bool
+
+	// outputValueCache maps txid → output values for all outputs of that
+	// tx. When inputOutputValue misses, it fetches the block, finds the
+	// tx, and caches ALL output values. Subsequent inputs spending
+	// different vouts from the same parent tx are O(1) cache hits.
+	// LRU-evicted by byte cost; survives across blocks.
+	outputValueCache *lru.Cache[chainhash.Hash, []uint64]
 }
 
 var (
@@ -120,7 +128,7 @@ func getEntry(cache map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, op tbcd.Outpoint)
 	return e
 }
 
-func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enabled bool, ordinalGenesis *HashHeight, computeInscSat func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error), watermarkGap time.Duration) Indexer {
+func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enabled bool, ordinalGenesis *HashHeight, computeInscSat func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error), watermarkGap time.Duration, outputValueCacheSize int) Indexer {
 	oi := &ordinalIndexer{
 		runCtx:         ctx,
 		cacheCapacity:  cacheLen,
@@ -134,6 +142,21 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enab
 		g:       g,
 		p:       oi,
 		genesis: ordinalGenesis,
+	}
+	if outputValueCacheSize > 0 {
+		var err error
+		oi.outputValueCache, err = lru.New[chainhash.Hash, []uint64](
+			outputValueCacheSize,
+			func(_ chainhash.Hash, v []uint64) int {
+				// Key: 32 bytes (chainhash.Hash)
+				// Value: 24 (slice header) + 8*len (backing array)
+				return chainhash.HashSize + 24 + 8*len(v) + lru.EntryOverhead
+			},
+			0,
+		)
+		if err != nil {
+			panic(fmt.Sprintf("ordinal output value cache: %v", err))
+		}
 	}
 	return oi
 }
@@ -363,7 +386,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				})
 			}
 
-			v, verr := inputOutputValue(ctx, i.g.db, prevOut.Hash, prevOut.Index)
+			v, verr := i.inputOutputValue(ctx, prevOut.Hash, prevOut.Index)
 			if verr != nil {
 				return fmt.Errorf("input value %v: %w", prevOut, verr)
 			}
@@ -545,25 +568,55 @@ func txOutTotal(txOut []*wire.TxOut) uint64 {
 	return total
 }
 
-// inputOutputValue looks up the value of a specific outpoint.
-func inputOutputValue(ctx context.Context, db tbcd.Database, txid chainhash.Hash, vout uint32) (uint64, error) {
-	blockHash, err := db.BlockHashByTxId(ctx, txid)
+// inputOutputValue returns the satoshi value of the output at txid:vout.
+// Uses the outputValueCache: on miss, fetches the raw block bytes via
+// BlockRawByHash and uses lazyBlock to find the tx and extract output
+// values without deserializing the entire block.
+func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Hash, vout uint32) (uint64, error) {
+	// Cache hit path.
+	if i.outputValueCache != nil {
+		if vals, ok := i.outputValueCache.Get(txid); ok {
+			if int(vout) >= len(vals) {
+				return 0, fmt.Errorf("cached vout %d out of range (tx has %d outputs)", vout, len(vals))
+			}
+			return vals[vout], nil
+		}
+	}
+
+	// Cache miss: find which block contains this tx.
+	blockHash, err := i.g.db.BlockHashByTxId(ctx, txid)
 	if err != nil {
 		return 0, fmt.Errorf("tx %v: %w", txid, err)
 	}
-	block, err := db.BlockByHash(ctx, *blockHash)
+
+	// Fetch raw block bytes — no deserialization.
+	raw, err := i.g.db.BlockRawByHash(ctx, *blockHash)
 	if err != nil {
-		return 0, fmt.Errorf("block %v: %w", blockHash, err)
+		return 0, fmt.Errorf("block raw %v: %w", blockHash, err)
 	}
-	for _, tx := range block.Transactions() {
-		if *tx.Hash() == txid {
-			if int(vout) >= len(tx.MsgTx().TxOut) {
-				return 0, fmt.Errorf("vout %d out of range", vout)
-			}
-			return uint64(tx.MsgTx().TxOut[vout].Value), nil
-		}
+
+	// Lazy scan: compute txids from raw bytes until we find the match.
+	lb := newLazyBlock(raw)
+	idx, err := lb.FindTx(txid)
+	if err != nil {
+		return 0, fmt.Errorf("tx %v not in block %v: %w", txid, blockHash, err)
 	}
-	return 0, fmt.Errorf("tx %v not in block", txid)
+
+	// Extract only this tx's output values — no other tx is touched.
+	vals, err := lb.TxOutputValues(idx)
+	if err != nil {
+		return 0, fmt.Errorf("tx %v output values: %w", txid, err)
+	}
+	if int(vout) >= len(vals) {
+		return 0, fmt.Errorf("vout %d out of range (%d outputs)", vout, len(vals))
+	}
+
+	// Cache all output values for this tx.
+	if i.outputValueCache != nil {
+		i.outputValueCache.Put(txid, vals)
+	}
+
+	return vals[vout], nil
 }
 
 // unwindBlock reverses a single block. Panics if the unwind goes
