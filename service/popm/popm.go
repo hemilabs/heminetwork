@@ -350,8 +350,8 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 }
 
 func (s *Server) broadcastKeystone(pctx context.Context, popTx *wire.MsgTx) error {
-	log.Tracef("mineKeystone")
-	defer log.Tracef("mineKeystone exit")
+	log.Tracef("broadcastKeystone")
+	defer log.Tracef("broadcastKeystone exit")
 
 	log.Infof("Broadcasting PoP tx %s with hash %v", s.params.Name, popTx.TxHash())
 
