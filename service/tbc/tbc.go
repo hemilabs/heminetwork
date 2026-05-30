@@ -3766,7 +3766,9 @@ func (s *Server) ExternalHeaderTearDown() error {
 // populateInscription builds an OrdinalInscription from the raw DB data for
 // a given inscription ID. It looks up the 'i' value, decodes it, resolves the
 // current outpoint via 's', and fetches block height via BlockHeaderByHash.
-func (s *Server) populateInscription(ctx context.Context, inscID [36]byte) (*tbcapi.OrdinalInscription, error) {
+// When includeSat is false the expensive backward-walk sat computation is
+// skipped and SatNumber is returned as 0 (or whatever was stored at index time).
+func (s *Server) populateInscription(ctx context.Context, inscID [36]byte, includeSat bool) (*tbcapi.OrdinalInscription, error) {
 	raw, err := s.g.db.OrdinalInscriptionByID(ctx, inscID)
 	if err != nil {
 		return nil, fmt.Errorf("inscription %x: %w", inscID, err)
@@ -3793,8 +3795,10 @@ func (s *Server) populateInscription(ctx context.Context, inscID [36]byte) (*tbc
 	copy(insc.TxID[:], inscID[:32])
 	insc.InputIndex = binary.LittleEndian.Uint32(inscID[32:])
 
-	// Compute sat number on demand if not stored (ordinals2: always 0).
-	if insc.SatNumber == 0 {
+	// Compute sat number on demand if not stored and requested.
+	// This is expensive: backward walk to coinbase, O(chain_depth).
+	// Disabled by default via IncludeSat=false on the request.
+	if includeSat && insc.SatNumber == 0 {
 		satNum, err := s.computeInscribedSat(ctx, insc.TxID, insc.InputIndex)
 		if err == nil {
 			insc.SatNumber = satNum
@@ -3830,7 +3834,7 @@ func (s *Server) populateInscription(ctx context.Context, inscID [36]byte) (*tbc
 }
 
 // InscriptionByID looks up a single inscription by its ID (txid + input index).
-func (s *Server) InscriptionByID(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (*tbcapi.OrdinalInscription, error) {
+func (s *Server) InscriptionByID(ctx context.Context, txid chainhash.Hash, inputIndex uint32, includeSat bool) (*tbcapi.OrdinalInscription, error) {
 	log.Tracef("InscriptionByID")
 	defer log.Tracef("InscriptionByID exit")
 
@@ -3839,7 +3843,7 @@ func (s *Server) InscriptionByID(ctx context.Context, txid chainhash.Hash, input
 	}
 
 	inscID := makeInscriptionID(&txid, inputIndex)
-	return s.populateInscription(ctx, inscID)
+	return s.populateInscription(ctx, inscID, includeSat)
 }
 
 // InscriptionContent retrieves raw inscription content, following delegation
@@ -3913,7 +3917,7 @@ func (s *Server) InscriptionContent(ctx context.Context, txid chainhash.Hash, in
 }
 
 // InscriptionsByBlock lists all inscriptions created in a given block.
-func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Hash) ([]*tbcapi.OrdinalInscription, error) {
+func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Hash, includeSat bool) ([]*tbcapi.OrdinalInscription, error) {
 	log.Tracef("InscriptionsByBlock")
 	defer log.Tracef("InscriptionsByBlock exit")
 
@@ -3928,7 +3932,7 @@ func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Ha
 
 	result := make([]*tbcapi.OrdinalInscription, 0, len(inscIDs))
 	for _, inscID := range inscIDs {
-		insc, err := s.populateInscription(ctx, inscID)
+		insc, err := s.populateInscription(ctx, inscID, includeSat)
 		if err != nil {
 			return nil, err
 		}
@@ -3941,7 +3945,7 @@ func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Ha
 // InscriptionsByAddress lists inscriptions currently held by UTXOs at the
 // given address. Iterates outpoints for the address (from the utxo index)
 // and scans 'o' entries at each outpoint.
-func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress string, start, count uint32) ([]*tbcapi.OrdinalInscription, error) {
+func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress string, start, count uint32, includeSat bool) ([]*tbcapi.OrdinalInscription, error) {
 	log.Tracef("InscriptionsByAddress")
 	defer log.Tracef("InscriptionsByAddress exit")
 
@@ -3983,7 +3987,7 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 			continue
 		}
 		for _, li := range located {
-			insc, err := s.populateInscription(ctx, li.InscID)
+			insc, err := s.populateInscription(ctx, li.InscID, includeSat)
 			if err != nil {
 				return nil, err
 			}
@@ -4019,7 +4023,7 @@ func (s *Server) InscriptionsBySat(ctx context.Context, satNumber uint64) ([]*tb
 	}
 	result := make([]*tbcapi.OrdinalInscription, 0, len(inscIDs))
 	for _, inscID := range inscIDs {
-		insc, err := s.populateInscription(ctx, inscID)
+		insc, err := s.populateInscription(ctx, inscID, true) // sat always needed
 		if err != nil {
 			return nil, err
 		}
