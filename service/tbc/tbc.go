@@ -3764,8 +3764,8 @@ func (s *Server) ExternalHeaderTearDown() error {
 }
 
 // populateInscription builds an OrdinalInscription from the raw DB data for
-// a given inscription ID. It looks up the 'i' value, decodes it, resolves the
-// current outpoint via 's', and fetches block height via BlockHeaderByHash.
+// a given inscription ID. It looks up the 'i' value, decodes it, and fetches
+// block height via BlockHeaderByHash.
 // When includeSat is false the expensive backward-walk sat computation is
 // skipped and SatNumber is returned as 0 (or whatever was stored at index time).
 func (s *Server) populateInscription(ctx context.Context, inscID [36]byte, includeSat bool) (*tbcapi.OrdinalInscription, error) {
