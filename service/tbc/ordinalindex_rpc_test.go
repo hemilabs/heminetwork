@@ -317,6 +317,32 @@ func TestRpcOrdinal(t *testing.T) {
 			},
 		},
 		{
+			name: "InscriptionByID IncludeSat returns stored sat",
+			req: tbcapi.OrdinalInscriptionByIDRequest{
+				TxID:       seed.txid,
+				InputIndex: 0,
+				IncludeSat: true,
+			},
+			respHeader: tbcapi.CmdOrdinalInscriptionByIDResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.OrdinalInscriptionByIDResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Error != nil {
+					return r.Error
+				}
+				if r.Inscription == nil {
+					return protocol.Errorf("inscription is nil")
+				}
+				if r.Inscription.SatNumber != seed.satNumber {
+					return protocol.Errorf("IncludeSat=true: sat: got %d, want %d",
+						r.Inscription.SatNumber, seed.satNumber)
+				}
+				return nil
+			},
+		},
+		{
 			name: "InscriptionByID not found",
 			req: tbcapi.OrdinalInscriptionByIDRequest{
 				TxID:       fakeTxid,
@@ -418,7 +444,9 @@ func TestRpcOrdinal(t *testing.T) {
 			},
 		},
 		{
-			name: "InscriptionsBySat positive",
+			// XXX(marco): InscriptionsBySat disabled — sat ranges not
+			// stored per outpoint. Expects error response.
+			name: "InscriptionsBySat disabled returns error",
 			req: tbcapi.OrdinalInscriptionsBySatRequest{
 				SatNumber: seed.satNumber,
 			},
@@ -428,21 +456,14 @@ func TestRpcOrdinal(t *testing.T) {
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
 				}
-				if r.Error != nil {
-					return r.Error
-				}
-				if len(r.Inscriptions) != 1 {
-					return protocol.Errorf("expected 1 inscription, got %d",
-						len(r.Inscriptions))
-				}
-				if r.Inscriptions[0].TxID != seed.txid {
-					return protocol.Errorf("txid mismatch")
+				if r.Error == nil {
+					return protocol.Errorf("expected error, got nil")
 				}
 				return nil
 			},
 		},
 		{
-			name: "InscriptionsBySat empty",
+			name: "InscriptionsBySat disabled unknown sat returns error",
 			req: tbcapi.OrdinalInscriptionsBySatRequest{
 				SatNumber: 999_999_999,
 			},
@@ -452,12 +473,8 @@ func TestRpcOrdinal(t *testing.T) {
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
 				}
-				if r.Error != nil {
-					return r.Error
-				}
-				if len(r.Inscriptions) != 0 {
-					return protocol.Errorf("expected 0 inscriptions, got %d",
-						len(r.Inscriptions))
+				if r.Error == nil {
+					return protocol.Errorf("expected error, got nil")
 				}
 				return nil
 			},

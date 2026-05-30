@@ -913,6 +913,19 @@ func (i *ordinalIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ i
 	return nil
 }
 
+// XXX(marco): onSyncComplete and populateWork are dormant. The populator
+// fires on sync-complete and processes 'w' work queue entries (backward-
+// walking each inscription to compute its sat number, then writing the
+// real sat into 'i' and creating the 'a' entry). But the 'w' work queue
+// writes in windBlock are commented out, so the populator finds zero
+// entries and returns immediately.
+//
+// This is Path A for re-enabling InscriptionsBySat without stored sat
+// ranges: un-comment the workCache write in windBlock's else branch,
+// and the populator will grind through backward walks after sync
+// completes. Downside: hours of background computation.
+//
+
 func (i *ordinalIndexer) onSyncComplete() {
 	if !i.populating.CompareAndSwap(0, 1) {
 		return
