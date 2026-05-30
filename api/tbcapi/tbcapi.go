@@ -727,6 +727,11 @@ type SatRange struct {
 type OrdinalInscriptionByIDRequest struct {
 	TxID       chainhash.Hash `json:"tx_id"`
 	InputIndex uint32         `json:"input_index"`
+	// IncludeSat enables on-demand sat number computation via backward
+	// chain walk. This is expensive (seconds per inscription at depth)
+	// because sat ranges are not yet stored per outpoint. When false
+	// the response returns SatNumber=0. Default: false.
+	IncludeSat bool `json:"include_sat"`
 }
 
 // OrdinalInscriptionByIDResponse is the response for OrdinalInscriptionByIDRequest.
@@ -751,6 +756,11 @@ type OrdinalInscriptionContentResponse struct {
 // OrdinalInscriptionsByBlockRequest lists inscriptions created in a block.
 type OrdinalInscriptionsByBlockRequest struct {
 	Hash chainhash.Hash `json:"hash"`
+	// IncludeSat enables on-demand sat number computation via backward
+	// chain walk. This is expensive (seconds per inscription at depth)
+	// because sat ranges are not yet stored per outpoint. When false
+	// the response returns SatNumber=0. Default: false.
+	IncludeSat bool `json:"include_sat"`
 }
 
 // OrdinalInscriptionsByBlockResponse is the response for OrdinalInscriptionsByBlockRequest.
@@ -764,6 +774,11 @@ type OrdinalInscriptionsByAddressRequest struct {
 	Address string `json:"address"`
 	Start   uint32 `json:"start"`
 	Count   uint32 `json:"count"`
+	// IncludeSat enables on-demand sat number computation via backward
+	// chain walk. This is expensive (seconds per inscription at depth)
+	// because sat ranges are not yet stored per outpoint. When false
+	// the response returns SatNumber=0. Default: false.
+	IncludeSat bool `json:"include_sat"`
 }
 
 // OrdinalInscriptionsByAddressResponse is the response for OrdinalInscriptionsByAddressRequest.
