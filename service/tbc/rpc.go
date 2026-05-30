@@ -1646,7 +1646,7 @@ func (s *Server) handleOrdinalInscriptionByIDRequest(ctx context.Context, req *t
 	log.Tracef("handleOrdinalInscriptionByIDRequest")
 	defer log.Tracef("handleOrdinalInscriptionByIDRequest exit")
 
-	insc, err := s.InscriptionByID(ctx, req.TxID, req.InputIndex)
+	insc, err := s.InscriptionByID(ctx, req.TxID, req.InputIndex, req.IncludeSat)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.OrdinalInscriptionByIDResponse{
@@ -1695,7 +1695,7 @@ func (s *Server) handleOrdinalInscriptionsByBlockRequest(ctx context.Context, re
 	log.Tracef("handleOrdinalInscriptionsByBlockRequest")
 	defer log.Tracef("handleOrdinalInscriptionsByBlockRequest exit")
 
-	inscriptions, err := s.InscriptionsByBlock(ctx, req.Hash)
+	inscriptions, err := s.InscriptionsByBlock(ctx, req.Hash, req.IncludeSat)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.OrdinalInscriptionsByBlockResponse{
@@ -1718,7 +1718,7 @@ func (s *Server) handleOrdinalInscriptionsByAddressRequest(ctx context.Context, 
 	log.Tracef("handleOrdinalInscriptionsByAddressRequest")
 	defer log.Tracef("handleOrdinalInscriptionsByAddressRequest exit")
 
-	inscriptions, err := s.InscriptionsByAddress(ctx, req.Address, req.Start, req.Count)
+	inscriptions, err := s.InscriptionsByAddress(ctx, req.Address, req.Start, req.Count, req.IncludeSat)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.OrdinalInscriptionsByAddressResponse{

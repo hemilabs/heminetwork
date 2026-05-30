@@ -1188,7 +1188,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return err
 		}
-		insc, err := s.InscriptionByID(ctx, *chtxid, uint32(idx))
+		insc, err := s.InscriptionByID(ctx, *chtxid, uint32(idx), false)
 		if err != nil {
 			return fmt.Errorf("inscription: %w", err)
 		}
@@ -1227,7 +1227,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		inscriptions, err := s.InscriptionsByBlock(ctx, *chhash)
+		inscriptions, err := s.InscriptionsByBlock(ctx, *chhash, false)
 		if err != nil {
 			return fmt.Errorf("inscriptions by block: %w", err)
 		}
@@ -1280,7 +1280,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			}
 			count = uint32(v)
 		}
-		inscriptions, err := s.InscriptionsByAddress(ctx, address, start, count)
+		inscriptions, err := s.InscriptionsByAddress(ctx, address, start, count, false)
 		if err != nil {
 			return fmt.Errorf("inscriptions by address: %w", err)
 		}

@@ -205,6 +205,8 @@ func ordinalWorkKey(blockHeight uint32, seq uint16) tbcd.OrdinalWorkKey {
 // The inscription ID (reveal_txid(32) + input_index(4)) is sufficient for
 // the background populator to locate the reveal and compute the sat number.
 // Layout: inscription_id(36), zero-padded to the fixed work-value width.
+//
+//nolint:unused // kept for revival with watermark/populator
 func encodeWorkValue(inscID [36]byte) tbcd.OrdinalWorkValue {
 	var v tbcd.OrdinalWorkValue
 	copy(v[:36], inscID[:])
@@ -304,23 +306,26 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	txs := block.Transactions()
 	var inscriptionSeq uint32
 
-	wm, err := i.getWatermark(ctx)
-	if err != nil {
-		return err
-	}
-
-	// Check if this block crosses the watermark threshold.
-	// Wall clock detection, block height storage.
-	if wm == nil {
-		blockTime := block.MsgBlock().Header.Timestamp
-		if time.Since(blockTime) < i.watermarkGap {
-			i.setWatermark(blockHeight)
-			wm = &blockHeight
-			log.Infof("ordinal watermark set at height %d", blockHeight)
-		}
-	}
-
-	fullComputation := wm != nil
+	// XXX(marco): watermark and backward-walk sat computation are
+	// disabled for performance. The watermark detects the chain tip
+	// and triggers full sat computation via backward walk; this is
+	// too slow for bulk indexing (12+ seconds per inscription at
+	// depth). Sat numbers will be computed on demand at query time.
+	// These may be revived once stored sat ranges per outpoint make
+	// the backward walk unnecessary.
+	//
+	// Original watermark code:
+	//   wm, err := i.getWatermark(ctx)
+	//   if err != nil { return err }
+	//   if wm == nil {
+	//       blockTime := block.MsgBlock().Header.Timestamp
+	//       if time.Since(blockTime) < i.watermarkGap {
+	//           i.setWatermark(blockHeight)
+	//           wm = &blockHeight
+	//       }
+	//   }
+	//   fullComputation := wm != nil
+	fullComputation := false
 
 	var feeList []feeCarry
 	var blockFeeBase uint64
@@ -439,7 +444,11 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 					cache.PutAux(auxOP, ordinalBlockInscriptionKey(blockHash, inscriptionSeq),
 						f.inscID[:])
 					// 'w': work queue for background sat-number populator.
-					i.workCache[ordinalWorkKey(blockHeight, uint16(inscriptionSeq))] = encodeWorkValue(f.inscID)
+					// XXX(marco): disabled — populator is not active while
+					// watermark is disabled. May be revived for deferred
+					// sat computation once sat ranges are stored per outpoint.
+					// Original:
+					// i.workCache[ordinalWorkKey(blockHeight, uint16(inscriptionSeq))] = encodeWorkValue(f.inscID)
 				}
 				inscriptionSeq++
 			}
