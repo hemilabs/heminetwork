@@ -214,13 +214,52 @@ func (s *Server) getTBCAPICommandHandler(cmd protocol.Command, payload any) func
 		return func(ctx context.Context) (any, error) {
 			return s.handleOrdinalInscriptionsByAddressRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsByAddressRequest))
 		}
+	// XXX(marco): InscriptionsBySat and SatRangesByOutpoint are disabled.
+	//
+	// SatRangesByOutpoint is hard-blocked on stored sat ranges per
+	// outpoint ('r' prefix). There is no alternative — it returns sat
+	// ranges by definition.
+	//
+	// InscriptionsBySat has two possible paths to re-enable:
+	//
+	// Path A (no stored ranges): re-enable the watermark/populator
+	// background goroutine. After initial sync completes, the populator
+	// picks up 'w' work queue entries and backward-walks each inscription
+	// to compute its sat number. It writes the real sat into 'i' and
+	// creates the 'a' (sat→inscription) entry. InscriptionsBySat starts
+	// working as the populator catches up. Downside: the backward walk
+	// takes hours to complete for all inscriptions, so there's a lag
+	// between sync and sat data availability.
+	//
+	// Path B (stored ranges): store sat ranges per outpoint during
+	// windBlock. Every tx output gets an 'r' entry with FIFO-split
+	// ranges from inputs. Inscription sat numbers are O(1) lookups
+	// during wind, 'a' index is populated inline. Both RPCs work
+	// immediately after sync. Downside: 'r' entries for every output
+	// is UTXO-index-sized data (~33 entries per block) requiring
+	// careful cache/flush tuning.
+	//
+	// case tbcapi.CmdOrdinalInscriptionsBySatRequest:
+	// 	return func(ctx context.Context) (any, error) {
+	// 		return s.handleOrdinalInscriptionsBySatRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsBySatRequest))
+	// 	}
+	// case tbcapi.CmdOrdinalSatRangesByOutpointRequest:
+	// 	return func(ctx context.Context) (any, error) {
+	// 		return s.handleOrdinalSatRangesByOutpointRequest(ctx, payload.(*tbcapi.OrdinalSatRangesByOutpointRequest))
+	// 	}
 	case tbcapi.CmdOrdinalInscriptionsBySatRequest:
 		return func(ctx context.Context) (any, error) {
-			return s.handleOrdinalInscriptionsBySatRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsBySatRequest))
+			log.Warningf("InscriptionsBySat called but disabled (sat ranges not stored per outpoint)")
+			return &tbcapi.OrdinalInscriptionsBySatResponse{
+				Error: protocol.RequestErrorf("InscriptionsBySat is disabled: sat ranges not yet stored per outpoint"),
+			}, nil
 		}
 	case tbcapi.CmdOrdinalSatRangesByOutpointRequest:
 		return func(ctx context.Context) (any, error) {
-			return s.handleOrdinalSatRangesByOutpointRequest(ctx, payload.(*tbcapi.OrdinalSatRangesByOutpointRequest))
+			log.Warningf("SatRangesByOutpoint called but disabled (sat ranges not stored per outpoint)")
+			return &tbcapi.OrdinalSatRangesByOutpointResponse{
+				Error: protocol.RequestErrorf("SatRangesByOutpoint is disabled: sat ranges not yet stored per outpoint"),
+			}, nil
 		}
 	default:
 		return nil
@@ -1735,6 +1774,7 @@ func (s *Server) handleOrdinalInscriptionsByAddressRequest(ctx context.Context, 
 	}, nil
 }
 
+//nolint:unused // handler kept for revival when sat ranges are stored per outpoint
 func (s *Server) handleOrdinalInscriptionsBySatRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionsBySatRequest) (any, error) {
 	log.Tracef("handleOrdinalInscriptionsBySatRequest")
 	defer log.Tracef("handleOrdinalInscriptionsBySatRequest exit")
@@ -1758,6 +1798,7 @@ func (s *Server) handleOrdinalInscriptionsBySatRequest(ctx context.Context, req 
 	}, nil
 }
 
+//nolint:unused // handler kept for revival when sat ranges are stored per outpoint
 func (s *Server) handleOrdinalSatRangesByOutpointRequest(ctx context.Context, req *tbcapi.OrdinalSatRangesByOutpointRequest) (any, error) {
 	log.Tracef("handleOrdinalSatRangesByOutpointRequest")
 	defer log.Tracef("handleOrdinalSatRangesByOutpointRequest exit")

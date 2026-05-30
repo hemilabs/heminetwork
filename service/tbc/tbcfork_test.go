@@ -4756,3 +4756,191 @@ func TestOrdinalIndexFork(t *testing.T) {
 	}
 	t.Log("final unwind complete — all ordinal data verified absent at genesis")
 }
+
+// TestOrdinalIndexForkTinyCache exercises ordinal wind/unwind with a cache
+// small enough to force multiple flush cycles. This ensures the ordinal
+// indexer correctly reads from DB after cache flushes during unwind, and
+// that no data is lost when the cache boundary falls mid-reorg.
+func TestOrdinalIndexForkTinyCache(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		OrdinalWatermarkGap:     24 * time.Hour,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       5, // tiny cache — forces multi-batch flush
+		Network:                 networkLocalnet,
+		RequestTimeout:          10,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	address := n.address
+	parent := chaincfg.RegressionNetParams.GenesisHash
+
+	// Chain A: prefix block + 3 inscription blocks. mineInscription
+	// only creates inscriptions at height >= 2 (needs parent coinbase).
+	// With MaxCachedOrdinals=5 and ~5+ entries per inscription block,
+	// this forces cache flushes during wind.
+	a0, err := n.MineAndSend(ctx, "a0", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1, err := n.MineAndSend(ctx, "a1", a0.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2, err := n.MineAndSend(ctx, "a2", a1.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a3, err := n.MineAndSend(ctx, "a3", a2.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	// Index chain A.
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify all 3 inscriptions are present.
+	for _, blk := range []*block{a1, a2, a3} {
+		blockHash := *blk.Hash()
+		inscs, err := s.InscriptionsByBlock(ctx, blockHash, false)
+		if err != nil {
+			t.Fatalf("chain A: InscriptionsByBlock(%s): %v", blk.name, err)
+		}
+		if len(inscs) != 1 {
+			t.Fatalf("chain A: %s: expected 1 inscription, got %d", blk.name, len(inscs))
+		}
+	}
+	t.Log("chain A: all 3 inscriptions verified present")
+
+	// Chain B: 5 plain blocks from genesis (longer than A, no inscriptions).
+	// This forces a reorg: unwind A's 4 blocks, wind B's 5.
+	l, err = s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b4, err := n.MineAndSend(ctx, "b4", b3.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b5, err := n.MineAndSend(ctx, "b5", b4.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reorg: unwind chain A (3 inscription blocks), wind chain B.
+	// With MaxCachedOrdinals=5, the unwind should flush at least once.
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatalf("reorg sync failed: %v", err)
+	}
+
+	// Verify chain A inscriptions are gone.
+	for _, blk := range []*block{a1, a2, a3} {
+		blockHash := *blk.Hash()
+		inscs, err := s.InscriptionsByBlock(ctx, blockHash, false)
+		if err != nil {
+			// Not found is expected after unwind.
+			continue
+		}
+		if len(inscs) != 0 {
+			t.Fatalf("post-reorg: %s should have 0 inscriptions, got %d",
+				blk.name, len(inscs))
+		}
+	}
+
+	// Verify chain B has no inscriptions.
+	for _, blk := range []*block{b1, b2, b3, b4, b5} {
+		blockHash := *blk.Hash()
+		inscs, err := s.InscriptionsByBlock(ctx, blockHash, false)
+		if err != nil {
+			continue // not found is fine
+		}
+		if len(inscs) != 0 {
+			t.Fatalf("chain B: %s should have 0 inscriptions, got %d",
+				blk.name, len(inscs))
+		}
+	}
+
+	t.Log("reorg with tiny cache completed successfully — ordinal data consistent")
+}
