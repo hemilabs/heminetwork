@@ -4508,7 +4508,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 		inscTxid := *inscTx.Hash()
 
 		// 'n': InscriptionsByBlock
-		inscs, err := s.InscriptionsByBlock(ctx, blockHash)
+		inscs, err := s.InscriptionsByBlock(ctx, blockHash, false)
 		if err != nil {
 			t.Fatalf("[%s] 'n' InscriptionsByBlock: %v", label, err)
 		}
@@ -4517,26 +4517,28 @@ func TestOrdinalIndexFork(t *testing.T) {
 		}
 
 		// 'i': InscriptionByID — must have real sat number
-		inscByID, err := s.InscriptionByID(ctx, inscTxid, 0)
+		inscByID, err := s.InscriptionByID(ctx, inscTxid, 0, false)
 		if err != nil {
 			t.Fatalf("[%s] 'i' InscriptionByID: %v", label, err)
 		}
 		if inscByID.TxID != inscTxid {
 			t.Fatalf("[%s] 'i' TxID mismatch", label)
 		}
-		if inscByID.SatNumber == 0 {
-			t.Fatalf("[%s] 'i' sat number is 0 — full computation should have set it", label)
-		}
-
-		// 'a': InscriptionsBySat — reverse lookup must work
-		satInscs, err := s.InscriptionsBySat(ctx, inscByID.SatNumber)
-		if err != nil {
-			t.Fatalf("[%s] 'a' InscriptionsBySat(%d): %v", label, inscByID.SatNumber, err)
-		}
-		if len(satInscs) != 1 {
-			t.Fatalf("[%s] 'a' expected 1 inscription for sat %d, got %d",
-				label, inscByID.SatNumber, len(satInscs))
-		}
+		// XXX(marco): sat number and 'a' index assertions disabled
+		// while fullComputation is off. Sat will be 0 and 'a' won't
+		// have entries. Revive when sat ranges are stored per outpoint.
+		//
+		// if inscByID.SatNumber == 0 {
+		// 	t.Fatalf("[%s] 'i' sat number is 0 — full computation should have set it", label)
+		// }
+		// satInscs, err := s.InscriptionsBySat(ctx, inscByID.SatNumber)
+		// if err != nil {
+		// 	t.Fatalf("[%s] 'a' InscriptionsBySat(%d): %v", label, inscByID.SatNumber, err)
+		// }
+		// if len(satInscs) != 1 {
+		// 	t.Fatalf("[%s] 'a' expected 1 inscription for sat %d, got %d",
+		// 		label, inscByID.SatNumber, len(satInscs))
+		// }
 
 		// Content
 		contentType, content, err := s.InscriptionContent(ctx, inscTxid, 0)
@@ -4596,7 +4598,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 			t.Fatalf("[%s] derive address: %v", label, aerr)
 		}
 		holdingAddr := addrs[0].EncodeAddress()
-		addrInscs, aerr := s.InscriptionsByAddress(ctx, holdingAddr, 0, 100)
+		addrInscs, aerr := s.InscriptionsByAddress(ctx, holdingAddr, 0, 100, false)
 		if aerr != nil {
 			t.Fatalf("[%s] InscriptionsByAddress(%s): %v", label, holdingAddr, aerr)
 		}
@@ -4627,11 +4629,11 @@ func TestOrdinalIndexFork(t *testing.T) {
 		inscTx := blk.TxByIndex(1)
 		inscTxid := *inscTx.Hash()
 
-		inscs, _ := s.InscriptionsByBlock(ctx, blockHash)
+		inscs, _ := s.InscriptionsByBlock(ctx, blockHash, false)
 		if len(inscs) != 0 {
 			t.Fatalf("[%s] 'n' expected 0 inscriptions, got %d", label, len(inscs))
 		}
-		_, err := s.InscriptionByID(ctx, inscTxid, 0)
+		_, err := s.InscriptionByID(ctx, inscTxid, 0, false)
 		if err == nil {
 			t.Fatalf("[%s] 'i' should fail after unwind", label)
 		}
@@ -4657,7 +4659,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 		_, addrs, _, aerr := txscript.ExtractPkScriptAddrs(revealPkScript, s.g.chain)
 		if aerr == nil && len(addrs) > 0 {
 			revealAddr := addrs[0].EncodeAddress()
-			addrInscs, _ := s.InscriptionsByAddress(ctx, revealAddr, 0, 100)
+			addrInscs, _ := s.InscriptionsByAddress(ctx, revealAddr, 0, 100, false)
 			for _, ai := range addrInscs {
 				if ai.TxID == inscTxid {
 					t.Fatalf("[%s] InscriptionsByAddress(%s): unwound inscription %v still visible",
