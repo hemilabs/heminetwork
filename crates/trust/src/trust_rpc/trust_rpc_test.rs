@@ -179,6 +179,7 @@ mod container_tests {
                 if relative.as_os_str().is_empty()
                     || str::starts_with(relative.to_str().unwrap(), ".git")
                     || str::starts_with(relative.to_str().unwrap(), "target")
+                    || str::starts_with(relative.to_str().unwrap(), ".gocache")
                 {
                     // println!("skipping {}", relative.display());
                     continue;
