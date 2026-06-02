@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of an inventory message list being accessed before ensuring the slice
   isn't empty ([#1039](https://github.com/hemilabs/heminetwork/pull/1039)).
 
+- Fix `KeystonesByHeight` panic when primary keystone hash keys collide
+  with the height-index key range in LevelDB. The iterator now filters
+  by key length before decoding.
+
 ### Breaking Changes
 
 - Rename `TBC_BLOCKHEADER_CACHE_SIZE` environment variable to
