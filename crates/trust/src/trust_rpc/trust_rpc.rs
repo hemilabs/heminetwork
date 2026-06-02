@@ -1,6 +1,5 @@
 use crate::trust_rpc::protocol::{JobStatus, Payload, ProtocolErrable};
 use base64::Engine as _;
-use bitcoin::consensus::Encodable;
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
@@ -27,8 +26,8 @@ mod protocol_test;
 
 #[derive(Error, Debug)]
 pub enum TrustRPCError {
-    #[error("Bitcoin error {0}")]
-    Bitcoin(#[from] bitcoin::consensus::encode::Error),
+    #[error("Bitcoin hex decode error: {0}")]
+    BitcoinHex(#[from] bitcoin::consensus::encode::FromHexError),
     #[error("Tungstenite error: {0}")]
     Tungstenite(#[from] tungstenite::Error),
     #[error("Tokio IO error: {0}")]
@@ -311,7 +310,7 @@ impl TrustRPC {
             tokio::time::timeout(self.config.cmd_timeout, async {
                 let mut write = self.write.lock().await;
 
-                // Send ping request
+                // Send request
                 tokio::select! {
                     _ = self.cancel.cancelled() => return Err(TrustRPCError::Cancelled),
                     res = write.send(tungstenite::Message::text(msg.marshal()?)) => res,
@@ -433,17 +432,14 @@ impl TrustRPC {
                 return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
             }
         };
-
         Ok(pl)
     }
 
     pub fn block_insert(&mut self, block: bitcoin::Block) -> Result<bitcoin::BlockHash> {
         let (id, rcv, _guard) = self.add_chan()?;
-        let mut buff = vec![];
-        block
-            .consensus_encode(&mut buff)
-            .map_err(|e| TrustRPCError::Bitcoin(e.into()))?;
-        let req = protocol::BlockInsertRequest { block: buff };
+        let req = protocol::BlockInsertRequest {
+            block: bitcoin::consensus::encode::serialize_hex(&block),
+        };
         let msg = Payload::BlockInsertRequest(req).encode(&id)?;
 
         let res = self.make_request(rcv, msg)?;

@@ -116,9 +116,9 @@ pub enum Command {
     BlockByHashRequest,
     #[serde(rename = "tbcapi-block-by-hash-raw-response")]
     BlockByHashResponse,
-    #[serde(rename = "tbcapi-block-insert-request")]
+    #[serde(rename = "tbcapi-block-insert-raw-request")]
     BlockInsertRequest,
-    #[serde(rename = "tbcapi-block-insert-response")]
+    #[serde(rename = "tbcapi-block-insert-raw-response")]
     BlockInsertResponse,
     #[serde(rename = "tbcapi-block-in-tx-index-request")]
     BlockInTxIndexRequest,
@@ -398,7 +398,7 @@ pub struct BlockHeaderBestRequest {}
 pub struct BlockHeaderBestResponse {
     pub height: u64,
     #[serde(default)]
-    pub block_header: Vec<u8>,
+    pub block_header: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
 }
@@ -410,7 +410,7 @@ pub struct BlockHeadersByHeightRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BlockHeadersByHeightResponse {
-    pub block_headers: Vec<Vec<u8>>,
+    pub block_headers: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
 }
@@ -424,7 +424,7 @@ pub struct BlockDownloadAsyncRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BlockDownloadAsyncResponse {
     #[serde(default)]
-    pub block: Vec<u8>,
+    pub block: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
 }
@@ -471,7 +471,7 @@ pub struct TxByIdRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TxByIdResponse {
     #[serde(default)]
-    pub tx: Vec<u8>,
+    pub tx: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
 }
@@ -487,11 +487,12 @@ pub struct KeystoneTx {
     pub block_hash: String,
     pub tx_index: u32,
     pub block_height: u32,
-    pub raw_tx: Vec<u8>,
+    pub raw_tx: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct KeystoneTxsByL2KeystoneAbrevHashResponse {
+    #[serde(default, deserialize_with = "deserialize_null_as_empty")]
     pub keystone_txs: Vec<KeystoneTx>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
@@ -505,14 +506,14 @@ pub struct BlockByHashRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BlockByHashResponse {
     #[serde(default)]
-    pub block: Vec<u8>,
+    pub block: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BlockInsertRequest {
-    pub block: Vec<u8>,
+    pub block: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -569,7 +570,7 @@ pub struct BlockHeaderByHashRequest {
 pub struct BlockHeaderByHashResponse {
     pub height: u64,
     #[serde(default)]
-    pub block_header: Vec<u8>,
+    pub block_header: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
 }
@@ -630,27 +631,35 @@ impl fmt::Display for ProtocolError {
 
 impl std::error::Error for ProtocolError {}
 
-pub fn decode_tx(raw: &Vec<u8>) -> Result<bitcoin::Transaction, bitcoin::consensus::encode::Error> {
-    bitcoin::consensus::Decodable::consensus_decode(&mut std::io::Cursor::new(raw))
+fn deserialize_null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
-pub fn decode_block(raw: &Vec<u8>) -> Result<bitcoin::Block, bitcoin::consensus::encode::Error> {
-    bitcoin::consensus::Decodable::consensus_decode(&mut std::io::Cursor::new(raw))
+pub fn decode_tx(
+    raw: &str,
+) -> Result<bitcoin::Transaction, bitcoin::consensus::encode::FromHexError> {
+    bitcoin::consensus::encode::deserialize_hex(raw)
+}
+
+pub fn decode_block(raw: &str) -> Result<bitcoin::Block, bitcoin::consensus::encode::FromHexError> {
+    bitcoin::consensus::encode::deserialize_hex(raw)
 }
 
 pub fn decode_header(
-    raw: &Vec<u8>,
-) -> Result<bitcoin::block::Header, bitcoin::consensus::encode::Error> {
-    bitcoin::consensus::Decodable::consensus_decode(&mut std::io::Cursor::new(raw))
+    raw: &str,
+) -> Result<bitcoin::block::Header, bitcoin::consensus::encode::FromHexError> {
+    bitcoin::consensus::encode::deserialize_hex(raw)
 }
 
 pub fn decode_header_batch(
-    raw: &[Vec<u8>],
-) -> Result<Vec<bitcoin::block::Header>, bitcoin::consensus::encode::Error> {
-    raw.iter()
-        .map(|bytes| {
-            bitcoin::consensus::Decodable::consensus_decode(&mut std::io::Cursor::new(bytes))
-        })
+    raws: &[String],
+) -> Result<Vec<bitcoin::block::Header>, bitcoin::consensus::encode::FromHexError> {
+    raws.iter()
+        .map(|s| bitcoin::consensus::encode::deserialize_hex(s))
         .collect()
 }
 

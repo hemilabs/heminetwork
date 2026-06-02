@@ -9,13 +9,13 @@ use tokio_tungstenite::accept_async;
 
 mod container_tests {
     use super::*;
+    use bitcoin::{BlockHash, address::Address};
     use futures_util::StreamExt;
-    use std::thread::sleep;
     use tar::Builder;
     use testcontainers::bollard::Docker;
     use testcontainers::bollard::body_full;
     use testcontainers::{
-        GenericImage, ImageExt,
+        ContainerAsync, GenericImage, ImageExt,
         core::{ContainerPort, ExecCommand, WaitFor},
         runners::AsyncRunner,
     };
@@ -31,6 +31,22 @@ mod container_tests {
     const TBCD_WS_PATH: &str = "/v1/admin/ws";
     const TBCD_WS_PORT: u16 = 8082;
 
+    struct ContainerSet<'a> {
+        rt: &'a Runtime,
+        containers: Vec<ContainerAsync<GenericImage>>,
+    }
+
+    impl<'a> Drop for ContainerSet<'a> {
+        fn drop(&mut self) {
+            let containers = std::mem::take(&mut self.containers);
+            self.rt.block_on(async move {
+                for c in containers {
+                    c.stop().await.unwrap();
+                }
+            });
+        }
+    }
+
     fn skip_docker() -> bool {
         let res = match std::env::var("HEMI_DOCKER_TESTS") {
             Ok(v) => v,
@@ -39,18 +55,107 @@ mod container_tests {
         !matches!(res.as_str(), "true" | "t" | "1")
     }
 
-    #[test]
-    fn test_synced_with_tbc_container() {
-        if skip_docker() {
-            return;
+    fn create_test_header(parent_hash: BlockHash, n: u32) -> bitcoin::block::Header {
+        bitcoin::block::Header {
+            version: bitcoin::blockdata::block::Version::ONE,
+            prev_blockhash: parent_hash,
+            merkle_root: bitcoin::TxMerkleNode::all_zeros(),
+            time: 12345,
+            bits: bitcoin::CompactTarget::from_consensus(0x207fffff),
+            nonce: n,
         }
+    }
 
+    // Returns a block containing a keystone OP_RETURN tx, and the abrev hash
+    // used to look it up via keystone_txs_by_hash.
+    fn create_test_block_with_keystone(
+        parent_hash: BlockHash,
+        nonce: u32,
+        utxo: &protocol::Utxo,
+    ) -> (bitcoin::Block, [u8; 32]) {
+        // Build L2KeystoneAbrev: "HEMI" + 76 bytes of abrev data.
+        let mut abrev = [0u8; 76];
+        abrev[0] = 1; // Version
+        abrev[1..5].copy_from_slice(&1u32.to_be_bytes()); // L1BlockNumber
+        abrev[5..9].copy_from_slice(&2u32.to_be_bytes()); // L2BlockNumber
+
+        let abrev_hash = {
+            let h = bitcoin::hashes::sha256d::Hash::hash(&abrev);
+            let mut b = *h.as_byte_array();
+            b.reverse();
+            b
+        };
+
+        let mut op_return_data = Vec::with_capacity(4 + 76);
+        op_return_data.extend_from_slice(b"HEMI");
+        op_return_data.extend_from_slice(&abrev);
+
+        let push_data = bitcoin::script::PushBytesBuf::try_from(op_return_data).unwrap();
+        let keystone_script = bitcoin::Script::builder()
+            .push_opcode(bitcoin::opcodes::all::OP_RETURN)
+            .push_slice(&push_data)
+            .into_script();
+
+        let coinbase = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::ONE,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin::OutPoint::null(),
+                script_sig: bitcoin::Script::builder()
+                    .push_int(nonce as i64)
+                    .into_script(),
+                sequence: bitcoin::Sequence::MAX,
+                witness: bitcoin::Witness::new(),
+            }],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(5000000000),
+                script_pubkey: bitcoin::ScriptBuf::new(),
+            }],
+        };
+
+        let tx_id = bitcoin::transaction::Txid::from_str(&utxo.tx_id).unwrap();
+        let prev_out = bitcoin::OutPoint::new(tx_id, utxo.out_index);
+
+        let keystone_tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::ONE,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: prev_out,
+                script_sig: bitcoin::ScriptBuf::new(),
+                sequence: bitcoin::Sequence::MAX,
+                witness: bitcoin::Witness::new(),
+            }],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::ZERO,
+                script_pubkey: keystone_script,
+            }],
+        };
+
+        let txdata = vec![coinbase, keystone_tx];
+        let merkle_root = bitcoin::merkle_tree::calculate_root(
+            txdata.iter().map(|tx| tx.compute_txid().to_raw_hash()),
+        )
+        .map(bitcoin::TxMerkleNode::from_raw_hash)
+        .unwrap_or(bitcoin::TxMerkleNode::all_zeros());
+
+        let header = bitcoin::block::Header {
+            version: bitcoin::blockdata::block::Version::ONE,
+            prev_blockhash: parent_hash,
+            merkle_root,
+            time: 12345,
+            bits: bitcoin::CompactTarget::from_consensus(0x207fffff),
+            nonce,
+        };
+
+        let block = bitcoin::Block { header, txdata };
+        (block, abrev_hash)
+    }
+
+    fn create_test_containers(
+        rt: &'_ Runtime,
+        block_count: u32,
+    ) -> (ContainerSet<'_>, String, Vec<String>) {
         let tbcd_root = project_root::get_project_root().unwrap();
-
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
 
         let x: u8 = rand::random();
         let bitcoind_container_name = format!("bitcoind-{}", x);
@@ -68,7 +173,7 @@ mod container_tests {
 
         let mut build_stream = docker.build_image(options, None, Some(body_full(tar_bytes.into())));
 
-        let (bitcoind, tbcd, url) = rt.block_on(async {
+        rt.block_on(async {
             while let Some(msg) = build_stream.next().await {
                 println!("Message: {msg:?}");
             }
@@ -95,34 +200,47 @@ mod container_tests {
                 .await
                 .expect("bitcoind failed to start");
 
-            // Generate 10 blocks
-            let cmd = ExecCommand::new([
-                "bitcoin-cli",
-                "-regtest=1",
-                "generatetoaddress",
-                "10",
-                REGNET_TEST_ADDR,
-            ]);
-
-            bitcoind.exec(cmd).await.unwrap();
+            let mut wait_for_insert: String = "handle (tbc admin)".into();
+            let mut block_hashes: Vec<String> = vec![];
+            if block_count > 0 {
+                // Generate 10 blocks
+                let cmd = ExecCommand::new([
+                    "bitcoin-cli",
+                    "-regtest=1",
+                    "generatetoaddress",
+                    &block_count.to_string(),
+                    REGNET_TEST_ADDR,
+                ]);
+                let mut res = bitcoind.exec(cmd).await.unwrap();
+                let stdo = res.stdout_to_vec().await.unwrap();
+                block_hashes = serde_json::from_slice(&stdo).expect("Failed to parse JSON");
+                wait_for_insert = format!(
+                    "Insert block {} at {}",
+                    block_hashes[block_hashes.len() - 1],
+                    block_count
+                );
+            };
 
             let tbc_seeds = format!("{}:18444", bitcoind_container_name);
 
             // Starts tbcd.
-            // It logs "handle (tbc admin): /v1/admin/ws" to stderr
+            // It logs "handle (tbc admin): /v1/admin/ws" to stdout
             // once it has registered the admin WebSocket handler.
             let tbcd_image = GenericImage::new("hemilabs/tbcd-test", "latest");
 
             let tbcd = tbcd_image
                 .with_exposed_port(ContainerPort::Tcp(TBCD_WS_PORT))
                 .with_wait_for(WaitFor::message_on_stderr("handle (tbc admin)"))
+                .with_wait_for(WaitFor::message_on_stderr(wait_for_insert))
                 .with_env_var("TBC_NETWORK", "localnet")
+                .with_env_var("TBC_AUTO_INDEX", "false")
                 .with_env_var("TBC_SEEDS", tbc_seeds)
                 .with_env_var("TBC_LISTEN_ADDRESS", "0.0.0.0:8082")
                 .with_env_var("TBC_LEVELDB_HOME", "/tmp/tbcd")
                 .with_env_var("TBC_JWT_TOKEN", JWT_SECRET_HEX)
                 .with_env_var("TBC_BLOCK_CACHE_SIZE", "10mb")
                 .with_env_var("TBC_BLOCKHEADER_CACHE_SIZE", "1mb")
+                .with_env_var("TBC_HEMI_INDEX", "true")
                 .with_network("trust_tests")
                 .start()
                 .await
@@ -134,8 +252,26 @@ mod container_tests {
                 .expect("tbcd port not mapped");
 
             let url = format!("ws://127.0.0.1:{}{}", tbcd_port, TBCD_WS_PATH);
-            (bitcoind, tbcd, url)
-        });
+            let cs = ContainerSet {
+                rt,
+                containers: vec![tbcd, bitcoind],
+            };
+            (cs, url, block_hashes)
+        })
+    }
+
+    #[test]
+    fn test_trust_rpc_e2e() {
+        if skip_docker() {
+            return;
+        }
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let (_cs, url, hashes) = create_test_containers(&rt, 10);
 
         // Starts trust
         let config = Config {
@@ -148,23 +284,329 @@ mod container_tests {
 
         let mut rpc = TrustRPC::new(config).unwrap();
 
-        // Wait up to 25 seconds for tbcd to sync
-        let mut synced = false;
-        for _ in 0..100 {
-            let sync = rpc.synced().expect("synced should return valid response");
-            if sync.synced && sync.blockheader_index_height.height == 10 {
-                synced = true;
-                break;
-            }
-            println!("received sync status: {:?}", sync);
-            sleep(Duration::from_millis(250));
+        struct TestTableItem {
+            name: String,
+            run: fn(
+                rpc: &mut TrustRPC,
+                headers: &Vec<BlockHash>,
+                txs: &mut Vec<protocol::Utxo>,
+            ) -> Result<()>,
+            early_exit: bool,
         }
-        assert!(synced);
 
-        rt.block_on(async move {
-            bitcoind.stop().await.unwrap();
-            tbcd.stop().await.unwrap();
-        });
+        let hashes: Vec<BlockHash> = hashes
+            .iter()
+            .map(|bh| bitcoin::BlockHash::from_str(bh).unwrap())
+            .collect();
+
+        let tests = vec![
+            TestTableItem {
+                name: "running".into(),
+                run: |rpc, _, _| {
+                    let res = rpc.running()?;
+                    if !res {
+                        return Err(TrustRPCError::Other("expected TBC to be running".into()));
+                    }
+                    Ok(())
+                },
+                early_exit: true,
+            },
+            TestTableItem {
+                name: "sync_indexers_to_hash".into(),
+                run: |rpc, hashes, _| rpc.sync_indexers_to_hash(hashes[9]),
+                early_exit: true,
+            },
+            TestTableItem {
+                name: "block_headers_insert".into(),
+                run: |rpc, hashes, _| {
+                    let fake_header = create_test_header(hashes[3], 10);
+                    let (itt, canon, _, count) = rpc.block_headers_insert(&[fake_header])?;
+                    if count != 1 || itt != "fork extended" || canon.block_hash() != hashes[9] {
+                        return Err(TrustRPCError::Other(format!(
+                            "Unexpected insert response: count {:?} itt {:?} canonical block {:?}",
+                            count, itt, canon
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: true,
+            },
+            TestTableItem {
+                name: "utxos_by_address".into(),
+                run: |rpc, _, utxos| {
+                    let addr: Address = Address::from_str(REGNET_TEST_ADDR)
+                        .unwrap()
+                        .require_network(bitcoin::Network::Regtest)
+                        .unwrap();
+                    let new_utxos = rpc.utxos_by_address(addr, 0, 10, false)?;
+                    if new_utxos.len() != 10 {
+                        return Err(TrustRPCError::Other(format!(
+                            "Expected 10 utxos, got {}",
+                            utxos.len()
+                        )));
+                    }
+                    *utxos = new_utxos.clone();
+                    for x in new_utxos {
+                        if x.value != 5000000000 {
+                            return Err(TrustRPCError::Other(format!(
+                                "expected utxo value 5000000000, got {}",
+                                x.value
+                            )));
+                        }
+                    }
+                    Ok(())
+                },
+                early_exit: true,
+            },
+            TestTableItem {
+                name: "synced".into(),
+                run: |rpc, _, _| {
+                    let sync = rpc.synced()?;
+                    let expect =
+                        sync.at_least_missing == 1 && sync.blockheader_index_height.height == 10;
+                    if !expect {
+                        return Err(TrustRPCError::Other(format!(
+                            "Unexpected sync value: {:?}",
+                            sync
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "download_block_from_random_peers".into(),
+                run: |rpc, hashes, _| {
+                    let fake_block = bitcoin::BlockHash::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.download_block_from_random_peers(fake_block, 1) {
+                        Err(_) => {}
+                        Ok(_) => {
+                            return Err(TrustRPCError::Other("fake block shouldn't exist".into()));
+                        }
+                    }
+
+                    let blk = rpc.download_block_from_random_peers(hashes[9], 1)?;
+                    if blk.block_hash() != hashes[9] {
+                        return Err(TrustRPCError::Other(format!(
+                            "Unexpected block returned: {:?}",
+                            blk
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "block_header_by_hash".into(),
+                run: |rpc, hashes, _| {
+                    let (height, bh_by_hash) = rpc.block_header_by_hash(hashes[9])?;
+                    if bh_by_hash.block_hash() != hashes[9] || height != 10 {
+                        return Err(TrustRPCError::Other(format!(
+                            "Unexpected header returned: {:?}",
+                            bh_by_hash
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "block_header_best".into(),
+                run: |rpc, hashes, _| {
+                    let (height, bh_by_hash) = rpc.block_header_best()?;
+                    if bh_by_hash.block_hash() != hashes[9] || height != 10 {
+                        return Err(TrustRPCError::Other(format!(
+                            "Unexpected header returned: {:?}",
+                            bh_by_hash
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "block_headers_by_height".into(),
+                run: |rpc, hashes, _| {
+                    let headers: Vec<BlockHash> = rpc
+                        .block_headers_by_height(5)?
+                        .iter()
+                        .map(|e| e.block_hash())
+                        .collect();
+                    if headers.len() != 2 {
+                        return Err(TrustRPCError::Other(format!(
+                            "expected 2 headers, got {}",
+                            headers.len()
+                        )));
+                    }
+                    let fake_header = create_test_header(hashes[3], 10);
+                    if !headers.contains(&hashes[4]) || !headers.contains(&fake_header.block_hash())
+                    {
+                        return Err(TrustRPCError::Other(format!(
+                            "Unexpected headers returned: {:?}",
+                            headers
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "block_in_tx_index".into(),
+                run: |rpc, hashes, _| {
+                    if !rpc.block_in_tx_index(hashes[9])? {
+                        return Err(TrustRPCError::Other("block not in tx index".into()));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "full_block_available".into(),
+                run: |rpc, hashes, _| {
+                    if !rpc.full_block_available(hashes[9])? {
+                        return Err(TrustRPCError::Other("full block not available".into()));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "balance_by_address".into(),
+                run: |rpc, _, _| {
+                    let addr: Address = Address::from_str(REGNET_TEST_ADDR)
+                        .unwrap()
+                        .require_network(bitcoin::Network::Regtest)
+                        .unwrap();
+                    let bal = rpc.balance_by_address(addr)?;
+                    if bal != 50000000000 {
+                        return Err(TrustRPCError::Other(format!(
+                            "wanted balance 50000000000, got {}",
+                            bal
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "tx_by_id".into(),
+                run: |rpc, _, utxos| {
+                    let tx_id: bitcoin::transaction::Txid =
+                        bitcoin::transaction::Txid::from_str(&utxos[0].tx_id).unwrap();
+                    let tx = rpc.tx_by_id(tx_id)?;
+                    if tx.compute_txid() != tx_id || !tx.is_coinbase() {
+                        return Err(TrustRPCError::Other(format!(
+                            "Unexpected TX returned: {:?}",
+                            tx
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "script_hash_available_to_spend".into(),
+                run: |rpc, _, utxos| {
+                    let tx_id: bitcoin::transaction::Txid =
+                        bitcoin::transaction::Txid::from_str(&utxos[0].tx_id).unwrap();
+                    if !rpc.script_hash_available_to_spend(tx_id, utxos[0].out_index)? {
+                        return Err(TrustRPCError::Other(
+                            "txOut should be available to spend".into(),
+                        ));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "block_by_hash".into(),
+                run: |rpc, hashes, _| {
+                    let blk = rpc.block_by_hash(hashes[9])?;
+                    if blk.block_hash() != hashes[9] {
+                        return Err(TrustRPCError::Other(format!(
+                            "expected block hash {:?}, got {:?}",
+                            hashes[9],
+                            blk.block_hash()
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                name: "block_hash_by_tx_id".into(),
+                run: |rpc, hashes, utxos| {
+                    let tx_id = bitcoin::transaction::Txid::from_str(&utxos[0].tx_id).unwrap();
+                    let block_hash = rpc.block_hash_by_tx_id(tx_id)?;
+                    if !hashes.contains(&block_hash) {
+                        return Err(TrustRPCError::Other(format!(
+                            "block hash {:?} not in expected chain",
+                            block_hash
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+            TestTableItem {
+                // Inserts a block with a keystone tx as height-11 extension,
+                // then syncs the indexer to it so keystone_txs_by_hash can find it.
+                name: "block_insert".into(),
+                run: |rpc, hashes, utxos| {
+                    let (block, _) = create_test_block_with_keystone(hashes[9], 42, &utxos[9]);
+                    let block_hash = block.block_hash();
+                    rpc.block_headers_insert(&[block.header])?;
+                    let inserted_hash = rpc.block_insert(block)?;
+                    if inserted_hash != block_hash {
+                        return Err(TrustRPCError::Other(format!(
+                            "expected inserted hash {:?}, got {:?}",
+                            block_hash, inserted_hash
+                        )));
+                    }
+                    rpc.sync_indexers_to_hash(block_hash)?;
+                    Ok(())
+                },
+                early_exit: true,
+            },
+            TestTableItem {
+                name: "keystone_txs_by_hash".into(),
+                run: |rpc, hashes, utxos| {
+                    let (_, abrev_hash) = create_test_block_with_keystone(hashes[9], 42, &utxos[9]);
+                    let abrev_hash_hex = hex::encode(abrev_hash);
+                    let txs = rpc.keystone_txs_by_hash(abrev_hash_hex, 1)?;
+                    if txs.len() != 1 {
+                        return Err(TrustRPCError::Other(format!(
+                            "expected 1 keystone tx, got {}",
+                            txs.len()
+                        )));
+                    }
+                    Ok(())
+                },
+                early_exit: false,
+            },
+        ];
+
+        print!("\nRunning subtests:\n\n");
+        let mut pass = true;
+        let mut utxos = vec![];
+        for tti in tests {
+            match (tti.run)(&mut rpc, &hashes, &mut utxos) {
+                Ok(_) => println!("test {} ... ok", tti.name),
+                Err(e) => {
+                    println!("test {} ... FAIL: {}", tti.name, e);
+                    if tti.early_exit {
+                        panic!("{:?}", e);
+                    }
+                    pass = false;
+                }
+            }
+        }
+
+        if !pass {
+            panic!("One or more subtests failed")
+        }
+
+        print!("\nAll subtests passed.\n\n");
     }
 
     fn create_build_context(dir: &str) -> Vec<u8> {
