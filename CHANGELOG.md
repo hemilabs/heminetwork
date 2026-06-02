@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of an inventory message list being accessed before ensuring the slice
   isn't empty ([#1039](https://github.com/hemilabs/heminetwork/pull/1039)).
 
+- Set default `POPM_MAX_FEE` to 100 sats/vB (was 0, uncapped). Prevents
+  a malicious or compromised fee source from draining PoP miner UTXOs.
+  Set `POPM_MAX_FEE=0` to restore the previous uncapped behavior.
+
 ### Breaking Changes
 
 - Rename `TBC_BLOCKHEADER_CACHE_SIZE` environment variable to

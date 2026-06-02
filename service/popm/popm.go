@@ -63,6 +63,8 @@ const (
 
 	minRelayFee = 1                // sats/vbyte
 	maxBlockAge = 30 * time.Second // XXX make this configurable?
+
+	defaultMaxFee = 100 // sats/vbyte
 )
 
 type health struct {
@@ -114,6 +116,7 @@ func NewDefaultConfig() *Config {
 		BitcoinConfirmations:    defaultBitcoinConfirmations,
 		BitcoinSource:           bitcoinSourceTBC,
 		BitcoinURL:              tbcgozer.DefaultURL,
+		MaxFee:                  defaultMaxFee,
 		opgethMinReconnectDelay: defaultMinReconnectDelay,
 		opgethMaxReconnectDelay: defaultMaxReconnectDelay,
 		l2KeystoneMaxAge:        defaultL2KeystoneMaxAge,
