@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a malicious or compromised fee source from draining PoP miner UTXOs.
   Set `POPM_MAX_FEE=0` to restore the previous uncapped behavior.
 - Fix `KeystonesByHeight` panic when primary keystone hash keys collide
+- Add `CheckBlockSanity` to `tbc` block insert RPC path as
+  defense-in-depth hardening. The RPC binds to localhost by default and
+  is used by internal services to feed forked-off blocks
+  ([#1057](https://github.com/hemilabs/heminetwork/pull/1057)).
+
 ### Breaking Changes
 
 - Rename `TBC_BLOCKHEADER_CACHE_SIZE` environment variable to
