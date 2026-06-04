@@ -406,12 +406,38 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 		// Expensive pass: only reached by txs with ordinal activity.
 		// Compute input values for FIFO positioning via cross-block reads.
+		//
+		// Shortcircuit: only walk inputs up to the last one carrying
+		// flotsam. For a 100-input tx with inscription on input 3,
+		// this does 4 iov calls instead of 100.
+		//
+		// Reveal input index comes from inscID[32:36], NOT srcInputIdx
+		// (which is ordinalRevealSentinel for reveals and must stay that
+		// way in the stored 'o' value for unwind compatibility).
 		expStart := time.Now()
+		var maxIdx uint32
+		for fi := range fl {
+			var idx uint32
+			if fl[fi].isReveal {
+				idx = binary.LittleEndian.Uint32(fl[fi].inscID[32:36])
+			} else {
+				idx = fl[fi].srcInputIdx
+			}
+			if idx > maxIdx {
+				maxIdx = idx
+			}
+		}
 		var inputValue uint64
 		for inputIdx, txIn := range tx.MsgTx().TxIn {
 			// Set pos for flotsam on this input BEFORE adding value.
 			for fi := range fl {
-				if fl[fi].srcInputIdx == uint32(inputIdx) {
+				var matchIdx uint32
+				if fl[fi].isReveal {
+					matchIdx = binary.LittleEndian.Uint32(fl[fi].inscID[32:36])
+				} else {
+					matchIdx = fl[fi].srcInputIdx
+				}
+				if matchIdx == uint32(inputIdx) {
 					if fl[fi].isReveal {
 						fl[fi].pos = inputValue
 					} else {
@@ -426,6 +452,9 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 			inputValue += v
 			iovCalls++
+			if uint32(inputIdx) >= maxIdx {
+				break
+			}
 		}
 		expensiveTime += time.Since(expStart)
 
