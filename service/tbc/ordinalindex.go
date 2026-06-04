@@ -330,6 +330,10 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	var feeList []feeCarry
 	var blockFeeBase uint64
 
+	blockStart := time.Now()
+	var cheapTime, expensiveTime time.Duration
+	var flotsamTxs, iovCalls, totalInputs int
+
 	for txBlockIdx, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
 			continue
@@ -337,7 +341,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		txid := *tx.Hash()
 
 		var fl []flotsam
-		var inputValue uint64
+		cheapStart := time.Now()
 		for inputIdx, txIn := range tx.MsgTx().TxIn {
 			prevOut := txIn.PreviousOutPoint
 
@@ -369,7 +373,6 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			for _, t := range tracked {
 				fl = append(fl, flotsam{
 					inscID:      t.InscID,
-					pos:         inputValue + t.Offset,
 					srcInputIdx: uint32(inputIdx),
 					srcOffset:   t.Offset,
 					prevValue:   append([]byte(nil), t.Value...),
@@ -384,7 +387,6 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				inscID := makeInscriptionID(tx.Hash(), uint32(inputIdx))
 				fl = append(fl, flotsam{
 					inscID:      inscID,
-					pos:         inputValue,
 					isReveal:    true,
 					cursed:      isInscriptionCursed(blockHeight, inputIdx, envelope),
 					envelope:    envelope,
@@ -392,18 +394,40 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				})
 			}
 
+		}
+
+		cheapTime += time.Since(cheapStart)
+		totalInputs += len(tx.MsgTx().TxIn)
+
+		if len(fl) == 0 {
+			continue
+		}
+		flotsamTxs++
+
+		// Expensive pass: only reached by txs with ordinal activity.
+		// Compute input values for FIFO positioning via cross-block reads.
+		expStart := time.Now()
+		var inputValue uint64
+		for inputIdx, txIn := range tx.MsgTx().TxIn {
+			// Set pos for flotsam on this input BEFORE adding value.
+			for fi := range fl {
+				if fl[fi].srcInputIdx == uint32(inputIdx) {
+					if fl[fi].isReveal {
+						fl[fi].pos = inputValue
+					} else {
+						fl[fi].pos = inputValue + fl[fi].srcOffset
+					}
+				}
+			}
+			prevOut := txIn.PreviousOutPoint
 			v, verr := i.inputOutputValue(ctx, prevOut.Hash, prevOut.Index)
 			if verr != nil {
 				return fmt.Errorf("input value %v: %w", prevOut, verr)
 			}
 			inputValue += v
+			iovCalls++
 		}
-
-		if len(fl) == 0 {
-			outTotal := txOutTotal(tx.MsgTx().TxOut)
-			blockFeeBase += inputValue - outTotal
-			continue
-		}
+		expensiveTime += time.Since(expStart)
 
 		sort.Slice(fl, func(a, b int) bool { return fl[a].pos < fl[b].pos })
 
@@ -482,6 +506,12 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 		blockFeeBase += inputValue - outTotal
 	}
+
+	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls cheap %v expensive %v total %v",
+		blockHeight, len(txs)-1, totalInputs, flotsamTxs, iovCalls,
+		cheapTime.Round(time.Millisecond),
+		expensiveTime.Round(time.Millisecond),
+		time.Since(blockStart).Round(time.Millisecond))
 
 	// Coinbase phase.
 	if len(feeList) > 0 {
