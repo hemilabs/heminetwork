@@ -454,7 +454,7 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 
 		// Try not to overshoot the cache to prevent costly allocations
 		_, _, pct := cache.Stats()
-		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
+		if bh.Height%1000 == 0 || pct > percentage || blocksProcessed == 1 {
 			log.Infof("%v indexer: %v cache %v%%%v", c, hh, pct,
 				c.p.readCacheInfo())
 		}
@@ -527,7 +527,7 @@ func (c *indexerCommon) parseBlocksReverse(ctx context.Context, endHash *chainha
 
 		// Try not to overshoot the cache to prevent costly allocations
 		_, _, pct := cache.Stats()
-		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
+		if bh.Height%1000 == 0 || pct > percentage || blocksProcessed == 1 {
 			log.Infof("%v unindexer: %v cache %v%%%v", c, hh, pct,
 				c.p.readCacheInfo())
 		}
