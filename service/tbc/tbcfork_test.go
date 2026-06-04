@@ -5186,10 +5186,6 @@ func TestOrdinalShortcircuitMultiInput(t *testing.T) {
 	}
 
 	// b2: splitter tx — splits b1's coinbase into 3 outputs.
-	func() {
-		n.mtx.Lock()
-		defer n.mtx.Unlock()
-	}()
 	b2, err := func() (*block, error) {
 		n.mtx.Lock()
 		defer n.mtx.Unlock()
@@ -5238,6 +5234,11 @@ func TestOrdinalShortcircuitMultiInput(t *testing.T) {
 		t.Fatalf("expected 1 inscription, got %d", len(inscs))
 	}
 	t.Logf("inscription found: txid=%v", inscs[0].TxID)
+
+	// Verify the inscription was indexed at the correct input.
+	if inscs[0].InputIndex != 2 {
+		t.Fatalf("expected InputIndex 2, got %d", inscs[0].InputIndex)
+	}
 
 	// DB round-trip: verify InscriptionByID with input index 2.
 	inscData, err := s.InscriptionByID(ctx, inscs[0].TxID, 2, false)
@@ -5293,4 +5294,191 @@ func TestOrdinalShortcircuitMultiInput(t *testing.T) {
 	}
 
 	t.Log("multi-input shortcircuit: wind, DB round-trip, unwind — all correct")
+}
+
+// TestOrdinalParallelFetch exercises the parallel inputOutputValue path
+// with enough inputs to exceed the semaphore slot count (8). Uses 12
+// inputs with inscription on input 10, forcing bounded concurrency.
+// Verifies FIFO positioning, DB round-trip, and unwind correctness.
+func TestOrdinalParallelFetch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		OrdinalWatermarkGap:     24 * time.Hour,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       1000,
+		Network:                 networkLocalnet,
+		RequestTimeout:          10,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	address := n.address
+	parent := chaincfg.RegressionNetParams.GenesisHash
+
+	// b1: plain block for spendable coinbase.
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b2: splitter — 12 outputs. This exceeds the parallel fetch
+	// semaphore (8 slots), forcing bounded concurrency.
+	b2, err := func() (*block, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return n.mineWithSplitterBlock("b2", b1, address, 12)
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.SendBlockheader(ctx, b2.MsgBlock().Header); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3: inscription tx spending all 12 outputs, inscription on input 10.
+	// fetchCount = 11, semaphore cap = 8 → real contention.
+	b3, err := func() (*block, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return n.mineWithMultiInputInscriptionBlock("b3", b2, address, 10)
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.SendBlockheader(ctx, b3.MsgBlock().Header); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify inscription exists.
+	blockHash := *b3.Hash()
+	inscs, err := s.InscriptionsByBlock(ctx, blockHash, false)
+	if err != nil {
+		t.Fatalf("InscriptionsByBlock: %v", err)
+	}
+	if len(inscs) != 1 {
+		t.Fatalf("expected 1 inscription, got %d", len(inscs))
+	}
+	t.Logf("inscription found: txid=%v", inscs[0].TxID)
+
+	// Verify the inscription was indexed at the correct input.
+	if inscs[0].InputIndex != 10 {
+		t.Fatalf("expected InputIndex 10, got %d", inscs[0].InputIndex)
+	}
+
+	// DB round-trip with input index 10.
+	inscData, err := s.InscriptionByID(ctx, inscs[0].TxID, 10, false)
+	if err != nil {
+		t.Fatalf("InscriptionByID(input=10): %v", err)
+	}
+	if inscData == nil {
+		t.Fatal("InscriptionByID returned nil")
+	}
+	t.Logf("parallel fetch DB round-trip OK (12 inputs, inscription on input 10)")
+
+	// Unwind via longer fork.
+	l, err = s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	f1, err := n.MineAndSend(ctx, "f1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2, err := n.MineAndSend(ctx, "f2", f1.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f3, err := n.MineAndSend(ctx, "f3", f2.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = n.MineAndSend(ctx, "f4", f3.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatalf("reorg sync failed: %v", err)
+	}
+
+	// Verify inscription gone after unwind.
+	inscsAfter, err := s.InscriptionsByBlock(ctx, blockHash, false)
+	if err != nil {
+		t.Logf("InscriptionsByBlock after unwind: %v (expected)", err)
+	} else if len(inscsAfter) != 0 {
+		t.Fatalf("inscription should be gone after unwind, got %d", len(inscsAfter))
+	}
+
+	t.Log("parallel fetch (12 inputs, semaphore contention): wind, DB round-trip, unwind — all correct")
 }
