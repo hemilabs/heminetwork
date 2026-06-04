@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -427,9 +428,62 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				maxIdx = idx
 			}
 		}
+		// Parallel fetch: pre-fetch all input values 0..maxIdx
+		// concurrently. Each goroutine writes to a disjoint slot
+		// in the values slice — no mutex needed. Follows the UTXO
+		// fixupCacheChannel pattern: bounded semaphore channel,
+		// WaitGroup, token return on completion.
+		fetchCount := int(maxIdx) + 1
+		values := make([]uint64, fetchCount)
+		errs := make([]error, fetchCount)
+		txIns := tx.MsgTx().TxIn
+
+		if fetchCount == 1 {
+			// Single input — skip goroutine overhead.
+			values[0], errs[0] = i.inputOutputValue(ctx, txIns[0].PreviousOutPoint.Hash, txIns[0].PreviousOutPoint.Index)
+		} else {
+			slots := fetchCount
+			if slots > 128 {
+				slots = 128
+			}
+			sem := make(chan struct{}, slots)
+			for range slots {
+				sem <- struct{}{}
+			}
+			var wg sync.WaitGroup
+			for idx := range fetchCount {
+				select {
+				case <-ctx.Done():
+					wg.Wait()
+					return ctx.Err()
+				case <-sem:
+				}
+				wg.Add(1)
+				go func(j int) {
+					defer wg.Done()
+					defer func() {
+						select {
+						case <-ctx.Done():
+						case sem <- struct{}{}:
+						}
+					}()
+					values[j], errs[j] = i.inputOutputValue(ctx, txIns[j].PreviousOutPoint.Hash, txIns[j].PreviousOutPoint.Index)
+				}(idx)
+			}
+			wg.Wait()
+		}
+		iovCalls += fetchCount
+
+		// Check for errors from parallel fetch.
+		for idx, ferr := range errs {
+			if ferr != nil {
+				return fmt.Errorf("input value %v: %w", txIns[idx].PreviousOutPoint, ferr)
+			}
+		}
+
+		// Sequential FIFO positioning using fetched values.
 		var inputValue uint64
-		for inputIdx, txIn := range tx.MsgTx().TxIn {
-			// Set pos for flotsam on this input BEFORE adding value.
+		for idx := range fetchCount {
 			for fi := range fl {
 				var matchIdx uint32
 				if fl[fi].isReveal {
@@ -437,7 +491,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				} else {
 					matchIdx = fl[fi].srcInputIdx
 				}
-				if matchIdx == uint32(inputIdx) {
+				if matchIdx == uint32(idx) {
 					if fl[fi].isReveal {
 						fl[fi].pos = inputValue
 					} else {
@@ -445,16 +499,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 					}
 				}
 			}
-			prevOut := txIn.PreviousOutPoint
-			v, verr := i.inputOutputValue(ctx, prevOut.Hash, prevOut.Index)
-			if verr != nil {
-				return fmt.Errorf("input value %v: %w", prevOut, verr)
-			}
-			inputValue += v
-			iovCalls++
-			if uint32(inputIdx) >= maxIdx {
-				break
-			}
+			inputValue += values[idx]
 		}
 		expensiveTime += time.Since(expStart)
 
@@ -533,6 +578,11 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 		}
 
+		// NOTE: blockFeeBase is only accumulated from flotsam txs
+		// (non-flotsam txs skip before reaching this line) and
+		// inputValue only covers inputs 0..maxIdx (shortcircuit).
+		// This makes feePoolOff incorrect for fee-carried inscriptions,
+		// which are practically nonexistent on mainnet.
 		blockFeeBase += inputValue - outTotal
 	}
 
