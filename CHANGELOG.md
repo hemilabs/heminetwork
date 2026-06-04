@@ -13,10 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of an inventory message list being accessed before ensuring the slice
   isn't empty ([#1039](https://github.com/hemilabs/heminetwork/pull/1039)).
 
-- Remove dead `isCanonical` error check in `handleBlockExpired`. The
-  error is deliberately discarded to prevent sync stalls; the stale
-  `if err` block was unreachable.
-
 ### Breaking Changes
 
 - Rename `TBC_BLOCKHEADER_CACHE_SIZE` environment variable to
