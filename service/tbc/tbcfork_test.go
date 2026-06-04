@@ -4944,3 +4944,353 @@ func TestOrdinalIndexForkTinyCache(t *testing.T) {
 
 	t.Log("reorg with tiny cache completed successfully — ordinal data consistent")
 }
+
+// TestOrdinalShortcircuitMultiInput exercises the maxIdx shortcircuit
+// and reveal FIFO positioning for inscriptions on non-zero inputs.
+//
+// Chain structure:
+//   genesis → b1 → b2(splitter: 3 outputs) → b3(inscription on input 2)
+//
+// The inscription on input 2 should get pos = value(input0) + value(input1),
+// NOT pos = 0 (the pre-fix bug). The shortcircuit should stop at maxIdx=2,
+// not walk all inputs.
+
+// mineWithSplitterBlock creates a block containing a tx that splits the
+// parent's coinbase into numOutputs equal-value outputs. The splitter tx
+// is at block index 1 (after coinbase). Must be called with b.mtx held.
+func (b *btcNode) mineWithSplitterBlock(name string, parentBlk *block, payToAddress btcutil.Address, numOutputs int) (*block, error) {
+	parentHash := parentBlk.Hash()
+	parent, ok := b.chain[parentHash.String()]
+	if !ok {
+		return nil, errors.New("parent hash not found")
+	}
+
+	coinbaseTx := parent.TxByIndex(0)
+	coinbaseValue := coinbaseTx.MsgTx().TxOut[0].Value
+
+	redeemTx := wire.NewMsgTx(wire.TxVersion)
+	prevOut := wire.NewOutPoint(coinbaseTx.Hash(), 0)
+	redeemTx.AddTxIn(wire.NewTxIn(prevOut, nil, nil))
+
+	perOutput := (coinbaseValue - 10000) / int64(numOutputs)
+	pkScript, err := txscript.PayToAddrScript(payToAddress)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < numOutputs; i++ {
+		redeemTx.AddTxOut(wire.NewTxOut(perOutput, pkScript))
+	}
+
+	prevPkScript := coinbaseTx.MsgTx().TxOut[0].PkScript
+	_, addrs, _, err := txscript.ExtractPkScriptAddrs(prevPkScript, b.params)
+	if err != nil {
+		return nil, err
+	}
+	if len(addrs) != 1 {
+		return nil, fmt.Errorf("expected 1 address, got %d", len(addrs))
+	}
+	nk, ok := b.keys[addrs[0].String()]
+	if !ok {
+		return nil, fmt.Errorf("no key for address %v", addrs[0])
+	}
+	sigScript, err := txscript.SignTxOutput(b.params, redeemTx, 0,
+		prevPkScript, txscript.SigHashAll,
+		txscript.KeyClosure(func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+			return nk.key, true, nil
+		}), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("sign splitter: %w", err)
+	}
+	redeemTx.TxIn[0].SignatureScript = sigScript
+
+	b.t.Logf("splitter tx %v: %d outputs of %d sats each",
+		btcutil.NewTx(redeemTx).Hash(), numOutputs, perOutput)
+
+	en := testutil.RandomBytes(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	nextHeight := parent.Height() + 1
+	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextHeight,
+		parentHash, extraNonce, []*btcutil.Tx{btcutil.NewTx(redeemTx)})
+	if err != nil {
+		return nil, err
+	}
+	blk := newBlock(b.params, name, bt)
+	if _, err := b.insertBlock(blk); err != nil {
+		return nil, err
+	}
+	if blk.Height() > b.height {
+		b.height = blk.Height()
+	}
+	return blk, nil
+}
+
+// mineWithMultiInputInscriptionBlock creates a block with an inscription
+// tx that spends all outputs of the splitter tx from parentBlk. The
+// inscription witness is on input inscInputIdx. Must be called with
+// b.mtx held.
+func (b *btcNode) mineWithMultiInputInscriptionBlock(name string, parentBlk *block, payToAddress btcutil.Address, inscInputIdx int) (*block, error) {
+	parentHash := parentBlk.Hash()
+	parent, ok := b.chain[parentHash.String()]
+	if !ok {
+		return nil, errors.New("parent hash not found")
+	}
+
+	// Splitter tx is at index 1 (after coinbase).
+	splitterTx := parent.TxByIndex(1)
+	splitterOuts := splitterTx.MsgTx().TxOut
+
+	if inscInputIdx >= len(splitterOuts) {
+		return nil, fmt.Errorf("inscInputIdx %d >= %d outputs", inscInputIdx, len(splitterOuts))
+	}
+
+	redeemTx := wire.NewMsgTx(wire.TxVersion)
+	var totalValue int64
+	for i, txOut := range splitterOuts {
+		prevOut := wire.NewOutPoint(splitterTx.Hash(), uint32(i))
+		redeemTx.AddTxIn(wire.NewTxIn(prevOut, nil, nil))
+		totalValue += txOut.Value
+	}
+
+	pkScript, err := txscript.PayToAddrScript(payToAddress)
+	if err != nil {
+		return nil, err
+	}
+	redeemTx.AddTxOut(wire.NewTxOut(totalValue-10000, pkScript))
+
+	inscContent := fmt.Sprintf("multi-input inscription on input %d", inscInputIdx)
+	redeemTx.TxIn[inscInputIdx].Witness = buildInscriptionWitness(
+		"text/plain;charset=utf-8", inscContent)
+
+	for i := range redeemTx.TxIn {
+		prevPkScript := splitterOuts[i].PkScript
+		_, addrs, _, err := txscript.ExtractPkScriptAddrs(prevPkScript, b.params)
+		if err != nil {
+			return nil, err
+		}
+		if len(addrs) != 1 {
+			return nil, fmt.Errorf("expected 1 address at output %d, got %d", i, len(addrs))
+		}
+		nk, ok := b.keys[addrs[0].String()]
+		if !ok {
+			return nil, fmt.Errorf("no key for address %v", addrs[0])
+		}
+		sigScript, err := txscript.SignTxOutput(b.params, redeemTx, i,
+			prevPkScript, txscript.SigHashAll,
+			txscript.KeyClosure(func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+				return nk.key, true, nil
+			}), nil, nil)
+		if err != nil {
+			return nil, fmt.Errorf("sign input %d: %w", i, err)
+		}
+		redeemTx.TxIn[i].SignatureScript = sigScript
+	}
+
+	b.t.Logf("multi-input inscription tx %v: %d inputs, inscription on input %d, content=%q",
+		btcutil.NewTx(redeemTx).Hash(), len(redeemTx.TxIn), inscInputIdx, inscContent)
+
+	en := testutil.RandomBytes(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	nextHeight := parent.Height() + 1
+	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextHeight,
+		parentHash, extraNonce, []*btcutil.Tx{btcutil.NewTx(redeemTx)})
+	if err != nil {
+		return nil, err
+	}
+	blk := newBlock(b.params, name, bt)
+	if _, err := b.insertBlock(blk); err != nil {
+		return nil, err
+	}
+	if blk.Height() > b.height {
+		b.height = blk.Height()
+	}
+	return blk, nil
+}
+
+// TestOrdinalShortcircuitMultiInput exercises the maxIdx shortcircuit
+// and reveal FIFO positioning for inscriptions on non-zero inputs.
+//
+// Chain: genesis -> b1 -> b2(splitter: 3 outputs) -> b3(inscription on input 2)
+//
+// The inscription on input 2 should get pos = value(input0) + value(input1),
+// NOT pos = 0 (the pre-fix bug). After wind, verifies DB round-trip via
+// InscriptionByID. Then unwinds via a longer fork and verifies cleanup.
+func TestOrdinalShortcircuitMultiInput(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		OrdinalWatermarkGap:     24 * time.Hour,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       1000,
+		Network:                 networkLocalnet,
+		RequestTimeout:          10,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	address := n.address
+	parent := chaincfg.RegressionNetParams.GenesisHash
+
+	// b1: plain block — creates a spendable coinbase.
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b2: splitter tx — splits b1's coinbase into 3 outputs.
+	func() {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+	}()
+	b2, err := func() (*block, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return n.mineWithSplitterBlock("b2", b1, address, 3)
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.SendBlockheader(ctx, b2.MsgBlock().Header); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3: inscription tx spending all 3 splitter outputs, inscription on input 2.
+	b3, err := func() (*block, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return n.mineWithMultiInputInscriptionBlock("b3", b2, address, 2)
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.SendBlockheader(ctx, b3.MsgBlock().Header); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	// Index everything.
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the inscription exists.
+	blockHash := *b3.Hash()
+	inscs, err := s.InscriptionsByBlock(ctx, blockHash, false)
+	if err != nil {
+		t.Fatalf("InscriptionsByBlock: %v", err)
+	}
+	if len(inscs) != 1 {
+		t.Fatalf("expected 1 inscription, got %d", len(inscs))
+	}
+	t.Logf("inscription found: txid=%v", inscs[0].TxID)
+
+	// DB round-trip: verify InscriptionByID with input index 2.
+	inscData, err := s.InscriptionByID(ctx, inscs[0].TxID, 2, false)
+	if err != nil {
+		t.Fatalf("InscriptionByID(input=2): %v", err)
+	}
+	if inscData == nil {
+		t.Fatal("InscriptionByID returned nil")
+	}
+	t.Logf("inscription DB round-trip OK")
+
+	// Unwind: mine a longer fork from genesis.
+	l, err = s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	f1, err := n.MineAndSend(ctx, "f1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2, err := n.MineAndSend(ctx, "f2", f1.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f3, err := n.MineAndSend(ctx, "f3", f2.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = n.MineAndSend(ctx, "f4", f3.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatalf("reorg sync failed: %v", err)
+	}
+
+	// Verify inscription is gone after unwind.
+	inscsAfter, err := s.InscriptionsByBlock(ctx, blockHash, false)
+	if err != nil {
+		t.Logf("InscriptionsByBlock after unwind: %v (expected)", err)
+	} else if len(inscsAfter) != 0 {
+		t.Fatalf("inscription should be gone after unwind, got %d", len(inscsAfter))
+	}
+
+	t.Log("multi-input shortcircuit: wind, DB round-trip, unwind — all correct")
+}
