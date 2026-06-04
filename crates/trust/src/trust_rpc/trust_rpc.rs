@@ -44,6 +44,10 @@ pub enum TrustRPCError {
     ConnectionLost,
     #[error("unexpected response type: {0}")]
     UnexpectedResponse(String),
+    #[error("Job failed: {0}")]
+    JobFailed(String),
+    #[error("{0} not found: {1}")]
+    NotFound(String, String),
     #[error("{0}")]
     Other(String),
 }
@@ -386,7 +390,16 @@ impl TrustRPC {
 
         let res = self.make_request(rcv, msg)?;
         let pl = match res {
-            Payload::TxByIdResponse(s) => protocol::decode_tx(&s.into_result()?.tx)?,
+            Payload::TxByIdResponse(s) => {
+                let s = s.into_result()?;
+                if s.tx.is_empty() {
+                    return Err(TrustRPCError::NotFound(
+                        "transaction".into(),
+                        tx_id.to_string(),
+                    ));
+                }
+                protocol::decode_tx(&s.tx)?
+            }
             p => {
                 return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
             }
@@ -427,7 +440,13 @@ impl TrustRPC {
 
         let res = self.make_request(rcv, msg)?;
         let pl = match res {
-            Payload::BlockByHashResponse(s) => protocol::decode_block(&s.into_result()?.block)?,
+            Payload::BlockByHashResponse(s) => {
+                let s = s.into_result()?;
+                if s.block.is_empty() {
+                    return Err(TrustRPCError::NotFound("block".into(), hash.to_string()));
+                }
+                protocol::decode_block(&s.block)?
+            }
             p => {
                 return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
             }
@@ -511,7 +530,12 @@ impl TrustRPC {
             Payload::BlockHashByTxIDResponse(s) => {
                 let h = match s.into_result()?.block_hash {
                     Some(h) => h,
-                    None => return Err(TrustRPCError::Other("blockhash is None".into())),
+                    None => {
+                        return Err(TrustRPCError::NotFound(
+                            "block hash".into(),
+                            tx_id.to_string(),
+                        ));
+                    }
                 };
                 let hash = bitcoin::BlockHash::from_str(&h);
                 hash.map_err(|e| TrustRPCError::Other(e.to_string()))? // XXX different error type?
@@ -533,6 +557,12 @@ impl TrustRPC {
         let pl = match res {
             Payload::BlockHeaderBestResponse(s) => {
                 let s = s.into_result()?;
+                if s.block_header.is_empty() {
+                    return Err(TrustRPCError::NotFound(
+                        "block header".into(),
+                        "best".into(),
+                    ));
+                }
                 (s.height, protocol::decode_header(&s.block_header)?)
             }
             p => {
@@ -557,6 +587,12 @@ impl TrustRPC {
         let pl = match res {
             Payload::BlockHeaderByHashResponse(s) => {
                 let s = s.into_result()?;
+                if s.block_header.is_empty() {
+                    return Err(TrustRPCError::NotFound(
+                        "block header".into(),
+                        hash.to_string(),
+                    ));
+                }
                 (s.height, protocol::decode_header(&s.block_header)?)
             }
             p => {
@@ -623,7 +659,11 @@ impl TrustRPC {
         let res = self.make_request(rcv, msg)?;
         let pl = match res {
             Payload::BlockDownloadAsyncResponse(s) => {
-                protocol::decode_block(&s.into_result()?.block)?
+                let s = s.into_result()?;
+                if s.block.is_empty() {
+                    return Err(TrustRPCError::NotFound("block".into(), hash.to_string()));
+                }
+                protocol::decode_block(&s.block)?
             }
             p => {
                 return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
@@ -760,7 +800,7 @@ impl TrustRPC {
                         JobStatus::Completed => return Ok(()),
                         JobStatus::Failed => {
                             let err = format!("job {} failed", notif.job.job_id);
-                            return Err(TrustRPCError::Other(err));
+                            return Err(TrustRPCError::JobFailed(err));
                         }
                         _ => continue,
                     }
@@ -789,7 +829,7 @@ impl TrustRPC {
                         tokio::select! {
                             _ = self.cancel.cancelled() => return Err(TrustRPCError::Cancelled),
                             res = guard.send(tungstenite::Message::text(sub.marshal()?)) => {
-                                res.map_err(|e| TrustRPCError::Other(
+                                res.map_err(|e| TrustRPCError::JobFailed(
                                     format!("resubscribe to job {} failed: {}", jid, e)
                                 ))?;
                             }
@@ -799,7 +839,7 @@ impl TrustRPC {
 
                 None => {
                     let err = "channel closed unexpectedly while waiting for job";
-                    return Err(TrustRPCError::Other(err.into()));
+                    return Err(TrustRPCError::JobFailed(err.into()));
                 }
             }
         }
@@ -817,9 +857,11 @@ impl TrustRPC {
         Ok((id.to_string(), rcv, ChanGuard(Arc::clone(&self.msg_chan))))
     }
 
-    #[allow(unused)] // XXX currently not needed
-    async fn close(&mut self) -> Result<()> {
-        self.write.lock().await.close().await?;
-        Ok(())
+    #[allow(unused)]
+    pub fn close(&mut self) -> Result<()> {
+        self.rt.block_on(async {
+            self.write.lock().await.close().await?;
+            Ok(())
+        })
     }
 }

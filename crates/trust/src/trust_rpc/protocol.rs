@@ -311,6 +311,7 @@ pub struct JobListRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobListResponse {
+    #[serde(default, deserialize_with = "deserialize_null_as_empty")]
     pub jobs: Vec<JobInfo>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -410,6 +411,7 @@ pub struct BlockHeadersByHeightRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BlockHeadersByHeightResponse {
+    #[serde(default, deserialize_with = "deserialize_null_as_empty")]
     pub block_headers: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
@@ -458,6 +460,7 @@ pub struct Utxo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UtxosByAddressResponse {
+    #[serde(default, deserialize_with = "deserialize_null_as_empty")]
     pub utxos: Vec<Utxo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,

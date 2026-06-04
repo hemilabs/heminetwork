@@ -70,10 +70,9 @@ mod container_tests {
     // used to look it up via keystone_txs_by_hash.
     fn create_test_block_with_keystone(
         parent_hash: BlockHash,
-        nonce: u32,
+        n: u32,
         utxo: &protocol::Utxo,
     ) -> (bitcoin::Block, [u8; 32]) {
-        // Build L2KeystoneAbrev: "HEMI" + 76 bytes of abrev data.
         let mut abrev = [0u8; 76];
         abrev[0] = 1; // Version
         abrev[1..5].copy_from_slice(&1u32.to_be_bytes()); // L1BlockNumber
@@ -101,9 +100,7 @@ mod container_tests {
             lock_time: bitcoin::absolute::LockTime::ZERO,
             input: vec![bitcoin::TxIn {
                 previous_output: bitcoin::OutPoint::null(),
-                script_sig: bitcoin::Script::builder()
-                    .push_int(nonce as i64)
-                    .into_script(),
+                script_sig: bitcoin::Script::builder().push_int(n as i64).into_script(),
                 sequence: bitcoin::Sequence::MAX,
                 witness: bitcoin::Witness::new(),
             }],
@@ -144,7 +141,7 @@ mod container_tests {
             merkle_root,
             time: 12345,
             bits: bitcoin::CompactTarget::from_consensus(0x207fffff),
-            nonce,
+            nonce: n,
         };
 
         let block = bitcoin::Block { header, txdata };
@@ -303,8 +300,7 @@ mod container_tests {
             TestTableItem {
                 name: "running".into(),
                 run: |rpc, _, _| {
-                    let res = rpc.running()?;
-                    if !res {
+                    if !rpc.running()? {
                         return Err(TrustRPCError::Other("expected TBC to be running".into()));
                     }
                     Ok(())
@@ -362,9 +358,7 @@ mod container_tests {
                 name: "synced".into(),
                 run: |rpc, _, _| {
                     let sync = rpc.synced()?;
-                    let expect =
-                        sync.at_least_missing == 1 && sync.blockheader_index_height.height == 10;
-                    if !expect {
+                    if sync.at_least_missing != 1 || sync.blockheader_index_height.height != 10 {
                         return Err(TrustRPCError::Other(format!(
                             "Unexpected sync value: {:?}",
                             sync
@@ -377,14 +371,6 @@ mod container_tests {
             TestTableItem {
                 name: "download_block_from_random_peers".into(),
                 run: |rpc, hashes, _| {
-                    let fake_block = bitcoin::BlockHash::from_str(JWT_SECRET_HEX).unwrap();
-                    match rpc.download_block_from_random_peers(fake_block, 1) {
-                        Err(_) => {}
-                        Ok(_) => {
-                            return Err(TrustRPCError::Other("fake block shouldn't exist".into()));
-                        }
-                    }
-
                     let blk = rpc.download_block_from_random_peers(hashes[9], 1)?;
                     if blk.block_hash() != hashes[9] {
                         return Err(TrustRPCError::Other(format!(
@@ -549,8 +535,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                // Inserts a block with a keystone tx as height-11 extension,
-                // then syncs the indexer to it so keystone_txs_by_hash can find it.
+                // Inserts a block with a keystone then syncs the indexer.
                 name: "block_insert".into(),
                 run: |rpc, hashes, utxos| {
                     let (block, _) = create_test_block_with_keystone(hashes[9], 42, &utxos[9]);
@@ -597,6 +582,205 @@ mod container_tests {
                     if tti.early_exit {
                         panic!("{:?}", e);
                     }
+                    pass = false;
+                }
+            }
+        }
+
+        if !pass {
+            panic!("One or more subtests failed")
+        }
+
+        print!("\nAll subtests passed.\n\n");
+    }
+
+    #[test]
+    fn test_trust_rpc_e2e_negative() {
+        if skip_docker() {
+            return;
+        }
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let (_cs, url, _) = create_test_containers(&rt, 1);
+
+        let config = Config {
+            url: url.clone(),
+            jwt_secret: JWT_SECRET,
+            cmd_timeout: Duration::from_secs(15),
+            backoff_initial: Duration::from_millis(500),
+            backoff_max: Duration::from_secs(5),
+        };
+
+        let mut rpc = TrustRPC::new(config).unwrap();
+
+        struct TestTableItem {
+            name: &'static str,
+            run: fn(&mut TrustRPC) -> Result<()>,
+        }
+
+        let tests: Vec<TestTableItem> = vec![
+            TestTableItem {
+                name: "block_headers_insert/empty_slice",
+                run: |rpc| match rpc.block_headers_insert(&[]) {
+                    Err(TrustRPCError::Protocol(_)) => Ok(()),
+                    e => Err(TrustRPCError::Other(format!(
+                        "expected Protocol error, got {:?}",
+                        e
+                    ))),
+                },
+            },
+            TestTableItem {
+                name: "block_header_by_hash/not_found",
+                run: |rpc| {
+                    let fake_hash = bitcoin::BlockHash::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.block_header_by_hash(fake_hash) {
+                        Err(TrustRPCError::Protocol(_)) => Ok(()),
+                        e => Err(TrustRPCError::Other(format!(
+                            "expected Protocol error, got {:?}",
+                            e
+                        ))),
+                    }
+                },
+            },
+            TestTableItem {
+                name: "block_by_hash/not_found",
+                run: |rpc| {
+                    let fake_hash = bitcoin::BlockHash::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.block_by_hash(fake_hash) {
+                        Err(TrustRPCError::Protocol(_)) => Ok(()),
+                        e => Err(TrustRPCError::Other(format!(
+                            "expected Protocol error, got {:?}",
+                            e
+                        ))),
+                    }
+                },
+            },
+            TestTableItem {
+                name: "download_block_from_random_peers/not_found",
+                run: |rpc| {
+                    let fake_hash = bitcoin::BlockHash::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.download_block_from_random_peers(fake_hash, 1) {
+                        Err(TrustRPCError::NotFound(_, _)) => Ok(()),
+                        e => Err(TrustRPCError::Other(format!(
+                            "expected NotFound error, got {:?}",
+                            e
+                        ))),
+                    }
+                },
+            },
+            TestTableItem {
+                name: "tx_by_id/not_found",
+                run: |rpc| {
+                    let fake_tx_id = bitcoin::transaction::Txid::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.tx_by_id(fake_tx_id) {
+                        Err(TrustRPCError::Protocol(_)) => Ok(()),
+                        e => Err(TrustRPCError::Other(format!(
+                            "expected Protocol, got {:?}",
+                            e
+                        ))),
+                    }
+                },
+            },
+            TestTableItem {
+                name: "block_hash_by_tx_id/not_found",
+                run: |rpc| {
+                    let fake_tx_id = bitcoin::transaction::Txid::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.block_hash_by_tx_id(fake_tx_id) {
+                        Err(TrustRPCError::Protocol(_)) => Ok(()),
+                        e => Err(TrustRPCError::Other(format!(
+                            "expected Protocol, got {:?}",
+                            e
+                        ))),
+                    }
+                },
+            },
+            TestTableItem {
+                name: "block_headers_by_height/out_of_range",
+                run: |rpc| match rpc.block_headers_by_height(9999) {
+                    Err(TrustRPCError::Protocol(_)) => Ok(()),
+                    e => Err(TrustRPCError::Other(format!(
+                        "expected Protocol, got {:?}",
+                        e
+                    ))),
+                },
+            },
+            TestTableItem {
+                name: "block_in_tx_index/not_indexed",
+                run: |rpc| {
+                    let fake_hash = bitcoin::BlockHash::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.block_in_tx_index(fake_hash) {
+                        Ok(false) => Ok(()),
+                        Ok(true) => Err(TrustRPCError::Other("expected not indexed".into())),
+                        Err(e) => Err(TrustRPCError::Other(format!(
+                            "expected Ok(false), got Err({:?})",
+                            e
+                        ))),
+                    }
+                },
+            },
+            TestTableItem {
+                name: "full_block_available/not_available",
+                run: |rpc| {
+                    let fake_hash = bitcoin::BlockHash::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.full_block_available(fake_hash) {
+                        Ok(false) => Ok(()),
+                        Ok(true) => Err(TrustRPCError::Other("expected not available".into())),
+                        Err(e) => Err(TrustRPCError::Other(format!(
+                            "expected Ok(false), got Err({:?})",
+                            e
+                        ))),
+                    }
+                },
+            },
+            TestTableItem {
+                name: "script_hash_available_to_spend/not_available",
+                run: |rpc| {
+                    let fake_tx_id = bitcoin::transaction::Txid::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.script_hash_available_to_spend(fake_tx_id, 0) {
+                        Ok(false) => Ok(()),
+                        e => Err(TrustRPCError::Other(format!(
+                            "expected Ok(false), got {:?}",
+                            e
+                        ))),
+                    }
+                },
+            },
+            TestTableItem {
+                name: "keystone_txs_by_hash/not_found",
+                run: |rpc| match rpc.keystone_txs_by_hash(JWT_SECRET_HEX.to_string(), 1) {
+                    Err(TrustRPCError::Protocol(_)) => Ok(()),
+                    e => Err(TrustRPCError::Other(format!(
+                        "expected Protocol, got {:?}",
+                        e
+                    ))),
+                },
+            },
+            TestTableItem {
+                name: "sync_indexers_to_hash/fake_hash",
+                run: |rpc| {
+                    let fake_hash = bitcoin::BlockHash::from_str(JWT_SECRET_HEX).unwrap();
+                    match rpc.sync_indexers_to_hash(fake_hash) {
+                        Err(TrustRPCError::JobFailed(_)) => Ok(()),
+                        e => Err(TrustRPCError::Other(format!(
+                            "expected JobFailed, got {:?}",
+                            e
+                        ))),
+                    }
+                },
+            },
+        ];
+
+        print!("\nRunning subtests:\n\n");
+        let mut pass = true;
+        for tti in tests {
+            match (tti.run)(&mut rpc) {
+                Ok(_) => println!("test {} ... ok", tti.name),
+                Err(e) => {
+                    println!("test {} ... FAIL: {}", tti.name, e);
                     pass = false;
                 }
             }
@@ -865,7 +1049,7 @@ fn test_sync_indexers_to_hash_fail() {
 
     let hash = bitcoin::BlockHash::all_zeros();
     let res = rpc.sync_indexers_to_hash(hash);
-    assert!(matches!(res, Err(TrustRPCError::Other(_))));
+    assert!(matches!(res, Err(TrustRPCError::JobFailed(_))));
 
     server_handle.join().unwrap();
 }
