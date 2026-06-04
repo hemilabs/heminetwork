@@ -252,7 +252,7 @@ func parseEnvelopeTags(tokenizer *txscript.ScriptTokenizer) (*InscriptionEnvelop
 
 		switch tag {
 		case 1: // content_type
-			env.ContentType = value
+			env.ContentType = append([]byte(nil), value...)
 		case 2: // pointer
 			if len(value) <= 8 {
 				ptr := decodeVarUint(value)
@@ -283,7 +283,7 @@ func parseEnvelopeTags(tokenizer *txscript.ScriptTokenizer) (*InscriptionEnvelop
 				env.Content = append(env.Content, tokenizer.Data()...)
 			}
 		case 7: // metaprotocol
-			env.Metaprotocol = value
+			env.Metaprotocol = append([]byte(nil), value...)
 		case 11: // delegate
 			if len(value) == 36 {
 				var delegate [36]byte
@@ -312,7 +312,7 @@ func parseEnvelopeTags(tokenizer *txscript.ScriptTokenizer) (*InscriptionEnvelop
 func applyTag(env *InscriptionEnvelope, tag int, value []byte) {
 	switch tag {
 	case 1:
-		env.ContentType = value
+		env.ContentType = append([]byte(nil), value...)
 	case 2:
 		if len(value) <= 8 {
 			ptr := decodeVarUint(value)
@@ -325,7 +325,7 @@ func applyTag(env *InscriptionEnvelope, tag int, value []byte) {
 			env.Parent = &parent
 		}
 	case 7:
-		env.Metaprotocol = value
+		env.Metaprotocol = append([]byte(nil), value...)
 	case 11:
 		if len(value) == 36 {
 			var delegate [36]byte
