@@ -6,20 +6,26 @@ package popm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/bitcoin"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
+	"github.com/hemilabs/heminetwork/v2/service/tbc"
 )
 
 const wantedKeystones = 20
@@ -744,6 +750,292 @@ func TestOpgethReconnect(t *testing.T) {
 				t.Fatal("reconnected too fast")
 			}
 			return
+		}
+	}
+}
+
+func TestPopMinerE2E(t *testing.T) {
+	testutil.SkipIfNoDocker(t)
+
+	const (
+		secret      = "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219740f"
+		otherSecret = "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219ffff"
+		kssCount    = 4
+	)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
+	defer cancel()
+
+	// Create bitcoind container
+	bitcoindContainer := testutil.CreateBitcoind(ctx)
+
+	// Generate miner address to fund with BTC from mining
+	_, _, btcAddress, err := bitcoin.KeysAndAddressFromHexString(
+		secret,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Generate secondary address
+	_, _, otherAddress, err := bitcoin.KeysAndAddressFromHexString(
+		otherSecret,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Generate blockCount blocks that fund the miner's wallet
+	_, err = testutil.RunBitcoindCommand(ctx, bitcoindContainer, []string{
+		"bitcoin-cli",
+		"-regtest=1",
+		"generatetoaddress",
+		strconv.FormatUint(kssCount, 10),
+		btcAddress.EncodeAddress(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Generate 100 more blocks to reach coinbase maturity. We send to
+	// another address to prevent the wallet from selection UTXOs that
+	// maybe not yet be ready for spending.
+	_, err = testutil.RunBitcoindCommand(ctx, bitcoindContainer, []string{
+		"bitcoin-cli",
+		"-regtest=1",
+		"generatetoaddress",
+		"100",
+		otherAddress.EncodeAddress(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, "18444")
+	if err != nil {
+		t.Errorf("error getting mapped port %v", err)
+	}
+
+	tbcCfg := &tbc.Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		HemiIndex:               true,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedKeystones:      1000,
+		Network:                 "localnet",
+		ListenAddress:           "127.0.0.1:0",
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		NotificationBlocking:    true,
+		// LogLevel:                "tbc=TRACE",
+		Seeds: []string{
+			"127.0.0.1:" + mappedPeerPort.Port(),
+		},
+	}
+
+	if err := loggo.ConfigureLoggers(tbcCfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
+
+	tbcServer, err := tbc.NewServer(tbcCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := tbcServer.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	// Start TBC
+	go func() {
+		err := tbcServer.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// Wait until TBC inserts all blocks
+	var insertCount int
+	for {
+		notif, err := l.Listen(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if notif.Is(tbc.NotificationBlock(chainhash.Hash{})) {
+			insertCount++
+		}
+		if insertCount == kssCount+100 {
+			break
+		}
+	}
+	l.Unsubscribe()
+
+	// Sync TBC to latest block
+	if err := tbcServer.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	_, kssList := testutil.MakeSharedKeystones(kssCount)
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	// Create opgeth test server to generate and send keystones.
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, kssCount)
+	defer opgeth.Shutdown()
+
+	// Setup pop miner
+	cfg := NewDefaultConfig()
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinURL = "ws://" + tbcServer.HTTPAddress().String() + tbcapi.RouteWebsocket
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
+	cfg.BitcoinSecret = secret
+	cfg.Network = "localnet"
+	// cfg.LogLevel = "popm=TRACE;tbc=TRACE"
+	cfg.l2KeystonePollTimeout = 500 * time.Millisecond
+	cfg.StaticFee = 100
+
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
+
+	// Confirm our address has the expected balance
+	bal, err := tbcServer.BalanceByAddress(ctx, btcAddress.EncodeAddress())
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedBal := uint64(kssCount * btcutil.SatoshiPerBitcoin * 50)
+	if bal != expectedBal {
+		t.Fatalf("expected balance of %d, got %d", expectedBal, bal)
+	}
+
+	// Create pop miner
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start pop miner
+	go func() {
+		if err := s.Run(ctx); !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// Wait for pop miner to retrieve keystones and then
+	// send a request to start mining
+	expectedMsg := map[string]int{
+		"kss_subscribe":          1,
+		"kss_getLatestKeystones": 1,
+	}
+	err = testutil.MessageListener(t, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.workC <- struct{}{}
+
+	var (
+		listen    *tbc.Listener
+		txIDs     string
+		inMempool bool
+	)
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case err := <-errCh:
+			t.Fatal(err)
+		case <-time.Tick(250 * time.Millisecond):
+			// Check if bitcoind has received the PoP Txs
+			txIDs, err = testutil.RunBitcoindCommand(ctx, bitcoindContainer, []string{
+				"bitcoin-cli",
+				"-regtest",
+				"getrawmempool",
+				"false",
+			})
+			if err != nil {
+				panic(err)
+			}
+
+			var out []string
+			if err := json.Unmarshal([]byte(txIDs), &out); err != nil {
+				panic(err)
+			}
+
+			if len(out) == kssCount {
+				inMempool = true
+			}
+		}
+		if inMempool {
+			break
+		}
+	}
+
+	listen, err = tbcServer.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listen.Unsubscribe()
+
+	// Generate block with the new PoP TXs
+	_, err = testutil.RunBitcoindCommand(ctx, bitcoindContainer, []string{
+		"bitcoin-cli",
+		"-regtest",
+		"generateblock",
+		otherAddress.EncodeAddress(),
+		txIDs,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	// Wait for TBC to insert the new block
+	for {
+		notif, err := listen.Listen(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if notif.Is(tbc.NotificationBlock(chainhash.Hash{})) {
+			break
+		}
+	}
+	listen.Unsubscribe()
+
+	// Sync TBC to the new block
+	if err = tbcServer.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Confirm our address has a lower balance now
+	bal, err = tbcServer.BalanceByAddress(ctx, btcAddress.EncodeAddress())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Original balance - (STATIC_FEE * POP_TX_SIZE * KssCount)
+	newBal := expectedBal - (uint64(cfg.StaticFee) * 285 * kssCount)
+	if bal != newBal {
+		t.Fatalf("expected balance of %d, got %d", newBal, bal)
+	}
+
+	// Speed up pop miner and update keystone states
+	if _, err = s.updateKeystoneStates(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	// Ensure every keystone is marked as 'mined'
+	for kh, kss := range s.keystones {
+		if kss.state != keystoneStateMined {
+			t.Fatalf("expected keystone %s to be mined", kh)
 		}
 	}
 }

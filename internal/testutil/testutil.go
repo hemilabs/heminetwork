@@ -5,13 +5,22 @@
 package testutil
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/hemilabs/heminetwork/v2/hemi"
 )
@@ -170,4 +179,81 @@ func ErrorIsOneOf(err error, errs []error) bool {
 		}
 	}
 	return false
+}
+
+// SkipIfNoDocker skips tests when the proper flag is not set.
+func SkipIfNoDocker(t *testing.T) {
+	envValue := os.Getenv("HEMI_DOCKER_TESTS")
+	val, err := strconv.ParseBool(envValue)
+	if envValue != "" && err != nil {
+		t.Fatal(err)
+	}
+
+	if !val {
+		t.Skip("HEMI_DOCKER_TESTS unset; skipping docker tests")
+	}
+}
+
+type StdoutLogConsumer struct {
+	Name string // name of service
+}
+
+func (t *StdoutLogConsumer) Accept(l testcontainers.Log) {
+	fmt.Printf("%s: %s", t.Name, string(l.Content))
+}
+
+// CreateBitcoind starts a new bitcoind container using testcontainers.
+func CreateBitcoind(ctx context.Context) testcontainers.Container {
+	id := hex.EncodeToString(RandomBytes(6))
+
+	name := "bitcoind-" + id
+	req := testcontainers.ContainerRequest{
+		Image:        "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617",
+		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1", "-noonion", "-listenonion=0", "-fallbackfee=0.01", "-peerbloomfilters=1", "-debug"},
+		ExposedPorts: []string{"18443", "18444"},
+		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
+		LogConsumerCfg: &testcontainers.LogConsumerConfig{
+			Consumers: []testcontainers.LogConsumer{
+				&StdoutLogConsumer{
+					Name: name,
+				},
+			},
+		},
+		Name: name,
+	}
+
+	bitcoindContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return bitcoindContainer
+}
+
+// RunBitcoindCommand executes a bitcoind command.
+func RunBitcoindCommand(ctx context.Context, bitcoindContainer testcontainers.Container, cmd []string) (string, error) {
+	exitCode, result, err := bitcoindContainer.Exec(ctx, cmd)
+	if err != nil {
+		return "", err
+	}
+
+	buf := new(strings.Builder)
+	_, err = io.Copy(buf, result)
+	if err != nil {
+		return "", err
+	}
+
+	if exitCode != 0 {
+		return "", fmt.Errorf("error code received: %d", exitCode)
+	}
+
+	if len(buf.String()) == 0 {
+		return "", nil
+	}
+
+	// first 8 bytes are header, there is also a newline character at the end of the response
+	return buf.String()[8 : len(buf.String())-1], nil
 }

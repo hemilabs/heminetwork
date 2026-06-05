@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"sort"
@@ -31,7 +30,6 @@ import (
 	"github.com/juju/loggo/v2"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
@@ -61,18 +59,6 @@ type StdoutLogConsumer struct {
 
 func (t *StdoutLogConsumer) Accept(l testcontainers.Log) {
 	fmt.Printf("%s: %s", t.Name, string(l.Content))
-}
-
-func skipIfNoDocker(t *testing.T) {
-	envValue := os.Getenv("HEMI_DOCKER_TESTS")
-	val, err := strconv.ParseBool(envValue)
-	if envValue != "" && err != nil {
-		t.Fatal(err)
-	}
-
-	if !val {
-		t.Skip("skipping docker tests")
-	}
 }
 
 func TestBlockHeaderEncodeDecode(t *testing.T) {
@@ -566,7 +552,7 @@ func TestKeystonesInBlock(t *testing.T) {
 }
 
 func TestServerBlockHeadersBest(t *testing.T) {
-	skipIfNoDocker(t)
+	testutil.SkipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
@@ -598,7 +584,7 @@ func TestServerBlockHeadersBest(t *testing.T) {
 }
 
 func TestForksWithGen(t *testing.T) {
-	skipIfNoDocker(t)
+	testutil.SkipIfNoDocker(t)
 
 	t.Skip("need unwind functionality to run these tests, they need to be audited after that as well")
 
@@ -621,8 +607,8 @@ func TestForksWithGen(t *testing.T) {
 			name: "Split Tip, Single Block",
 			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
 				// block 1A, send 7 btc to otherAddress
-				_, err := runBitcoinCommand(
-					ctx, t, bitcoindContainer,
+				r, err := testutil.RunBitcoindCommand(
+					ctx, bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
 						"-regtest=1",
@@ -636,10 +622,10 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
-				blockHashesResponse, err := runBitcoinCommand(
+				blockHashesResponse, err := testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -650,6 +636,7 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(blockHashesResponse)
 
 				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
 				if true {
@@ -680,9 +667,8 @@ func TestForksWithGen(t *testing.T) {
 				// to the mempool
 				invalidateBlock(ctx, t, bitcoindContainer, blockHashes.Blocks[0])
 
-				_, err = runBitcoinCommand(
+				r, err = testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -695,12 +681,12 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
 				// create block 1B and 2B, the txs should be included
 				// in 1B.  use 2B to move tbc forward
-				_, err = runBitcoinCommand(
+				r, err = testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -711,6 +697,7 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 			},
 		},
 		{
@@ -732,9 +719,8 @@ func TestForksWithGen(t *testing.T) {
 					}
 
 					// block i*1A, send 7 btc to otherAddress
-					_, err := runBitcoinCommand(
+					r, err := testutil.RunBitcoindCommand(
 						ctx,
-						t,
 						bitcoindContainer,
 						[]string{
 							"bitcoin-cli",
@@ -750,10 +736,10 @@ func TestForksWithGen(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					t.Log(r)
 
-					blockHashesResponse, err := runBitcoinCommand(
+					blockHashesResponse, err := testutil.RunBitcoindCommand(
 						ctx,
-						t,
 						bitcoindContainer,
 						[]string{
 							"bitcoin-cli",
@@ -764,6 +750,7 @@ func TestForksWithGen(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					t.Log(blockHashesResponse)
 
 					var blockHashes struct {
 						Blocks []string `json:"blocks"`
@@ -786,9 +773,8 @@ func TestForksWithGen(t *testing.T) {
 						reconsiderBlock(ctx, t, bitcoindContainer, lastB)
 					}
 
-					_, err = runBitcoinCommand(
+					r, err = testutil.RunBitcoindCommand(
 						ctx,
-						t,
 						bitcoindContainer,
 						[]string{
 							"bitcoin-cli",
@@ -804,10 +790,10 @@ func TestForksWithGen(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					t.Log(r)
 
-					blockHashesResponse, err = runBitcoinCommand(
+					blockHashesResponse, err = testutil.RunBitcoindCommand(
 						ctx,
-						t,
 						bitcoindContainer,
 						[]string{
 							"bitcoin-cli",
@@ -818,6 +804,7 @@ func TestForksWithGen(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					t.Log(blockHashesResponse)
 
 					if err := json.Unmarshal([]byte(blockHashesResponse), &blockHashes); err != nil {
 						t.Fatal(err)
@@ -834,9 +821,8 @@ func TestForksWithGen(t *testing.T) {
 		{
 			name: "Long reorg",
 			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
-				_, err := runBitcoinCommand(
+				r, err := testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -851,10 +837,10 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
-				_, err = runBitcoinCommand(
+				r, err = testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -865,6 +851,7 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
 				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
 				if true {
@@ -884,9 +871,8 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatalf("unexpected balance: %d", balance)
 				}
 
-				blockHash, err := runBitcoinCommand(
+				blockHash, err := testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -897,14 +883,14 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(blockHash)
 
 				// create fork, invalidate block at height 10, this means we
 				// generate blocks starting at 10
 				invalidateBlock(ctx, t, bitcoindContainer, blockHash)
 
-				_, err = runBitcoinCommand(
+				r, err = testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -917,11 +903,11 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
 				// create long new chain
-				_, err = runBitcoinCommand(
+				r, err = testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -932,6 +918,7 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
 				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
 				panic("replace tbcServer.SyncIndexersToHeight with tbcServer.SyncIndexersToHash")
@@ -944,9 +931,8 @@ func TestForksWithGen(t *testing.T) {
 		{
 			name: "Ancient orphan",
 			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
-				_, err := runBitcoinCommand(
+				r, err := testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -961,10 +947,10 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
-				_, err = runBitcoinCommand(
+				r, err = testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -975,6 +961,7 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
 				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
 				if true {
@@ -994,9 +981,8 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatalf("unexpected balance: %d", balance)
 				}
 
-				blockHash, err := runBitcoinCommand(
+				blockHash, err := testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -1007,14 +993,14 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(blockHash)
 
 				// create fork, invalidate block at height 10, this means we
 				// generate blocks starting at 10
 				invalidateBlock(ctx, t, bitcoindContainer, blockHash)
 
-				_, err = runBitcoinCommand(
+				r, err = testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -1027,11 +1013,11 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
 				// create long new chain
-				_, err = runBitcoinCommand(
+				r, err = testutil.RunBitcoindCommand(
 					ctx,
-					t,
 					bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
@@ -1042,6 +1028,7 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				t.Log(r)
 
 				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
 				panic("replace tbcServer.SyncIndexersToHeight with tbcServer.SyncIndexersToHash")
@@ -1066,9 +1053,8 @@ func TestForksWithGen(t *testing.T) {
 				}
 			}()
 
-			_, err = runBitcoinCommand(
+			r, err := testutil.RunBitcoindCommand(
 				ctx,
-				t,
 				bitcoindContainer,
 				[]string{
 					"bitcoin-cli",
@@ -1079,10 +1065,10 @@ func TestForksWithGen(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Log(r)
 
-			walletAddress, err := runBitcoinCommand(
+			walletAddress, err := testutil.RunBitcoindCommand(
 				ctx,
-				t,
 				bitcoindContainer,
 				[]string{
 					"bitcoin-cli",
@@ -1092,10 +1078,10 @@ func TestForksWithGen(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Log(walletAddress)
 
-			_, err = runBitcoinCommand(
+			r, err = testutil.RunBitcoindCommand(
 				ctx,
-				t,
 				bitcoindContainer,
 				[]string{
 					"bitcoin-cli",
@@ -1107,6 +1093,7 @@ func TestForksWithGen(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Log(r)
 
 			tbcServer, _ := createTbcServer(ctx, t, mappedPeerPort)
 
@@ -1116,9 +1103,8 @@ func TestForksWithGen(t *testing.T) {
 }
 
 func invalidateBlock(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, blockHash string) {
-	_, err := runBitcoinCommand(
+	r, err := testutil.RunBitcoindCommand(
 		ctx,
-		t,
 		bitcoindContainer,
 		[]string{
 			"bitcoin-cli",
@@ -1129,12 +1115,12 @@ func invalidateBlock(ctx context.Context, t *testing.T, bitcoindContainer testco
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(r)
 }
 
 func reconsiderBlock(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, blockHash string) {
-	_, err := runBitcoinCommand(
+	r, err := testutil.RunBitcoindCommand(
 		ctx,
-		t,
 		bitcoindContainer,
 		[]string{
 			"bitcoin-cli",
@@ -1145,68 +1131,12 @@ func reconsiderBlock(ctx context.Context, t *testing.T, bitcoindContainer testco
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
-	id, err := randHexId(6)
-	if err != nil {
-		t.Fatal("failed to generate random id:", err)
-	}
-
-	name := "bitcoind-" + id
-	req := testcontainers.ContainerRequest{
-		Image:        "kylemanna/bitcoind",
-		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1", "-noonion", "-listenonion=0", "-fallbackfee=0.01", "-peerbloomfilters=1", "-debug"},
-		ExposedPorts: []string{"18443", "18444"},
-		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
-		LogConsumerCfg: &testcontainers.LogConsumerConfig{
-			Consumers: []testcontainers.LogConsumer{&StdoutLogConsumer{
-				Name: name,
-			}},
-		},
-		Name: name,
-	}
-
-	bitcoindContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return bitcoindContainer
-}
-
-func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, cmd []string) (string, error) {
-	exitCode, result, err := bitcoindContainer.Exec(ctx, cmd)
-	if err != nil {
-		return "", err
-	}
-
-	buf := new(strings.Builder)
-	_, err = io.Copy(buf, result)
-	if err != nil {
-		return "", err
-	}
-	t.Log(buf.String())
-
-	if exitCode != 0 {
-		return "", fmt.Errorf("error code received: %d", exitCode)
-	}
-
-	if len(buf.String()) == 0 {
-		return "", nil
-	}
-
-	// first 8 bytes are header, there is also a newline character at the end of the response
-	return buf.String()[8 : len(buf.String())-1], nil
+	t.Log(r)
 }
 
 func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container) *chainhash.Hash {
-	blockHash, err := runBitcoinCommand(
+	blockHash, err := testutil.RunBitcoindCommand(
 		ctx,
-		t,
 		bitcoindContainer,
 		[]string{
 			"bitcoin-cli",
@@ -1217,10 +1147,10 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(blockHash)
 
-	blockJson, err := runBitcoinCommand(
+	blockJson, err := testutil.RunBitcoindCommand(
 		ctx,
-		t,
 		bitcoindContainer,
 		[]string{
 			"bitcoin-cli",
@@ -1231,6 +1161,7 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(blockJson)
 
 	var parsed struct {
 		Tx []string `json:"tx"`
@@ -1404,7 +1335,7 @@ func cliBlockHeaderToTBC(t *testing.T, btcCliBlockHeader *BtcCliBlockHeader) []*
 }
 
 func bitcoindBlockAtHeight(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, height uint64) *BtcCliBlockHeader {
-	blockHash, err := runBitcoinCommand(ctx, t, bitcoindContainer, []string{
+	blockHash, err := testutil.RunBitcoindCommand(ctx, bitcoindContainer, []string{
 		"bitcoin-cli",
 		"-regtest=1",
 		"getblockhash",
@@ -1413,12 +1344,13 @@ func bitcoindBlockAtHeight(ctx context.Context, t *testing.T, bitcoindContainer 
 	if err != nil {
 		t.Fatal(fmt.Errorf("bitcoin-cli getblockhash %d: %w", height, err))
 	}
+	t.Log(blockHash)
 
 	return bitcoindBlockByHash(ctx, t, bitcoindContainer, blockHash)
 }
 
 func bitcoindBestBlock(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container) *BtcCliBlockHeader {
-	blockHash, err := runBitcoinCommand(ctx, t, bitcoindContainer, []string{
+	blockHash, err := testutil.RunBitcoindCommand(ctx, bitcoindContainer, []string{
 		"bitcoin-cli",
 		"-regtest=1",
 		"getbestblockhash",
@@ -1426,13 +1358,14 @@ func bitcoindBestBlock(ctx context.Context, t *testing.T, bitcoindContainer test
 	if err != nil {
 		t.Fatal(fmt.Errorf("bitcoin-cli getbestblockhash: %w", err))
 	}
+	t.Log(blockHash)
 
 	return bitcoindBlockByHash(ctx, t, bitcoindContainer, blockHash)
 }
 
 func bitcoindBlockByHash(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, blockHash string) *BtcCliBlockHeader {
-	blockHeaderJson, err := runBitcoinCommand(
-		ctx, t, bitcoindContainer,
+	blockHeaderJson, err := testutil.RunBitcoindCommand(
+		ctx, bitcoindContainer,
 		[]string{
 			"bitcoin-cli",
 			"-regtest=1",
@@ -1442,6 +1375,7 @@ func bitcoindBlockByHash(ctx context.Context, t *testing.T, bitcoindContainer te
 	if err != nil {
 		t.Fatal(fmt.Errorf("bitcoin-cli getblockheader: %w", err))
 	}
+	t.Log(blockHeaderJson)
 
 	var btcCliBlockHeader BtcCliBlockHeader
 	if err = json.Unmarshal([]byte(blockHeaderJson), &btcCliBlockHeader); err != nil {
@@ -1454,7 +1388,7 @@ func bitcoindBlockByHash(ctx context.Context, t *testing.T, bitcoindContainer te
 func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks uint64, overrideAddress string) (testcontainers.Container, nat.Port) {
 	t.Helper()
 
-	bitcoindContainer := createBitcoind(ctx, t)
+	bitcoindContainer := testutil.CreateBitcoind(ctx)
 
 	_, _, btcAddress, err := bitcoin.KeysAndAddressFromHexString(
 		privateKey,
@@ -1471,9 +1405,8 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 		address = btcAddress.EncodeAddress()
 	}
 
-	_, err = runBitcoinCommand(
+	r, err := testutil.RunBitcoindCommand(
 		ctx,
-		t,
 		bitcoindContainer,
 		[]string{
 			"bitcoin-cli",
@@ -1485,6 +1418,7 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(r)
 
 	mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, "18444")
 	if err != nil {
