@@ -202,6 +202,10 @@ func (stubDB) OrdinalInscriptionsByOutpointWithOffset(context.Context, tbcd.Outp
 	panic("stub")
 }
 
+func (stubDB) OrdinalBigOByOutpoint(context.Context, tbcd.Outpoint) ([]byte, error) {
+	panic("stub")
+}
+
 func (stubDB) OrdinalInscribedSatsInRange(context.Context, uint64, uint64) ([]uint64, error) {
 	panic("stub")
 }
