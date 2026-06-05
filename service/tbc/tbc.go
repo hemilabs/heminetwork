@@ -61,7 +61,7 @@ const (
 	defaultMaxCachedKeystones = 1e6 // number of cached keystones prior to flush
 	defaultMaxCachedTxs       = 1e6 // dual purpose cache, max key 69, max value 36
 	defaultMaxZK              = 1e6
-	defaultMaxCachedOrdinals  = 150000 // ~1GB heap at 6.4KB/entry avg (inscription content)
+	defaultMaxCachedOrdinals  = 500000 // ~1GB heap; O entries (40B) + o entries (6.4KB avg)
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 

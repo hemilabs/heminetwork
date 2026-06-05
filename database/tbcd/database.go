@@ -156,6 +156,7 @@ type Database interface {
 	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
 	OrdinalInscriptionsByOutpoint(ctx context.Context, op Outpoint) ([][36]byte, error)
 	OrdinalInscriptionsByOutpointWithOffset(ctx context.Context, op Outpoint) ([]OrdinalLocatedInscription, error)
+	OrdinalBigOByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error)
 	OrdinalInscribedSatBounds(ctx context.Context) (minSat, maxSat uint64, err error)
 	OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error)
@@ -723,6 +724,12 @@ type OrdinalCacheEntry struct {
 	// perspective — never read back from cache during processing.
 	// Flushed alongside 'o'/'p' entries. nil value = delete.
 	Aux map[OrdinalKey]OrdinalValue
+
+	// 'O' entry: point-Get acceleration index for inscription detection.
+	// DB key: 'O'(1) + txid(32) + vout(4) = 37 bytes. Value: blockHash(32)
+	// + outputValue(8). Per-outpoint (no offset). nil with BigOSet = delete.
+	BigO    []byte
+	BigOSet bool
 }
 
 // EntryCount returns the total number of sub-entries (inscriptions +
