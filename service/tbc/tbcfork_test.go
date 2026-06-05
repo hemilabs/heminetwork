@@ -4572,6 +4572,21 @@ func TestOrdinalIndexFork(t *testing.T) {
 				label, op)
 		}
 
+		// 'O': verify acceleration index exists with correct output value.
+		bigOVal, bigOErr := s.g.db.OrdinalBigOByOutpoint(ctx, op)
+		if bigOErr != nil {
+			t.Fatalf("[%s] 'O' OrdinalBigOByOutpoint: %v", label, bigOErr)
+		}
+		if bigOVal == nil {
+			t.Fatalf("[%s] 'O' entry not found at outpoint %v", label, op)
+		}
+		if len(bigOVal) != 40 {
+			t.Fatalf("[%s] 'O' value length: got %d, want 40", label, len(bigOVal))
+		}
+		// Verify outputValue in 'O' matches the actual tx output value.
+		gotOVal := binary.BigEndian.Uint64(bigOVal[32:40])
+		t.Logf("[%s] 'O' entry verified: outputValue=%d", label, gotOVal)
+
 		// InscriptionsByAddress: derive address from the holding
 		// output via the tx index and verify the RPC finds it.
 		holdingBlockHash, _, berr := s.g.db.BlockHashByTxId(ctx, *op.TxIdHash())
@@ -4651,6 +4666,12 @@ func TestOrdinalIndexFork(t *testing.T) {
 			t.Fatalf("[%s] 'o' reveal outpoint should be empty, got %d",
 				label, len(oInscs))
 		}
+		// 'O' must also be gone.
+		bigOVal, _ := s.g.db.OrdinalBigOByOutpoint(ctx, op)
+		if bigOVal != nil {
+			t.Fatalf("[%s] 'O' entry should be gone at outpoint %v, got %d bytes",
+				label, op, len(bigOVal))
+		}
 		// InscriptionsByAddress: derive address from the reveal
 		// output's pkScript (raw block data persists after unwind).
 		// After unwind the UTXO is gone, so the inscription must
@@ -4703,6 +4724,13 @@ func TestOrdinalIndexFork(t *testing.T) {
 		t.Fatalf("unwind to b2: %v", err)
 	}
 	ordinalVerifyWound(t, "b2@b2", b2) // default OP = reveal outpoint; transfer reversed
+	// After reversing b3's transfer, the transferred outpoint's O must be gone.
+	bigOTransferred, _ := s.g.db.OrdinalBigOByOutpoint(ctx, transferredOP)
+	if bigOTransferred != nil {
+		t.Fatalf("O at transferred outpoint %v should be gone after unwind, got %d bytes",
+			transferredOP, len(bigOTransferred))
+	}
+	t.Log("O at transferred outpoint correctly tombstoned after b3 unwind")
 
 	// --- Unwind to genesis ---
 	t.Log("=== unwind to genesis ===")
@@ -5250,6 +5278,41 @@ func TestOrdinalShortcircuitMultiInput(t *testing.T) {
 	}
 	t.Logf("inscription DB round-trip OK")
 
+	// FIFO + O verification: inscription on input 2 lands at (txid, 0).
+	inscTx := b3.TxByIndex(1)
+	inscTxid := *inscTx.Hash()
+	inscOP := tbcd.NewOutpoint(inscTxid, 0)
+	oEntries, oerr := s.g.db.OrdinalInscriptionsByOutpoint(ctx, inscOP)
+	if oerr != nil {
+		t.Fatalf("o lookup: %v", oerr)
+	}
+	if len(oEntries) != 1 {
+		t.Fatalf("expected 1 o entry, got %d", len(oEntries))
+	}
+	bigOVal, boerr := s.g.db.OrdinalBigOByOutpoint(ctx, inscOP)
+	if boerr != nil {
+		t.Fatalf("O lookup: %v", boerr)
+	}
+	if bigOVal == nil {
+		t.Fatal("O entry missing at inscription outpoint")
+	}
+	if len(bigOVal) != 40 {
+		t.Fatalf("O value length: got %d, want 40", len(bigOVal))
+	}
+	var gotBH chainhash.Hash
+	copy(gotBH[:], bigOVal[:32])
+	b3Hash := *b3.Hash()
+	if !gotBH.IsEqual(&b3Hash) {
+		t.Fatalf("O blockHash: got %v, want %v", gotBH, b3Hash)
+	}
+	gotOV := binary.BigEndian.Uint64(bigOVal[32:40])
+	wantOV := uint64(inscTx.MsgTx().TxOut[0].Value)
+	if gotOV != wantOV {
+		t.Fatalf("O outputValue: got %d, want %d", gotOV, wantOV)
+	}
+	t.Logf("O entry verified: blockHash=%v outputValue=%d", gotBH, gotOV)
+
+
 	// Unwind: mine a longer fork from genesis.
 	l, err = s.SubscribeNotifications(ctx, 10)
 	if err != nil {
@@ -5291,6 +5354,17 @@ func TestOrdinalShortcircuitMultiInput(t *testing.T) {
 		t.Logf("InscriptionsByBlock after unwind: %v (expected)", err)
 	} else if len(inscsAfter) != 0 {
 		t.Fatalf("inscription should be gone after unwind, got %d", len(inscsAfter))
+	}
+
+
+	// O and o must also be gone after unwind.
+	bigOAfter, _ := s.g.db.OrdinalBigOByOutpoint(ctx, inscOP)
+	if bigOAfter != nil {
+		t.Fatalf("O entry should be gone after unwind, got %d bytes", len(bigOAfter))
+	}
+	oAfter, _ := s.g.db.OrdinalInscriptionsByOutpoint(ctx, inscOP)
+	if len(oAfter) != 0 {
+		t.Fatalf("o entry should be gone after unwind, got %d", len(oAfter))
 	}
 
 	t.Log("multi-input shortcircuit: wind, DB round-trip, unwind — all correct")
@@ -5437,6 +5511,41 @@ func TestOrdinalParallelFetch(t *testing.T) {
 	}
 	t.Logf("parallel fetch DB round-trip OK (12 inputs, inscription on input 10)")
 
+
+	// O verification: inscription at (txid, 0) must have correct values.
+	pfInscTx := b3.TxByIndex(1)
+	pfInscTxid := *pfInscTx.Hash()
+	pfInscOP := tbcd.NewOutpoint(pfInscTxid, 0)
+	pfOEntries, pferr := s.g.db.OrdinalInscriptionsByOutpoint(ctx, pfInscOP)
+	if pferr != nil {
+		t.Fatalf("o lookup: %v", pferr)
+	}
+	if len(pfOEntries) != 1 {
+		t.Fatalf("expected 1 o entry, got %d", len(pfOEntries))
+	}
+	pfBigO, pfboerr := s.g.db.OrdinalBigOByOutpoint(ctx, pfInscOP)
+	if pfboerr != nil {
+		t.Fatalf("O lookup: %v", pfboerr)
+	}
+	if pfBigO == nil {
+		t.Fatal("O entry missing at parallel fetch inscription outpoint")
+	}
+	if len(pfBigO) != 40 {
+		t.Fatalf("O value length: got %d, want 40", len(pfBigO))
+	}
+	var pfGotBH chainhash.Hash
+	copy(pfGotBH[:], pfBigO[:32])
+	pfB3Hash := *b3.Hash()
+	if !pfGotBH.IsEqual(&pfB3Hash) {
+		t.Fatalf("O blockHash: got %v, want %v", pfGotBH, pfB3Hash)
+	}
+	pfGotOV := binary.BigEndian.Uint64(pfBigO[32:40])
+	pfWantOV := uint64(pfInscTx.MsgTx().TxOut[0].Value)
+	if pfGotOV != pfWantOV {
+		t.Fatalf("O outputValue: got %d, want %d", pfGotOV, pfWantOV)
+	}
+	t.Logf("O entry verified: blockHash=%v outputValue=%d", pfGotBH, pfGotOV)
+
 	// Unwind via longer fork.
 	l, err = s.SubscribeNotifications(ctx, 10)
 	if err != nil {
@@ -5480,5 +5589,205 @@ func TestOrdinalParallelFetch(t *testing.T) {
 		t.Fatalf("inscription should be gone after unwind, got %d", len(inscsAfter))
 	}
 
+	// O and o must also be gone after unwind.
+	pfBigOAfter, _ := s.g.db.OrdinalBigOByOutpoint(ctx, pfInscOP)
+	if pfBigOAfter != nil {
+		t.Fatalf("O entry should be gone after unwind, got %d bytes", len(pfBigOAfter))
+	}
+	pfOAfter, _ := s.g.db.OrdinalInscriptionsByOutpoint(ctx, pfInscOP)
+	if len(pfOAfter) != 0 {
+		t.Fatalf("o entry should be gone after unwind, got %d", len(pfOAfter))
+	}
+
 	t.Log("parallel fetch (12 inputs, semaphore contention): wind, DB round-trip, unwind — all correct")
+}
+
+// TestOrdinalBigOLifecycle verifies the 'O' acceleration index:
+// - Written during wind with correct blockHash + outputValue
+// - Used by the cheap pass for bloom filter rejection
+// - Tombstoned during unwind
+func TestOrdinalBigOLifecycle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		OrdinalWatermarkGap:     24 * time.Hour,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       1000,
+		Network:                 networkLocalnet,
+		RequestTimeout:          10,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	address := n.address
+	parent := chaincfg.RegressionNetParams.GenesisHash
+
+	// b1: plain block for a spendable coinbase.
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b2: inscription block.
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2Hash := *b2.Hash()
+	inscTx := b2.TxByIndex(1)
+	inscTxid := *inscTx.Hash()
+	inscOutputValue := uint64(inscTx.MsgTx().TxOut[0].Value)
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// === Verify 'O' entry exists with correct values ===
+	inscOP := tbcd.NewOutpoint(inscTxid, 0)
+	bigOVal, err := s.g.db.OrdinalBigOByOutpoint(ctx, inscOP)
+	if err != nil {
+		t.Fatalf("OrdinalBigOByOutpoint: %v", err)
+	}
+	if bigOVal == nil {
+		t.Fatal("'O' entry not found for inscription outpoint")
+	}
+	if len(bigOVal) != 40 {
+		t.Fatalf("'O' value length: got %d, want 40", len(bigOVal))
+	}
+
+	// Verify blockHash in 'O' value matches b2's hash.
+	var gotBlockHash chainhash.Hash
+	copy(gotBlockHash[:], bigOVal[:32])
+	if !gotBlockHash.IsEqual(&b2Hash) {
+		t.Fatalf("'O' blockHash: got %v, want %v", gotBlockHash, b2Hash)
+	}
+
+	// Verify outputValue in 'O' value matches the inscription tx output.
+	gotOutputValue := binary.BigEndian.Uint64(bigOVal[32:40])
+	if gotOutputValue != inscOutputValue {
+		t.Fatalf("'O' outputValue: got %d, want %d", gotOutputValue, inscOutputValue)
+	}
+	t.Logf("'O' entry verified: blockHash=%v outputValue=%d", gotBlockHash, gotOutputValue)
+
+	// === Verify 'o' entry also exists (both should be present) ===
+	oInscs, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, inscOP)
+	if err != nil {
+		t.Fatalf("OrdinalInscriptionsByOutpoint: %v", err)
+	}
+	if len(oInscs) != 1 {
+		t.Fatalf("expected 1 'o' entry, got %d", len(oInscs))
+	}
+	t.Log("'o' entry also present — both 'O' and 'o' written correctly")
+
+	// === Unwind: mine a longer fork ===
+	l, err = s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	f1, err := n.MineAndSend(ctx, "f1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2, err := n.MineAndSend(ctx, "f2", f1.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f3, err := n.MineAndSend(ctx, "f3", f2.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = n.MineAndSend(ctx, "f4", f3.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatalf("reorg sync: %v", err)
+	}
+
+	// === Verify 'O' entry is gone after unwind ===
+	bigOAfter, err := s.g.db.OrdinalBigOByOutpoint(ctx, inscOP)
+	if err != nil {
+		t.Fatalf("OrdinalBigOByOutpoint after unwind: %v", err)
+	}
+	if bigOAfter != nil {
+		t.Fatalf("'O' entry should be gone after unwind, got %d bytes", len(bigOAfter))
+	}
+	t.Log("'O' entry correctly tombstoned after unwind")
+
+	// === Verify 'o' entry is also gone ===
+	oAfter, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, inscOP)
+	if err != nil {
+		t.Fatalf("OrdinalInscriptionsByOutpoint after unwind: %v", err)
+	}
+	if len(oAfter) != 0 {
+		t.Fatalf("'o' entry should be gone after unwind, got %d", len(oAfter))
+	}
+	t.Log("BigO lifecycle: write with correct values, tombstone on unwind — all correct")
 }

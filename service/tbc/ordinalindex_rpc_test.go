@@ -132,6 +132,20 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	entry2.Inscriptions[0] = encodeOutpointValue(
 		seed.inscID2, srcKindReveal, 0, ordinalRevealSentinel, 0)
 
+	// 'O': point-Get acceleration index for each inscription outpoint.
+	// Value: blockHash(32) + outputValue(8) = 40 bytes.
+	var bigO1 [40]byte
+	copy(bigO1[:32], seed.blockHash[:])
+	binary.BigEndian.PutUint64(bigO1[32:], 5_000_000_000)
+	entry1.BigO = bigO1[:]
+	entry1.BigOSet = true
+
+	var bigO2 [40]byte
+	copy(bigO2[:32], seed.blockHash[:])
+	binary.BigEndian.PutUint64(bigO2[32:], 10_000_000_000)
+	entry2.BigO = bigO2[:]
+	entry2.BigOSet = true
+
 	// 'a': sat→inscription mapping for InscriptionsBySat.
 	entry1.Aux[ordinalSatInscriptionKey(seed.satNumber, seed.inscID)] = []byte{}
 
@@ -227,6 +241,72 @@ func TestRpcOrdinal(t *testing.T) {
 	defer c.CloseNow()
 
 	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	// Verify 'O' entries exist in the DB for both inscription outpoints.
+	{
+		op1 := seed.outpoint
+		bigO1, err := s.g.db.OrdinalBigOByOutpoint(ctx, op1)
+		if err != nil {
+			t.Fatalf("E2E 'O' lookup op1: %v", err)
+		}
+		if bigO1 == nil {
+			t.Fatal("E2E 'O' entry missing for inscription 1")
+		}
+		if len(bigO1) != 40 {
+			t.Fatalf("E2E 'O' value length: got %d, want 40", len(bigO1))
+		}
+		var gotBH chainhash.Hash
+		copy(gotBH[:], bigO1[:32])
+		if !gotBH.IsEqual(&seed.blockHash) {
+			t.Fatalf("E2E 'O' blockHash: got %v, want %v", gotBH, seed.blockHash)
+		}
+		gotOV := binary.BigEndian.Uint64(bigO1[32:40])
+		if gotOV != 5_000_000_000 {
+			t.Fatalf("E2E 'O' outputValue 1: got %d, want 5000000000", gotOV)
+		}
+
+		op2 := tbcd.NewOutpoint(seed.txid2, 0)
+		bigO2, err := s.g.db.OrdinalBigOByOutpoint(ctx, op2)
+		if err != nil {
+			t.Fatalf("E2E 'O' lookup op2: %v", err)
+		}
+		if bigO2 == nil {
+			t.Fatal("E2E 'O' entry missing for inscription 2")
+		}
+		gotOV2 := binary.BigEndian.Uint64(bigO2[32:40])
+		if gotOV2 != 10_000_000_000 {
+			t.Fatalf("E2E 'O' outputValue 2: got %d, want 10000000000", gotOV2)
+		}
+		t.Log("E2E 'O' entries verified for both inscriptions")
+	}
+
+	// Verify 'o' entries exist for both inscription outpoints.
+	{
+		op1 := seed.outpoint
+		o1, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, op1)
+		if err != nil {
+			t.Fatalf("E2E 'o' lookup op1: %v", err)
+		}
+		if len(o1) != 1 {
+			t.Fatalf("E2E 'o' expected 1 inscription at op1, got %d", len(o1))
+		}
+		if o1[0] != seed.inscID {
+			t.Fatalf("E2E 'o' inscID mismatch: got %x, want %x", o1[0], seed.inscID)
+		}
+
+		op2 := tbcd.NewOutpoint(seed.txid2, 0)
+		o2, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, op2)
+		if err != nil {
+			t.Fatalf("E2E 'o' lookup op2: %v", err)
+		}
+		if len(o2) != 1 {
+			t.Fatalf("E2E 'o' expected 1 inscription at op2, got %d", len(o2))
+		}
+		if o2[0] != seed.inscID2 {
+			t.Fatalf("E2E 'o' inscID2 mismatch: got %x, want %x", o2[0], seed.inscID2)
+		}
+		t.Log("E2E 'o' entries verified for both inscriptions")
+	}
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),

@@ -83,6 +83,13 @@ var (
 	ordinalIndexHashKey  = []byte("ordinalindexhash")  // last indexed ordinal block hash
 )
 
+// ordinalBatchBytesPerOutpoint estimates the average serialized batch
+// bytes per outpoint in the ordinal cache. Each outpoint generates
+// ~5 sub-entries (o, O, i, b, n) averaging ~120 bytes each in the
+// LevelDB batch (key + value + varint overhead). Used to pre-allocate
+// the batch via MakeBatch to avoid repeated Batch.grow reallocations.
+const ordinalBatchBytesPerOutpoint = 600
+
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
 		panic(err)
@@ -1897,6 +1904,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 		return fmt.Errorf("outputs commit: %w", err)
 	}
 
+
 	return nil
 }
 
@@ -1983,6 +1991,7 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	if err = txsCommit(); err != nil {
 		return fmt.Errorf("transactions commit: %w", err)
 	}
+
 
 	return nil
 }
@@ -2527,7 +2536,7 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 	// Unpack each OrdinalCacheEntry into LevelDB batch operations,
 	// constructing DB keys from Outpoint + offset. Same pattern as
 	// BlockUtxoUpdate constructing 'u'+'h' keys from Outpoint→CacheOutput.
-	ordBatch := new(leveldb.Batch)
+	ordBatch := leveldb.MakeBatch(len(data) * ordinalBatchBytesPerOutpoint)
 	for op, entry := range data {
 		// 'o' entries: 'o' + txid(32) + vout(4) + offset(8) = 45 bytes
 		for offset, v := range entry.Inscriptions {
@@ -2552,6 +2561,19 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 				ordBatch.Delete(key[:])
 			} else {
 				ordBatch.Put(key[:], v)
+			}
+		}
+
+		// 'O' entry: point-Get acceleration index.
+		// 'O' + txid(32) + vout(4) = 37 bytes.
+		if entry.BigOSet {
+			var oKey [37]byte
+			oKey[0] = 'O'
+			copy(oKey[1:37], op[1:37])
+			if entry.BigO == nil {
+				ordBatch.Delete(oKey[:])
+			} else {
+				ordBatch.Put(oKey[:], entry.BigO)
 			}
 		}
 
@@ -2764,6 +2786,25 @@ func (l *ldb) OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chai
 // at the given outpoint along with each one's byte offset within the
 // output, by prefix-scanning 'o' + txid + vout. Results are in offset
 // order (the key sorts by offset). Used by forward FIFO transfer tracking.
+
+// OrdinalBigOByOutpoint does a point Get for the 'O' acceleration
+// index at the given outpoint. Returns nil, nil if not found (bloom
+// filter rejection). The key is fully specified: 'O' + txid + vout.
+func (l *ldb) OrdinalBigOByOutpoint(ctx context.Context, op tbcd.Outpoint) ([]byte, error) {
+	ordDB := l.pool[level.OrdinalDB]
+	var key [37]byte
+	key[0] = 'O'
+	copy(key[1:37], op[1:37])
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("bigO get %v: %w", op, err)
+	}
+	return v, nil
+}
+
 func (l *ldb) OrdinalInscriptionsByOutpointWithOffset(ctx context.Context, op tbcd.Outpoint) ([]tbcd.OrdinalLocatedInscription, error) {
 	log.Tracef("OrdinalInscriptionsByOutpointWithOffset")
 	defer log.Tracef("OrdinalInscriptionsByOutpointWithOffset exit")

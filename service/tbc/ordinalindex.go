@@ -109,6 +109,15 @@ func (c *OrdinalCache) PutPredecessor(op tbcd.Outpoint, offset uint64, v []byte)
 	c.entryCount++
 }
 
+// PutBigO writes the 'O' acceleration entry for an outpoint.
+// v == nil signals deletion (tombstone).
+func (c *OrdinalCache) PutBigO(op tbcd.Outpoint, v []byte) {
+	e := getEntry(c.m, op)
+	e.BigO = v
+	e.BigOSet = true
+	c.entryCount++
+}
+
 // PutAux writes a non-outpoint sub-entry ('i','n','a','m') and increments the counter.
 func (c *OrdinalCache) PutAux(op tbcd.Outpoint, key tbcd.OrdinalKey, v tbcd.OrdinalValue) {
 	e := getEntry(c.m, op)
@@ -284,6 +293,13 @@ type flotsam struct {
 	// before this transfer moved it. Stored under the 'p' prefix at the
 	// destination so unwind can restore it. Nil for reveals.
 	prevValue []byte
+	// srcBlockHash and srcOutputValue are carried from the 'O'
+	// acceleration index during the cheap pass. If set, the expensive
+	// pass can skip BlockHashByTxId + BlockRawByHash for this input.
+	// Only populated for transfers with a committed 'O' entry.
+	srcBlockHash   chainhash.Hash
+	srcOutputValue uint64
+	srcHasO        bool // true if srcBlockHash/srcOutputValue are valid
 }
 
 // ordinalRevealSentinel marks an 'o' entry as a reveal (no prior location
@@ -348,38 +364,69 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 			spentOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
 
-			// DB lookup (committed data).
-			tracked, terr := i.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, spentOP)
-			if terr != nil {
-				return fmt.Errorf("tracked lookup %v: %w", spentOP, terr)
+			// Fast path: point Get 'O' with bloom filter.
+			// Rejects 99.99% of inputs without creating an iterator.
+			bigOVal, bigOErr := i.g.db.OrdinalBigOByOutpoint(ctx, spentOP)
+			if bigOErr != nil {
+				return fmt.Errorf("bigO lookup %v: %w", spentOP, bigOErr)
 			}
-			// Cache overlay: an outpoint created earlier in THIS block
-			// won't be in the DB yet. O(1) lookup replaces the O(n)
-			// trackedInBlock scan.
+			// Apply cache overlay for 'O' (same-block tombstone or update).
+			if entry, ok := cache.m[spentOP]; ok && entry.BigOSet {
+				bigOVal = entry.BigO
+			}
+
+			// Check cache for same-block inscription not yet committed.
+			hasCacheInscription := false
 			if entry, ok := cache.m[spentOP]; ok {
-				for offset, v := range entry.Inscriptions {
-					if v == nil {
-						continue // tombstoned
+				for _, v := range entry.Inscriptions {
+					if v != nil {
+						hasCacheInscription = true
+						break
 					}
-					if len(v) < 36 {
-						continue // malformed
-					}
-					var li tbcd.OrdinalLocatedInscription
-					copy(li.InscID[:], v[:36])
-					li.Offset = offset
-					li.Value = append([]byte(nil), v...)
-					tracked = append(tracked, li)
 				}
 			}
-			for _, t := range tracked {
-				fl = append(fl, flotsam{
-					inscID:      t.InscID,
-					srcInputIdx: uint32(inputIdx),
-					srcOffset:   t.Offset,
-					prevValue:   append([]byte(nil), t.Value...),
-				})
-				// Tombstone the old 'o' entry — the sat is moving.
-				cache.PutInscription(spentOP, t.Offset, nil)
+
+			// Inscription hit. Full 'o' scan for data (only ~200/block).
+			if bigOVal != nil || hasCacheInscription {
+				tracked, terr := i.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, spentOP)
+				if terr != nil {
+					return fmt.Errorf("tracked lookup %v: %w", spentOP, terr)
+				}
+				// Cache overlay for same-block inscriptions.
+				if entry, ok := cache.m[spentOP]; ok {
+					for offset, v := range entry.Inscriptions {
+						if v == nil {
+							continue // tombstoned
+						}
+						if len(v) < 36 {
+							continue // malformed
+						}
+						var li tbcd.OrdinalLocatedInscription
+						copy(li.InscID[:], v[:36])
+						li.Offset = offset
+						li.Value = append([]byte(nil), v...)
+						tracked = append(tracked, li)
+					}
+				}
+				for _, t := range tracked {
+					f := flotsam{
+						inscID:      t.InscID,
+						srcInputIdx: uint32(inputIdx),
+						srcOffset:   t.Offset,
+						prevValue:   append([]byte(nil), t.Value...),
+					}
+					// Carry 'O' data for transfer fast path.
+					if bigOVal != nil && len(bigOVal) >= 40 {
+						copy(f.srcBlockHash[:], bigOVal[:32])
+						f.srcOutputValue = binary.BigEndian.Uint64(bigOVal[32:40])
+						f.srcHasO = true
+					}
+					fl = append(fl, f)
+					cache.PutInscription(spentOP, t.Offset, nil)
+				}
+				if len(tracked) > 0 && bigOVal != nil {
+					cache.PutBigO(spentOP, nil)
+				}
 			}
 
 			// Reveals: does this input carry an inscription envelope?
@@ -438,10 +485,37 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		errs := make([]error, fetchCount)
 		txIns := tx.MsgTx().TxIn
 
-		if fetchCount == 1 {
-			// Single input — skip goroutine overhead.
+		// Pre-fill values from 'O' fast path. Only transfers have
+		// srcHasO (reveals' funding outputs are not inscriptions).
+		filled := make([]bool, fetchCount)
+		for fi := range fl {
+			if !fl[fi].srcHasO {
+				continue
+			}
+			idx := fl[fi].srcInputIdx
+			if int(idx) < fetchCount {
+				// Verify O outputValue matches inputOutputValue.
+				// Zero mainnet evidence for transfers — panic on
+				// mismatch. Remove this assert once verified.
+				prevOut := txIns[idx].PreviousOutPoint
+				iov, ioverr := i.inputOutputValue(ctx, prevOut.Hash, prevOut.Index)
+				if ioverr != nil {
+					panic(fmt.Sprintf("bigO verify iov %v: %v", prevOut, ioverr))
+				}
+				if iov != fl[fi].srcOutputValue {
+					panic(fmt.Sprintf("bigO outputValue mismatch at %v: O=%d iov=%d",
+						prevOut, fl[fi].srcOutputValue, iov))
+				}
+				values[idx] = fl[fi].srcOutputValue
+				filled[idx] = true
+			}
+		}
+
+		// Fetch remaining inputs not pre-filled by 'O'.
+		if fetchCount == 1 && !filled[0] {
 			values[0], errs[0] = i.inputOutputValue(ctx, txIns[0].PreviousOutPoint.Hash, txIns[0].PreviousOutPoint.Index)
-		} else {
+			iovCalls++
+		} else if fetchCount > 1 {
 			slots := fetchCount
 			if slots > 128 {
 				slots = 128
@@ -452,6 +526,9 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 			var wg sync.WaitGroup
 			for idx := range fetchCount {
+				if filled[idx] {
+					continue // pre-filled from 'O'
+				}
 				select {
 				case <-ctx.Done():
 					wg.Wait()
@@ -469,10 +546,10 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 					}()
 					values[j], errs[j] = i.inputOutputValue(ctx, txIns[j].PreviousOutPoint.Hash, txIns[j].PreviousOutPoint.Index)
 				}(idx)
+				iovCalls++
 			}
 			wg.Wait()
 		}
-		iovCalls += fetchCount
 
 		// Check for errors from parallel fetch.
 		for idx, ferr := range errs {
@@ -565,6 +642,12 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				if kind == srcKindTransfer {
 					cache.PutPredecessor(op, locOffset, f.prevValue)
 				}
+				// 'O': point-Get acceleration index.
+				// blockHash(32) + outputValue(8) = 40 bytes.
+				var bigOVal [40]byte
+				copy(bigOVal[:32], blockHash[:])
+				binary.BigEndian.PutUint64(bigOVal[32:], uint64(tx.MsgTx().TxOut[locVout].Value))
+				cache.PutBigO(op, bigOVal[:])
 			} else {
 				feeInternal := f.pos - outTotal
 				feeList = append(feeList, feeCarry{
@@ -614,6 +697,11 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				if len(e.prevValue) > 0 {
 					cache.PutPredecessor(op, offset, e.prevValue)
 				}
+				// 'O' for fee-carried inscription in coinbase output.
+				var feeOVal [40]byte
+				copy(feeOVal[:32], blockHash[:])
+				binary.BigEndian.PutUint64(feeOVal[32:], uint64(coinbaseTx.MsgTx().TxOut[vout].Value))
+				cache.PutBigO(op, feeOVal[:])
 			} else {
 				op := lostSentinelOutpoint()
 				lostOff := lostSatOffset(blockHeight, lostSeq)
@@ -873,6 +961,7 @@ func (i *ordinalIndexer) unwindOutpointEntries(ctx context.Context, block *btcut
 		// Delete the 'o' and 'p' entries at the current location.
 		cache.PutInscription(op, li.Offset, nil)
 		cache.PutPredecessor(op, li.Offset, nil)
+		cache.PutBigO(op, nil)
 
 		// Reveal: nothing to restore.
 		if !isTransfer {
@@ -912,6 +1001,43 @@ func (i *ordinalIndexer) unwindOutpointEntries(ctx context.Context, block *btcut
 		prevOut := srcTx.TxIn[srcInputIdx].PreviousOutPoint
 		srcOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
 		cache.PutInscription(srcOP, srcOffset, prevValue)
+
+		// Restore O at the previous location. For cross-block
+		// transfers, BlockHashByTxId works (the earlier block is
+		// still wound). For same-block transfers, the tx index for
+		// the current block is already gone — use the block hash
+		// and find the output value from the block directly.
+		var restoreBlockHash *chainhash.Hash
+		var restoreOutValue uint64
+		// NOTE: rbhErr catches all errors, not just "not found".
+		// A real DB error falls through to the same-block scan.
+		// The verify assert on the next wind will catch corruption.
+		rbh, _, rbhErr := i.g.db.BlockHashByTxId(ctx, prevOut.Hash)
+		if rbhErr == nil {
+			// Cross-block: tx index has the earlier block.
+			restoreBlockHash = rbh
+			rov, rovErr := i.inputOutputValue(ctx, prevOut.Hash, prevOut.Index)
+			if rovErr != nil {
+				return fmt.Errorf("unwind O restore value %v: %w", prevOut, rovErr)
+			}
+			restoreOutValue = rov
+		} else {
+			// Same-block: tx is in the block being unwound.
+			bh := block.MsgBlock().Header.BlockHash()
+			restoreBlockHash = &bh
+			for _, btx := range block.Transactions() {
+				if *btx.Hash() == prevOut.Hash {
+					if int(prevOut.Index) < len(btx.MsgTx().TxOut) {
+						restoreOutValue = uint64(btx.MsgTx().TxOut[prevOut.Index].Value)
+					}
+					break
+				}
+			}
+		}
+		var bigORestore [40]byte
+		copy(bigORestore[:32], restoreBlockHash[:])
+		binary.BigEndian.PutUint64(bigORestore[32:], restoreOutValue)
+		cache.PutBigO(srcOP, bigORestore[:])
 	}
 	return nil
 }
