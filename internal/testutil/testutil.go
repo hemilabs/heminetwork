@@ -208,7 +208,7 @@ func CreateBitcoind(ctx context.Context) testcontainers.Container {
 
 	name := "bitcoind-" + id
 	req := testcontainers.ContainerRequest{
-		Image:        "kylemanna/bitcoind",
+		Image:        "kylemanna/bitcoind@sha256:46904e5c985f0148ca07a7702d17299fb5fa0678cb4a091c080c11ac78e92617",
 		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1", "-noonion", "-listenonion=0", "-fallbackfee=0.01", "-peerbloomfilters=1", "-debug"},
 		ExposedPorts: []string{"18443", "18444"},
 		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
