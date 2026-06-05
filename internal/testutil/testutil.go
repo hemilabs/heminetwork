@@ -190,7 +190,7 @@ func SkipIfNoDocker(t *testing.T) {
 	}
 
 	if !val {
-		t.Skip("skipping docker tests")
+		t.Skip("HEMI_DOCKER_TESTS unset; skipping docker tests")
 	}
 }
 
