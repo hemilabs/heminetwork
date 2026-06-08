@@ -36,6 +36,13 @@ mod container_tests {
         containers: Vec<ContainerAsync<GenericImage>>,
     }
 
+    impl<'a> ContainerSet<'a> {
+        // Returns the container ID of the tbcd container.
+        fn tbcd_id(&self) -> &str {
+            self.containers[0].id()
+        }
+    }
+
     impl<'a> Drop for ContainerSet<'a> {
         fn drop(&mut self) {
             let containers = std::mem::take(&mut self.containers);
@@ -197,32 +204,34 @@ mod container_tests {
                 println!("Message: {msg:?}");
             }
 
-            // Starts bitcoind (regtest)
-            let bitcoind = GenericImage::new("kylemanna/bitcoind", "latest")
-                .with_exposed_port(ContainerPort::Tcp(18444))
-                .with_wait_for(WaitFor::message_on_stdout("dnsseed thread exit"))
-                .with_network("trust_tests")
-                .with_container_name(&bitcoind_container_name)
-                .with_cmd([
-                    "bitcoind",
-                    "-regtest=1",
-                    "-debug=1",
-                    "-rpcallowip=0.0.0.0/0",
-                    "-rpcbind=0.0.0.0:18443",
-                    "-txindex=1",
-                    "-noonion",
-                    "-listenonion=0",
-                    "-fallbackfee=0.01",
-                    "-peerbloomfilters=1",
-                ])
-                .start()
-                .await
-                .expect("bitcoind failed to start");
-
             let mut wait_for_insert: String = "handle (tbc admin)".into();
-            let mut block_hashes: Vec<String> = vec![];
+            let mut tbc_seeds: String = "".into();
+            let mut containers = vec![];
+            let mut block_hashes = vec![];
+
             if block_count > 0 {
-                // Generate 10 blocks
+                // Starts bitcoind (regtest)
+                let bitcoind = GenericImage::new("kylemanna/bitcoind", "latest")
+                    .with_exposed_port(ContainerPort::Tcp(18444))
+                    .with_wait_for(WaitFor::message_on_stdout("dnsseed thread exit"))
+                    .with_network("trust_tests")
+                    .with_container_name(&bitcoind_container_name)
+                    .with_cmd([
+                        "bitcoind",
+                        "-regtest=1",
+                        "-debug=1",
+                        "-rpcallowip=0.0.0.0/0",
+                        "-rpcbind=0.0.0.0:18443",
+                        "-txindex=1",
+                        "-noonion",
+                        "-listenonion=0",
+                        "-fallbackfee=0.01",
+                        "-peerbloomfilters=1",
+                    ])
+                    .start()
+                    .await
+                    .expect("bitcoind failed to start");
+
                 let cmd = ExecCommand::new([
                     "bitcoin-cli",
                     "-regtest=1",
@@ -233,14 +242,18 @@ mod container_tests {
                 let mut res = bitcoind.exec(cmd).await.unwrap();
                 let stdo = res.stdout_to_vec().await.unwrap();
                 block_hashes = serde_json::from_slice(&stdo).expect("Failed to parse JSON");
+                containers.push(bitcoind);
+
+                // Wait for tbcd to insert blocks before returning
                 wait_for_insert = format!(
                     "Insert block {} at {}",
                     block_hashes[block_hashes.len() - 1],
                     block_count
                 );
-            };
 
-            let tbc_seeds = format!("{}:18444", bitcoind_container_name);
+                // Set bitcoind as a peer for tbcd
+                tbc_seeds = format!("{}:18444", bitcoind_container_name);
+            };
 
             // Starts tbcd.
             // It logs "handle (tbc admin): /v1/admin/ws" to stdout
@@ -270,11 +283,9 @@ mod container_tests {
                 .await
                 .expect("tbcd port not mapped");
 
+            containers.insert(0, tbcd);
             let url = format!("ws://127.0.0.1:{}{}", tbcd_port, TBCD_WS_PATH);
-            let cs = ContainerSet {
-                rt,
-                containers: vec![tbcd, bitcoind],
-            };
+            let cs = ContainerSet { rt, containers };
             (cs, url, block_hashes)
         })
     }
@@ -786,6 +797,72 @@ mod container_tests {
             .map(|t| (t.name, false, (t.run)(&mut rpc)))
             .collect();
         run_subtests(&subtests)
+    }
+
+    #[test]
+    fn test_trust_rpc_reconnect() {
+        if skip_docker() {
+            return;
+        }
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let (cs, url, _) = create_test_containers(&rt, 0);
+        let tbcd_id = cs.tbcd_id().to_string();
+
+        let config = Config {
+            url: url.clone(),
+            jwt_secret: JWT_SECRET,
+            cmd_timeout: Duration::from_secs(1),
+            backoff_initial: Duration::from_millis(500),
+            backoff_max: Duration::from_millis(500),
+        };
+
+        let mut rpc = TrustRPC::new(config).unwrap();
+
+        rpc.running().unwrap();
+
+        rt.block_on(async {
+            use testcontainers::bollard::container::LogOutput;
+            use testcontainers::bollard::query_parameters::LogsOptionsBuilder;
+
+            let docker = Docker::connect_with_local_defaults().unwrap();
+            docker
+                .restart_container(&tbcd_id, None)
+                .await
+                .expect("failed to restart tbcd container");
+
+            let mut stream = docker.logs(
+                &tbcd_id,
+                Some(
+                    LogsOptionsBuilder::default()
+                        .follow(true)
+                        .stderr(true)
+                        .stdout(false)
+                        .tail("0")
+                        .build(),
+                ),
+            );
+
+            let wait = b"handle (tbc admin)";
+            while let Some(Ok(entry)) = stream.next().await {
+                match &entry {
+                    LogOutput::StdErr { message } => {
+                        if message.windows(wait.len()).any(|w| w == wait) {
+                            break;
+                        }
+                        continue;
+                    }
+                    _ => continue,
+                }
+            }
+        });
+
+        rpc.running()
+            .expect("TrustRPC did not reconnect after tbcd restart");
     }
 
     fn create_build_context(dir: &str) -> Vec<u8> {
