@@ -47,6 +47,28 @@ mod container_tests {
         }
     }
 
+    fn run_subtests(tests: &[(&str, bool, Result<()>)]) {
+        print!("\nRunning subtests:\n\n");
+        let mut pass = true;
+        for t in tests {
+            match &t.2 {
+                Ok(_) => println!("test {} ... ok", t.0),
+                Err(e) => {
+                    println!("test {} ... FAIL: {}", t.0, e);
+                    if t.1 {
+                        panic!("test {} failed early: {:?}", t.0, e);
+                    }
+                    pass = false;
+                }
+            }
+        }
+
+        if !pass {
+            panic!("One or more subtests failed")
+        }
+        print!("\nAll subtests passed.\n\n")
+    }
+
     fn skip_docker() -> bool {
         let res = match std::env::var("HEMI_DOCKER_TESTS") {
             Ok(v) => v,
@@ -282,7 +304,7 @@ mod container_tests {
         let mut rpc = TrustRPC::new(config).unwrap();
 
         struct TestTableItem {
-            name: String,
+            name: &'static str,
             run: fn(
                 rpc: &mut TrustRPC,
                 headers: &Vec<BlockHash>,
@@ -298,7 +320,7 @@ mod container_tests {
 
         let tests = vec![
             TestTableItem {
-                name: "running".into(),
+                name: "running",
                 run: |rpc, _, _| {
                     if !rpc.running()? {
                         return Err(TrustRPCError::Other("expected TBC to be running".into()));
@@ -308,12 +330,12 @@ mod container_tests {
                 early_exit: true,
             },
             TestTableItem {
-                name: "sync_indexers_to_hash".into(),
+                name: "sync_indexers_to_hash",
                 run: |rpc, hashes, _| rpc.sync_indexers_to_hash(hashes[9]),
                 early_exit: true,
             },
             TestTableItem {
-                name: "block_headers_insert".into(),
+                name: "block_headers_insert",
                 run: |rpc, hashes, _| {
                     let fake_header = create_test_header(hashes[3], 10);
                     let (itt, canon, _, count) = rpc.block_headers_insert(&[fake_header])?;
@@ -328,7 +350,7 @@ mod container_tests {
                 early_exit: true,
             },
             TestTableItem {
-                name: "utxos_by_address".into(),
+                name: "utxos_by_address",
                 run: |rpc, _, utxos| {
                     let addr: Address = Address::from_str(REGNET_TEST_ADDR)
                         .unwrap()
@@ -355,7 +377,7 @@ mod container_tests {
                 early_exit: true,
             },
             TestTableItem {
-                name: "synced".into(),
+                name: "synced",
                 run: |rpc, _, _| {
                     let sync = rpc.synced()?;
                     if sync.at_least_missing != 1 || sync.blockheader_index_height.height != 10 {
@@ -369,7 +391,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "download_block_from_random_peers".into(),
+                name: "download_block_from_random_peers",
                 run: |rpc, hashes, _| {
                     let blk = rpc.download_block_from_random_peers(hashes[9], 1)?;
                     if blk.block_hash() != hashes[9] {
@@ -383,7 +405,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "block_header_by_hash".into(),
+                name: "block_header_by_hash",
                 run: |rpc, hashes, _| {
                     let (height, bh_by_hash) = rpc.block_header_by_hash(hashes[9])?;
                     if bh_by_hash.block_hash() != hashes[9] || height != 10 {
@@ -397,7 +419,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "block_header_best".into(),
+                name: "block_header_best",
                 run: |rpc, hashes, _| {
                     let (height, bh_by_hash) = rpc.block_header_best()?;
                     if bh_by_hash.block_hash() != hashes[9] || height != 10 {
@@ -411,7 +433,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "block_headers_by_height".into(),
+                name: "block_headers_by_height",
                 run: |rpc, hashes, _| {
                     let headers: Vec<BlockHash> = rpc
                         .block_headers_by_height(5)?
@@ -437,7 +459,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "block_in_tx_index".into(),
+                name: "block_in_tx_index",
                 run: |rpc, hashes, _| {
                     if !rpc.block_in_tx_index(hashes[9])? {
                         return Err(TrustRPCError::Other("block not in tx index".into()));
@@ -447,7 +469,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "full_block_available".into(),
+                name: "full_block_available",
                 run: |rpc, hashes, _| {
                     if !rpc.full_block_available(hashes[9])? {
                         return Err(TrustRPCError::Other("full block not available".into()));
@@ -457,7 +479,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "balance_by_address".into(),
+                name: "balance_by_address",
                 run: |rpc, _, _| {
                     let addr: Address = Address::from_str(REGNET_TEST_ADDR)
                         .unwrap()
@@ -475,7 +497,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "tx_by_id".into(),
+                name: "tx_by_id",
                 run: |rpc, _, utxos| {
                     let tx_id: bitcoin::transaction::Txid =
                         bitcoin::transaction::Txid::from_str(&utxos[0].tx_id).unwrap();
@@ -491,7 +513,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "script_hash_available_to_spend".into(),
+                name: "script_hash_available_to_spend",
                 run: |rpc, _, utxos| {
                     let tx_id: bitcoin::transaction::Txid =
                         bitcoin::transaction::Txid::from_str(&utxos[0].tx_id).unwrap();
@@ -505,7 +527,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "block_by_hash".into(),
+                name: "block_by_hash",
                 run: |rpc, hashes, _| {
                     let blk = rpc.block_by_hash(hashes[9])?;
                     if blk.block_hash() != hashes[9] {
@@ -520,7 +542,7 @@ mod container_tests {
                 early_exit: false,
             },
             TestTableItem {
-                name: "block_hash_by_tx_id".into(),
+                name: "block_hash_by_tx_id",
                 run: |rpc, hashes, utxos| {
                     let tx_id = bitcoin::transaction::Txid::from_str(&utxos[0].tx_id).unwrap();
                     let block_hash = rpc.block_hash_by_tx_id(tx_id)?;
@@ -536,7 +558,7 @@ mod container_tests {
             },
             TestTableItem {
                 // Inserts a block with a keystone then syncs the indexer.
-                name: "block_insert".into(),
+                name: "block_insert",
                 run: |rpc, hashes, utxos| {
                     let (block, _) = create_test_block_with_keystone(hashes[9], 42, &utxos[9]);
                     let block_hash = block.block_hash();
@@ -554,7 +576,7 @@ mod container_tests {
                 early_exit: true,
             },
             TestTableItem {
-                name: "keystone_txs_by_hash".into(),
+                name: "keystone_txs_by_hash",
                 run: |rpc, hashes, utxos| {
                     let (_, abrev_hash) = create_test_block_with_keystone(hashes[9], 42, &utxos[9]);
                     let abrev_hash_hex = hex::encode(abrev_hash);
@@ -571,27 +593,12 @@ mod container_tests {
             },
         ];
 
-        print!("\nRunning subtests:\n\n");
-        let mut pass = true;
         let mut utxos = vec![];
-        for tti in tests {
-            match (tti.run)(&mut rpc, &hashes, &mut utxos) {
-                Ok(_) => println!("test {} ... ok", tti.name),
-                Err(e) => {
-                    println!("test {} ... FAIL: {}", tti.name, e);
-                    if tti.early_exit {
-                        panic!("{:?}", e);
-                    }
-                    pass = false;
-                }
-            }
-        }
-
-        if !pass {
-            panic!("One or more subtests failed")
-        }
-
-        print!("\nAll subtests passed.\n\n");
+        let subtests: Vec<(&str, bool, Result<()>)> = tests
+            .iter()
+            .map(|t| (t.name, t.early_exit, (t.run)(&mut rpc, &hashes, &mut utxos)))
+            .collect();
+        run_subtests(&subtests)
     }
 
     #[test]
@@ -774,23 +781,11 @@ mod container_tests {
             },
         ];
 
-        print!("\nRunning subtests:\n\n");
-        let mut pass = true;
-        for tti in tests {
-            match (tti.run)(&mut rpc) {
-                Ok(_) => println!("test {} ... ok", tti.name),
-                Err(e) => {
-                    println!("test {} ... FAIL: {}", tti.name, e);
-                    pass = false;
-                }
-            }
-        }
-
-        if !pass {
-            panic!("One or more subtests failed")
-        }
-
-        print!("\nAll subtests passed.\n\n");
+        let subtests: Vec<(&str, bool, Result<()>)> = tests
+            .iter()
+            .map(|t| (t.name, false, (t.run)(&mut rpc)))
+            .collect();
+        run_subtests(&subtests)
     }
 
     fn create_build_context(dir: &str) -> Vec<u8> {
