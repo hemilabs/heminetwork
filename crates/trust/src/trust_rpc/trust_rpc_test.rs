@@ -19,6 +19,7 @@ mod container_tests {
         core::{ContainerPort, ExecCommand, WaitFor},
         runners::AsyncRunner,
     };
+    use tokio::sync::OnceCell;
     use walkdir::WalkDir;
 
     const REGNET_TEST_ADDR: &str = "2MxGhR8wmKPC8Dwz3v4KpW3HGqUgrRmdur2";
@@ -30,6 +31,8 @@ mod container_tests {
     // tbcd serves the admin WebSocket (which handles all commands) at this path.
     const TBCD_WS_PATH: &str = "/v1/admin/ws";
     const TBCD_WS_PORT: u16 = 8082;
+
+    static BUILD_LOCK: OnceCell<bool> = OnceCell::const_new();
 
     struct ContainerSet<'a> {
         rt: &'a Runtime,
@@ -189,28 +192,35 @@ mod container_tests {
         let docker = Docker::connect_with_local_defaults().unwrap();
 
         rt.block_on(async {
-            // Skip the build if the image already exists
-            if docker
-                .inspect_image("hemilabs/tbcd-test:latest")
-                .await
-                .is_err()
-            {
-                let tar_bytes = create_build_context(tbcd_root.to_str().unwrap());
-                let options = testcontainers::bollard::query_parameters::BuildImageOptions {
-                    dockerfile: "docker/tbcd/Dockerfile".to_string(),
-                    t: Some("hemilabs/tbcd-test:latest".to_string()),
-                    q: true,
-                    ..Default::default()
-                };
-                let mut build_stream =
-                    docker.build_image(options, None, Some(body_full(tar_bytes.into())));
-                while let Some(msg) = build_stream.next().await {
-                    match msg {
-                        Ok(info) => println!("Build: {info:?}"),
-                        Err(e) => panic!("Docker image build failed: {e:?}"),
+            // Skip the building tbcd if the image already exists.
+            // If it doesn't, only build it one time, and block parallel builds.
+            BUILD_LOCK
+                .get_or_init(|| async {
+                    if docker
+                        .inspect_image("hemilabs/tbcd-test:latest")
+                        .await
+                        .is_err()
+                    {
+                        let tar_bytes = create_build_context(tbcd_root.to_str().unwrap());
+                        let options =
+                            testcontainers::bollard::query_parameters::BuildImageOptions {
+                                dockerfile: "docker/tbcd/Dockerfile".to_string(),
+                                t: Some("hemilabs/tbcd-test:latest".to_string()),
+                                q: true,
+                                ..Default::default()
+                            };
+                        let mut build_stream =
+                            docker.build_image(options, None, Some(body_full(tar_bytes.into())));
+                        while let Some(msg) = build_stream.next().await {
+                            match msg {
+                                Ok(info) => println!("Build: {info:?}"),
+                                Err(e) => panic!("Docker image build failed: {e:?}"),
+                            }
+                        }
                     }
-                }
-            }
+                    true
+                })
+                .await;
 
             let mut wait_for_insert: String = "handle (tbc admin)".into();
             let mut tbc_seeds: String = "".into();
