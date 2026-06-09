@@ -188,22 +188,27 @@ mod container_tests {
 
         let docker = Docker::connect_with_local_defaults().unwrap();
 
-        let tar_bytes = create_build_context(tbcd_root.to_str().unwrap());
-
-        let options = testcontainers::bollard::query_parameters::BuildImageOptions {
-            dockerfile: "docker/tbcd/Dockerfile".to_string(),
-            t: Some("hemilabs/tbcd-test:latest".to_string()),
-            q: true,
-            ..Default::default()
-        };
-
-        let mut build_stream = docker.build_image(options, None, Some(body_full(tar_bytes.into())));
-
         rt.block_on(async {
-            while let Some(msg) = build_stream.next().await {
-                match msg {
-                    Ok(info) => println!("Build: {info:?}"),
-                    Err(e) => panic!("Docker image build failed: {e:?}"),
+            // Skip the build if the image already exists
+            if docker
+                .inspect_image("hemilabs/tbcd-test:latest")
+                .await
+                .is_err()
+            {
+                let tar_bytes = create_build_context(tbcd_root.to_str().unwrap());
+                let options = testcontainers::bollard::query_parameters::BuildImageOptions {
+                    dockerfile: "docker/tbcd/Dockerfile".to_string(),
+                    t: Some("hemilabs/tbcd-test:latest".to_string()),
+                    q: true,
+                    ..Default::default()
+                };
+                let mut build_stream =
+                    docker.build_image(options, None, Some(body_full(tar_bytes.into())));
+                while let Some(msg) = build_stream.next().await {
+                    match msg {
+                        Ok(info) => println!("Build: {info:?}"),
+                        Err(e) => panic!("Docker image build failed: {e:?}"),
+                    }
                 }
             }
 
