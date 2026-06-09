@@ -201,7 +201,10 @@ mod container_tests {
 
         rt.block_on(async {
             while let Some(msg) = build_stream.next().await {
-                println!("Message: {msg:?}");
+                match msg {
+                    Ok(info) => println!("Build: {info:?}"),
+                    Err(e) => panic!("Docker image build failed: {e:?}"),
+                }
             }
 
             let mut wait_for_insert: String = "handle (tbc admin)".into();
