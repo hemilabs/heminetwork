@@ -20,7 +20,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/hemi"

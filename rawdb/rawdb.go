@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb/opt"
 	"github.com/juju/loggo/v2"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 const (

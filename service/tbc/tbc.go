@@ -29,11 +29,11 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
+	"github.com/hemilabs/x/leveldb/leveldb"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/tbcadminapi"

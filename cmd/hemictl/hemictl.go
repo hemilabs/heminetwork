@@ -31,9 +31,9 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb/opt"
 	"github.com/juju/loggo/v2"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
