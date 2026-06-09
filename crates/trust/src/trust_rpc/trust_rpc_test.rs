@@ -186,7 +186,7 @@ mod container_tests {
     ) -> (ContainerSet<'_>, String, Vec<String>) {
         let tbcd_root = project_root::get_project_root().unwrap();
 
-        let x: u8 = rand::random();
+        let x: u16 = rand::random();
         let bitcoind_container_name = format!("bitcoind-{}", x);
 
         let docker = Docker::connect_with_local_defaults().unwrap();
