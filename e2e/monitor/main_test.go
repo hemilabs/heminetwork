@@ -2759,7 +2759,12 @@ func sendToTBCPrecompileWithInvalidTXID(t *testing.T, ctx context.Context, clien
 		t.Fatal(err)
 	}
 
-	gasPrice, err := client.SuggestGasPrice(ctx)
+	gasTipCap, err := client.SuggestGasTipCap(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gasFeeCap, err := client.SuggestGasPrice(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2772,13 +2777,15 @@ func sendToTBCPrecompileWithInvalidTXID(t *testing.T, ctx context.Context, clien
 	toAddress := common.HexToAddress("0x0000000000000000000000000000000000000043")
 	data := common.FromHex("0xa82f7c66")
 
-	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    nonce,
-		To:       &toAddress,
-		Value:    big.NewInt(0),
-		Gas:      uint64(100000),
-		GasPrice: gasPrice,
-		Data:     data,
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID:   chainID,
+		Nonce:     nonce,
+		To:        &toAddress,
+		Value:     big.NewInt(0),
+		Gas:       uint64(3000000),
+		GasFeeCap: gasFeeCap,
+		GasTipCap: gasTipCap,
+		Data:      data,
 	})
 
 	signer := types.NewCancunSigner(chainID)
