@@ -2774,8 +2774,8 @@ func sendToTBCPrecompileWithInvalidTXID(t *testing.T, ctx context.Context, clien
 		t.Fatal(err)
 	}
 
-	toAddress := common.HexToAddress("0x0000000000000000000000000000000000000043")
-	data := common.FromHex("0xa82f7c66")
+	toAddress := optimismPortalProxy(t)
+	data := common.FromHex("0xe9e05c42000000000000000000000000000000000000000000000000000000000000004300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030d40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000004a82f7c6600000000000000000000000000000000000000000000000000000000")
 
 	tx := types.NewTx(&types.DynamicFeeTx{
 		ChainID:   chainID,
@@ -2798,7 +2798,7 @@ func sendToTBCPrecompileWithInvalidTXID(t *testing.T, ctx context.Context, clien
 		t.Fatal(err)
 	}
 
-	t.Logf("sent tx to 0x43 with data 0xa82f7c66: %s", signedTx.Hash().Hex())
+	t.Logf("sent deposit tx to OptimismPortalProxy: %s", signedTx.Hash().Hex())
 
 	receipt := waitForTxReceipt(t, ctx, client, signedTx)
 	if receipt == nil {
