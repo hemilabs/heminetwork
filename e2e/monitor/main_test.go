@@ -339,6 +339,14 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				t.Fatalf("could not dial eth l1 %s", err)
 			}
 
+			privateKeyHex := privateKeyForTestByIndex(t, uint(i))
+			privateKey, err := crypto.HexToECDSA(privateKeyHex)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			sendToTBCPrecompileWithInvalidTXID(t, ctx, l1Client, privateKey)
+
 			l2Client, err := ethclient.Dial(l2Endpoint)
 			if err != nil {
 				t.Fatalf("could not dial eth l2 %s", err)
@@ -357,13 +365,6 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 			l2ClientNonSequencingFullSync, err := ethclient.Dial(l2NonSequencingFullSyncEndpoint)
 			if err != nil {
 				t.Fatalf("could not dial eth l2 non sequencing full sync %s", err)
-			}
-
-			// Use different private key for each subtest to avoid conflicts
-			privateKeyHex := privateKeyForTestByIndex(t, uint(i))
-			privateKey, err := crypto.HexToECDSA(privateKeyHex)
-			if err != nil {
-				t.Fatal(err)
 			}
 
 			l2ClientToUse := l2Client
@@ -2741,6 +2742,64 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 			break
 		}
 		time.Sleep(10 * time.Second)
+	}
+}
+
+func sendToTBCPrecompileWithInvalidTXID(t *testing.T, ctx context.Context, client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatal("error casting public key to ECDSA")
+	}
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	nonce, err := client.PendingNonceAt(ctx, fromAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gasPrice, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	chainID, err := client.ChainID(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	toAddress := common.HexToAddress("0x0000000000000000000000000000000000000043")
+	data := common.FromHex("0xa82f7c66")
+
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    nonce,
+		To:       &toAddress,
+		Value:    big.NewInt(0),
+		Gas:      uint64(100000),
+		GasPrice: gasPrice,
+		Data:     data,
+	})
+
+	signer := types.NewCancunSigner(chainID)
+	signedTx, err := types.SignTx(tx, signer, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := client.SendTransaction(ctx, signedTx); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("sent tx to 0x43 with data 0xa82f7c66: %s", signedTx.Hash().Hex())
+
+	receipt := waitForTxReceipt(t, ctx, client, signedTx)
+	if receipt == nil {
+		t.Fatal("no receipt received")
+	}
+
+	if receipt.Status == types.ReceiptStatusFailed {
+		t.Fatal("transaction failed")
 	}
 }
 
