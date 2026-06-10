@@ -339,6 +339,25 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				t.Fatalf("could not dial eth l1 %s", err)
 			}
 
+			privateKeyHex := privateKeyForTestByIndex(t, uint(i))
+			privateKey, err := crypto.HexToECDSA(privateKeyHex)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			invalidTxidRetries := 10
+			for i := range invalidTxidRetries {
+				if err := sendToTBCPrecompileWithInvalidTXID(t, ctx, l1Client, privateKey); err != nil {
+					if i >= invalidTxidRetries-1 {
+						t.Fatal(err)
+					} else {
+						t.Logf("error occurred sending invalid txid, will retry (err: %s)", err)
+					}
+				} else {
+					break
+				}
+			}
+
 			l2Client, err := ethclient.Dial(l2Endpoint)
 			if err != nil {
 				t.Fatalf("could not dial eth l2 %s", err)
@@ -357,13 +376,6 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 			l2ClientNonSequencingFullSync, err := ethclient.Dial(l2NonSequencingFullSyncEndpoint)
 			if err != nil {
 				t.Fatalf("could not dial eth l2 non sequencing full sync %s", err)
-			}
-
-			// Use different private key for each subtest to avoid conflicts
-			privateKeyHex := privateKeyForTestByIndex(t, uint(i))
-			privateKey, err := crypto.HexToECDSA(privateKeyHex)
-			if err != nil {
-				t.Fatal(err)
 			}
 
 			l2ClientToUse := l2Client
@@ -2742,6 +2754,73 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 		}
 		time.Sleep(10 * time.Second)
 	}
+}
+
+func sendToTBCPrecompileWithInvalidTXID(t *testing.T, ctx context.Context, client *ethclient.Client, privateKey *ecdsa.PrivateKey) error {
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatal("error casting public key to ECDSA")
+	}
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	nonce, err := client.PendingNonceAt(ctx, fromAddress)
+	if err != nil {
+		return err
+	}
+
+	gasTipCap, err := client.SuggestGasTipCap(ctx)
+	if err != nil {
+		return err
+	}
+
+	gasFeeCap, err := client.SuggestGasPrice(ctx)
+	if err != nil {
+		return err
+	}
+
+	chainID, err := client.ChainID(ctx)
+	if err != nil {
+		return err
+	}
+
+	toAddress := optimismPortalProxy(t)
+	data := common.FromHex("0xe9e05c42000000000000000000000000000000000000000000000000000000000000004300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000030d40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000004a82f7c6600000000000000000000000000000000000000000000000000000000")
+
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID:   chainID,
+		Nonce:     nonce,
+		To:        &toAddress,
+		Value:     big.NewInt(0),
+		Gas:       uint64(3000000),
+		GasFeeCap: gasFeeCap,
+		GasTipCap: gasTipCap,
+		Data:      data,
+	})
+
+	signer := types.NewCancunSigner(chainID)
+	signedTx, err := types.SignTx(tx, signer, privateKey)
+	if err != nil {
+		return err
+	}
+
+	if err := client.SendTransaction(ctx, signedTx); err != nil {
+		return err
+	}
+
+	t.Logf("sent deposit tx to OptimismPortalProxy: %s", signedTx.Hash().Hex())
+
+	receipt := waitForTxReceipt(t, ctx, client, signedTx)
+	if receipt == nil {
+		return err
+	}
+
+	if receipt.Status == types.ReceiptStatusFailed {
+		return err
+	}
+
+	return nil
 }
 
 func waitSequencerWindowSizeForFork(t *testing.T) {

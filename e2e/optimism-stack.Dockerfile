@@ -4,7 +4,7 @@
 
 # increment me to break the cache: 2
 
-ARG OP_GETH_COMMIT=127f88f368ed4773d11e771b398592f1dda20591
+ARG OP_GETH_COMMIT=6ceee9fc3344204415d70f783202f175dae40d79
 ARG OPTIMISM_COMMIT=a22bfa0853b40668f17b0a2c81fff515e563f539
 
 # commit near tip on "master" (main) branch.  the most recent release is
@@ -22,7 +22,7 @@ RUN git clone https://github.com/foundry-rs/foundry.git
 
 WORKDIR /git/foundry
 RUN git checkout $FOUNDRY_COMMIT
-RUN cargo build --package forge
+RUN cargo build --release --package forge
 
 FROM golang:1.26.5-trixie@sha256:4ee9ffa999b4583ce281939cdff828763083610292f252279a0cee77473bd9a7 AS just_build
 
@@ -93,7 +93,7 @@ WORKDIR /git/optimism/op-proposer
 RUN just op-proposer
 
 
-COPY --from=foundry_build /git/foundry/target/debug/forge /usr/bin/forge
+COPY --from=foundry_build /git/foundry/target/release/forge /usr/bin/forge
 
 RUN forge --help
 

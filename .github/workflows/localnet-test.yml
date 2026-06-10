@@ -69,6 +69,8 @@ jobs:
         run: |
           echo "Building optimism-stack image from Dockerfile (no cache or Dockerfile changed)"
           docker build -f ./$DOCKERFILE_NAME -t $DOCKER_IMAGE_TAG .
+          docker image prune -f
+          docker system prune -f
 
       - name: "build localnet"
         env:
@@ -80,9 +82,13 @@ jobs:
             echo "Using freshly built $DOCKER_IMAGE_TAG image, building remaining services"
           fi
           docker compose -f ./e2e/docker-compose.yml build
+          docker image prune -f
+          docker system prune -f
       
       - name: "remove dangling"
-        run: docker system prune -f
+        run: |
+          docker system prune -f
+          docker image prune -f
 
       - name: "Save optimism-stack image to cache"
         env:
@@ -113,7 +119,9 @@ jobs:
 
       - name: "build synctest"
         working-directory: ./synctest
-        run: docker build -t synctest:latest .
+        run: |
+          docker build -t synctest:latest .
+          docker image prune -f
 
       - name: "run synctest"
         working-directory: ./synctest
