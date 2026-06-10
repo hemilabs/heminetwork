@@ -111,7 +111,7 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 					Name:  n.DNSName,
 					Class: dns.ClassINET,
 				},
-				TXT: rdata.TXT{Txt: []string{"v=" + dnsAppName + "; identity=" +
+				TXT: rdata.TXT{Txt: []string{"v=" + DNSAppName + "; identity=" +
 					n.Secret.String() + port}},
 			},
 		},
@@ -1261,7 +1261,7 @@ func TestDNSSeeding(t *testing.T) {
 				Class: dns.ClassINET,
 			},
 			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v; port=%v",
-				dnsAppName, serverA.Identity(), port)}},
+				DNSAppName, serverA.Identity(), port)}},
 		},
 	}
 
@@ -1393,7 +1393,7 @@ func TestDNSForwardWithValidHostname(t *testing.T) {
 		&dns.TXT{
 			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
 			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-				dnsAppName, serverB.Identity())}},
+				DNSAppName, serverB.Identity())}},
 		},
 	}
 
@@ -3957,7 +3957,7 @@ func TestVerifyDNSIdentityErrors(t *testing.T) {
 			&dns.TXT{
 				Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
 				TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-					dnsAppName, wrongID)}},
+					DNSAppName, wrongID)}},
 			},
 		}
 		srv := newDNSServer(ctx, handler)
@@ -4011,7 +4011,7 @@ func TestVerifyDNSIdentityErrors(t *testing.T) {
 			&dns.TXT{
 				Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
 				TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=ZZZZ",
-					dnsAppName)}},
+					DNSAppName)}},
 			},
 		}
 		srv := newDNSServer(ctx, handler)
@@ -4622,7 +4622,7 @@ func TestConnectPeerDNSVerifyError(t *testing.T) {
 		&dns.TXT{
 			Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
 			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-				dnsAppName, wrongID)}},
+				DNSAppName, wrongID)}},
 		},
 	}
 	dnsSrv := newDNSServer(ctx, handler)
@@ -9173,7 +9173,7 @@ func TestConnectDNSVerifyError(t *testing.T) {
 		&dns.TXT{
 			Hdr: dns.Header{Name: "localhost.", Class: dns.ClassINET},
 			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-				dnsAppName, wrongID)}},
+				DNSAppName, wrongID)}},
 		},
 	}
 	dnsSrv := newDNSServer(ctx, handler)
@@ -11227,7 +11227,7 @@ func TestTXTRecordFromAddressReverseLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m["v"] != dnsAppName {
+	if m["v"] != DNSAppName {
 		t.Fatalf("v=%q", m["v"])
 	}
 }
@@ -13074,7 +13074,7 @@ func TestSeedForwardModePreservesHostname(t *testing.T) {
 		&dns.TXT{
 			Hdr: dns.Header{Name: seedFQDN, Class: dns.ClassINET},
 			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v; port=%v",
-				dnsAppName, serverA.Identity(), portNum)}},
+				DNSAppName, serverA.Identity(), portNum)}},
 		},
 	}
 	dnsSrv := newDNSServer(ctx, handler)
