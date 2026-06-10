@@ -279,6 +279,7 @@ func init() {
 type Config struct {
 	Connect                 []string
 	DNS                     string // DNSOff, DNSForward, DNSReverse, DNSAll
+	DNSServer               string // host:port of a custom DNS resolver; empty = system default
 	Hostname                string // Hostname to advertise in gossip; empty = IP
 	Home                    string
 	ListenAddress           string
@@ -1310,7 +1311,7 @@ func (s *Server) verifyDNSIdentity(ctx context.Context, hostname string, id Iden
 		if err != nil {
 			continue
 		}
-		if m["v"] != dnsAppName {
+		if m["v"] != DNSAppName {
 			continue
 		}
 		remoteDNSID, err := NewIdentityFromString(m["identity"])

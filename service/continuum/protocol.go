@@ -802,7 +802,7 @@ const (
 	// private key (32 bytes = 256 bits).
 	secp256k1KeySize = 32
 
-	dnsAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
+	DNSAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
 )
 
 // ZeroChallenge is an all-zeros challenge value used as an invalid sentinel.
@@ -2055,7 +2055,7 @@ func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr
 	}
 	// Port field present in TXT record but unused.
 
-	if m["v"] != dnsAppName {
+	if m["v"] != DNSAppName {
 		return false, fmt.Errorf("dns invalid app name: '%v'", m["v"])
 	}
 	remoteDNSID, err := NewIdentityFromString(m["identity"])
