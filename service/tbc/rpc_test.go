@@ -3402,7 +3402,7 @@ func TestNotifyTxOutputsContextCancelled(t *testing.T) {
 // RPC. Proves the full pipeline: bitcoind → P2P → TBC → ordinal
 // indexer → LevelDB → RPC response.
 func TestRpcOrdinalSatRanges(t *testing.T) {
-	skipIfNoDocker(t)
+	testutil.SkipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
@@ -3534,7 +3534,7 @@ func TestRpcOrdinalSatRanges(t *testing.T) {
 // TestRpcOrdinalNotFound tests all ordinal RPC endpoints with inputs
 // that should return not-found or empty results.
 func TestRpcOrdinalNotFound(t *testing.T) {
-	skipIfNoDocker(t)
+	testutil.SkipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
@@ -3706,7 +3706,7 @@ func TestRpcOrdinalNotFound(t *testing.T) {
 //
 //	TBC P2P sync → ordinal indexer → TBC RPC query
 func TestRpcOrdinalInscriptionE2E(t *testing.T) {
-	skipIfNoDocker(t)
+	testutil.SkipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
@@ -3844,7 +3844,7 @@ func TestRpcOrdinalInscriptionE2E(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	_, err = runBitcoinCommand(ctx, t, bitcoindContainer, []string{
+	_, err = testutil.RunBitcoindCommand(ctx, bitcoindContainer, []string{
 		"bitcoin-cli", "-regtest=1", "generatetoaddress", "1",
 		p2pkhAddr.EncodeAddress(),
 	})
@@ -3894,7 +3894,7 @@ func TestRpcOrdinalInscriptionE2E(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	_, err = runBitcoinCommand(ctx, t, bitcoindContainer, []string{
+	_, err = testutil.RunBitcoindCommand(ctx, bitcoindContainer, []string{
 		"bitcoin-cli", "-regtest=1", "generatetoaddress", "1",
 		p2pkhAddr.EncodeAddress(),
 	})
