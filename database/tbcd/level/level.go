@@ -85,10 +85,10 @@ var (
 
 // ordinalBatchBytesPerOutpoint estimates the average serialized batch
 // bytes per outpoint in the ordinal cache. Each outpoint generates
-// ~5 sub-entries (o, O, i, b, n) averaging ~120 bytes each in the
+// ~5 sub-entries (o, O, i, b, n) averaging ~300 bytes each in the
 // LevelDB batch (key + value + varint overhead). Used to pre-allocate
 // the batch via MakeBatch to avoid repeated Batch.grow reallocations.
-const ordinalBatchBytesPerOutpoint = 600
+const ordinalBatchBytesPerOutpoint = 1500
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
