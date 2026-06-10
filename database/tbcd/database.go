@@ -112,6 +112,7 @@ type Database interface {
 	BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error)
 	// BlocksInsert(ctx context.Context, bs []*btcutil.Block) (int64, error)
 	BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Block, error)
+	BlockRawByHash(ctx context.Context, hash chainhash.Hash) ([]byte, error)
 	BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool, error)
 	BlockCacheStats() CacheStats
 
