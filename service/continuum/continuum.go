@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
+	"github.com/hemilabs/x/tss/v3/ecdsa/keygen"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
@@ -146,6 +146,7 @@ func init() {
 type Config struct {
 	Connect                 []string
 	DNS                     string // DNSOff, DNSForward, DNSReverse, DNSAll
+	DNSServer               string // host:port of a custom DNS resolver; empty = system default
 	Hostname                string // Hostname to advertise in gossip; empty = IP
 	Home                    string
 	ListenAddress           string
@@ -329,8 +330,20 @@ func NewServer(cfg *Config) (*Server, error) {
 		// wired in.
 		init = &noopInitiator{}
 	}
+	var resolver *net.Resolver
+	if cfg.DNSServer != "" {
+		dnsAddr := cfg.DNSServer
+		resolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := &net.Dialer{Timeout: 10 * time.Second}
+				return d.DialContext(ctx, "tcp", dnsAddr)
+			},
+		}
+	}
 	return &Server{
 		cfg:          cfg,
+		resolver:     resolver,
 		listenConfig: &net.ListenConfig{},
 		sessions:     make(map[Identity]*Transport, cfg.PeersWanted),
 		ponged:       make(map[Identity]struct{}, cfg.PeersWanted),
@@ -991,7 +1004,7 @@ func (s *Server) verifyDNSIdentity(ctx context.Context, hostname string, id Iden
 		if err != nil {
 			continue
 		}
-		if m["v"] != dnsAppName {
+		if m["v"] != DNSAppName {
 			continue
 		}
 		remoteDNSID, err := NewIdentityFromString(m["identity"])
@@ -1215,7 +1228,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		return
 	}
 
-	d := &net.Dialer{Timeout: dialTimeout}
+	d := &net.Dialer{Timeout: dialTimeout, Resolver: s.dnsResolver()}
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		log.Warningf("connectPeer dial %v: %v", addr, err)
@@ -2258,7 +2271,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		return
 	}
 
-	d := &net.Dialer{Timeout: dialTimeout}
+	d := &net.Dialer{Timeout: dialTimeout, Resolver: s.dnsResolver()}
 	conn, err := d.DialContext(ctx, "tcp", c)
 	if err != nil {
 		sendErr(ctx, errC, err)

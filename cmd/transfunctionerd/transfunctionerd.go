@@ -91,6 +91,12 @@ var (
 			Help:         "address and port transfunctionerd prometheus listens on",
 			Print:        config.PrintAll,
 		},
+		"TRF_DNS_SERVER": config.Config{
+			Value:        &cfg.DNSServer,
+			DefaultValue: "",
+			Help:         "Address (host:port) of a custom DNS resolver used for peer verification. Empty uses the system default.",
+			Print:        config.PrintAll,
+		},
 		"TRF_DNS": config.Config{
 			Value:        &cfg.DNS,
 			DefaultValue: "forward",

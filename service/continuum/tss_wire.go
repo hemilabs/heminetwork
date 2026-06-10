@@ -11,13 +11,13 @@ import (
 	"reflect"
 	"strings"
 
-	ecdsaKeygen "github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
-	ecdsaResharing "github.com/hemilabs/x/tss-lib/v3/ecdsa/resharing"
-	ecdsaSigning "github.com/hemilabs/x/tss-lib/v3/ecdsa/signing"
-	eddsaKeygen "github.com/hemilabs/x/tss-lib/v3/eddsa/keygen"
-	eddsaResharing "github.com/hemilabs/x/tss-lib/v3/eddsa/resharing"
-	eddsaSigning "github.com/hemilabs/x/tss-lib/v3/eddsa/signing"
-	"github.com/hemilabs/x/tss-lib/v3/tss"
+	ecdsaKeygen "github.com/hemilabs/x/tss/v3/ecdsa/keygen"
+	ecdsaResharing "github.com/hemilabs/x/tss/v3/ecdsa/resharing"
+	ecdsaSigning "github.com/hemilabs/x/tss/v3/ecdsa/signing"
+	eddsaKeygen "github.com/hemilabs/x/tss/v3/eddsa/keygen"
+	eddsaResharing "github.com/hemilabs/x/tss/v3/eddsa/resharing"
+	eddsaSigning "github.com/hemilabs/x/tss/v3/eddsa/signing"
+	"github.com/hemilabs/x/tss/v3/tss"
 )
 
 // tssWireEnvelope wraps a TSS message Content for wire transport.
@@ -37,7 +37,7 @@ func marshalTSSContent(content interface{}) ([]byte, error) {
 		return nil, errors.New("marshal: nil content")
 	}
 	t := reflect.TypeOf(content).Elem()
-	// Extract "ecdsa/keygen" from "github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
+	// Extract "ecdsa/keygen" from "github.com/hemilabs/x/tss/v3/ecdsa/keygen"
 	pkg := t.PkgPath()
 	if idx := strings.Index(pkg, "ecdsa/"); idx >= 0 {
 		pkg = pkg[idx:]

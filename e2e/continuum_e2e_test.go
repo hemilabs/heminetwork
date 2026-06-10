@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
+	"github.com/hemilabs/x/tss/v3/ecdsa/keygen"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/hemilabs/heminetwork/v2/service/continuum"

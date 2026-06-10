@@ -28,7 +28,7 @@ import (
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-	"github.com/hemilabs/x/tss-lib/v3/tss"
+	"github.com/hemilabs/x/tss/v3/tss"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
@@ -677,7 +677,7 @@ const (
 	// private key (32 bytes = 256 bits).
 	secp256k1KeySize = 32
 
-	dnsAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
+	DNSAppName = "transfunctioner" // Expected "v=" value in DNS TXT record
 )
 
 // ZeroChallenge is an all-zeros challenge value used as an invalid sentinel.
@@ -1852,7 +1852,7 @@ func VerifyRemoteDNSIdentity(ctx context.Context, r *net.Resolver, addr net.Addr
 	}
 	// Port field present in TXT record but unused.
 
-	if m["v"] != dnsAppName {
+	if m["v"] != DNSAppName {
 		return false, fmt.Errorf("dns invalid app name: '%v'", m["v"])
 	}
 	remoteDNSID, err := NewIdentityFromString(m["identity"])

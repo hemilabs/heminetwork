@@ -6,6 +6,7 @@
 FROM golang:1.26.1-alpine3.23@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS builder
 
 ARG GO_LDFLAGS
+ARG CONTINUUM_DEBUG
 
 # Add make and git
 RUN apk --no-cache add --update make git
@@ -18,7 +19,7 @@ COPY go.sum .
 RUN make go-deps
 
 COPY . .
-RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" transfunctionerd
+RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" CONTINUUM_DEBUG="$CONTINUUM_DEBUG" transfunctionerd
 
 # Run stage
 FROM cgr.dev/chainguard/static@sha256:2fdfacc8d61164aa9e20909dceec7cc28b9feb66580e8e1a65b9f2443c53b61b
