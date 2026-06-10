@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -73,7 +74,12 @@ func NewOrdinalCache(capacity int) *OrdinalCache {
 }
 
 func (c *OrdinalCache) Clear() {
-	clear(c.m)
+	if c.entryCount > c.capacity+c.capacity/10 {
+		c.m = make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, c.capacity)
+		runtime.GC()
+	} else {
+		clear(c.m)
+	}
 	c.entryCount = 0
 }
 
@@ -416,7 +422,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 						prevValue:   append([]byte(nil), t.Value...),
 					}
 					// Carry 'O' data for transfer fast path.
-					if bigOVal != nil && len(bigOVal) >= 40 {
+					if len(bigOVal) >= 40 {
 						copy(f.srcBlockHash[:], bigOVal[:32])
 						f.srcOutputValue = binary.BigEndian.Uint64(bigOVal[32:40])
 						f.srcHasO = true
@@ -441,7 +447,6 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 					srcInputIdx: ordinalRevealSentinel,
 				})
 			}
-
 		}
 
 		cheapTime += time.Since(cheapStart)
@@ -819,7 +824,10 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 		}
 	} else {
 		// Slow path: legacy entry, scan with lazyBlock.
-		lb := newLazyBlock(raw)
+		lb, err := newLazyBlock(raw)
+		if err != nil {
+			return 0, fmt.Errorf("lazy block %v: %w", blockHash, err)
+		}
 		idx, err := lb.FindTx(txid)
 		if err != nil {
 			return 0, fmt.Errorf("tx %v not in block %v: %w", txid, blockHash, err)
