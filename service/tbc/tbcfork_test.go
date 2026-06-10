@@ -5312,7 +5312,6 @@ func TestOrdinalShortcircuitMultiInput(t *testing.T) {
 	}
 	t.Logf("O entry verified: blockHash=%v outputValue=%d", gotBH, gotOV)
 
-
 	// Unwind: mine a longer fork from genesis.
 	l, err = s.SubscribeNotifications(ctx, 10)
 	if err != nil {
@@ -5355,7 +5354,6 @@ func TestOrdinalShortcircuitMultiInput(t *testing.T) {
 	} else if len(inscsAfter) != 0 {
 		t.Fatalf("inscription should be gone after unwind, got %d", len(inscsAfter))
 	}
-
 
 	// O and o must also be gone after unwind.
 	bigOAfter, _ := s.g.db.OrdinalBigOByOutpoint(ctx, inscOP)
@@ -5510,7 +5508,6 @@ func TestOrdinalParallelFetch(t *testing.T) {
 		t.Fatal("InscriptionByID returned nil")
 	}
 	t.Logf("parallel fetch DB round-trip OK (12 inputs, inscription on input 10)")
-
 
 	// O verification: inscription at (txid, 0) must have correct values.
 	pfInscTx := b3.TxByIndex(1)

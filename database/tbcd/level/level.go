@@ -1904,7 +1904,6 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 		return fmt.Errorf("outputs commit: %w", err)
 	}
 
-
 	return nil
 }
 
@@ -1991,7 +1990,6 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	if err = txsCommit(); err != nil {
 		return fmt.Errorf("transactions commit: %w", err)
 	}
-
 
 	return nil
 }
