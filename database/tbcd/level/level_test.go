@@ -1647,3 +1647,115 @@ func TestDbUpgradeV5Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestKeystonesByHeightSkipsMismatchedKeys(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	home := t.TempDir()
+	cfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Build a fake keystone at height 10.
+	var ksHash chainhash.Hash
+	copy(ksHash[:], testutil.FillBytes("kshash", 32))
+
+	ks := tbcd.Keystone{
+		BlockHeight: 10,
+		BlockHash:   ksHash,
+	}
+	copy(ks.AbbreviatedKeystone[:], testutil.FillBytes("abbrev", 32))
+
+	// Insert the primary record keyed by hash, and the height-index entry.
+	kssDB := db.pool[level.KeystonesDB]
+	if err := kssDB.Put(ksHash[:], encodeKeystoneToSlice(ks), nil); err != nil {
+		t.Fatal(err)
+	}
+	heightKey := encodeKeystoneHeightHashSlice(10, ksHash)
+	if err := kssDB.Put(heightKey, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert a rogue 32-byte key starting with 'h' that sorts into the
+	// height range. This simulates a primary keystone hash key whose
+	// first byte is 0x68 ('h'). Without the length filter this would
+	// panic in decodeKeystoneHeightHash.
+	rogue := make([]byte, 32)
+	rogue[0] = 'h'
+	binary.BigEndian.PutUint32(rogue[1:5], 10)
+	// Trailing bytes must be non-zero: a 32-byte key with an all-zero
+	// tail sorts before the 37-byte range start (h|height|32 zero bytes)
+	// as a prefix, so it would never enter the scan range and the length
+	// guard would not be exercised.
+	for j := 5; j < len(rogue); j++ {
+		rogue[j] = 0xff
+	}
+	if err := kssDB.Put(rogue, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// KeystonesByHeight must not panic and must return the real keystone.
+	kssList, err := db.KeystonesByHeight(ctx, 9, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kssList) != 1 {
+		t.Fatalf("expected 1 keystone, got %d", len(kssList))
+	}
+	if kssList[0].BlockHeight != 10 {
+		t.Fatalf("expected height 10, got %d", kssList[0].BlockHeight)
+	}
+}
+
+func TestKeystonesByHeightOnlyMismatchedKeys(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	home := t.TempDir()
+	cfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Insert only a rogue 32-byte key starting with 'h'.
+	kssDB := db.pool[level.KeystonesDB]
+	rogue := make([]byte, 32)
+	rogue[0] = 'h'
+	binary.BigEndian.PutUint32(rogue[1:5], 10)
+	// Trailing bytes must be non-zero: a 32-byte key with an all-zero
+	// tail sorts before the 37-byte range start (h|height|32 zero bytes)
+	// as a prefix, so it would never enter the scan range and the length
+	// guard would not be exercised.
+	for j := 5; j < len(rogue); j++ {
+		rogue[j] = 0xff
+	}
+	if err := kssDB.Put(rogue, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Must return NotFound, not panic.
+	_, err = db.KeystonesByHeight(ctx, 9, 2)
+	if !errors.Is(err, database.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
+}
