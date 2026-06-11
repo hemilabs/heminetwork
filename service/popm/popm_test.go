@@ -1039,3 +1039,67 @@ func TestPopMinerE2E(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultMaxFee(t *testing.T) {
+	cfg := NewDefaultConfig()
+	if cfg.MaxFee != defaultMaxFee {
+		t.Fatalf("expected default MaxFee of %v, got %v",
+			defaultMaxFee, cfg.MaxFee)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	_, kssList := testutil.MakeSharedKeystones(1)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
+
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
+	defer mtbc.Shutdown()
+
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gozerReady := make(chan struct{})
+	go func() {
+		err := s.gozer.Run(ctx, func() {
+			gozerReady <- struct{}{}
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-gozerReady:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+
+	// Fee above default cap should be rejected.
+	mtbc.SetFeeEstimate(defaultMaxFee + 50)
+	_, err = s.estimateFee(ctx)
+	if !errors.Is(err, ErrFeeMaxExceeded) {
+		t.Fatalf("expected FeeMaxExceededError for fee above default cap, got: %v", err)
+	}
+
+	// Fee below default cap should pass.
+	mtbc.SetFeeEstimate(defaultMaxFee - 10)
+	fee, err := s.estimateFee(ctx)
+	if err != nil {
+		t.Fatalf("expected no error for fee below default cap, got: %v", err)
+	}
+	if fee.SatsPerVByte != defaultMaxFee-10 {
+		t.Fatalf("expected fee of %v, got %v", defaultMaxFee-10, fee.SatsPerVByte)
+	}
+}
