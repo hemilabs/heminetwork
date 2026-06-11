@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Set default `POPM_MAX_FEE` to 100 sats/vB (was 0, uncapped). Prevents
   a malicious or compromised fee source from draining PoP miner UTXOs.
   Set `POPM_MAX_FEE=0` to restore the previous uncapped behavior.
+- Fix `KeystonesByHeight` panic when primary keystone hash keys collide
+  with the height-index key range in LevelDB. The iterator now filters
+  by key length before decoding
+  ([#1059](https://github.com/hemilabs/heminetwork/pull/1059)).
 
 ### Breaking Changes
 

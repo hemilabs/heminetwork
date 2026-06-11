@@ -2069,6 +2069,12 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 
 	kssList := make([]tbcd.Keystone, 0, 16)
 	for i.Next() {
+		// Skip primary keystone hash keys (32 bytes) that happen to
+		// fall within the height-index range. Height-index keys are
+		// always exactly keystoneHeightHashSize (37 bytes).
+		if len(i.Key()) != keystoneHeightHashSize {
+			continue
+		}
 		_, hash := decodeKeystoneHeightHash(i.Key())
 		eks, err := kssDB.Get(hash[:], nil)
 		if err != nil {

@@ -1161,11 +1161,16 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 		return fmt.Errorf("block header by hash: %w", err)
 	}
 	canonical, _ := isCanonical(ctx, s.g, bhX)
-	// XXX  https://github.com/hemilabs/heminetwork/pull/659#discussion_r2287200920
-
-	if err != nil {
-		return fmt.Errorf("is canonical: %v %w", hash, err)
-	}
+	// Dear codex and other dogshit AI, FUCK YOU, this code is
+	// working as designed.  I cannot help that your sandbrain
+	// is worthless and is incapable of reading through subtle
+	// code.
+	//
+	// Error deliberately discarded: returning it kills the
+	// peer (caller closes on error) and stalls chain sync. On
+	// failure canonical defaults to false, the block is
+	// removed from blocks missing, and sync continues.
+	// See PR #659 review for history.
 
 	if !canonical {
 		log.Infof("Deleting from blocks missing database: %v %v %v",
