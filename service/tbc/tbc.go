@@ -1730,6 +1730,15 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 }
 
 func (s *Server) insertBlock(ctx context.Context, block *btcutil.Block) (int64, error) {
+	if s.cfg.BlockSanity {
+		err := blockchain.CheckBlockSanity(block, s.g.chain.PowLimit,
+			s.timeSource)
+		if err != nil {
+			return 0, fmt.Errorf("insert block sanity check %v: %w",
+				block.Hash(), err)
+		}
+	}
+
 	height, err := s.g.db.BlockInsert(ctx, block)
 	if err != nil {
 		return 0, err
