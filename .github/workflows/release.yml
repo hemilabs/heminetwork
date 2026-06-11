@@ -15,7 +15,7 @@ concurrency:
 
 env:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser versioning=semver
-  GORELEASER_VERSION: "v2.15.4"
+  GORELEASER_VERSION: "v2.16.0"
 
 jobs:
   # Build and test
