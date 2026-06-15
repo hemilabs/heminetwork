@@ -1729,10 +1729,10 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	return nil
 }
 
-func (s *Server) insertBlock(ctx context.Context, block *btcutil.Block) (int64, error) {
+func (s *Server) insertBlock(ctx context.Context, block *btcutil.Block, timeSource blockchain.MedianTimeSource) (int64, error) {
 	if s.cfg.BlockSanity {
 		err := blockchain.CheckBlockSanity(block, s.g.chain.PowLimit,
-			s.timeSource)
+			timeSource)
 		if err != nil {
 			return 0, fmt.Errorf("insert block sanity check %v: %w",
 				block.Hash(), err)
@@ -1769,8 +1769,25 @@ func (s *Server) insertBlockheader(ctx context.Context, headers *wire.MsgHeaders
 	return it, cbh, lbh, n, err
 }
 
+// parentTime adapts a fixed timestamp to blockchain.MedianTimeSource.
+type parentTime time.Time
+
+func (t parentTime) AdjustedTime() time.Time       { return time.Time(t) }
+func (parentTime) AddTimeSample(string, time.Time) {}
+func (parentTime) Offset() time.Duration           { return 0 }
+
+// BlockInsert inserts a block received out of context (over the API, or a
+// missed/forked-off block). Such a block may arrive arbitrarily long after it
+// was mined, so CheckBlockSanity's "timestamp too far in the future" gate is
+// anchored to the parent block's timestamp -- a child is never more than two
+// hours ahead of its parent -- rather than the local wall clock. IBD inserts
+// go through handleBlock, not here, and keep using s.timeSource.
 func (s *Server) BlockInsert(ctx context.Context, blk *wire.MsgBlock) (int64, error) {
-	return s.insertBlock(ctx, btcutil.NewBlock(blk))
+	parent, err := s.g.db.BlockHeaderByHash(ctx, blk.Header.PrevBlock)
+	if err != nil {
+		return 0, fmt.Errorf("block insert parent header: %w", err)
+	}
+	return s.insertBlock(ctx, btcutil.NewBlock(blk), parentTime(parent.Timestamp()))
 }
 
 func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
@@ -1815,7 +1832,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 		// }
 	}
 
-	height, err := s.insertBlock(ctx, block) // XXX see if we can use raw here
+	height, err := s.insertBlock(ctx, block, s.timeSource) // XXX see if we can use raw here
 	if err != nil {
 		return fmt.Errorf("database block insert %v: %w", bhs, err)
 	} else {
@@ -2015,7 +2032,7 @@ func (s *Server) insertGenesis(ctx context.Context, height uint64, diff *big.Int
 	}
 
 	log.Debugf("Inserting genesis block")
-	_, err = s.insertBlock(ctx, btcutil.NewBlock(s.g.chain.GenesisBlock))
+	_, err = s.insertBlock(ctx, btcutil.NewBlock(s.g.chain.GenesisBlock), s.timeSource)
 	if err != nil {
 		return fmt.Errorf("genesis block insert: %w", err)
 	}

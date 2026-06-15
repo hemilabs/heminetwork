@@ -780,8 +780,7 @@ func (s *Server) handleBlockInsertRequest(ctx context.Context, req *tbcapi.Block
 		}, err
 	}
 
-	_, err := s.insertBlock(ctx, btcutil.NewBlock(req.Block))
-	if err != nil {
+	if _, err := s.BlockInsert(ctx, req.Block); err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
 	}
@@ -802,8 +801,7 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 		}, nil
 	}
 
-	_, err = s.insertBlock(ctx, btcutil.NewBlock(b))
-	if err != nil {
+	if _, err := s.BlockInsert(ctx, b); err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
 	}

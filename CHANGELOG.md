@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defense-in-depth hardening. The RPC binds to localhost by default and
   is used by internal services to feed forked-off blocks
   ([#1057](https://github.com/hemilabs/heminetwork/pull/1057)).
+- Anchor `CheckBlockSanity`'s "timestamp too far in the future" check to the
+  parent block's timestamp for out-of-context block inserts (`BlockInsert` and
+  the block-insert RPCs) instead of the local wall clock. Such blocks may be
+  inserted arbitrarily long after they were mined; IBD and genesis still use
+  the node clock and are unchanged. All other sanity checks are retained.
 
 ### Breaking Changes
 
