@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Hemi Labs, Inc.
+// Copyright (c) 2025-2026 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -105,6 +105,48 @@ var (
 			Parse: func(envValue string) (any, error) {
 				return time.ParseDuration(envValue)
 			},
+		},
+		"HPROXY_READ_HEADER_TIMEOUT": config.Config{
+			Value:        &cfg.ReadHeaderTimeout,
+			DefaultValue: cfg.ReadHeaderTimeout,
+			Help:         "HTTP server read header timeout",
+			Print:        config.PrintAll,
+			Parse: func(envValue string) (any, error) {
+				return time.ParseDuration(envValue)
+			},
+		},
+		"HPROXY_READ_TIMEOUT": config.Config{
+			Value:        &cfg.ReadTimeout,
+			DefaultValue: cfg.ReadTimeout,
+			Help:         "HTTP server read timeout",
+			Print:        config.PrintAll,
+			Parse: func(envValue string) (any, error) {
+				return time.ParseDuration(envValue)
+			},
+		},
+		"HPROXY_WRITE_TIMEOUT": config.Config{
+			Value:        &cfg.WriteTimeout,
+			DefaultValue: cfg.WriteTimeout,
+			Help:         "HTTP server write timeout",
+			Print:        config.PrintAll,
+			Parse: func(envValue string) (any, error) {
+				return time.ParseDuration(envValue)
+			},
+		},
+		"HPROXY_SERVER_IDLE_TIMEOUT": config.Config{
+			Value:        &cfg.ServerIdleTimeout,
+			DefaultValue: cfg.ServerIdleTimeout,
+			Help:         "HTTP server idle connection timeout",
+			Print:        config.PrintAll,
+			Parse: func(envValue string) (any, error) {
+				return time.ParseDuration(envValue)
+			},
+		},
+		"HPROXY_MAX_CONTROL_BODY_SIZE": config.Config{
+			Value:        &cfg.MaxControlBodySize,
+			DefaultValue: cfg.MaxControlBodySize,
+			Help:         "max request body size for control endpoints (bytes)",
+			Print:        config.PrintAll,
 		},
 	}
 )

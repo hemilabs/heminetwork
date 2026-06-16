@@ -812,3 +812,31 @@ func TestNodePoking(t *testing.T) {
 		t.Errorf("got %v unhealthy, want %v", unhealthy, unhealthyCount)
 	}
 }
+
+func TestControlAddBodyLimit(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a valid JSON array of nodes that exceeds DefaultMaxControlBody.
+	// Each entry is ~30 bytes of JSON; we need enough to cross the limit.
+	var buf bytes.Buffer
+	buf.WriteByte('[')
+	entry := []byte(`{"node_url":"http://x.example.com:8545"},`)
+	for buf.Len() < int(DefaultMaxControlBody)+1 {
+		buf.Write(entry)
+	}
+	buf.Truncate(buf.Len() - 1) // drop trailing comma
+	buf.WriteByte(']')
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader(buf.Bytes()))
+	rec := httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized body, got %d", rec.Code)
+	}
+}

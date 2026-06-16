@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defense-in-depth hardening. The RPC binds to localhost by default and
   is used by internal services to feed forked-off blocks
   ([#1057](https://github.com/hemilabs/heminetwork/pull/1057)).
+- Add `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, and
+  `IdleTimeout` to the `hproxy` proxy and control HTTP servers.
+  Zero timeouts allowed slowloris-style connection exhaustion.
+- Add `MaxBytesReader` to `hproxy` control add and remove endpoints.
+  Unbounded request bodies could cause OOM.
 
 ### Breaking Changes
 
