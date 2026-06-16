@@ -8,6 +8,17 @@
 PROJECTPATH := $(abspath $(dir $(realpath $(firstword $(MAKEFILE_LIST)))))
 
 GO_LDFLAGS ?=
+
+# Debug build tags.  Enable ceremony initiation commands in hemictl:
+#   CONTINUUM_DEBUG=1 make
+GO_TAGS =
+ifdef CONTINUUM_DEBUG
+GO_TAGS += continuum_debug
+endif
+ifneq ($(GO_TAGS),)
+GO_TAGS_FLAG = -tags "$(strip $(GO_TAGS))"
+LINT_TAGS_FLAG = --build-tags "$(strip $(GO_TAGS))"
+endif
 export GOCACHE ?= $(PROJECTPATH)/.gocache
 export GOBIN ?= $(shell go env GOPATH)/bin
 PROJECT_BIN := $(PROJECTPATH)/bin
@@ -58,23 +69,23 @@ tidy:
 
 .PHONY: build
 build:
-	go build -trimpath -ldflags "$(GO_LDFLAGS)" ./...
+	go build -trimpath $(GO_TAGS_FLAG) -ldflags "$(GO_LDFLAGS)" ./...
 
 .PHONY: install
 install: $(cmds)
 
 .PHONY: $(cmds)
 $(cmds):
-	go build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(PROJECT_BIN)/$@ ./cmd/$@
+	go build -trimpath $(GO_TAGS_FLAG) -ldflags "$(GO_LDFLAGS)" -o $(PROJECT_BIN)/$@ ./cmd/$@
 
 .PHONY: test
 test:
-	go test -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
+	go test $(GO_TAGS_FLAG) -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
 		-covermode=atomic -ldflags "$(GO_LDFLAGS)" ./...
 
 .PHONY: race
 race:
-	go test -race -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
+	go test $(GO_TAGS_FLAG) -race -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
 		-covermode=atomic -ldflags "$(GO_LDFLAGS)" ./...
 
 .PHONY: cover
@@ -100,12 +111,12 @@ fmt:
 
 .PHONY: lint
 lint: fmt
-	$(GOBIN)/golangci-lint run --fix ./...
+	$(GOBIN)/golangci-lint run $(LINT_TAGS_FLAG) --fix ./...
 
 .PHONY: lint-check
 lint-check:
 	$(GOBIN)/golangci-lint fmt --diff ./...
-	$(GOBIN)/golangci-lint run ./...
+	$(GOBIN)/golangci-lint run $(LINT_TAGS_FLAG) ./...
 	$(GOBIN)/golicenser -tmpl="$$LICENSE_HEADER" -author="$(LICENSE_AUTHOR)" -year-mode=git-range ./...
 
 .PHONY: lint-deps
@@ -117,7 +128,7 @@ lint-deps:
 
 .PHONY: vulncheck
 vulncheck:
-	$(GOBIN)/govulncheck ./...
+	$(GOBIN)/govulncheck $(GO_TAGS_FLAG) ./...
 
 .PHONY: vulncheck-deps
 vulncheck-deps:
