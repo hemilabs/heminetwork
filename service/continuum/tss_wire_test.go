@@ -8,15 +8,15 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/hemilabs/x/tss-lib/v3/crypto"
-	cmt "github.com/hemilabs/x/tss-lib/v3/crypto/commitments"
-	ecdsaKeygen "github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
-	ecdsaResharing "github.com/hemilabs/x/tss-lib/v3/ecdsa/resharing"
-	ecdsaSigning "github.com/hemilabs/x/tss-lib/v3/ecdsa/signing"
-	eddsaKeygen "github.com/hemilabs/x/tss-lib/v3/eddsa/keygen"
-	eddsaResharing "github.com/hemilabs/x/tss-lib/v3/eddsa/resharing"
-	eddsaSigning "github.com/hemilabs/x/tss-lib/v3/eddsa/signing"
-	"github.com/hemilabs/x/tss-lib/v3/tss"
+	"github.com/hemilabs/x/tss/v3/crypto"
+	cmt "github.com/hemilabs/x/tss/v3/crypto/commitments"
+	ecdsaKeygen "github.com/hemilabs/x/tss/v3/ecdsa/keygen"
+	ecdsaResharing "github.com/hemilabs/x/tss/v3/ecdsa/resharing"
+	ecdsaSigning "github.com/hemilabs/x/tss/v3/ecdsa/signing"
+	eddsaKeygen "github.com/hemilabs/x/tss/v3/eddsa/keygen"
+	eddsaResharing "github.com/hemilabs/x/tss/v3/eddsa/resharing"
+	eddsaSigning "github.com/hemilabs/x/tss/v3/eddsa/signing"
+	"github.com/hemilabs/x/tss/v3/tss"
 )
 
 func TestMarshalUnmarshalRoundTrip(t *testing.T) {
