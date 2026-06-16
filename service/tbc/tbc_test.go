@@ -2469,3 +2469,49 @@ func TestEmptyInvMessage(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleGenericMsgTxMempoolDisabled(t *testing.T) {
+	s := &Server{
+		cfg: &Config{MempoolEnabled: false},
+	}
+	// s.mempool is nil — this panicked before the guard.
+	tx := wire.NewMsgTx(2)
+	err := s.handleGeneric(t.Context(), nil, tx, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+// syncedStub is a tbcd.Database that returns an error from
+// BlockHeaderBest so synced() exits early on a cancelled context.
+type syncedStub struct {
+	stubDB
+}
+
+func (syncedStub) BlockHeaderBest(context.Context) (*tbcd.BlockHeader, error) {
+	return nil, errors.New("stub")
+}
+
+func TestHandleGenericMsgTxMempoolEnabled(t *testing.T) {
+	mp, err := NewMempool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg:     &Config{MempoolEnabled: true},
+		mempool: mp,
+	}
+	s.g.db = syncedStub{}
+
+	// Use a cancelled context so synced() returns SyncInfo{Synced: false}
+	// after BlockHeaderBest errors. This exercises the MempoolEnabled=true
+	// branch in handleGeneric without needing full server infrastructure.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	tx := wire.NewMsgTx(2)
+	err = s.handleGeneric(ctx, nil, tx, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}

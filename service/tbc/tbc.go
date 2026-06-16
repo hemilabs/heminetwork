@@ -567,8 +567,10 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 		}
 
 	case *wire.MsgTx:
-		if err := s.handleTx(ctx, p, m, raw); err != nil {
-			return fmt.Errorf("handle generic transaction: %w", err)
+		if s.cfg.MempoolEnabled {
+			if err := s.handleTx(ctx, p, m, raw); err != nil {
+				return fmt.Errorf("handle generic transaction: %w", err)
+			}
 		}
 
 	case *wire.MsgInv:
