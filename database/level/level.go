@@ -13,11 +13,11 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb/filter"
+	"github.com/hemilabs/x/leveldb/leveldb/opt"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/filter"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/rawdb"

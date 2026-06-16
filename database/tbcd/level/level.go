@@ -21,10 +21,10 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
+	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb/util"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/level"

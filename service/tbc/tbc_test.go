@@ -27,8 +27,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
+	"github.com/hemilabs/x/leveldb/leveldb"
 	"github.com/juju/loggo/v2"
-	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/hemilabs/heminetwork/v2/api"
@@ -378,8 +378,8 @@ func cmpDB(a, b *leveldb.DB) (int, error) {
 			return records, err
 		}
 
-		if diff := deep.Equal(i.Value(), v); len(diff) > 0 {
-			return records, fmt.Errorf("unexpected diff: %v", diff)
+		if !bytes.Equal(i.Value(), v) {
+			return records, fmt.Errorf("value mismatch at key %x", i.Key())
 		}
 	}
 	return records, nil

@@ -17,11 +17,11 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/dustin/go-humanize"
+	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb/util"
 	"github.com/mitchellh/go-homedir"
 	cp "github.com/otiai10/copy"
 	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/hemi"

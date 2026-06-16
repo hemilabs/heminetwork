@@ -20,12 +20,12 @@ require (
 	github.com/ethereum/go-ethereum v1.17.2
 	github.com/go-test/deep v1.1.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	github.com/hemilabs/x/leveldb v0.1.0
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/shirou/gopsutil/v4 v4.26.4
-	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/tyler-smith/go-bip39 v1.1.0
 	golang.org/x/crypto v0.52.0
