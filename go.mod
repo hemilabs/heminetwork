@@ -21,7 +21,7 @@ require (
 	github.com/go-test/deep v1.1.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hemilabs/x/leveldb v0.1.0
-	github.com/hemilabs/x/tss-lib/v3 v3.0.0-20260507172513-c23bec7119b9
+	github.com/hemilabs/x/tss/v3 v3.0.0-alpha.1
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1

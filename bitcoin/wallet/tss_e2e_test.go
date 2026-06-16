@@ -7,7 +7,7 @@
 
 // This end-to-end test exercises the full TSS signing path against a
 // real 2-of-3 ECDSA threshold committee assembled in-process from
-// github.com/hemilabs/x/tss-lib/v3.  No mocks, no shortcuts:
+// github.com/hemilabs/x/tss/v3.  No mocks, no shortcuts:
 //
 //   1. Real Paillier pre-parameters (safe-prime generation).
 //   2. Real 4-round distributed keygen.
@@ -49,10 +49,10 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/hemilabs/x/tss-lib/v3/crypto"
-	"github.com/hemilabs/x/tss-lib/v3/ecdsa/keygen"
-	"github.com/hemilabs/x/tss-lib/v3/ecdsa/signing"
-	"github.com/hemilabs/x/tss-lib/v3/tss"
+	"github.com/hemilabs/x/tss/v3/crypto"
+	"github.com/hemilabs/x/tss/v3/ecdsa/keygen"
+	"github.com/hemilabs/x/tss/v3/ecdsa/signing"
+	"github.com/hemilabs/x/tss/v3/tss"
 )
 
 // TestTSS_E2E_P2WPKH runs the complete flow: real distributed ECDSA
@@ -413,7 +413,7 @@ func printEvidence(e evidence) {
 	fmt.Printf("  9-round signing:       %.2fs\n", e.sign.Seconds())
 	fmt.Println()
 	fmt.Println("Library versions:")
-	fmt.Println("  tss-lib:               github.com/hemilabs/x/tss-lib/v3")
+	fmt.Println("  tss-lib:               github.com/hemilabs/x/tss/v3")
 	fmt.Println("  bitcoin primitives:    github.com/btcsuite/btcd")
 	fmt.Println("  wallet under test:     github.com/hemilabs/heminetwork/v2/bitcoin/wallet")
 	fmt.Println("============================================================")

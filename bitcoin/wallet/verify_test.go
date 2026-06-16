@@ -209,7 +209,7 @@ func TestVerifySchnorrTaprootAddressRoundTrip(t *testing.T) {
 //  1. Build a P2WPKH input.
 //  2. Compute the BIP-143 sighash the external signer will sign.
 //  3. Assemble the signature from raw (r, s) via ECDSASigFromRS —
-//     the shape hemilabs/x/tss-lib/v3 returns.
+//     the shape hemilabs/x/tss/v3 returns.
 //  4. Run VerifyECDSA as the pre-broadcast gate.
 //  5. Only on success, inject via TransactionApplyECDSA.
 //  6. Confirm the script engine accepts the result.

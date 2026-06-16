@@ -19,7 +19,7 @@ import (
 
 // ECDSASigFromRS assembles a DER-encoded ECDSA signature from raw
 // big-endian r and s scalar bytes as produced by many threshold
-// signature libraries (including hemilabs/x/tss-lib/v3).  The
+// signature libraries (including hemilabs/x/tss/v3).  The
 // signature is normalised to low-S form per BIP-146 before encoding;
 // a high-S input is implicitly negated by Serialize so the encoded
 // signature is accepted by Bitcoin consensus rules.
