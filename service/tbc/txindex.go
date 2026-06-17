@@ -69,9 +69,21 @@ func (i *txIndexer) readCacheInfo() string { return "" }
 func processTxs(ctx context.Context, block *btcutil.Block, direction int, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
 	blockHash := block.Hash()
 	txs := block.Transactions()
-	for _, tx := range txs {
-		// cache txid <-> block
-		txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
+
+	// Get tx byte locations for O(1) lookups.
+	locs, err := block.TxLoc()
+	if err != nil {
+		log.Errorf("block %v TxLoc: %v", blockHash, err)
+	}
+
+	for idx, tx := range txs {
+		// cache txid <-> block with byte location
+		if locs != nil && idx < len(locs) {
+			txk, txv := tbcd.NewTxMappingWithLoc(tx.Hash(), blockHash, locs[idx])
+			txsCache[txk] = &txv
+		} else {
+			txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
+		}
 
 		// Don't keep track of spent coinbase inputs
 		// XXX note that after debate this is deemed to be correct. We

@@ -28,8 +28,8 @@ func (stubDB) Close() error { return nil }
 // BlockHashByTxId is the first thing txOutFromOutPoint calls.
 // Returning an error simulates "parent not in block db", which
 // is the trigger for the CPFP mempool fallback.
-func (stubDB) BlockHashByTxId(context.Context, chainhash.Hash) (*chainhash.Hash, error) {
-	return nil, errors.New("not found")
+func (stubDB) BlockHashByTxId(context.Context, chainhash.Hash) (*chainhash.Hash, *wire.TxLoc, error) {
+	return nil, nil, errors.New("not found")
 }
 
 // The remaining methods satisfy the tbcd.Database interface but

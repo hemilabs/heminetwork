@@ -5,6 +5,7 @@
 package tbc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -123,11 +124,32 @@ func txOutFromOutPoint(ctx context.Context, db tbcd.Database, op tbcd.Outpoint) 
 	txId := op.TxIdHash()
 	txIndex := op.TxIndex()
 
-	// Find block hashes
-	blockHash, err := db.BlockHashByTxId(ctx, *txId)
+	blockHash, loc, err := db.BlockHashByTxId(ctx, *txId)
 	if err != nil {
 		return nil, fmt.Errorf("block by txid: %w", err)
 	}
+
+	// Fast path: TxLoc available, jump directly to tx bytes.
+	if loc != nil {
+		raw, err := db.BlockRawByHash(ctx, *blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("block raw %v: %w", blockHash, err)
+		}
+		if loc.TxStart+loc.TxLen > len(raw) {
+			return nil, fmt.Errorf("tx loc out of range: %d+%d > %d",
+				loc.TxStart, loc.TxLen, len(raw))
+		}
+		var msgTx wire.MsgTx
+		if err := msgTx.Deserialize(bytes.NewReader(raw[loc.TxStart : loc.TxStart+loc.TxLen])); err != nil {
+			return nil, fmt.Errorf("deserialize tx at offset %d: %w", loc.TxStart, err)
+		}
+		if int(txIndex) >= len(msgTx.TxOut) {
+			return nil, fmt.Errorf("tx index invalid: %v", op)
+		}
+		return msgTx.TxOut[txIndex], nil
+	}
+
+	// Slow path: legacy entry without TxLoc, full block scan.
 	b, err := db.BlockByHash(ctx, *blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("block by hash: %w", err)

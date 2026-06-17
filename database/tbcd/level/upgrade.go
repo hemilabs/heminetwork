@@ -750,3 +750,42 @@ func (l *ldb) v5(ctx context.Context) error {
 	binary.BigEndian.PutUint64(v, 5)
 	return l.MetadataPut(ctx, versionKey, v)
 }
+
+func (l *ldb) v6(ctx context.Context) error {
+	log.Tracef("v6")
+	defer log.Tracef("v6 exit")
+
+	log.Infof("Upgrading database from v5 to v6")
+
+	// Wipe the transactions index so it rebuilds with TxLoc values
+	// in 't' entries. The index is fully derived from block data.
+	lcfg := l.Config()
+	if err := l.Close(); err != nil {
+		return fmt.Errorf("close database: %w", err)
+	}
+	home := filepath.Clean(l.cfg.Home)
+	target := filepath.Join(home, level.TransactionsDB)
+	if !strings.HasPrefix(target, home+string(os.PathSeparator)) {
+		return fmt.Errorf("refusing to remove %q: not a child of %q",
+			target, home)
+	}
+	if fi, err := os.Lstat(target); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to remove %q: is a symlink", target)
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return fmt.Errorf("remove transactions: %w", err)
+	}
+	ld, err := level.New(ctx, &lcfg)
+	if err != nil {
+		return fmt.Errorf("reopen database: %w", err)
+	}
+	l.Database = ld
+	l.pool = ld.DB()
+	l.rawPool = ld.RawDB()
+
+	log.Infof("v6: wiped transactions index for rebuild with TxLoc values")
+
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 6)
+	return l.MetadataPut(ctx, versionKey, v)
+}

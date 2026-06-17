@@ -121,7 +121,7 @@ type Database interface {
 	BlockHeaderByTxIndex(ctx context.Context) (*BlockHeader, error)
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput, utxoIndexHash chainhash.Hash) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue, txIndexHash chainhash.Hash) error
-	BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error)
+	BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, *wire.TxLoc, error)
 	SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]SpentInfo, error)
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
@@ -449,7 +449,7 @@ func NewScriptHashFromString(hash string) (ScriptHash, error) {
 //
 // Transaction ID to Block mapping:
 //
-//	t + txid + blockhash = nil | [1 + 32 + 32] = nil
+//	t + txid + blockhash = txstart + txlen | [1 + 32 + 32] = [4 + 4]
 type (
 	TxKey   [69]byte // Allocate max sized key, the prefix byte determines the lengths
 	TxValue [36]byte // allocate max sized value
@@ -479,6 +479,20 @@ func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 	copy(txKey[33:], blockHash[:])
 
 	return txKey
+}
+
+// NewTxMappingWithLoc returns a TxKey and TxValue that maps a tx id to a block
+// hash with the tx byte location (offset + length) within the raw block. This
+// allows callers to jump directly to the tx's bytes without scanning the block.
+func NewTxMappingWithLoc(txId, blockHash *chainhash.Hash, loc wire.TxLoc) (txKey TxKey, txValue TxValue) {
+	txKey[0] = 't'
+	copy(txKey[1:33], txId[:])
+	copy(txKey[33:], blockHash[:])
+
+	binary.BigEndian.PutUint32(txValue[0:4], uint32(loc.TxStart))
+	binary.BigEndian.PutUint32(txValue[4:8], uint32(loc.TxLen))
+
+	return txKey, txValue
 }
 
 func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, error) {

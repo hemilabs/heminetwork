@@ -48,7 +48,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 5
+	ldbVersion = 6
 
 	logLevel = "INFO"
 	verbose  = false
@@ -312,6 +312,10 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			// Upgrade to v5: wipe witness-stripped block
 			// bodies and rebuild blocksmissing from headers.
 			err = l.v5(ctx)
+		case 5:
+			// Upgrade to v6: wipe tx index so it rebuilds
+			// with TxLoc values in 't' entries.
+			err = l.v6(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {
@@ -1628,36 +1632,40 @@ func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool,
 	return ok, nil
 }
 
-func (l *ldb) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error) {
+func (l *ldb) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, *wire.TxLoc, error) {
 	log.Tracef("BlockHashByTxId")
 	defer log.Tracef("BlockHashByTxId exit")
 
-	blocks := make([]*chainhash.Hash, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
-	var txid [33]byte
-	txid[0] = 't'
-	copy(txid[1:], txId[:])
-	it := txDB.NewIterator(util.BytesPrefix(txid[:]), nil)
+	var prefix [33]byte
+	prefix[0] = 't'
+	copy(prefix[1:], txId[:])
+	it := txDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
 	defer it.Release()
+
+	var found bool
+	var blockHash chainhash.Hash
+	var locp *wire.TxLoc
 	for it.Next() {
-		block, err := chainhash.NewHash(it.Key()[33:])
-		if err != nil {
-			return nil, err
+		if found {
+			panic(fmt.Sprintf("multiple blocks for tx %v", txId))
 		}
-		blocks = append(blocks, block)
+		copy(blockHash[:], it.Key()[33:])
+		if v := it.Value(); len(v) >= 8 {
+			locp = &wire.TxLoc{
+				TxStart: int(binary.BigEndian.Uint32(v[0:4])),
+				TxLen:   int(binary.BigEndian.Uint32(v[4:8])),
+			}
+		}
+		found = true
 	}
 	if err := it.Error(); err != nil {
-		return nil, fmt.Errorf("blocks by id iterator: %w", err)
+		return nil, nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
-	switch len(blocks) {
-	case 0:
-		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", txId))
-	case 1:
-		return blocks[0], nil
-	default:
-		panic(fmt.Sprintf("invalid blocks count %v: %v",
-			len(blocks), spew.Sdump(blocks)))
+	if !found {
+		return nil, nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", txId))
 	}
+	return &blockHash, locp, nil
 }
 
 func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tbcd.SpentInfo, error) {
@@ -1903,32 +1911,39 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 	defer txsDiscard()
 
-	block := make([]byte, 33)
-	block[0] = 'b'
 	var blk []byte
 	bm := make(map[string]struct{}, len(txs))
 	defer clear(bm)
 
 	txsBatch := new(leveldb.Batch)
+	var keyBuf [69]byte
+	var valBuf [36]byte
+	var blkBuf [33]byte
+	blkBuf[0] = 'b'
 	for k, v := range txs {
-		// cache is being emptied so we can slice it here.
 		var key, value []byte
 		switch k[0] {
 		case 't':
-			key = k[0:65]
-			value = nil
+			copy(keyBuf[:], k[0:65])
+			key = keyBuf[:65]
+			if v != nil {
+				copy(valBuf[:], v[0:8])
+				value = valBuf[:8]
+			}
 
 			// insert block hash to determine if it was indexed later
 			if _, ok := bm[string(k[33:65])]; !ok {
 				bm[string(k[33:65])] = struct{}{}
-				copy(block[1:], k[33:65])
-				blk = block
+				copy(blkBuf[1:], k[33:65])
+				blk = blkBuf[:]
 			} else {
 				blk = nil
 			}
 		case 's':
-			key = k[:]
-			value = v[:]
+			copy(keyBuf[:], k[:])
+			key = keyBuf[:]
+			copy(valBuf[:], v[:])
+			value = valBuf[:]
 
 			// don't insert block
 			blk = nil

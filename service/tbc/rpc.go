@@ -738,7 +738,7 @@ func (s *Server) handleBlockHashByTxIdRequest(ctx context.Context, req *tbcapi.B
 	log.Tracef("handleBlockHashByTxIdRequest")
 	defer log.Tracef("handleBlockHashByTxIdRequest exit")
 
-	hash, err := s.BlockHashByTxId(ctx, req.TxID)
+	hash, _, err := s.BlockHashByTxId(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockHashByTxIDResponse{

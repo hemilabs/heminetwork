@@ -905,10 +905,8 @@ func TestDbUpgradeV5(t *testing.T) {
 	// contents v5 must not touch.  The keys are deliberately
 	// unique so a post-upgrade Get confirms exact preservation.
 	survivors := map[string][2][]byte{
-		level.TransactionsDB: {
-			[]byte("v5-test-tx-key"),
-			[]byte("v5-test-tx-value"),
-		},
+		// TransactionsDB is intentionally absent: v6 upgrade wipes
+		// the transactions index for rebuild with TxLoc values.
 		level.OutputsDB: {
 			[]byte("v5-test-utxo-key"),
 			[]byte("v5-test-utxo-value"),
@@ -1036,13 +1034,13 @@ func TestDbUpgradeV5(t *testing.T) {
 		}
 	}
 
-	// Assertion 5: schema version is now 5.
+	// Assertion 5: schema version is now 6 (v5 + v6 upgrade).
 	got, err := db2.Version(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != 5 {
-		t.Fatalf("version after v5: got %v want 5", got)
+	if got != 6 {
+		t.Fatalf("version after upgrade: got %v want 6", got)
 	}
 }
 
@@ -1758,4 +1756,491 @@ func TestKeystonesByHeightOnlyMismatchedKeys(t *testing.T) {
 	if !errors.Is(err, database.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got: %v", err)
 	}
+}
+
+// createTestBlockWithTxs builds a block with a coinbase and n additional
+// dummy transactions. The block is serialized and re-parsed so that
+// TxLoc() returns valid byte offsets.
+func createTestBlockWithTxs(t *testing.T, prevHash *chainhash.Hash, nonce int64, numTxs int) *btcutil.Block {
+	t.Helper()
+	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
+	bh.Timestamp = time.Unix(nonce, 0)
+	bh.Bits = 0x1d00ffff
+	block := wire.NewMsgBlock(bh)
+
+	// Coinbase
+	cb := wire.NewMsgTx(2)
+	cb.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{
+			Hash:  chainhash.Hash{},
+			Index: 0xffffffff,
+		},
+		SignatureScript: []byte{0x04, 0xff, 0xff, 0x00, 0x1d},
+	})
+	cb.AddTxOut(&wire.TxOut{Value: 5000000000, PkScript: []byte{0x51}})
+	if err := block.AddTransaction(cb); err != nil {
+		t.Fatal(err)
+	}
+
+	// Additional dummy txs with varying output counts
+	for i := range numTxs {
+		tx := wire.NewMsgTx(2)
+		prevHash := chainhash.DoubleHashB([]byte(fmt.Sprintf("prev-%d-%d", nonce, i)))
+		var ph chainhash.Hash
+		copy(ph[:], prevHash)
+		tx.AddTxIn(&wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{Hash: ph, Index: 0},
+			SignatureScript:  []byte{0x00},
+		})
+		// Each tx has i+1 outputs with different values
+		for j := range i + 1 {
+			tx.AddTxOut(&wire.TxOut{
+				Value:    int64((i+1)*1000 + j),
+				PkScript: []byte{0x51},
+			})
+		}
+		if err := block.AddTransaction(tx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Serialize and re-parse so TxLoc works
+	var buf bytes.Buffer
+	if err := block.Serialize(&buf); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := btcutil.NewBlockFromBytes(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
+}
+
+// TestDbUpgradeV6 validates the v5 -> v6 upgrade that wipes the
+// transactions index for rebuild with TxLoc values.
+func TestDbUpgradeV6(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	home := t.TempDir()
+	cfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a v5 database with some tx index entries.
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed some 't' entries directly into TransactionsDB.
+	txDB := db.pool[level.TransactionsDB]
+	for i := range 10 {
+		var k [65]byte
+		k[0] = 't'
+		k[1] = byte(i)
+		if err := txDB.Put(k[:], nil, nil); err != nil {
+			t.Fatalf("seed tx %d: %v", i, err)
+		}
+	}
+
+	// Verify entries exist
+	it := txDB.NewIterator(nil, nil)
+	var preCount int
+	for it.Next() {
+		preCount++
+	}
+	it.Release()
+	if preCount < 10 {
+		t.Fatalf("pre-upgrade: expected >= 10 entries, got %d", preCount)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Downgrade version to 5 so v6 upgrade runs on next open.
+	// Use upgradeOpen to skip the upgrade loop during this open.
+	lcfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lcfg.SetUpgradeOpen(true)
+	db2, err := New(ctx, lcfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 5)
+	if err := db2.MetadataPut(ctx, versionKey, v); err != nil {
+		t.Fatal(err)
+	}
+	if err := db2.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopen WITHOUT upgradeOpen — this triggers the v5->v6 upgrade.
+	normalCfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db3, err := New(ctx, normalCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db3.Close()
+
+	// Verify version is 6
+	got, err := db3.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 6 {
+		t.Fatalf("version after v6 upgrade: got %d want 6", got)
+	}
+
+	// Verify tx index is empty (wiped)
+	txDB2 := db3.pool[level.TransactionsDB]
+	it2 := txDB2.NewIterator(nil, nil)
+	var postCount int
+	for it2.Next() {
+		postCount++
+	}
+	it2.Release()
+	if postCount != 0 {
+		t.Fatalf("post-upgrade: expected 0 tx entries, got %d", postCount)
+	}
+}
+
+// TestTxLocRoundTrip verifies that TxLoc values stored via
+// BlockTxUpdate are correctly retrieved via BlockHashByTxId.
+func TestTxLocRoundTrip(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	// Create a block with 5 transactions
+	block := createTestBlockWithTxs(t, &chainhash.Hash{}, 1, 5)
+	blockHash := block.Hash()
+
+	// Get TxLoc from the block
+	locs, err := block.TxLoc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	txs := block.Transactions()
+	if len(txs) != 6 { // 1 coinbase + 5 regular
+		t.Fatalf("expected 6 txs, got %d", len(txs))
+	}
+	if len(locs) != len(txs) {
+		t.Fatalf("TxLoc count %d != tx count %d", len(locs), len(txs))
+	}
+
+	// Build cache with TxLoc values
+	cache := make(map[tbcd.TxKey]*tbcd.TxValue)
+	for i, tx := range txs {
+		txk, txv := tbcd.NewTxMappingWithLoc(tx.Hash(), blockHash, locs[i])
+		cache[txk] = &txv
+	}
+
+	// Commit
+	if err := db.BlockTxUpdate(ctx, 1, cache, *blockHash); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read back and verify each TxLoc
+	for i, tx := range txs {
+		bh, loc, err := db.BlockHashByTxId(ctx, *tx.Hash())
+		if err != nil {
+			t.Fatalf("tx %d: %v", i, err)
+		}
+		if !bh.IsEqual(blockHash) {
+			t.Fatalf("tx %d: block hash %v != %v", i, bh, blockHash)
+		}
+		if loc == nil {
+			t.Fatalf("tx %d: expected TxLoc, got nil", i)
+		}
+		if loc.TxStart != locs[i].TxStart {
+			t.Fatalf("tx %d: TxStart %d != %d", i, loc.TxStart, locs[i].TxStart)
+		}
+		if loc.TxLen != locs[i].TxLen {
+			t.Fatalf("tx %d: TxLen %d != %d", i, loc.TxLen, locs[i].TxLen)
+		}
+	}
+}
+
+// TestTxLocOffsetCorrectness verifies that the stored TxLoc offset
+// actually points to the correct tx bytes within the raw block.
+// The tx deserialized from those bytes must have the same txid.
+func TestTxLocOffsetCorrectness(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	// Create a block with 10 transactions (varying output counts)
+	block := createTestBlockWithTxs(t, &chainhash.Hash{}, 42, 10)
+	blockHash := block.Hash()
+
+	// Store raw block bytes directly (bypass BlockInsert which needs headers)
+	raw, err := block.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bDB := db.rawPool[level.BlocksDB]
+	if err := bDB.Insert(blockHash[:], raw); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get TxLoc and build cache
+	locs, err := block.TxLoc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	txs := block.Transactions()
+	cache := make(map[tbcd.TxKey]*tbcd.TxValue)
+	for i, tx := range txs {
+		txk, txv := tbcd.NewTxMappingWithLoc(tx.Hash(), blockHash, locs[i])
+		cache[txk] = &txv
+	}
+	if err := db.BlockTxUpdate(ctx, 1, cache, *blockHash); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get raw block bytes via DB
+	rawFromDB, err := db.BlockRawByHash(ctx, *blockHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// For each tx, use the stored offset to extract bytes and verify txid
+	for i, tx := range txs {
+		_, loc, err := db.BlockHashByTxId(ctx, *tx.Hash())
+		if err != nil {
+			t.Fatalf("tx %d lookup: %v", i, err)
+		}
+
+		if loc == nil {
+			t.Fatalf("tx %d: expected TxLoc, got nil", i)
+		}
+
+		// Extract tx bytes using stored offset
+		if loc.TxStart+loc.TxLen > len(rawFromDB) {
+			t.Fatalf("tx %d: offset %d+%d exceeds block size %d",
+				i, loc.TxStart, loc.TxLen, len(rawFromDB))
+		}
+		txBytes := rawFromDB[loc.TxStart : loc.TxStart+loc.TxLen]
+
+		// Deserialize and verify txid matches
+		var msgTx wire.MsgTx
+		if err := msgTx.Deserialize(bytes.NewReader(txBytes)); err != nil {
+			t.Fatalf("tx %d: deserialize from offset: %v", i, err)
+		}
+		gotHash := msgTx.TxHash()
+		if gotHash != *tx.Hash() {
+			t.Fatalf("tx %d: hash from offset %v != expected %v",
+				i, gotHash, tx.Hash())
+		}
+
+		// Verify output values match
+		for j, out := range tx.MsgTx().TxOut {
+			if msgTx.TxOut[j].Value != out.Value {
+				t.Fatalf("tx %d output %d: value %d != %d",
+					i, j, msgTx.TxOut[j].Value, out.Value)
+			}
+		}
+	}
+}
+
+// TestTxLocLegacyNilValue verifies that BlockHashByTxId
+// handles legacy nil-value 't' entries gracefully (returns zero TxLoc).
+func TestTxLocLegacyNilValue(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	// Insert a 't' entry with nil value (legacy format)
+	block := createTestBlockWithTxs(t, &chainhash.Hash{}, 1, 1)
+	blockHash := block.Hash()
+	txs := block.Transactions()
+
+	cache := make(map[tbcd.TxKey]*tbcd.TxValue)
+	cache[tbcd.NewTxMapping(txs[0].Hash(), blockHash)] = nil // legacy nil
+
+	if err := db.BlockTxUpdate(ctx, 1, cache, *blockHash); err != nil {
+		t.Fatal(err)
+	}
+
+	bh, loc, err := db.BlockHashByTxId(ctx, *txs[0].Hash())
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if !bh.IsEqual(blockHash) {
+		t.Fatalf("block hash %v != %v", bh, blockHash)
+	}
+	// Legacy entry: TxLoc should be nil
+	if loc != nil {
+		t.Fatalf("legacy entry should have nil TxLoc, got start=%d len=%d",
+			loc.TxStart, loc.TxLen)
+	}
+}
+
+// TestDbUpgradeV6E2E exercises the full upgrade lifecycle:
+// v5 DB with legacy nil-value 't' entries → v6 upgrade (wipes index) →
+// re-populate with TxLoc entries → verify TxLoc offset correctness
+// through BlockHashByTxId.
+func TestDbUpgradeV6E2E(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	home := t.TempDir()
+	cfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 1: Create a v5 DB with blocks and legacy nil-value tx index.
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block := createTestBlockWithTxs(t, &chainhash.Hash{}, 1, 5)
+	blockHash := block.Hash()
+	txs := block.Transactions()
+
+	// Store raw block so we can verify offset correctness later.
+	raw, err := block.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bDB := db.rawPool[level.BlocksDB]
+	if err := bDB.Insert(blockHash[:], raw); err != nil {
+		t.Fatal(err)
+	}
+
+	// Store legacy nil-value tx index entries (v5 format).
+	legacyCache := make(map[tbcd.TxKey]*tbcd.TxValue)
+	for _, tx := range txs {
+		legacyCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
+	}
+	if err := db.BlockTxUpdate(ctx, 1, legacyCache, *blockHash); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify legacy entries return nil TxLoc.
+	for i, tx := range txs {
+		_, loc, err := db.BlockHashByTxId(ctx, *tx.Hash())
+		if err != nil {
+			t.Fatalf("pre-upgrade tx %d: %v", i, err)
+		}
+		if loc != nil {
+			t.Fatalf("pre-upgrade tx %d: expected nil TxLoc, got start=%d len=%d",
+				i, loc.TxStart, loc.TxLen)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 2: Downgrade to v5 and reopen (triggers v6 upgrade).
+	downCfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downCfg.SetUpgradeOpen(true)
+	db2, err := New(ctx, downCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 5)
+	if err := db2.MetadataPut(ctx, versionKey, v); err != nil {
+		t.Fatal(err)
+	}
+	if err := db2.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopen normally — triggers v5→v6 upgrade (wipes tx index).
+	normalCfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db3, err := New(ctx, normalCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify version is 6.
+	got, err := db3.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 6 {
+		t.Fatalf("version after upgrade: got %d want 6", got)
+	}
+
+	// Verify tx index is empty after upgrade.
+	for _, tx := range txs {
+		_, _, err := db3.BlockHashByTxId(ctx, *tx.Hash())
+		if err == nil {
+			t.Fatal("expected error for wiped tx index entry")
+		}
+	}
+
+	// Phase 3: Re-populate with TxLoc entries (simulates re-index).
+	locs, err := block.TxLoc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newCache := make(map[tbcd.TxKey]*tbcd.TxValue)
+	for i, tx := range txs {
+		txk, txv := tbcd.NewTxMappingWithLoc(tx.Hash(), blockHash, locs[i])
+		newCache[txk] = &txv
+	}
+	if err := db3.BlockTxUpdate(ctx, 1, newCache, *blockHash); err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 4: Verify TxLoc offset correctness.
+	rawFromDB, err := db3.BlockRawByHash(ctx, *blockHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, tx := range txs {
+		bh, loc, err := db3.BlockHashByTxId(ctx, *tx.Hash())
+		if err != nil {
+			t.Fatalf("post-reindex tx %d: %v", i, err)
+		}
+		if !bh.IsEqual(blockHash) {
+			t.Fatalf("tx %d: block hash mismatch", i)
+		}
+		if loc == nil {
+			t.Fatalf("tx %d: TxLoc is nil after re-index", i)
+		}
+		// Extract tx bytes using stored offset and verify txid.
+		if loc.TxStart+loc.TxLen > len(rawFromDB) {
+			t.Fatalf("tx %d: offset %d+%d exceeds block size %d",
+				i, loc.TxStart, loc.TxLen, len(rawFromDB))
+		}
+		txBytes := rawFromDB[loc.TxStart : loc.TxStart+loc.TxLen]
+		var msgTx wire.MsgTx
+		if err := msgTx.Deserialize(bytes.NewReader(txBytes)); err != nil {
+			t.Fatalf("tx %d: deserialize from offset: %v", i, err)
+		}
+		gotHash := msgTx.TxHash()
+		if gotHash != *tx.Hash() {
+			t.Fatalf("tx %d: hash from offset %v != expected %v",
+				i, gotHash, tx.Hash())
+		}
+	}
+
+	db3.Close()
 }
