@@ -449,7 +449,7 @@ func NewScriptHashFromString(hash string) (ScriptHash, error) {
 //
 // Transaction ID to Block mapping:
 //
-//	t + txid + blockhash = nil | [1 + 32 + 32] = nil
+//	t + txid + blockhash = txstart + txlen | [1 + 32 + 32] = [4 + 4]
 type (
 	TxKey   [69]byte // Allocate max sized key, the prefix byte determines the lengths
 	TxValue [36]byte // allocate max sized value
