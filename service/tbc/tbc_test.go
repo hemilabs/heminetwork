@@ -2541,10 +2541,10 @@ type indexerStub struct {
 	hash chainhash.Hash
 }
 
-func (s indexerStub) Enabled() bool                                           { return true }
-func (s indexerStub) Indexing() bool                                          { return false }
-func (s indexerStub) IndexToBest(context.Context) error                       { return nil }
-func (s indexerStub) IndexToHash(context.Context, chainhash.Hash) error       { return nil }
+func (s indexerStub) Enabled() bool                                     { return true }
+func (s indexerStub) Indexing() bool                                    { return false }
+func (s indexerStub) IndexToBest(context.Context) error                 { return nil }
+func (s indexerStub) IndexToHash(context.Context, chainhash.Hash) error { return nil }
 func (s indexerStub) IndexerAt(context.Context) (*tbcd.BlockHeader, error) {
 	return &tbcd.BlockHeader{Hash: s.hash}, nil
 }
