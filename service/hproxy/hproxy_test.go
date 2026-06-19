@@ -934,15 +934,13 @@ func TestControlAddBodyLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Build a valid JSON array of nodes that exceeds DefaultMaxControlBodySize.
-	// Each entry is ~30 bytes of JSON; we need enough to cross the limit.
 	var buf bytes.Buffer
 	buf.WriteByte('[')
 	entry := []byte(`{"node_url":"http://x.example.com:8545"},`)
 	for buf.Len() < int(DefaultMaxControlBodySize)+1 {
 		buf.Write(entry)
 	}
-	buf.Truncate(buf.Len() - 1) // drop trailing comma
+	buf.Truncate(buf.Len() - 1)
 	buf.WriteByte(']')
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
@@ -953,4 +951,857 @@ func TestControlAddBodyLimit(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for oversized body, got %d", rec.Code)
 	}
+}
+
+// --- NewServer edge cases --------------------------------------------------
+
+func TestNewServerNilConfig(t *testing.T) {
+	s, err := NewServer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.cfg == nil {
+		t.Fatal("expected default config")
+	}
+}
+
+func TestNewServerBadNetwork(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.Network = "krypton"
+	_, err := NewServer(cfg)
+	if err == nil {
+		t.Fatal("expected error for unknown network")
+	}
+}
+
+func TestNewServerBadMaxRequestSize(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.MaxRequestSize = "not-a-size"
+	_, err := NewServer(cfg)
+	if err == nil {
+		t.Fatal("expected error for bad max request size")
+	}
+}
+
+func TestNewServerZeroRequestTimeout(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.RequestTimeout = 0
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.cfg.RequestTimeout != DefaultRequestTimeout {
+		t.Fatalf("expected default timeout, got %v", s.cfg.RequestTimeout)
+	}
+}
+
+// --- ForbiddenMethodError --------------------------------------------------
+
+func TestForbiddenMethodError(t *testing.T) {
+	e := ForbiddenMethodError{method: "debug_traceCall"}
+	if e.Error() != "method not allowed: debug_traceCall" {
+		t.Fatalf("unexpected error string: %v", e.Error())
+	}
+	if !errors.Is(e, ErrForbiddenMethod) {
+		t.Fatal("ForbiddenMethodError should match ErrForbiddenMethod")
+	}
+}
+
+// --- Prometheus gauge helpers ----------------------------------------------
+
+func TestPromGauges(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hp.mtx.Lock()
+	hp.promHealth = health{
+		NewNodes:       1,
+		HealthyNodes:   2,
+		UnhealthyNodes: 3,
+		RemovedNodes:   4,
+	}
+	hp.persistentConnections = 5
+	hp.proxyCalls = 10
+	hp.setupDuration = 100
+	hp.proxyDuration = 200
+	hp.mtx.Unlock()
+
+	if v := hp.promHVMNew(); v != 1 {
+		t.Fatalf("promHVMNew = %v, want 1", v)
+	}
+	if v := hp.promHVMHealthy(); v != 2 {
+		t.Fatalf("promHVMHealthy = %v, want 2", v)
+	}
+	if v := hp.promHVMUnhealthy(); v != 3 {
+		t.Fatalf("promHVMUnhealthy = %v, want 3", v)
+	}
+	if v := hp.promHVMRemoved(); v != 4 {
+		t.Fatalf("promHVMRemoved = %v, want 4", v)
+	}
+	if v := hp.promConnections(); v != 5 {
+		t.Fatalf("promConnections = %v, want 5", v)
+	}
+	if v := hp.promAvgClientSetupLatency(); v != 10 {
+		t.Fatalf("promAvgClientSetupLatency = %v, want 10", v)
+	}
+	if v := hp.promAvgProxyLatency(); v != 20 {
+		t.Fatalf("promAvgProxyLatency = %v, want 20", v)
+	}
+}
+
+func TestPromLatencyZeroCalls(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := hp.promAvgClientSetupLatency(); v != 0 {
+		t.Fatalf("expected 0 with zero calls, got %v", v)
+	}
+	if v := hp.promAvgProxyLatency(); v != 0 {
+		t.Fatalf("expected 0 with zero calls, got %v", v)
+	}
+}
+
+func TestCollectors(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1 := hp.Collectors()
+	if len(c1) == 0 {
+		t.Fatal("expected collectors")
+	}
+	c2 := hp.Collectors()
+	if len(c1) != len(c2) {
+		t.Fatal("collectors should be cached")
+	}
+}
+
+// --- Running / promRunning -------------------------------------------------
+
+func TestRunningAndPromRunning(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if hp.running() {
+		t.Fatal("should not be running initially")
+	}
+	if v := hp.promRunning(); v != 0 {
+		t.Fatalf("promRunning = %v, want 0", v)
+	}
+
+	hp.testAndSetRunning(true)
+
+	if !hp.running() {
+		t.Fatal("should be running after set")
+	}
+	if v := hp.promRunning(); v != 1 {
+		t.Fatalf("promRunning = %v, want 1", v)
+	}
+}
+
+// --- isHealthy / health ----------------------------------------------------
+
+func TestIsHealthy(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	hp, _ := newHproxy(t, []string{s.URL}, []string{"ping"})
+	time.Sleep(250 * time.Millisecond)
+
+	if !hp.isHealthy(t.Context()) {
+		t.Fatal("expected healthy with one live backend")
+	}
+
+	ok, _, err := hp.health(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("health should report healthy")
+	}
+}
+
+func TestIsHealthyUnhealthy(t *testing.T) {
+	hp, _ := newHproxy(t, []string{"http://localhost:1"}, []string{"ping"})
+	time.Sleep(250 * time.Millisecond)
+
+	if hp.isHealthy(t.Context()) {
+		t.Fatal("expected unhealthy with dead backend")
+	}
+}
+
+// --- Control add/remove/list via handler -----------------------------------
+
+func TestControlAddRemoveList(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addBody := `[{"node_url":"http://add1.example.com:8545"},{"node_url":"http://add2.example.com:8545"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte(addBody)))
+	rec := httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("add: expected 200, got %d", rec.Code)
+	}
+
+	// List should return 2 nodes.
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, RouteControlList, nil)
+	rec = httptest.NewRecorder()
+	hp.handleControlListRequest(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", rec.Code)
+	}
+	var listed []NodeHealth
+	if err := json.NewDecoder(rec.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("list: expected 2 nodes, got %d", len(listed))
+	}
+
+	// Remove one.
+	removeBody := `[{"node_url":"http://add1.example.com:8545"}]`
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader([]byte(removeBody)))
+	rec = httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("remove: expected 200, got %d", rec.Code)
+	}
+
+	// List again — still 2 entries but one is "removed".
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, RouteControlList, nil)
+	rec = httptest.NewRecorder()
+	hp.handleControlListRequest(rec, req)
+	var listed2 []NodeHealth
+	if err := json.NewDecoder(rec.Body).Decode(&listed2); err != nil {
+		t.Fatal(err)
+	}
+	removed := 0
+	for _, n := range listed2 {
+		if n.Status == "removed" {
+			removed++
+		}
+	}
+	if removed != 1 {
+		t.Fatalf("expected 1 removed node, got %d", removed)
+	}
+}
+
+func TestControlAddDuplicate(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[{"node_url":"http://dup.example.com:8545"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte(body)))
+	rec := httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first add: expected 200, got %d", rec.Code)
+	}
+
+	// Second add — duplicate error in response body.
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte(body)))
+	rec = httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second add: expected 200, got %d", rec.Code)
+	}
+	var nes []NodeError
+	if err := json.NewDecoder(rec.Body).Decode(&nes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nes) != 1 || nes[0].Error != "duplicate" {
+		t.Fatalf("expected duplicate error, got %+v", nes)
+	}
+}
+
+func TestControlAddBadScheme(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[{"node_url":"ftp://bad.example.com"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte(body)))
+	rec := httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+	var nes []NodeError
+	if err := json.NewDecoder(rec.Body).Decode(&nes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nes) != 1 || nes[0].Error == "" {
+		t.Fatalf("expected unsupported scheme error, got %+v", nes)
+	}
+}
+
+func TestControlAddBadJSON(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte("not json")))
+	rec := httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestControlRemoveBadJSON(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader([]byte("not json")))
+	rec := httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestControlRemoveNotFound(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[{"node_url":"http://ghost.example.com:8545"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader([]byte(body)))
+	rec := httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+	var nes []NodeError
+	if err := json.NewDecoder(rec.Body).Decode(&nes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nes) != 1 || nes[0].Error != "not found" {
+		t.Fatalf("expected not found error, got %+v", nes)
+	}
+}
+
+func TestControlRemoveAlreadyRemoved(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[{"node_url":"http://once.example.com:8545"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte(body)))
+	rec := httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader([]byte(body)))
+	rec = httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+
+	// Remove again.
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader([]byte(body)))
+	rec = httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+	var nes []NodeError
+	if err := json.NewDecoder(rec.Body).Decode(&nes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nes) != 1 || nes[0].Error != "already removed" {
+		t.Fatalf("expected already removed error, got %+v", nes)
+	}
+}
+
+func TestControlAddReAddsRemovedNode(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[{"node_url":"http://comeback.example.com:8545"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte(body)))
+	rec := httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader([]byte(body)))
+	rec = httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+
+	// Re-add — should succeed (re-adds the removed node).
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte(body)))
+	rec = httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+	var nes []NodeError
+	if err := json.NewDecoder(rec.Body).Decode(&nes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nes) != 1 || nes[0].Error != "" {
+		t.Fatalf("expected no error on re-add, got %+v", nes)
+	}
+}
+
+func TestControlRemoveBodyLimit(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	buf.WriteByte('[')
+	entry := []byte(`{"node_url":"http://x.example.com:8545"},`)
+	for buf.Len() < int(DefaultMaxControlBodySize)+1 {
+		buf.Write(entry)
+	}
+	buf.Truncate(buf.Len() - 1)
+	buf.WriteByte(']')
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader(buf.Bytes()))
+	rec := httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized body, got %d", rec.Code)
+	}
+}
+
+// --- Run double-start ------------------------------------------------------
+
+func TestRunDoubleStart(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	hp, _ := newHproxy(t, []string{s.URL}, []string{"ping"})
+
+	// hp is already running via newHproxy. Try to run again.
+	err := hp.Run(t.Context())
+	if err == nil {
+		t.Fatal("expected error on double start")
+	}
+}
+
+// --- CallEthereum ----------------------------------------------------------
+
+func TestCallEthereum(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req EthereumRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			panic(err)
+		}
+		resp := EthereumResponse{
+			Version: EthereumVersion,
+			ID:      req.ID,
+			Result:  json.RawMessage(`"0x1"`),
+		}
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			panic(err)
+		}
+	}))
+	defer srv.Close()
+
+	resp, err := CallEthereum(t.Context(), srv.Client(), srv.URL, "eth_blockNumber")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(resp.Result) != `"0x1"` {
+		t.Fatalf("unexpected result: %s", resp.Result)
+	}
+}
+
+func TestCallEthereumBadStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	_, err := CallEthereum(t.Context(), srv.Client(), srv.URL, "eth_blockNumber")
+	if err == nil {
+		t.Fatal("expected error for 500 status")
+	}
+}
+
+func TestCallEthereumBadVersion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req EthereumRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			panic(err)
+		}
+		resp := EthereumResponse{
+			Version: "1.0",
+			ID:      req.ID,
+			Result:  json.RawMessage(`"0x1"`),
+		}
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			panic(err)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := CallEthereum(t.Context(), srv.Client(), srv.URL, "eth_blockNumber")
+	if err == nil {
+		t.Fatal("expected error for wrong version")
+	}
+}
+
+func TestCallEthereumBadID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		resp := EthereumResponse{
+			Version: EthereumVersion,
+			ID:      "wrong-id",
+			Result:  json.RawMessage(`"0x1"`),
+		}
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			panic(err)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := CallEthereum(t.Context(), srv.Client(), srv.URL, "eth_blockNumber")
+	if err == nil {
+		t.Fatal("expected error for mismatched ID")
+	}
+}
+
+func TestCallEthereumBadJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer srv.Close()
+
+	_, err := CallEthereum(t.Context(), srv.Client(), srv.URL, "eth_blockNumber")
+	if err == nil {
+		t.Fatal("expected error for bad JSON response")
+	}
+}
+
+func TestCallEthereumBadURL(t *testing.T) {
+	_, err := CallEthereum(t.Context(), http.DefaultClient, "://bad", "eth_blockNumber")
+	if err == nil {
+		t.Fatal("expected error for bad URL")
+	}
+}
+
+func TestRemoveBadScheme(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[{"node_url":"ftp://bad.example.com"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader([]byte(body)))
+	rec := httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+	var nes []NodeError
+	if err := json.NewDecoder(rec.Body).Decode(&nes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nes) != 1 || nes[0].Error == "" {
+		t.Fatalf("expected unsupported scheme error, got %+v", nes)
+	}
+}
+
+func TestNewServerOverflowRequestSize(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.MaxRequestSize = "10EiB"
+	_, err := NewServer(cfg)
+	if err == nil {
+		t.Fatal("expected error for overflow request size")
+	}
+}
+
+func TestControlListWithConnectedClients(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	hp, hpCfg := newHproxy(t, []string{s.URL}, []string{"ping"})
+	time.Sleep(250 * time.Millisecond)
+
+	body := `{"jsonrpc":"2.0","method":"ping","id":"1"}`
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		"http://"+hpCfg.ListenAddress+"/", bytes.NewReader([]byte(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, RouteControlList, nil)
+	rec := httptest.NewRecorder()
+	hp.handleControlListRequest(rec, req)
+	var listed []NodeHealth
+	if err := json.NewDecoder(rec.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(listed))
+	}
+	if listed[0].Connections < 1 {
+		t.Fatalf("expected at least 1 connection, got %d", listed[0].Connections)
+	}
+}
+
+func TestHTTPAddressNil(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hp.HTTPAddress() != nil {
+		t.Fatal("expected nil address before Run")
+	}
+}
+
+func TestNodeAddBadURL(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[{"node_url":"://bad-url"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
+		bytes.NewReader([]byte(body)))
+	rec := httptest.NewRecorder()
+	hp.handleControlAddRequest(rec, req)
+	var nes []NodeError
+	if err := json.NewDecoder(rec.Body).Decode(&nes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nes) != 1 || nes[0].Error == "" {
+		t.Fatalf("expected invalid url error, got %+v", nes)
+	}
+}
+
+func TestRemoveBadURL(t *testing.T) {
+	cfg := NewDefaultConfig()
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := `[{"node_url":"://bad-url"}]`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlRemove,
+		bytes.NewReader([]byte(body)))
+	rec := httptest.NewRecorder()
+	hp.handleControlRemoveRequest(rec, req)
+	var nes []NodeError
+	if err := json.NewDecoder(rec.Body).Decode(&nes); err != nil {
+		t.Fatal(err)
+	}
+	if len(nes) != 1 || nes[0].Error == "" {
+		t.Fatalf("expected invalid url error, got %+v", nes)
+	}
+}
+
+func postProxy(t *testing.T, addr string, body []byte) *http.Response {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		"http://"+addr+"/", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+func TestFilterRequestMaxBytes(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	hp, hpCfg := newHproxy(t, []string{s.URL}, []string{"ping"})
+	time.Sleep(250 * time.Millisecond)
+
+	big := make([]byte, hp.maxRequestSize+1)
+	for i := range big {
+		big[i] = 'x'
+	}
+
+	resp := postProxy(t, hpCfg.ListenAddress, big)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", resp.StatusCode)
+	}
+}
+
+func TestFilterRequestBadJSON(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	_, hpCfg := newHproxy(t, []string{s.URL}, []string{"ping"})
+	time.Sleep(250 * time.Millisecond)
+
+	resp := postProxy(t, hpCfg.ListenAddress, []byte("not json"))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected 415, got %d", resp.StatusCode)
+	}
+}
+
+func TestFilterRequestForbiddenMethod(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	_, hpCfg := newHproxy(t, []string{s.URL}, []string{"ping"})
+	time.Sleep(250 * time.Millisecond)
+
+	body := `{"jsonrpc":"2.0","method":"debug_traceCall","id":"1"}`
+	resp := postProxy(t, hpCfg.ListenAddress, []byte(body))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.StatusCode)
+	}
+}
+
+func TestProxyNoCandidates(t *testing.T) {
+	_, hpCfg := newHproxy(t, []string{"http://localhost:1"}, []string{"ping"})
+	time.Sleep(250 * time.Millisecond)
+
+	body := `{"jsonrpc":"2.0","method":"ping","id":"1"}`
+	resp := postProxy(t, hpCfg.ListenAddress, []byte(body))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", resp.StatusCode)
+	}
+}
+
+func TestRunNoURLs(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.HVMURLs = nil
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = hp.Run(t.Context())
+	if err == nil {
+		t.Fatal("expected error for no HVM URLs")
+	}
+}
+
+func TestRunWithPrometheus(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.HVMURLs = []string{s.URL}
+	cfg.MethodFilter = []string{"ping"}
+	cfg.ListenAddress = "127.0.0.1:0"
+	cfg.ControlAddress = "127.0.0.1:0"
+	cfg.PrometheusListenAddress = "127.0.0.1:0"
+	cfg.RequestTimeout = time.Second
+	cfg.PollFrequency = time.Second
+
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 6*time.Second)
+	defer cancel()
+
+	go func() {
+		err := hp.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			panic(err)
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for server to start")
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := hp.HTTPAddress(); addr != nil {
+			break
+		}
+	}
+
+	time.Sleep(5500 * time.Millisecond)
+	cancel()
+}
+
+func TestRunWithPprof(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.HVMURLs = []string{s.URL}
+	cfg.MethodFilter = []string{"ping"}
+	cfg.ListenAddress = "127.0.0.1:0"
+	cfg.ControlAddress = "127.0.0.1:0"
+	cfg.PprofListenAddress = "127.0.0.1:0"
+	cfg.RequestTimeout = time.Second
+	cfg.PollFrequency = time.Second
+
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	go func() {
+		err := hp.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for server to start")
+		case <-time.After(10 * time.Millisecond):
+		}
+		if addr := hp.HTTPAddress(); addr != nil {
+			break
+		}
+	}
+
+	time.Sleep(250 * time.Millisecond)
+	cancel()
 }
