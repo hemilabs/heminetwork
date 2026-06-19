@@ -6,7 +6,6 @@ package wallet
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -28,26 +27,26 @@ import (
 // between parse errors and verification mismatches.
 func VerifyECDSA(sigHash, sigDER []byte, pubKey *btcec.PublicKey) error {
 	if pubKey == nil {
-		return errors.New("pubkey cannot be nil")
+		return fmt.Errorf("pubkey cannot be nil: %w", ErrNilArgument)
 	}
 	if len(sigHash) != 32 {
-		return fmt.Errorf("sighash must be 32 bytes, got %d", len(sigHash))
+		return fmt.Errorf("sighash must be 32 bytes, got %d: %w", len(sigHash), ErrInvalidSigHashLength)
 	}
 	if len(sigDER) == 0 {
-		return errors.New("empty signature")
+		return fmt.Errorf("empty DER: %w", ErrInvalidSigLength)
 	}
 	sig, err := ecdsa.ParseDERSignature(sigDER)
 	if err != nil {
-		return fmt.Errorf("parse signature: %w", err)
+		return fmt.Errorf("%w: %v", ErrParseSig, err)
 	}
 	// Reject high-S signatures per BIP-146.  Serialize normalises
 	// to low-S; if the round-trip differs from the input, the
 	// original carried a high-S value (or non-canonical DER).
 	if !bytes.Equal(sig.Serialize(), sigDER) {
-		return errors.New("signature is not in canonical low-S form (BIP-146)")
+		return fmt.Errorf("BIP-146: %w", ErrNonCanonicalSig)
 	}
 	if !sig.Verify(sigHash, pubKey) {
-		return errors.New("invalid signature")
+		return ErrInvalidSig
 	}
 	return nil
 }
@@ -67,26 +66,27 @@ func VerifyECDSA(sigHash, sigDER []byte, pubKey *btcec.PublicKey) error {
 // the signature over.
 func VerifySchnorr(sigHash, sig64, xOnlyPubKey []byte) error {
 	if len(xOnlyPubKey) != 32 {
-		return fmt.Errorf("x-only pubkey must be 32 bytes, got %d",
-			len(xOnlyPubKey))
+		return fmt.Errorf("x-only pubkey must be 32 bytes, got %d: %w",
+			len(xOnlyPubKey), ErrInvalidPubKeyLength)
 	}
 	if len(sigHash) != 32 {
-		return fmt.Errorf("sighash must be 32 bytes, got %d", len(sigHash))
+		return fmt.Errorf("sighash must be 32 bytes, got %d: %w",
+			len(sigHash), ErrInvalidSigHashLength)
 	}
 	if len(sig64) != 64 {
-		return fmt.Errorf("schnorr signature must be 64 bytes, got %d",
-			len(sig64))
+		return fmt.Errorf("schnorr signature must be 64 bytes, got %d: %w",
+			len(sig64), ErrInvalidSigLength)
 	}
 	sig, err := schnorr.ParseSignature(sig64)
 	if err != nil {
-		return fmt.Errorf("parse signature: %w", err)
+		return fmt.Errorf("%w: %v", ErrParseSig, err)
 	}
 	pub, err := schnorr.ParsePubKey(xOnlyPubKey)
 	if err != nil {
-		return fmt.Errorf("parse x-only pubkey: %w", err)
+		return fmt.Errorf("parse x-only pubkey: %w", ErrInvalidPubKeyLength)
 	}
 	if !sig.Verify(sigHash, pub) {
-		return errors.New("invalid signature")
+		return ErrInvalidSig
 	}
 	return nil
 }

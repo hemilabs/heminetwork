@@ -7,7 +7,7 @@ package wallet
 import (
 	"bytes"
 	"encoding/hex"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -183,8 +183,8 @@ func TestSignP2TRKeyPathWrongKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected key-not-found error")
 	}
-	if !strings.Contains(err.Error(), "lookup key") {
-		t.Fatalf("expected lookup-key error, got: %v", err)
+	if !errors.Is(err, zuul.ErrKeyDoesntExist) {
+		t.Fatalf("expected ErrKeyDoesntExist, got: %v", err)
 	}
 }
 
@@ -250,8 +250,8 @@ func TestPubKeyMatchesTaprootAddressRejectsWrongKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected mismatch error")
 	}
-	if !strings.Contains(err.Error(), "does not match") {
-		t.Fatalf("expected match-failure error, got: %v", err)
+	if !errors.Is(err, ErrPubKeyMismatch) {
+		t.Fatalf("expected ErrPubKeyMismatch, got: %v", err)
 	}
 }
 
@@ -349,8 +349,8 @@ func TestVerifySchnorrRejectsMalformedSig(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected parse error for invalid r")
 	}
-	if !strings.Contains(err.Error(), "parse signature") {
-		t.Fatalf("expected parse-signature error, got: %v", err)
+	if !errors.Is(err, ErrParseSig) {
+		t.Fatalf("expected ErrParseSig, got: %v", err)
 	}
 }
 
@@ -382,8 +382,8 @@ func TestVerifySchnorrRejectsMalformedPubKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected parse error for invalid pubkey x-coordinate")
 	}
-	if !strings.Contains(err.Error(), "parse x-only pubkey") {
-		t.Fatalf("expected parse-pubkey error, got: %v", err)
+	if !errors.Is(err, ErrInvalidPubKeyLength) {
+		t.Fatalf("expected ErrInvalidPubKeyLength, got: %v", err)
 	}
 }
 

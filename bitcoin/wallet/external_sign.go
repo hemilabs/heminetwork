@@ -5,7 +5,6 @@
 package wallet
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -29,30 +28,30 @@ import (
 // or above the group order is rejected as invalid.
 func ECDSASigFromRS(r, s []byte) ([]byte, error) {
 	if len(r) == 0 || len(s) == 0 {
-		return nil, errors.New("empty scalar")
+		return nil, fmt.Errorf("empty scalar: %w", ErrInvalidScalar)
 	}
 	// SetByteSlice silently truncates inputs longer than 32 bytes.
 	// Reject them explicitly to avoid producing a wrong signature
 	// from padded or mis-concatenated TSS output.
 	if len(r) > 32 {
-		return nil, fmt.Errorf("r is %d bytes, max 32", len(r))
+		return nil, fmt.Errorf("r is %d bytes, max 32: %w", len(r), ErrInvalidScalar)
 	}
 	if len(s) > 32 {
-		return nil, fmt.Errorf("s is %d bytes, max 32", len(s))
+		return nil, fmt.Errorf("s is %d bytes, max 32: %w", len(s), ErrInvalidScalar)
 	}
 
 	var rs, ss secp256k1.ModNScalar
 	if overflow := rs.SetByteSlice(r); overflow {
-		return nil, errors.New("r overflows group order")
+		return nil, fmt.Errorf("r overflows group order: %w", ErrInvalidScalar)
 	}
 	if rs.IsZero() {
-		return nil, errors.New("r is zero")
+		return nil, fmt.Errorf("r is zero: %w", ErrInvalidScalar)
 	}
 	if overflow := ss.SetByteSlice(s); overflow {
-		return nil, errors.New("s overflows group order")
+		return nil, fmt.Errorf("s overflows group order: %w", ErrInvalidScalar)
 	}
 	if ss.IsZero() {
-		return nil, errors.New("s is zero")
+		return nil, fmt.Errorf("s is zero: %w", ErrInvalidScalar)
 	}
 
 	sig := ecdsa.NewSignature(&rs, &ss)
@@ -100,14 +99,14 @@ func ECDSASigFromRS(r, s []byte) ([]byte, error) {
 // receive; the caller already has it.
 func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, prev *wire.TxOut, pubKey *btcec.PublicKey, sigDER []byte, hashType txscript.SigHashType) error {
 	if tx == nil || prev == nil || pubKey == nil {
-		return errors.New("tx, prev and pubKey cannot be nil")
+		return fmt.Errorf("tx, prev and pubKey cannot be nil: %w", ErrNilArgument)
 	}
 	if idx < 0 || idx >= len(tx.TxIn) {
-		return fmt.Errorf("input index %d out of range (tx has %d inputs)",
-			idx, len(tx.TxIn))
+		return fmt.Errorf("input index %d out of range (tx has %d inputs): %w",
+			idx, len(tx.TxIn), ErrIndexOutOfRange)
 	}
 	if hashType == txscript.SigHashDefault {
-		return errors.New("SigHashDefault is not valid for ECDSA; use SigHashAll")
+		return fmt.Errorf("use SigHashAll: %w", ErrSigHashDefaultECDSA)
 	}
 	if err := validateSigHashType(hashType); err != nil {
 		return err
@@ -118,7 +117,7 @@ func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, pre
 	// Serialize round-trips through the parsed R,S scalars.
 	sig, err := ecdsa.ParseDERSignature(sigDER)
 	if err != nil {
-		return fmt.Errorf("parse signature: %w", err)
+		return fmt.Errorf("%w: %v", ErrParseSig, err)
 	}
 	canonicalDER := sig.Serialize()
 
@@ -136,7 +135,7 @@ func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, pre
 	case txscript.WitnessV0PubKeyHashTy:
 		return applyECDSAP2WPKH(params, tx, idx, prev, sigWithHash, pubCompressed)
 	default:
-		return fmt.Errorf("unsupported script class for ECDSA: %v", class)
+		return fmt.Errorf("ECDSA %v: %w", class, ErrUnsupportedScript)
 	}
 }
 
@@ -200,7 +199,7 @@ func pubKeyMatchesAddress(params *chaincfg.Params, pkScript, pubCompressed []byt
 	}
 
 	if addrs[0].EncodeAddress() != want.EncodeAddress() {
-		return errors.New("public key does not match address")
+		return ErrPubKeyMismatch
 	}
 	return nil
 }
@@ -222,5 +221,5 @@ func validateSigHashType(hashType txscript.SigHashType) error {
 		txscript.SigHashSingle | txscript.SigHashAnyOneCanPay:
 		return nil
 	}
-	return fmt.Errorf("invalid sighash type %#x", uint32(hashType))
+	return fmt.Errorf("%#x: %w", uint32(hashType), ErrInvalidSigHashType)
 }

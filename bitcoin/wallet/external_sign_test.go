@@ -6,7 +6,7 @@ package wallet
 
 import (
 	"bytes"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -415,8 +415,8 @@ func TestECDSASigFromRSRejectsOversized(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error for oversized scalar")
 			}
-			if !strings.Contains(err.Error(), "max 32") {
-				t.Fatalf("expected 'max 32' error, got: %v", err)
+			if !errors.Is(err, ErrInvalidScalar) {
+				t.Fatalf("expected ErrInvalidScalar, got: %v", err)
 			}
 		})
 	}

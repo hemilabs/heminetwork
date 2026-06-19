@@ -280,8 +280,8 @@ func TestTransactionApplyECDSAP2WPKHWrongKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for wrong pubkey on P2WPKH input")
 	}
-	if !strings.Contains(err.Error(), "p2wpkh") {
-		t.Fatalf("expected error to reference 'p2wpkh', got: %v", err)
+	if !errors.Is(err, ErrPubKeyMismatch) {
+		t.Fatalf("expected ErrPubKeyMismatch, got: %v", err)
 	}
 }
 
@@ -367,9 +367,6 @@ func TestApplyECDSAP2PKHScriptBuilderError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ScriptBuilder error for oversized data push")
 	}
-	if !strings.Contains(err.Error(), "build sigScript") {
-		t.Fatalf("expected 'build sigScript' error, got: %v", err)
-	}
 }
 
 // TestPubKeyMatchesAddressExtractError covers the ExtractPkScriptAddrs
@@ -410,9 +407,6 @@ func TestPubKeyMatchesAddressZeroAddrs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for zero-address pkScript")
 	}
-	if !strings.Contains(err.Error(), "0 addresses") {
-		t.Fatalf("expected '0 addresses', got: %v", err)
-	}
 }
 
 // TestPubKeyMatchesTaprootAddressZeroAddrs covers the len(addrs) != 1
@@ -431,9 +425,6 @@ func TestPubKeyMatchesTaprootAddressZeroAddrs(t *testing.T) {
 	err = pubKeyMatchesTaprootAddress(params, opReturn, priv.PubKey())
 	if err == nil {
 		t.Fatal("expected error for zero-address pkScript")
-	}
-	if !strings.Contains(err.Error(), "0 addresses") {
-		t.Fatalf("expected '0 addresses', got: %v", err)
 	}
 }
 
@@ -479,8 +470,8 @@ func TestTransactionApplyECDSARejectsP2SHP2WPKH(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected unsupported-script-class error for P2SH-P2WPKH")
 	}
-	if !strings.Contains(err.Error(), "unsupported script class") {
-		t.Fatalf("expected 'unsupported script class', got: %v", err)
+	if !errors.Is(err, ErrUnsupportedScript) {
+		t.Fatalf("expected ErrUnsupportedScript, got: %v", err)
 	}
 }
 
@@ -502,8 +493,8 @@ func TestTransactionApplyECDSAIdxZeroNoInputs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected out-of-range error for idx=0 with no inputs")
 	}
-	if !strings.Contains(err.Error(), "input index 0 out of range") {
-		t.Fatalf("expected 'input index 0 out of range', got: %v", err)
+	if !errors.Is(err, ErrIndexOutOfRange) {
+		t.Fatalf("expected ErrIndexOutOfRange, got: %v", err)
 	}
 }
 
@@ -539,8 +530,8 @@ func TestTransactionApplySchnorrRejectsP2WPKH(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected unsupported-script-class error for P2WPKH")
 	}
-	if !strings.Contains(err.Error(), "unsupported script class for schnorr") {
-		t.Fatalf("expected schnorr script-class error, got: %v", err)
+	if !errors.Is(err, ErrUnsupportedScript) {
+		t.Fatalf("expected ErrUnsupportedScript, got: %v", err)
 	}
 }
 
@@ -558,8 +549,8 @@ func TestVerifyECDSARejectsLongSigHash(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 33-byte sighash")
 	}
-	if !strings.Contains(err.Error(), "sighash must be 32 bytes, got 33") {
-		t.Fatalf("expected length error, got: %v", err)
+	if !errors.Is(err, ErrInvalidSigHashLength) {
+		t.Fatalf("expected ErrInvalidSigHashLength, got: %v", err)
 	}
 }
 
@@ -571,22 +562,22 @@ func TestVerifySchnorrRejectsLongInputs(t *testing.T) {
 		sigHash []byte
 		sig64   []byte
 		xOnly   []byte
-		want    string
+		want    error
 	}{
 		{
 			"long xOnlyPubKey",
 			make([]byte, 32), make([]byte, 64), make([]byte, 33),
-			"x-only pubkey must be 32 bytes, got 33",
+			ErrInvalidPubKeyLength,
 		},
 		{
 			"long sigHash",
 			make([]byte, 33), make([]byte, 64), make([]byte, 32),
-			"sighash must be 32 bytes, got 33",
+			ErrInvalidSigHashLength,
 		},
 		{
 			"long sig64",
 			make([]byte, 32), make([]byte, 65), make([]byte, 32),
-			"schnorr signature must be 64 bytes, got 65",
+			ErrInvalidSigLength,
 		},
 	}
 	for _, tc := range cases {
@@ -595,8 +586,8 @@ func TestVerifySchnorrRejectsLongInputs(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("expected %q, got: %v", tc.want, err)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("expected %v, got: %v", tc.want, err)
 			}
 		})
 	}

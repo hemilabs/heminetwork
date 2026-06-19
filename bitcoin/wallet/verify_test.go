@@ -5,7 +5,7 @@
 package wallet
 
 import (
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -125,8 +125,8 @@ func TestVerifyECDSARejectsHighS(t *testing.T) {
 	if err == nil {
 		t.Fatal("VerifyECDSA accepted a high-S signature")
 	}
-	if !strings.Contains(err.Error(), "BIP-146") {
-		t.Fatalf("expected BIP-146 error, got: %v", err)
+	if !errors.Is(err, ErrNonCanonicalSig) {
+		t.Fatalf("expected ErrNonCanonicalSig, got: %v", err)
 	}
 }
 
