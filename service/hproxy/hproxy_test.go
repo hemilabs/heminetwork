@@ -20,8 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
-
 	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
 )
 
@@ -159,15 +157,67 @@ func TestNobodyHome(t *testing.T) {
 // func TestDialTimeout(t *testing.T) {
 // XXX tried to build a test for this but did not succeed. Remove or fix.
 // }
+// clientCount returns the number of tracked clients.
+func (s *Server) clientCount() int {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return len(s.clients)
+}
+
+// waitClients polls until the client count equals want or the context
+// expires.  Returns the final count.
+func waitClients(ctx context.Context, hp *Server, want int) int {
+	for {
+		n := hp.clientCount()
+		if n == want {
+			return n
+		}
+		select {
+		case <-ctx.Done():
+			return n
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// doRequest sends one JSON-RPC request through the proxy using a
+// fresh transport (so hproxy sees a distinct client).  Panics on
+// failure because t.Fatal in a goroutine only kills that goroutine.
+func doRequest(ctx context.Context, addr string, id int) {
+	c := &http.Client{Transport: &http.Transport{}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://"+addr, newEthReq("ping"))
+	if err != nil {
+		panic(fmt.Errorf("client %d: new request: %w", id, err))
+	}
+	reply, err := c.Do(req)
+	if err != nil {
+		panic(fmt.Errorf("client %d: do: %w", id, err))
+	}
+	defer reply.Body.Close()
+	if reply.StatusCode != http.StatusOK {
+		panic(fmt.Errorf("client %d: status %d", id, reply.StatusCode))
+	}
+	hdr := reply.Header.Get("X-Hproxy")
+	if hdr == "" {
+		panic(fmt.Errorf("client %d: missing X-Hproxy header", id))
+	}
+	var jr serverReply
+	if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
+		panic(fmt.Errorf("client %d: decode: %w", id, err))
+	}
+	if strconv.Itoa(jr.ID) != hdr {
+		panic(fmt.Errorf("client %d: id mismatch header=%s json=%d", id, hdr, jr.ID))
+	}
+}
+
 func TestClientReap(t *testing.T) {
 	s := newServer(0, nil)
 	defer s.Close()
-	servers := []string{s.URL}
 
 	hpCfg := NewDefaultConfig()
-	hpCfg.HVMURLs = servers
-	hpCfg.LogLevel = "hproxy=TRACE"                 // XXX figure out why this isn't working
-	hpCfg.ClientIdleTimeout = mock.InfiniteDuration // will timeout manually later
+	hpCfg.HVMURLs = []string{s.URL}
+	hpCfg.ClientIdleTimeout = mock.InfiniteDuration
 	hpCfg.RequestTimeout = time.Second
 	hpCfg.PollFrequency = time.Second
 	hpCfg.ListenAddress = "127.0.0.1:0"
@@ -178,96 +228,82 @@ func TestClientReap(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		err = hp.Run(t.Context())
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err := hp.Run(t.Context()); err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
 
-	// Wait for HTTP server to start
 	for {
 		select {
 		case <-t.Context().Done():
 			t.Fatal(t.Context().Err())
 		case <-time.After(10 * time.Millisecond):
 		}
-		if addr := hp.HTTPAddress(); addr != nil {
-			hpCfg.ListenAddress = addr.String()
+		if hp.HTTPAddress() != nil {
+			hpCfg.ListenAddress = hp.HTTPAddress().String()
 			break
 		}
 	}
 
-	testDuration := 5 * time.Second
-	ctx, cancel := context.WithTimeout(t.Context(), testDuration)
-	defer cancel()
+	const clientCount = 5
 
-	// Launch 5 clients
+	// Phase 1: establish clients with infinite idle timeout.
 	var wg sync.WaitGroup
-	clientCount := 5
 	for i := range clientCount {
 		wg.Add(1)
 		go func(x int) {
 			defer wg.Done()
-			// This uses a new http.Transport to prevent using idle connections,
-			// which would result in a new client not being created.
-			c := &http.Client{Transport: &http.Transport{}}
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-				"http://"+hpCfg.ListenAddress, newEthReq("ping"))
-			if err != nil {
-				panic(fmt.Errorf("get %v: %w", x, err))
-			}
-			reply, err := c.Do(req)
-			if err != nil {
-				panic(fmt.Errorf("do %v: %w", x, err))
-			}
-			defer reply.Body.Close()
-			switch reply.StatusCode {
-			case http.StatusOK:
-			default:
-				panic(fmt.Errorf("%v replied %v",
-					hpCfg.ListenAddress, reply.StatusCode))
-			}
-
-			// Require X-Hproxy
-			ids := reply.Header.Get("X-Hproxy")
-			if ids == "" {
-				panic("expected X-Hproxy being set")
-			}
-
-			var jr serverReply
-			if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
-				panic(fmt.Errorf("decode %v: %w", x, err))
-			}
-
-			// Verify that json id matches header id, a bit silly
-			// but keeps us honest.
-			if strconv.Itoa(jr.ID) != ids {
-				panic(fmt.Errorf("id mismatch header: %s, json: %d", ids, jr.ID))
-			}
+			doRequest(t.Context(), hpCfg.ListenAddress, x)
 		}(i)
 	}
-
 	wg.Wait()
-	hp.mtx.RLock()
-	if len(hp.clients) != clientCount {
-		t.Fatalf("got %v clients, want %v", len(hp.clients), clientCount)
-	}
-	hp.mtx.RUnlock()
 
+	if n := hp.clientCount(); n != clientCount {
+		t.Fatalf("after requests: got %d clients, want %d", n, clientCount)
+	}
+
+	// Phase 2: reset all timers to 1ns — reaper fires almost immediately.
 	hp.mtx.Lock()
 	for _, v := range hp.clients {
 		v.reset(1 * time.Nanosecond)
 	}
 	hp.mtx.Unlock()
 
-	time.Sleep(250 * time.Millisecond)
-
-	hp.mtx.RLock()
-	if len(hp.clients) != 0 {
-		t.Logf("not reaped clients: %v", spew.Sdump(hp.clients))
-		time.Sleep(50 * time.Millisecond)
+	got := waitClients(t.Context(), hp, 0)
+	if got != 0 {
+		t.Fatalf("after reap: got %d clients, want 0", got)
 	}
-	hp.mtx.RUnlock()
+
+	// Phase 3: new requests after reap must create fresh clients.
+	for i := range clientCount {
+		wg.Add(1)
+		go func(x int) {
+			defer wg.Done()
+			doRequest(t.Context(), hpCfg.ListenAddress, x+clientCount)
+		}(i)
+	}
+	wg.Wait()
+
+	if n := hp.clientCount(); n != clientCount {
+		t.Fatalf("after re-register: got %d clients, want %d", n, clientCount)
+	}
+
+	// Phase 4: verify that activity resets the idle timer.  Set a
+	// short timeout, then send a request before it expires — the
+	// client must survive because the request resets the ticker.
+	hp.mtx.Lock()
+	for _, v := range hp.clients {
+		v.reset(200 * time.Millisecond)
+	}
+	hp.mtx.Unlock()
+
+	time.Sleep(100 * time.Millisecond)
+	doRequest(t.Context(), hpCfg.ListenAddress, 99)
+	time.Sleep(150 * time.Millisecond)
+
+	if n := hp.clientCount(); n == 0 {
+		t.Fatal("activity should have prevented reap but all clients were reaped")
+	}
 }
 
 func TestRequestTimeout(t *testing.T) {
