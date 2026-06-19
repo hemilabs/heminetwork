@@ -51,12 +51,16 @@ const (
 	logLevel = "INFO"
 
 	// XXX think about these durations
-	DefaultClientIdleTimeout = 5 * time.Minute  // Reap timer for client persistence
-	DefaultRequestTimeout    = 9 * time.Second  // Smaller than 12s
-	DefaultMaxControlBody    = 1 << 20          // 1 MiB, control endpoint body limit
-	DefaultPollFrequency     = 11 * time.Second // Smaller than 12s
-	DefaultListenAddress     = "localhost:8545" // Default geth port
-	DefaultControlAddress    = "localhost:1337" // Default control port
+	DefaultClientIdleTimeout  = 5 * time.Minute  // Reap timer for client persistence
+	DefaultRequestTimeout     = 9 * time.Second  // Smaller than 12s
+	DefaultReadHeaderTimeout  = 10 * time.Second // Slowloris header defense
+	DefaultReadTimeout        = 30 * time.Second // Full request read ceiling
+	DefaultWriteTimeout       = 30 * time.Second // Response write ceiling
+	DefaultServerIdleTimeout  = 60 * time.Second // Keep-alive reap
+	DefaultMaxControlBodySize = int64(1 << 20)   // 1 MiB, control endpoint body limit
+	DefaultPollFrequency      = 11 * time.Second // Smaller than 12s
+	DefaultListenAddress      = "localhost:8545" // Default geth port
+	DefaultControlAddress     = "localhost:1337" // Default control port
 
 	expectedClients = 1000
 
@@ -187,12 +191,12 @@ func NewDefaultConfig() *Config {
 		PollFrequency:       DefaultPollFrequency,
 		Network:             "mainnet",
 		PrometheusNamespace: appName,
-		ReadHeaderTimeout:   10 * time.Second,
-		ReadTimeout:         30 * time.Second,
+		ReadHeaderTimeout:   DefaultReadHeaderTimeout,
+		ReadTimeout:         DefaultReadTimeout,
 		RequestTimeout:      DefaultRequestTimeout,
-		ServerIdleTimeout:   60 * time.Second,
-		WriteTimeout:        30 * time.Second,
-		MaxControlBodySize:  DefaultMaxControlBody,
+		ServerIdleTimeout:   DefaultServerIdleTimeout,
+		WriteTimeout:        DefaultWriteTimeout,
+		MaxControlBodySize:  DefaultMaxControlBodySize,
 		MaxRequestSize:      defaultMaxRequestSize,
 	}
 }
@@ -361,7 +365,8 @@ func (s *Server) Collectors() []prometheus.Collector {
 			}, s.promConnections),
 		}
 		if measureLatency {
-			s.promCollectors = append(s.promCollectors,
+			s.promCollectors = append(
+				s.promCollectors,
 				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 					Namespace: s.cfg.PrometheusNamespace,
 					Name:      "avg_client_setup_latency",
@@ -1105,10 +1110,10 @@ func (s *Server) Run(pctx context.Context) error {
 			Addr:              s.cfg.ControlAddress,
 			Handler:           cmux,
 			BaseContext:       func(_ net.Listener) context.Context { return ctx },
-			ReadHeaderTimeout: s.cfg.ReadHeaderTimeout / 2,
-			ReadTimeout:       s.cfg.ReadTimeout / 2,
-			WriteTimeout:      s.cfg.WriteTimeout / 2,
-			IdleTimeout:       s.cfg.ServerIdleTimeout / 2,
+			ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
+			ReadTimeout:       s.cfg.ReadTimeout,
+			WriteTimeout:      s.cfg.WriteTimeout,
+			IdleTimeout:       s.cfg.ServerIdleTimeout,
 		}
 		go func() {
 			log.Infof("Control listening: %s", s.cfg.ControlAddress)

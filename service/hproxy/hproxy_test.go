@@ -813,6 +813,84 @@ func TestNodePoking(t *testing.T) {
 	}
 }
 
+func TestServerTimeoutsConfigured(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	hp, _ := newHproxy(t, []string{s.URL}, []string{"ping"})
+
+	hp.mtx.RLock()
+	srv := hp.httpServer
+	hp.mtx.RUnlock()
+
+	if srv.ReadHeaderTimeout != DefaultReadHeaderTimeout {
+		t.Fatalf("ReadHeaderTimeout = %v, want %v", srv.ReadHeaderTimeout, DefaultReadHeaderTimeout)
+	}
+	if srv.ReadTimeout != DefaultReadTimeout {
+		t.Fatalf("ReadTimeout = %v, want %v", srv.ReadTimeout, DefaultReadTimeout)
+	}
+	if srv.WriteTimeout != DefaultWriteTimeout {
+		t.Fatalf("WriteTimeout = %v, want %v", srv.WriteTimeout, DefaultWriteTimeout)
+	}
+	if srv.IdleTimeout != DefaultServerIdleTimeout {
+		t.Fatalf("IdleTimeout = %v, want %v", srv.IdleTimeout, DefaultServerIdleTimeout)
+	}
+}
+
+func TestServerTimeoutsCustom(t *testing.T) {
+	s := newServer(0, nil)
+	defer s.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.HVMURLs = []string{s.URL}
+	cfg.RequestTimeout = time.Second
+	cfg.PollFrequency = time.Second
+	cfg.ListenAddress = "127.0.0.1:0"
+	cfg.ControlAddress = "127.0.0.1:0"
+	cfg.ReadHeaderTimeout = 5 * time.Second
+	cfg.ReadTimeout = 15 * time.Second
+	cfg.WriteTimeout = 20 * time.Second
+	cfg.ServerIdleTimeout = 45 * time.Second
+
+	hp, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		if err := hp.Run(t.Context()); err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	for {
+		select {
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+		if hp.HTTPAddress() != nil {
+			break
+		}
+	}
+
+	hp.mtx.RLock()
+	srv := hp.httpServer
+	hp.mtx.RUnlock()
+
+	if srv.ReadHeaderTimeout != 5*time.Second {
+		t.Fatalf("ReadHeaderTimeout = %v, want 5s", srv.ReadHeaderTimeout)
+	}
+	if srv.ReadTimeout != 15*time.Second {
+		t.Fatalf("ReadTimeout = %v, want 15s", srv.ReadTimeout)
+	}
+	if srv.WriteTimeout != 20*time.Second {
+		t.Fatalf("WriteTimeout = %v, want 20s", srv.WriteTimeout)
+	}
+	if srv.IdleTimeout != 45*time.Second {
+		t.Fatalf("IdleTimeout = %v, want 45s", srv.IdleTimeout)
+	}
+}
+
 func TestControlAddBodyLimit(t *testing.T) {
 	cfg := NewDefaultConfig()
 	hp, err := NewServer(cfg)
@@ -820,18 +898,18 @@ func TestControlAddBodyLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Build a valid JSON array of nodes that exceeds DefaultMaxControlBody.
+	// Build a valid JSON array of nodes that exceeds DefaultMaxControlBodySize.
 	// Each entry is ~30 bytes of JSON; we need enough to cross the limit.
 	var buf bytes.Buffer
 	buf.WriteByte('[')
 	entry := []byte(`{"node_url":"http://x.example.com:8545"},`)
-	for buf.Len() < int(DefaultMaxControlBody)+1 {
+	for buf.Len() < int(DefaultMaxControlBodySize)+1 {
 		buf.Write(entry)
 	}
 	buf.Truncate(buf.Len() - 1) // drop trailing comma
 	buf.WriteByte(']')
 
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, RouteControlAdd,
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, RouteControlAdd,
 		bytes.NewReader(buf.Bytes()))
 	rec := httptest.NewRecorder()
 	hp.handleControlAddRequest(rec, req)
