@@ -71,7 +71,7 @@ func TransactionApplySchnorr(params *chaincfg.Params, tx *wire.MsgTx, idx int, p
 	// parsed R,S values.
 	sig, err := schnorr.ParseSignature(sig64)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrParseSig, err)
+		return fmt.Errorf("%w: %w", ErrParseSig, err)
 	}
 	canonical := sig.Serialize()
 

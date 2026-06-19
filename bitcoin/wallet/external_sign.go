@@ -117,7 +117,7 @@ func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, pre
 	// Serialize round-trips through the parsed R,S scalars.
 	sig, err := ecdsa.ParseDERSignature(sigDER)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrParseSig, err)
+		return fmt.Errorf("%w: %w", ErrParseSig, err)
 	}
 	canonicalDER := sig.Serialize()
 

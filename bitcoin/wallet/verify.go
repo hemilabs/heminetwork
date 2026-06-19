@@ -37,7 +37,7 @@ func VerifyECDSA(sigHash, sigDER []byte, pubKey *btcec.PublicKey) error {
 	}
 	sig, err := ecdsa.ParseDERSignature(sigDER)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrParseSig, err)
+		return fmt.Errorf("%w: %w", ErrParseSig, err)
 	}
 	// Reject high-S signatures per BIP-146.  Serialize normalises
 	// to low-S; if the round-trip differs from the input, the
@@ -79,7 +79,7 @@ func VerifySchnorr(sigHash, sig64, xOnlyPubKey []byte) error {
 	}
 	sig, err := schnorr.ParseSignature(sig64)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrParseSig, err)
+		return fmt.Errorf("%w: %w", ErrParseSig, err)
 	}
 	pub, err := schnorr.ParsePubKey(xOnlyPubKey)
 	if err != nil {
