@@ -6,6 +6,7 @@ package tbc
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -73,7 +74,7 @@ func processTxs(ctx context.Context, block *btcutil.Block, direction int, txsCac
 	// Get tx byte locations for O(1) lookups.
 	locs, err := block.TxLoc()
 	if err != nil {
-		log.Errorf("block %v TxLoc: %v", blockHash, err)
+		return fmt.Errorf("block %v TxLoc: %w", blockHash, err)
 	}
 
 	for idx, tx := range txs {
@@ -100,7 +101,8 @@ func processTxs(ctx context.Context, block *btcutil.Block, direction int, txsCac
 				tx.Hash(),
 				&txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index,
-				uint32(txInIdx))
+				uint32(txInIdx),
+			)
 			txsCache[txk] = &txv
 		}
 	}
