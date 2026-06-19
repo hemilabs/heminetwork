@@ -97,6 +97,9 @@ func TransactionApplyECDSA(params *chaincfg.Params, tx *wire.MsgTx, idx int, pre
 		return fmt.Errorf("input index %d out of range (tx has %d inputs)",
 			idx, len(tx.TxIn))
 	}
+	if hashType == txscript.SigHashDefault {
+		return errors.New("SigHashDefault is not valid for ECDSA; use SigHashAll")
+	}
 	if err := validateSigHashType(hashType); err != nil {
 		return err
 	}

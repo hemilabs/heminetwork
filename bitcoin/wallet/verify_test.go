@@ -5,6 +5,7 @@
 package wallet
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -15,6 +16,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // TestVerifyECDSAValid signs a hash with a known key and confirms
@@ -95,6 +97,53 @@ func TestVerifyECDSARejectsBad(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestVerifyECDSARejectsHighS verifies that VerifyECDSA rejects a
+// signature whose S value is above N/2 (BIP-146).  Bitcoin consensus
+// requires low-S form; a TSS library that returns high-S output must
+// be caught at the verification gate, not silently accepted.
+func TestVerifyECDSARejectsHighS(t *testing.T) {
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := chainhash.HashB([]byte("high-s-payload"))
+	sig := ecdsa.Sign(priv, hash)
+
+	// btcd's Serialize() auto-normalises to low-S, so we need to
+	// manually construct DER with the negated (high-S) value.
+	r := sig.R()
+	s := sig.S()
+	var highS secp256k1.ModNScalar
+	highS.Set(&s).Negate()
+	rBytes := r.Bytes()
+	sBytes := highS.Bytes()
+	highDER := manualDER(rBytes[:], sBytes[:])
+
+	err = VerifyECDSA(hash, highDER, priv.PubKey())
+	if err == nil {
+		t.Fatal("VerifyECDSA accepted a high-S signature")
+	}
+	if !strings.Contains(err.Error(), "BIP-146") {
+		t.Fatalf("expected BIP-146 error, got: %v", err)
+	}
+}
+
+func manualDER(r, s []byte) []byte {
+	encodeInt := func(v []byte) []byte {
+		for len(v) > 1 && v[0] == 0 {
+			v = v[1:]
+		}
+		if v[0]&0x80 != 0 {
+			v = append([]byte{0x00}, v...)
+		}
+		return append([]byte{0x02, byte(len(v))}, v...)
+	}
+	rEnc := encodeInt(r)
+	sEnc := encodeInt(s)
+	inner := append(rEnc, sEnc...)
+	return append([]byte{0x30, byte(len(inner))}, inner...)
 }
 
 // TestVerifySchnorrValid signs a hash with a known key (tweaked
@@ -327,7 +376,8 @@ func TestVerifySchnorrGatesTransactionApplySchnorr(t *testing.T) {
 
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
 	addr, err := btcutil.NewAddressTaproot(
-		schnorr.SerializePubKey(outputKey), params)
+		schnorr.SerializePubKey(outputKey), params,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

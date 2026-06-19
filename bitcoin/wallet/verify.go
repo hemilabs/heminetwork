@@ -5,6 +5,7 @@
 package wallet
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -38,6 +39,12 @@ func VerifyECDSA(sigHash, sigDER []byte, pubKey *btcec.PublicKey) error {
 	sig, err := ecdsa.ParseDERSignature(sigDER)
 	if err != nil {
 		return fmt.Errorf("parse signature: %w", err)
+	}
+	// Reject high-S signatures per BIP-146.  Serialize normalises
+	// to low-S; if the round-trip differs from the input, the
+	// original carried a high-S value (or non-canonical DER).
+	if !bytes.Equal(sig.Serialize(), sigDER) {
+		return errors.New("signature is not in canonical low-S form (BIP-146)")
 	}
 	if !sig.Verify(sigHash, pubKey) {
 		return errors.New("invalid signature")

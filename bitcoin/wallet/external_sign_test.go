@@ -321,7 +321,8 @@ func TestTransactionApplyECDSARejectsP2TR(t *testing.T) {
 
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
 	addr, err := btcutil.NewAddressTaproot(
-		outputKey.SerializeCompressed()[1:], params)
+		outputKey.SerializeCompressed()[1:], params,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +342,7 @@ func TestTransactionApplyECDSARejectsP2TR(t *testing.T) {
 
 	sigDER := signWithKeyToDER(priv, chainhash.HashB([]byte("anything")))
 	err = TransactionApplyECDSA(params, tx, 0, prev, priv.PubKey(),
-		sigDER, txscript.SigHashDefault)
+		sigDER, txscript.SigHashAll)
 	if err == nil {
 		t.Fatal("expected unsupported-script-class error for P2TR")
 	}
@@ -597,6 +598,42 @@ func TestTransactionApplyECDSARejectsBadSigHashType(t *testing.T) {
 					uint32(tc.hashType))
 			}
 		})
+	}
+}
+
+// TestTransactionApplyECDSARejectsSigHashDefault verifies that
+// SigHashDefault (0x00) is rejected for ECDSA inputs.  SigHashDefault
+// is a BIP-341 taproot concept; for legacy and segwit v0 ECDSA inputs,
+// a 0x00 sighash byte is invalid and produces an unspendable witness.
+func TestTransactionApplyECDSARejectsSigHashDefault(t *testing.T) {
+	params := &chaincfg.TestNet3Params
+
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fundHash := chainhash.DoubleHashH([]byte("sighashdefault-ecdsa-00000000"))
+	op := wire.NewOutPoint(&fundHash, 0)
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(wire.NewTxIn(op, nil, nil))
+
+	prev := wire.NewTxOut(50_000, pkScript)
+	sigDER := signWithKeyToDER(priv, chainhash.HashB([]byte("x")))
+
+	err = TransactionApplyECDSA(params, tx, 0, prev, priv.PubKey(),
+		sigDER, txscript.SigHashDefault)
+	if err == nil {
+		t.Fatal("expected error for SigHashDefault on ECDSA input")
 	}
 }
 
