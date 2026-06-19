@@ -6,6 +6,7 @@ package wallet
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -387,6 +388,35 @@ func TestECDSASigFromRSRejectsOverflow(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := ECDSASigFromRS(tc.r, tc.s); err == nil {
 				t.Fatalf("expected overflow error")
+			}
+		})
+	}
+}
+
+// TestECDSASigFromRSRejectsOversized verifies the helper refuses
+// scalars longer than 32 bytes.  SetByteSlice silently truncates
+// oversized inputs; the length guard catches this before truncation
+// produces a wrong signature.
+func TestECDSASigFromRSRejectsOversized(t *testing.T) {
+	cases := []struct {
+		name string
+		r, s []byte
+	}{
+		{"r 33 bytes", make([]byte, 33), []byte{1}},
+		{"s 33 bytes", []byte{1}, make([]byte, 33)},
+		{"r 64 bytes", make([]byte, 64), []byte{1}},
+		{"s 64 bytes", []byte{1}, make([]byte, 64)},
+	}
+	for _, tc := range cases {
+		tc.r[0] = 0x01
+		tc.s[0] = 0x01
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ECDSASigFromRS(tc.r, tc.s)
+			if err == nil {
+				t.Fatal("expected error for oversized scalar")
+			}
+			if !strings.Contains(err.Error(), "max 32") {
+				t.Fatalf("expected 'max 32' error, got: %v", err)
 			}
 		})
 	}

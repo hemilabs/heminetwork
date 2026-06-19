@@ -31,6 +31,15 @@ func ECDSASigFromRS(r, s []byte) ([]byte, error) {
 	if len(r) == 0 || len(s) == 0 {
 		return nil, errors.New("empty scalar")
 	}
+	// SetByteSlice silently truncates inputs longer than 32 bytes.
+	// Reject them explicitly to avoid producing a wrong signature
+	// from padded or mis-concatenated TSS output.
+	if len(r) > 32 {
+		return nil, fmt.Errorf("r is %d bytes, max 32", len(r))
+	}
+	if len(s) > 32 {
+		return nil, fmt.Errorf("s is %d bytes, max 32", len(s))
+	}
 
 	var rs, ss secp256k1.ModNScalar
 	if overflow := rs.SetByteSlice(r); overflow {
