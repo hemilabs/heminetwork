@@ -29,6 +29,8 @@ jobs:
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: generate key and addresses
         run: go run ./cmd/keygen/keygen.go -net=localnet | jq -r 'to_entries[] | "\(.key)=\(.value)"' | sed -n '2s/^private_key/POPM_BTC_PRIVATE_KEY/; 4s/^bitcoin_address/BTC_ADDRESS/; 5s/^ethereum_address/ETH_ADDRESS/; 2p; 4p; 5p' >> $GITHUB_ENV

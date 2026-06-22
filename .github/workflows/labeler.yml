@@ -2,19 +2,38 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
+# WARNING: This workflow runs with elevated trust, from a potentially external
+# and untrusted repository. The workflow job receives the base repository's
+# GITHUB_TOKEN, access to repository and organisation secrets, and write
+# access to the default-branch cache.
+#
+# This workflow MUST NEVER checkout the repository, execute any code, or trust
+# any inputs. It is very important to be careful when using variables that may
+# contain arbitrary data, in order to prevent script injection attacks.
+#
+# More information:
+# https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target
+
 # GitHub Actions workflow to automatically label pull requests.
 name: "Label"
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     branches: ["main"]
     types: ["opened", "synchronize", "labeled", "unlabeled"]
+
+concurrency:
+  group: "label-${{ github.workflow }}-${{ github.event.number || github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   labeler:
     name: "Pull Request"
     runs-on: "ubuntu-latest"
     permissions:
-      pull-requests: write
+      pull-requests: write # Required to update pull request labels.
     steps:
       - name: "Label pull requests"
         uses: actions/labeler@f27b608878404679385c85cfa523b85ccb86e213 # v6.1.0
