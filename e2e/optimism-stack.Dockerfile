@@ -9,7 +9,7 @@ ARG OPTIMISM_COMMIT=a22bfa0853b40668f17b0a2c81fff515e563f539
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken
-ARG FOUNDRY_COMMIT=97fba0a51e335a174442b19d92b64df9d2ab72ab
+ARG FOUNDRY_COMMIT=4072e48705af9d93e3c0f6e29e93b5e9a40caed8
 
 FROM golang:1.26.3-trixie@sha256:0f6b034c99663ea8957e7dae99124e37374cbe7fcb5b5646f19b185f8f976279 AS foundry_build
 ARG FOUNDRY_COMMIT
