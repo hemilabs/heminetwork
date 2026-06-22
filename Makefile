@@ -19,7 +19,7 @@ GOLICENSER_VERSION := v0.3.1
 # renovate: datasource=github-releases depName=mvdan/gofumpt versioning=semver
 GOFUMPT_VERSION := v0.10.0
 # renovate: datasource=go depName=golang.org/x/vuln versioning=semver
-GOVULNCHECK_VERSION := v1.3.0
+GOVULNCHECK_VERSION := v1.4.0
 
 cmds := \
 	bfgd \
