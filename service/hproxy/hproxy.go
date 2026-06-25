@@ -56,7 +56,7 @@ const (
 	DefaultReadHeaderTimeout  = 10 * time.Second // Slowloris header defense
 	DefaultReadTimeout        = 30 * time.Second // Full request read ceiling
 	DefaultWriteTimeout       = 30 * time.Second // Response write ceiling
-	DefaultServerIdleTimeout  = 60 * time.Second // Keep-alive reap
+	DefaultIdleTimeout        = 60 * time.Second // Keep-alive reap
 	DefaultMaxControlBodySize = int64(1 << 20)   // 1 MiB, control endpoint body limit
 	DefaultPollFrequency      = 11 * time.Second // Smaller than 12s
 	DefaultListenAddress      = "localhost:8545" // Default geth port
@@ -178,7 +178,7 @@ type Config struct {
 	ReadHeaderTimeout       time.Duration
 	ReadTimeout             time.Duration
 	RequestTimeout          time.Duration
-	ServerIdleTimeout       time.Duration
+	IdleTimeout             time.Duration
 	WriteTimeout            time.Duration
 	MaxControlBodySize      int64
 }
@@ -194,7 +194,7 @@ func NewDefaultConfig() *Config {
 		ReadHeaderTimeout:   DefaultReadHeaderTimeout,
 		ReadTimeout:         DefaultReadTimeout,
 		RequestTimeout:      DefaultRequestTimeout,
-		ServerIdleTimeout:   DefaultServerIdleTimeout,
+		IdleTimeout:         DefaultIdleTimeout,
 		WriteTimeout:        DefaultWriteTimeout,
 		MaxControlBodySize:  DefaultMaxControlBodySize,
 		MaxRequestSize:      defaultMaxRequestSize,
@@ -1084,7 +1084,7 @@ func (s *Server) Run(pctx context.Context) error {
 		ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
 		ReadTimeout:       s.cfg.ReadTimeout,
 		WriteTimeout:      s.cfg.WriteTimeout,
-		IdleTimeout:       s.cfg.ServerIdleTimeout,
+		IdleTimeout:       s.cfg.IdleTimeout,
 	}
 	go func() {
 		log.Infof("Listening: %s", ln.Addr())
@@ -1113,7 +1113,7 @@ func (s *Server) Run(pctx context.Context) error {
 			ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
 			ReadTimeout:       s.cfg.ReadTimeout,
 			WriteTimeout:      s.cfg.WriteTimeout,
-			IdleTimeout:       s.cfg.ServerIdleTimeout,
+			IdleTimeout:       s.cfg.IdleTimeout,
 		}
 		go func() {
 			log.Infof("Control listening: %s", s.cfg.ControlAddress)

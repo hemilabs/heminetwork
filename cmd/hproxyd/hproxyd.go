@@ -133,9 +133,9 @@ var (
 				return time.ParseDuration(envValue)
 			},
 		},
-		"HPROXY_SERVER_IDLE_TIMEOUT": config.Config{
-			Value:        &cfg.ServerIdleTimeout,
-			DefaultValue: hproxy.DefaultServerIdleTimeout,
+		"HPROXY_IDLE_TIMEOUT": config.Config{
+			Value:        &cfg.IdleTimeout,
+			DefaultValue: hproxy.DefaultIdleTimeout,
 			Help:         "HTTP server idle connection timeout",
 			Print:        config.PrintAll,
 			Parse: func(envValue string) (any, error) {

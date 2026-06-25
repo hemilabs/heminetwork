@@ -239,8 +239,8 @@ func TestClientReap(t *testing.T) {
 			t.Fatal(t.Context().Err())
 		case <-time.After(10 * time.Millisecond):
 		}
-		if hp.HTTPAddress() != nil {
-			hpCfg.ListenAddress = hp.HTTPAddress().String()
+		if addr := hp.HTTPAddress(); addr != nil {
+			hpCfg.ListenAddress = addr.String()
 			break
 		}
 	}
@@ -250,11 +250,9 @@ func TestClientReap(t *testing.T) {
 	// Phase 1: establish clients with infinite idle timeout.
 	var wg sync.WaitGroup
 	for i := range clientCount {
-		wg.Add(1)
-		go func(x int) {
-			defer wg.Done()
-			doRequest(t.Context(), hpCfg.ListenAddress, x)
-		}(i)
+		wg.Go(func() {
+			doRequest(t.Context(), hpCfg.ListenAddress, i)
+		})
 	}
 	wg.Wait()
 
@@ -276,11 +274,9 @@ func TestClientReap(t *testing.T) {
 
 	// Phase 3: new requests after reap must create fresh clients.
 	for i := range clientCount {
-		wg.Add(1)
-		go func(x int) {
-			defer wg.Done()
-			doRequest(t.Context(), hpCfg.ListenAddress, x+clientCount)
-		}(i)
+		wg.Go(func() {
+			doRequest(t.Context(), hpCfg.ListenAddress, i+clientCount)
+		})
 	}
 	wg.Wait()
 
@@ -868,8 +864,8 @@ func TestServerTimeoutsConfigured(t *testing.T) {
 	if srv.WriteTimeout != DefaultWriteTimeout {
 		t.Fatalf("WriteTimeout = %v, want %v", srv.WriteTimeout, DefaultWriteTimeout)
 	}
-	if srv.IdleTimeout != DefaultServerIdleTimeout {
-		t.Fatalf("IdleTimeout = %v, want %v", srv.IdleTimeout, DefaultServerIdleTimeout)
+	if srv.IdleTimeout != DefaultIdleTimeout {
+		t.Fatalf("IdleTimeout = %v, want %v", srv.IdleTimeout, DefaultIdleTimeout)
 	}
 }
 
@@ -886,7 +882,7 @@ func TestServerTimeoutsCustom(t *testing.T) {
 	cfg.ReadHeaderTimeout = 5 * time.Second
 	cfg.ReadTimeout = 15 * time.Second
 	cfg.WriteTimeout = 20 * time.Second
-	cfg.ServerIdleTimeout = 45 * time.Second
+	cfg.IdleTimeout = 45 * time.Second
 
 	hp, err := NewServer(cfg)
 	if err != nil {
