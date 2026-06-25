@@ -49,7 +49,7 @@ func (t *satTracer) inputValue(ctx context.Context, txid chainhash.Hash, vout ui
 	if tx == nil {
 		return 0, fmt.Errorf("tx %v not in block", txid)
 	}
-	if int(vout) >= len(tx.MsgTx().TxOut) {
+	if int64(vout) >= int64(len(tx.MsgTx().TxOut)) {
 		return 0, fmt.Errorf("vout %d out of range", vout)
 	}
 	return uint64(tx.MsgTx().TxOut[vout].Value), nil
@@ -225,7 +225,7 @@ func (s *Server) computeInscribedSat(ctx context.Context, txid chainhash.Hash, i
 		return 0, fmt.Errorf("tx %v not in block", txid)
 	}
 
-	if int(inputIndex) >= len(tx.MsgTx().TxIn) {
+	if int64(inputIndex) >= int64(len(tx.MsgTx().TxIn)) {
 		return 0, fmt.Errorf("input %d out of range", inputIndex)
 	}
 
@@ -285,7 +285,7 @@ func (c *satRangeContext) compute(ctx context.Context, txid chainhash.Hash, vout
 		return nil, fmt.Errorf("tx %v not in block %v", txid, blockHash)
 	}
 
-	if int(vout) >= len(tx.MsgTx().TxOut) {
+	if int64(vout) >= int64(len(tx.MsgTx().TxOut)) {
 		return nil, fmt.Errorf("vout %d out of range for tx %v", vout, txid)
 	}
 
