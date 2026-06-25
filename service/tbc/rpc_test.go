@@ -4052,9 +4052,10 @@ func TestRpcOrdinalInscriptionE2E(t *testing.T) {
 	} else if len(satInscResp.Inscriptions) != 1 {
 		t.Fatalf("expected 1 inscription for sat %d, got %d",
 			revealSat, len(satInscResp.Inscriptions))
+	} else {
+		t.Logf("InscriptionsBySat verified: sat=%d has inscription %v",
+			revealSat, satInscResp.Inscriptions[0].TxID)
 	}
-	t.Logf("InscriptionsBySat verified: sat=%d has inscription %v",
-		revealSat, satInscResp.Inscriptions[0].TxID)
 
 	// Query inscriptions by address — reveal output pays to p2pkhAddr.
 	if err := tbcapi.Write(ctx, tws.conn, "insc-6", tbcapi.OrdinalInscriptionsByAddressRequest{
