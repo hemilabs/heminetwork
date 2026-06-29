@@ -12,7 +12,7 @@ replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308
 
 require (
 	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
-	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
+	github.com/btcsuite/btcd/chaincfg/chainhash v1.2.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/ethereum-optimism/optimism v0.0.0-00010101000000-000000000000
 	github.com/ethereum-optimism/optimism/op-bindings v0.10.14
