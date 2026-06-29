@@ -1426,7 +1426,12 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 		t.Errorf("error getting mapped port %v", err)
 	}
 
-	return bitcoindContainer, mappedPeerPort
+	mappedPeerPortNAT, err := nat.NewPort(string(mappedPeerPort.Proto()), mappedPeerPort.Port())
+	if err != nil {
+		t.Fatalf("error converting port: %s", err)
+	}
+
+	return bitcoindContainer, mappedPeerPortNAT
 }
 
 func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Server {
