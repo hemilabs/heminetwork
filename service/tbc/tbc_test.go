@@ -2470,3 +2470,104 @@ func TestEmptyInvMessage(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleGenericMsgTxMempoolDisabled(t *testing.T) {
+	s := &Server{
+		cfg: &Config{MempoolEnabled: false},
+	}
+	// s.mempool is nil — this panicked before the guard.
+	tx := wire.NewMsgTx(2)
+	err := s.handleGeneric(t.Context(), nil, tx, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+// syncedStub is a tbcd.Database that returns an error from
+// BlockHeaderBest so synced() exits early on a cancelled context.
+type syncedStub struct {
+	stubDB
+}
+
+func (syncedStub) BlockHeaderBest(context.Context) (*tbcd.BlockHeader, error) {
+	return nil, errors.New("stub")
+}
+
+func TestHandleGenericMsgTxMempoolEnabled(t *testing.T) {
+	mp, err := NewMempool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		cfg:     &Config{MempoolEnabled: true},
+		mempool: mp,
+	}
+	s.g.db = syncedStub{}
+
+	// Use a cancelled context so synced() returns SyncInfo{Synced: false}
+	// after BlockHeaderBest errors. This exercises the MempoolEnabled=true
+	// branch in handleGeneric without needing full server infrastructure.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	tx := wire.NewMsgTx(2)
+	err = s.handleGeneric(ctx, nil, tx, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+// txErrorDB makes synced() return Synced:true on the first BlockHeaderBest
+// call, then returns an error on the second call inside handleTx.
+type txErrorDB struct {
+	stubDB
+	calls int
+	hash  chainhash.Hash
+}
+
+func (d *txErrorDB) BlockHeaderBest(context.Context) (*tbcd.BlockHeader, error) {
+	d.calls++
+	if d.calls == 1 {
+		return &tbcd.BlockHeader{Hash: d.hash, Height: 100}, nil
+	}
+	return nil, errors.New("db error")
+}
+
+func (d *txErrorDB) BlocksMissing(context.Context, int) ([]tbcd.BlockIdentifier, error) {
+	return nil, nil
+}
+
+// indexerStub satisfies the Indexer interface, returning a fixed block header.
+type indexerStub struct {
+	hash chainhash.Hash
+}
+
+func (s indexerStub) Enabled() bool                                     { return true }
+func (s indexerStub) Indexing() bool                                    { return false }
+func (s indexerStub) IndexToBest(context.Context) error                 { return nil }
+func (s indexerStub) IndexToHash(context.Context, chainhash.Hash) error { return nil }
+func (s indexerStub) IndexerAt(context.Context) (*tbcd.BlockHeader, error) {
+	return &tbcd.BlockHeader{Hash: s.hash}, nil
+}
+
+func TestHandleGenericMsgTxError(t *testing.T) {
+	hash := chainhash.Hash{1}
+	mp, err := NewMempool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := &txErrorDB{hash: hash}
+	s := &Server{
+		cfg:     &Config{MempoolEnabled: true},
+		mempool: mp,
+	}
+	s.g.db = db
+	s.ui = indexerStub{hash: hash}
+	s.ti = indexerStub{hash: hash}
+
+	tx := wire.NewMsgTx(2)
+	err = s.handleGeneric(t.Context(), nil, tx, nil)
+	if err == nil {
+		t.Fatal("expected error from handleTx, got nil")
+	}
+}

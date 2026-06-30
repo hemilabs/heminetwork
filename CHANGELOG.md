@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Guard `MsgTx` dispatch on `MempoolEnabled` in `handleGeneric`. When
+  the mempool is disabled, unsolicited P2P transaction messages caused a
+  nil pointer dereference crash.
+
 - Fix a remote crash vulnerability in `tbc` caused by the first element
   of an inventory message list being accessed before ensuring the slice
   isn't empty ([#1039](https://github.com/hemilabs/heminetwork/pull/1039)).
