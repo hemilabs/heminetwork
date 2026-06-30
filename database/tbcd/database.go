@@ -145,6 +145,22 @@ type Database interface {
 	ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
 	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
 	ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
+
+	// Ordinals
+	BlockHeaderByOrdinalIndex(ctx context.Context) (*BlockHeader, error)
+	BlockOrdinalUpdate(ctx context.Context, direction int, data map[Outpoint]*OrdinalCacheEntry, work map[OrdinalWorkKey]OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error
+	ReadOrdinalWork(ctx context.Context, belowHeight uint32, limit int) ([]OrdinalWorkEntry, error)
+	OrdinalWatermarkGet(ctx context.Context) (uint32, bool, error)
+	OrdinalPopulatorUpdate(ctx context.Context, ordData map[OrdinalKey]OrdinalValue, workData map[OrdinalWorkKey]OrdinalWorkValue) error
+	OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error)
+	OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error)
+	OrdinalInscriptionsByOutpoint(ctx context.Context, op Outpoint) ([][36]byte, error)
+	OrdinalInscriptionsByOutpointWithOffset(ctx context.Context, op Outpoint) ([]OrdinalLocatedInscription, error)
+	OrdinalBigOByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
+	OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error)
+	OrdinalInscribedSatBounds(ctx context.Context) (minSat, maxSat uint64, err error)
+	OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error)
+	OrdinalValueByKey(ctx context.Context, key OrdinalKey) ([]byte, error)
 }
 
 type Keystone struct {
@@ -625,6 +641,113 @@ func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txi
 // ScriptHash(32), TxSpendKey(72). ScriptHash(32) is the *ONLY* table that is
 // updated, the others are essentially a journal of activity.
 type ZKIndexKey string // ugh to make []byte comparable
+
+// OrdinalKey is a fixed-size ordinal index key. Using a fixed-size array
+// (like Outpoint and TxKey) avoids heap-allocated map keys and the GC
+// pressure that comes with map[string][]byte under heavy write load.
+// Max key is 'a' (sat→inscriptions) = 1 + 8 + 36 = 45 bytes.
+// Shorter keys are zero-padded; the prefix byte disambiguates.
+type OrdinalKey [45]byte
+
+func (k OrdinalKey) IsInscription() bool      { return k[0] == 'i' }
+func (k OrdinalKey) IsSatInscription() bool   { return k[0] == 'a' }
+func (k OrdinalKey) IsBlockInscription() bool { return k[0] == 'n' }
+func (k OrdinalKey) IsOutpoint() bool         { return k[0] == 'o' }
+
+// OrdinalValue wraps ordinal index values. A nil value signals deletion,
+// mirroring CacheOutput.IsDelete() for the utxo indexer.
+type OrdinalValue []byte
+
+func (v OrdinalValue) IsDelete() bool { return v == nil }
+func (v OrdinalValue) Bytes() []byte  { return []byte(v) }
+
+// OrdinalWorkKey is a 7-byte key for the inscription work queue.
+// Layout: 'w'(1) + block_height(4) + seq(2).
+// Different size from OrdinalKey — a simple len check distinguishes them.
+// The work queue records inscriptions that need sat number computation
+// by a background populator.
+type OrdinalWorkKey [7]byte
+
+func (k OrdinalWorkKey) Prefix() byte   { return k[0] }
+func (k OrdinalWorkKey) Height() uint32 { return binary.BigEndian.Uint32(k[1:5]) }
+func (k OrdinalWorkKey) Seq() uint16    { return binary.BigEndian.Uint16(k[5:7]) }
+
+// OrdinalWorkValue wraps work queue values as a fixed-size array.
+// Layout: inscription_id(36) = reveal_txid(32) + input_index(4). The
+// inscription ID is all the populator needs to locate the reveal and
+// compute the sat number. Fixed size avoids heap-allocated backing
+// arrays and aliasing issues that []byte slices can cause with LevelDB
+// batch writes.
+type OrdinalWorkValue [36]byte
+
+// OrdinalWorkValueDelete is the sentinel value signaling deletion.
+var OrdinalWorkValueDelete OrdinalWorkValue
+
+func init() {
+	for i := range OrdinalWorkValueDelete {
+		OrdinalWorkValueDelete[i] = 0xff
+	}
+}
+
+func (v OrdinalWorkValue) IsDelete() bool { return v == OrdinalWorkValueDelete }
+
+// OrdinalWorkEntry is a decoded work queue entry for the populator.
+type OrdinalWorkEntry struct {
+	Height uint32
+	Seq    uint16
+	InscID [36]byte
+}
+
+// OrdinalCacheEntry holds all ordinal data tracked at a single outpoint.
+// The ordinal indexer's cache is map[Outpoint]*OrdinalCacheEntry; this
+// replaces the previous map[OrdinalKey]OrdinalValue where the 45-byte
+// DB key format prevented O(1) lookup by outpoint.
+//
+// All cache access goes through cache[outpoint]. Cache miss falls through
+// to DB. nil values in inscriptions/predecessors are tombstones (delete
+// from DB on commit).
+type OrdinalCacheEntry struct {
+	// 'o' entries: inscriptions tracked at this outpoint.
+	// Key is the byte offset within the output.
+	// Value is the 53-byte 'o' value (inscID + srcKind + srcTxIdx +
+	// srcInputIdx + srcOffset). nil = tombstone (delete from DB on commit).
+	Inscriptions map[uint64][]byte
+
+	// 'p' entries: predecessor values at this outpoint.
+	// Key is the same byte offset as the inscription it belongs to.
+	// Value is the raw 'o' value that was at the source outpoint before
+	// the sat moved here. nil = tombstone.
+	Predecessors map[uint64][]byte
+
+	// Auxiliary entries: data generated at this outpoint that uses
+	// non-outpoint DB keys ('i', 'n', 'a'). Write-only from the cache
+	// perspective — never read back from cache during processing.
+	// Flushed alongside 'o'/'p' entries. nil value = delete.
+	Aux map[OrdinalKey]OrdinalValue
+
+	// 'O' entry: point-Get acceleration index for inscription detection.
+	// DB key: 'O'(1) + txid(32) + vout(4) = 37 bytes. Value: blockHash(32)
+	// + outputValue(8). Per-outpoint (no offset). nil with BigOSet = delete.
+	BigO    []byte
+	BigOSet bool
+}
+
+// EntryCount returns the total number of sub-entries (inscriptions +
+// predecessors + aux) in this cache entry. This drives the flush
+// decision — the cache must track real DB entry count, not outpoint count.
+func (e *OrdinalCacheEntry) EntryCount() int {
+	return len(e.Inscriptions) + len(e.Predecessors) + len(e.Aux)
+}
+
+// OrdinalLocatedInscription is an inscription at a known byte offset within
+// an outpoint. Returned by OrdinalInscriptionsByOutpointWithOffset for
+// forward FIFO transfer tracking. Value is the raw 'o' value (inscID plus
+// source location); the tbc package owns its layout and decodes it.
+type OrdinalLocatedInscription struct {
+	InscID [36]byte
+	Offset uint64
+	Value  []byte
+}
 
 func BEUint64(x uint64) []byte {
 	var b [8]byte

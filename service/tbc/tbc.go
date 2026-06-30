@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -59,7 +60,8 @@ const (
 
 	defaultMaxCachedKeystones = 1e6 // number of cached keystones prior to flush
 	defaultMaxCachedTxs       = 1e6 // dual purpose cache, max key 69, max value 36
-	defaultMaxZK              = 1e6 // number of cached zk rows prior to flush
+	defaultMaxZK              = 1e6
+	defaultMaxCachedOrdinals  = 500000 // ~1GB heap; O entries (40B) + o entries (6.4KB avg)
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
@@ -101,6 +103,12 @@ var (
 	localnetHemiGenesis = &HashHeight{
 		Hash:   *chaincfg.RegressionNetParams.GenesisHash,
 		Height: 0,
+	}
+
+	// First known inscription: block 767430. Genesis = 767430 - 576.
+	mainnetOrdinalGenesis = &HashHeight{
+		Hash:   *s2h("00000000000000000000aa3565d9ea3056ff31ba416efab16601ccfe50971ab1"),
+		Height: 766854,
 	}
 
 	fixupStrategy = 3 // Do not touch unless your name is marco
@@ -185,12 +193,17 @@ type Config struct {
 	DatabaseDebug           bool
 	Network                 string
 	PeersWanted             int
+	RequestTimeout          int // RPC request timeout in seconds
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
 	Seeds                   []string
 	ZKIndex                 bool
 	UtxoReadCacheSize       string // LRU read cache for utxo fixup; "0" or "" disables
+	OrdinalIndex            bool
+	MaxCachedOrdinals       int
+	OrdinalOutputCacheSize  string // LRU read cache for tx output values; "0" or "" disables
+	OrdinalWatermarkGap     time.Duration
 
 	// Admin API
 	JWTSecret string // Hex-encoded JWT token for admin RPC authentication
@@ -206,20 +219,24 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress:        tbcapi.DefaultListen,
-		BlockCacheSize:       "1gb",
-		HeaderCacheSize:      "128mb",
-		LogLevel:             logLevel,
-		MaxCachedKeystones:   defaultMaxCachedKeystones,
-		MaxCachedTxs:         defaultMaxCachedTxs,
-		MaxCachedZK:          defaultMaxZK,
-		UtxoReadCacheSize:    "1gb",
-		MempoolEnabled:       true,
-		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
-		PeersWanted:          defaultPeersWanted,
-		PrometheusNamespace:  appName,
-		ExternalHeaderMode:   false, // Default anyway, but for readability
-		DatabaseDebug:        false, // Default anyway, but dangerous so be explicit
+		ListenAddress:          tbcapi.DefaultListen,
+		BlockCacheSize:         "1gb",
+		HeaderCacheSize:        "128mb",
+		LogLevel:               logLevel,
+		MaxCachedKeystones:     defaultMaxCachedKeystones,
+		MaxCachedTxs:           defaultMaxCachedTxs,
+		MaxCachedZK:            defaultMaxZK,
+		UtxoReadCacheSize:      "1gb",
+		MaxCachedOrdinals:      defaultMaxCachedOrdinals,
+		OrdinalOutputCacheSize: "256mb",
+		OrdinalWatermarkGap:    24 * time.Hour,
+		MempoolEnabled:         true,
+		NotificationBlocking:   false, // Default anyway, but dangerous so be explicit
+		PeersWanted:            defaultPeersWanted,
+		RequestTimeout:         120,
+		PrometheusNamespace:    appName,
+		ExternalHeaderMode:     false, // Default anyway, but for readability
+		DatabaseDebug:          false, // Default anyway, but dangerous so be explicit
 	}
 }
 
@@ -254,10 +271,11 @@ type Server struct {
 	invBlocks []*chainhash.Hash
 
 	// bitcoin network
-	wireNet     wire.BitcoinNet
-	timeSource  blockchain.MedianTimeSource
-	hemiGenesis *HashHeight
-	pm          *PeerManager
+	wireNet        wire.BitcoinNet
+	timeSource     blockchain.MedianTimeSource
+	hemiGenesis    *HashHeight
+	ordinalGenesis *HashHeight
+	pm             *PeerManager
 
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL // outstanding pings
@@ -271,6 +289,7 @@ type Server struct {
 	ti  Indexer
 	ki  Indexer
 	zki Indexer
+	oi  Indexer
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -282,6 +301,7 @@ type Server struct {
 		blockCache                tbcd.CacheStats
 		headerCache               tbcd.CacheStats
 		utxoReadCache             lru.Stats
+		ordinalOutputCache        lru.Stats
 		diskFree                  uint64
 	} // periodically updated by promPoll
 	isRunning     bool
@@ -317,7 +337,10 @@ func NewServer(cfg *Config) (*Server, error) {
 		}
 	}
 
-	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
+	if cfg.RequestTimeout <= 0 {
+		return nil, errors.New("request timeout must be greater than zero")
+	}
+
 	s := &Server{
 		cfg:        cfg,
 		printTime:  time.Now().Add(10 * time.Second),
@@ -330,7 +353,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			Help:      "The total number of successful RPC commands",
 		}),
 		sessions:        make(map[string]*tbcWs),
-		requestTimeout:  defaultRequestTimeout,
+		requestTimeout:  time.Duration(cfg.RequestTimeout) * time.Second,
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
 		invBlocks:       make([]*chainhash.Hash, 0, 16),
 		promPollVerbose: false,
@@ -372,6 +395,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	case "mainnet":
 		s.wireNet = wire.MainNet
 		s.hemiGenesis = mainnetHemiGenesis
+		s.ordinalGenesis = mainnetOrdinalGenesis
 
 	case "testnet3", "upgradetest":
 		// upgradetest is a special mode to verify database upgrades.
@@ -808,6 +832,12 @@ func (s *Server) promZK() float64 {
 	return deucalion.Uint64ToFloat(s.prom.syncInfo.ZK.Height)
 }
 
+func (s *Server) promOrdinal() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.Uint64ToFloat(s.prom.syncInfo.Ordinal.Height)
+}
+
 func (s *Server) promConnectedPeers() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -928,6 +958,36 @@ func (s *Server) promUtxoReadCacheItems() float64 {
 	return deucalion.IntToFloat(s.prom.utxoReadCache.Items)
 }
 
+func (s *Server) promOrdinalOutputCacheHits() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Hits)
+}
+
+func (s *Server) promOrdinalOutputCacheMisses() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Misses)
+}
+
+func (s *Server) promOrdinalOutputCachePurges() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Purges)
+}
+
+func (s *Server) promOrdinalOutputCacheSize() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Cost)
+}
+
+func (s *Server) promOrdinalOutputCacheItems() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.ordinalOutputCache.Items)
+}
+
 func (s *Server) promDiskFree() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -964,6 +1024,9 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.headerCache = s.g.db.BlockHeaderCacheStats()
 		if s.utxoReadCache != nil {
 			s.prom.utxoReadCache = s.utxoReadCache.Stats()
+		}
+		if oi, ok := s.oi.(*ordinalIndexer); ok && oi.outputValueCache != nil {
+			s.prom.ordinalOutputCache = oi.outputValueCache.Stats()
 		}
 		if s.cfg.MempoolEnabled {
 			s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
@@ -2690,6 +2753,17 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 		}
 	}
 
+	// Ordinal index. Runs last: its wind reads tx output amounts (FIFO
+	// placement) from the tx index, so the tx index must be current
+	// first. Its unwind is self-contained (the 'o' value records each
+	// inscription's source location), so unwind has no ordering
+	// dependency on the other indexes.
+	if s.cfg.OrdinalIndex {
+		if err := s.oi.IndexToHash(ctx, hash); err != nil {
+			return fmt.Errorf("ordinal indexer: %w", err)
+		}
+	}
+
 	log.Debugf("Done syncing to: %v", hash)
 
 	bh, err := s.g.db.BlockHeaderByHash(ctx, hash)
@@ -2729,6 +2803,16 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 
 	if s.cfg.ZKIndex {
 		if err := s.zki.IndexToBest(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Ordinal index runs last: its wind reads tx output amounts for FIFO
+	// placement (tx index must be current); its unwind is self-contained
+	// (source location stored in the 'o' value), so it has no ordering
+	// dependency on unwind.
+	if s.cfg.OrdinalIndex {
+		if err := s.oi.IndexToBest(ctx); err != nil {
 			return err
 		}
 	}
@@ -2831,6 +2915,7 @@ type SyncInfo struct {
 	Tx          HashHeight `json:"tx_index_height"`
 	Utxo        HashHeight `json:"utxo_index_height"`
 	ZK          HashHeight `json:"zk_index_height"`
+	Ordinal     HashHeight `json:"ordinal_index_height"`
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2932,14 +3017,35 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		si.ZK = *zkHH
 	}
 
+	if s.cfg.OrdinalIndex {
+		ordBH, err := s.oi.IndexerAt(ctx)
+		if err != nil {
+			ordBH = &tbcd.BlockHeader{}
+		}
+		ordHH := &HashHeight{
+			Hash:   ordBH.Hash,
+			Height: ordBH.Height,
+		}
+		si.Ordinal = *ordHH
+	}
+
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
 		!s.indexing && !blksMissing {
+		// If keystone, zk, and ordinal indexers are disabled we are synced.
+		if !s.cfg.HemiIndex && !s.cfg.ZKIndex && !s.cfg.OrdinalIndex {
+			si.Synced = true
+			return si
+		}
 		if s.cfg.HemiIndex && !si.Keystone.Hash.IsEqual(&bhb.Hash) {
 			// Keystone index not synced
 			return si
 		}
 		if s.cfg.ZKIndex && !si.ZK.Hash.IsEqual(&bhb.Hash) {
 			// ZK index not synced
+			return si
+		}
+		if s.cfg.OrdinalIndex && !si.Ordinal.Hash.IsEqual(&bhb.Hash) {
+			// Ordinal index not synced
 			return si
 		}
 		si.Synced = true
@@ -3013,9 +3119,6 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 	s.ui = NewUtxoIndexer(s.g, s.cfg.MaxCachedTxs, s.fixupCache, func() {
 		if s.utxoReadCache != nil {
-			cs := s.utxoReadCache.Stats()
-			log.Infof("utxo read cache at tip: hits %v misses %v purges %v items %v",
-				cs.Hits, cs.Misses, cs.Purges, cs.Items)
 			s.utxoReadCache.Clear()
 		}
 	}, func() string {
@@ -3065,6 +3168,20 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	if s.cfg.ZKIndex {
 		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedZK,
 			s.cfg.ZKIndex)
+	}
+
+	if s.cfg.OrdinalIndex {
+		var ovcSize int
+		if s.cfg.OrdinalOutputCacheSize != "" && s.cfg.OrdinalOutputCacheSize != "0" {
+			parsed, err := humanize.ParseBytes(s.cfg.OrdinalOutputCacheSize)
+			if err != nil {
+				return fmt.Errorf("ordinal output cache size: %w", err)
+			}
+			ovcSize = int(parsed)
+		}
+		s.oi = NewOrdinalIndexer(ctx, s.g, s.cfg.MaxCachedOrdinals,
+			s.cfg.OrdinalIndex, s.ordinalGenesis,
+			s.computeInscribedSat, s.cfg.OrdinalWatermarkGap, ovcSize)
 	}
 
 	return nil
@@ -3218,6 +3335,31 @@ func (s *Server) Collectors() []prometheus.Collector {
 			}, s.promUtxoReadCacheItems),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_hits",
+				Help:      "Ordinal output value cache hits",
+			}, s.promOrdinalOutputCacheHits),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_misses",
+				Help:      "Ordinal output value cache misses",
+			}, s.promOrdinalOutputCacheMisses),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_purges",
+				Help:      "Ordinal output value cache purges",
+			}, s.promOrdinalOutputCachePurges),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_size",
+				Help:      "Ordinal output value cache size in bytes",
+			}, s.promOrdinalOutputCacheSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ordinal_output_cache_items",
+				Help:      "Number of ordinal output value cache entries",
+			}, s.promOrdinalOutputCacheItems),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "disk_free",
 				Help:      "Disk free",
 			}, s.promDiskFree),
@@ -3237,6 +3379,15 @@ func (s *Server) Collectors() []prometheus.Collector {
 					Name:      "zk_sync_height",
 					Help:      "Height of the zk indexer",
 				}, s.promZK))
+		}
+		if s.cfg.OrdinalIndex {
+			s.promCollectors = append(s.promCollectors,
+				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+					Namespace: s.cfg.PrometheusNamespace,
+					Name:      "ordinal_sync_height",
+					Help:      "Height of the ordinal indexer",
+				}, s.promOrdinal),
+			)
 		}
 	}
 	return s.promCollectors
@@ -3478,6 +3629,10 @@ func (s *Server) Run(pctx context.Context) error {
 			bh, _ := s.zki.IndexerAt(ctx)
 			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
 		}
+		if s.cfg.OrdinalIndex {
+			bh, _ := s.oi.IndexerAt(ctx)
+			log.Infof("Ordinal index %v @ %v", bh.Height, bh.Hash)
+		}
 
 		// XXX this code really should do something along the lines of
 		// SyncIndexersToBest to nudge the indexers. If that is not
@@ -3606,4 +3761,300 @@ func (s *Server) ExternalHeaderTearDown() error {
 		return err
 	}
 	return nil
+}
+
+// populateInscription builds an OrdinalInscription from the raw DB data for
+// a given inscription ID. It looks up the 'i' value, decodes it, and fetches
+// block height via BlockHeaderByHash.
+// When includeSat is false the expensive backward-walk sat computation is
+// skipped and SatNumber is returned as 0 (or whatever was stored at index time).
+func (s *Server) populateInscription(ctx context.Context, inscID [36]byte, includeSat bool) (*tbcapi.OrdinalInscription, error) {
+	raw, err := s.g.db.OrdinalInscriptionByID(ctx, inscID)
+	if err != nil {
+		return nil, fmt.Errorf("inscription %x: %w", inscID, err)
+	}
+
+	d, err := decodeInscriptionValue(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode inscription %x: %w", inscID, err)
+	}
+
+	bh, err := s.g.db.BlockHeaderByHash(ctx, d.BlockHash)
+	if err != nil {
+		return nil, fmt.Errorf("block header for inscription %x: %w", inscID, err)
+	}
+
+	insc := &tbcapi.OrdinalInscription{
+		SatNumber:   d.SatNumber,
+		Cursed:      d.Cursed,
+		BlockHash:   d.BlockHash,
+		BlockHeight: bh.Height,
+	}
+
+	// Inscription ID = txid(32) + input_index(4 LE).
+	copy(insc.TxID[:], inscID[:32])
+	insc.InputIndex = binary.LittleEndian.Uint32(inscID[32:])
+
+	// Compute sat number on demand if not stored and requested.
+	// This is expensive: backward walk to coinbase, O(chain_depth).
+	// Disabled by default via IncludeSat=false on the request.
+	if includeSat && insc.SatNumber == 0 {
+		satNum, err := s.computeInscribedSat(ctx, insc.TxID, insc.InputIndex)
+		if err == nil {
+			insc.SatNumber = satNum
+		} else if ctx.Err() != nil {
+			return nil, fmt.Errorf("computeInscribedSat %v:%d: %w",
+				insc.TxID, insc.InputIndex, err)
+		} else {
+			log.Errorf("computeInscribedSat %v:%d: %v",
+				insc.TxID, insc.InputIndex, err)
+		}
+	}
+
+	if d.Parent != nil {
+		var parentTxID chainhash.Hash
+		copy(parentTxID[:], d.Parent[:32])
+		insc.ParentTxID = &parentTxID
+		idx := binary.LittleEndian.Uint32(d.Parent[32:])
+		insc.ParentInputIndex = &idx
+	}
+	if d.Delegate != nil {
+		var delegateTxID chainhash.Hash
+		copy(delegateTxID[:], d.Delegate[:32])
+		insc.DelegateTxID = &delegateTxID
+		idx := binary.LittleEndian.Uint32(d.Delegate[32:])
+		insc.DelegateInputIndex = &idx
+	}
+	if d.Metaprotocol != "" {
+		mp := d.Metaprotocol
+		insc.Metaprotocol = &mp
+	}
+
+	return insc, nil
+}
+
+// InscriptionByID looks up a single inscription by its ID (txid + input index).
+func (s *Server) InscriptionByID(ctx context.Context, txid chainhash.Hash, inputIndex uint32, includeSat bool) (*tbcapi.OrdinalInscription, error) {
+	log.Tracef("InscriptionByID")
+	defer log.Tracef("InscriptionByID exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	inscID := makeInscriptionID(&txid, inputIndex)
+	return s.populateInscription(ctx, inscID, includeSat)
+}
+
+// InscriptionContent retrieves raw inscription content, following delegation
+// chains up to a maximum depth of 10.
+func (s *Server) InscriptionContent(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (string, []byte, error) {
+	log.Tracef("InscriptionContent")
+	defer log.Tracef("InscriptionContent exit")
+
+	if !s.cfg.OrdinalIndex {
+		return "", nil, errors.New("ordinal index not enabled")
+	}
+
+	inscID := makeInscriptionID(&txid, inputIndex)
+
+	// Follow delegation chain.
+	const maxDelegateDepth = 10
+	for depth := range maxDelegateDepth {
+		_ = depth
+
+		raw, err := s.g.db.OrdinalInscriptionByID(ctx, inscID)
+		if err != nil {
+			return "", nil, fmt.Errorf("inscription %x: %w", inscID, err)
+		}
+
+		d, err := decodeInscriptionValue(raw)
+		if err != nil {
+			return "", nil, fmt.Errorf("decode inscription %x: %w", inscID, err)
+		}
+
+		if d.Delegate != nil {
+			copy(inscID[:], d.Delegate[:])
+			continue
+		}
+
+		// Fetch raw block and parse witness envelope.
+		block, err := s.g.db.BlockByHash(ctx, d.BlockHash)
+		if err != nil {
+			return "", nil, fmt.Errorf("block %v: %w", d.BlockHash, err)
+		}
+
+		var targetTxID chainhash.Hash
+		copy(targetTxID[:], inscID[:32])
+		targetInputIdx := binary.LittleEndian.Uint32(inscID[32:])
+
+		for _, tx := range block.Transactions() {
+			if !tx.Hash().IsEqual(&targetTxID) {
+				continue
+			}
+
+			if int(targetInputIdx) >= len(tx.MsgTx().TxIn) {
+				return "", nil, fmt.Errorf("input index %d out of range for tx %v",
+					targetInputIdx, targetTxID)
+			}
+
+			env, err := ParseInscriptionEnvelope(tx.MsgTx().TxIn[targetInputIdx].Witness)
+			if err != nil {
+				return "", nil, fmt.Errorf("parse envelope: %w", err)
+			}
+			if env == nil {
+				return "", nil, fmt.Errorf("no inscription envelope in tx %v input %d",
+					targetTxID, targetInputIdx)
+			}
+
+			return string(env.ContentType), env.Content, nil
+		}
+
+		return "", nil, fmt.Errorf("tx %v not found in block %v", targetTxID, d.BlockHash)
+	}
+
+	return "", nil, errors.New("delegation chain exceeds maximum depth")
+}
+
+// InscriptionsByBlock lists all inscriptions created in a given block.
+func (s *Server) InscriptionsByBlock(ctx context.Context, blockHash chainhash.Hash, includeSat bool) ([]*tbcapi.OrdinalInscription, error) {
+	log.Tracef("InscriptionsByBlock")
+	defer log.Tracef("InscriptionsByBlock exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	inscIDs, err := s.g.db.OrdinalInscriptionsByBlockHash(ctx, blockHash)
+	if err != nil {
+		return nil, fmt.Errorf("inscriptions by block %v: %w", blockHash, err)
+	}
+
+	result := make([]*tbcapi.OrdinalInscription, 0, len(inscIDs))
+	for _, inscID := range inscIDs {
+		insc, err := s.populateInscription(ctx, inscID, includeSat)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, insc)
+	}
+
+	return result, nil
+}
+
+// InscriptionsByAddress lists inscriptions currently held by UTXOs at the
+// given address. Iterates outpoints for the address (from the utxo index)
+// and scans 'o' entries at each outpoint.
+func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress string, start, count uint32, includeSat bool) ([]*tbcapi.OrdinalInscription, error) {
+	log.Tracef("InscriptionsByAddress")
+	defer log.Tracef("InscriptionsByAddress exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	addr, err := btcutil.DecodeAddress(encodedAddress, s.g.chain)
+	if err != nil {
+		return nil, fmt.Errorf("decode address: %w", err)
+	}
+	script, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, fmt.Errorf("address to script: %w", err)
+	}
+	sh := tbcd.NewScriptHashFromScript(script)
+
+	// XXX(marco): fetches ALL UTXOs into memory. For high-activity
+	// addresses (exchange hot wallets) this is a memory bomb. Paginate
+	// UtxosByScriptHash in batches and break early once start+count
+	// inscriptions are accumulated.
+	utxos, err := s.g.db.UtxosByScriptHash(ctx, sh, 0, ^uint64(0))
+	if err != nil {
+		return nil, fmt.Errorf("utxos for %s: %w", encodedAddress, err)
+	}
+
+	result := make([]*tbcapi.OrdinalInscription, 0)
+	for _, utxo := range utxos {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		op := tbcd.NewOutpoint(*utxo.ChainHash(), utxo.OutputIndex())
+
+		// Scan 'o' entries at this outpoint for tracked inscriptions.
+		located, err := s.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+		if err != nil {
+			log.Warningf("InscriptionsByAddress: scan 'o' at %v: %v", op, err)
+			continue
+		}
+		for _, li := range located {
+			insc, err := s.populateInscription(ctx, li.InscID, includeSat)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, insc)
+		}
+	}
+
+	// Apply pagination.
+	if uint32(len(result)) <= start {
+		return result[:0], nil
+	}
+	result = result[start:]
+	if count > 0 && uint32(len(result)) > count {
+		result = result[:count]
+	}
+	return result, nil
+}
+
+// InscriptionsBySat lists all inscriptions on a given sat.
+// Scans the 'a' prefix (sat→inscription reverse index) populated at
+// wind time (above watermark) or by the background populator.
+func (s *Server) InscriptionsBySat(ctx context.Context, satNumber uint64) ([]*tbcapi.OrdinalInscription, error) {
+	log.Tracef("InscriptionsBySat")
+	defer log.Tracef("InscriptionsBySat exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	inscIDs, err := s.g.db.OrdinalInscriptionsBySat(ctx, satNumber)
+	if err != nil {
+		return nil, fmt.Errorf("inscriptions by sat %d: %w", satNumber, err)
+	}
+	result := make([]*tbcapi.OrdinalInscription, 0, len(inscIDs))
+	for _, inscID := range inscIDs {
+		insc, err := s.populateInscription(ctx, inscID, true) // sat always needed
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, insc)
+	}
+	return result, nil
+}
+
+// SatRangesByOutpoint returns the sat ranges assigned to a UTXO.
+// Computed on demand by walking backward through the spending chain.
+func (s *Server) SatRangesByOutpoint(ctx context.Context, txid chainhash.Hash, vout uint32) ([]tbcapi.SatRange, error) {
+	log.Tracef("SatRangesByOutpoint")
+	defer log.Tracef("SatRangesByOutpoint exit")
+
+	if !s.cfg.OrdinalIndex {
+		return nil, errors.New("ordinal index not enabled")
+	}
+
+	memo := make(map[tbcd.Outpoint][]SatRange)
+	ranges, err := s.computeSatRanges(ctx, txid, vout, memo)
+	if err != nil {
+		return nil, fmt.Errorf("sat ranges for %v:%d: %w", txid, vout, err)
+	}
+
+	result := make([]tbcapi.SatRange, len(ranges))
+	for i, r := range ranges {
+		result[i] = tbcapi.SatRange{
+			Start: r.Start,
+			Count: r.Count,
+		}
+	}
+
+	return result, nil
 }

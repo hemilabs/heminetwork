@@ -146,6 +146,24 @@ const (
 	CmdTxUnwatchResponse = "tbcapi-tx-unwatch-response"
 
 	CmdTxNotification = "tbcapi-tx-notification"
+
+	CmdOrdinalInscriptionByIDRequest  = "tbcapi-ordinal-inscription-by-id-request"
+	CmdOrdinalInscriptionByIDResponse = "tbcapi-ordinal-inscription-by-id-response"
+
+	CmdOrdinalInscriptionContentRequest  = "tbcapi-ordinal-inscription-content-request"
+	CmdOrdinalInscriptionContentResponse = "tbcapi-ordinal-inscription-content-response"
+
+	CmdOrdinalInscriptionsByBlockRequest  = "tbcapi-ordinal-inscriptions-by-block-request"
+	CmdOrdinalInscriptionsByBlockResponse = "tbcapi-ordinal-inscriptions-by-block-response"
+
+	CmdOrdinalInscriptionsByAddressRequest  = "tbcapi-ordinal-inscriptions-by-address-request"
+	CmdOrdinalInscriptionsByAddressResponse = "tbcapi-ordinal-inscriptions-by-address-response"
+
+	CmdOrdinalInscriptionsBySatRequest  = "tbcapi-ordinal-inscriptions-by-sat-request"
+	CmdOrdinalInscriptionsBySatResponse = "tbcapi-ordinal-inscriptions-by-sat-response"
+
+	CmdOrdinalSatRangesByOutpointRequest  = "tbcapi-ordinal-sat-ranges-by-outpoint-request"
+	CmdOrdinalSatRangesByOutpointResponse = "tbcapi-ordinal-sat-ranges-by-outpoint-response"
 )
 
 var (
@@ -683,6 +701,114 @@ type TxNotification struct {
 	Metadata  map[string]string  `json:"metadata,omitempty"`
 }
 
+// OrdinalInscription describes a single inscription and its current location.
+type OrdinalInscription struct {
+	TxID               chainhash.Hash  `json:"tx_id"`
+	InputIndex         uint32          `json:"input_index"`
+	SatNumber          uint64          `json:"sat_number"`
+	Cursed             bool            `json:"cursed"`
+	BlockHash          chainhash.Hash  `json:"block_hash"`
+	BlockHeight        uint64          `json:"block_height"`
+	ParentTxID         *chainhash.Hash `json:"parent_tx_id,omitempty"`
+	ParentInputIndex   *uint32         `json:"parent_input_index,omitempty"`
+	DelegateTxID       *chainhash.Hash `json:"delegate_tx_id,omitempty"`
+	DelegateInputIndex *uint32         `json:"delegate_input_index,omitempty"`
+	Metaprotocol       *string         `json:"metaprotocol,omitempty"`
+}
+
+// SatRange represents a contiguous range of satoshi ordinals.
+type SatRange struct {
+	Start uint64 `json:"start"`
+	Count uint64 `json:"count"`
+}
+
+// OrdinalInscriptionByIDRequest requests a single inscription by its ID.
+type OrdinalInscriptionByIDRequest struct {
+	TxID       chainhash.Hash `json:"tx_id"`
+	InputIndex uint32         `json:"input_index"`
+	// IncludeSat enables on-demand sat number computation via backward
+	// chain walk. This is expensive (seconds per inscription at depth)
+	// because sat ranges are not yet stored per outpoint. When false
+	// the response returns SatNumber=0. Default: false.
+	IncludeSat bool `json:"include_sat"`
+}
+
+// OrdinalInscriptionByIDResponse is the response for OrdinalInscriptionByIDRequest.
+type OrdinalInscriptionByIDResponse struct {
+	Inscription *OrdinalInscription `json:"inscription,omitempty"`
+	Error       *protocol.Error     `json:"error,omitempty"`
+}
+
+// OrdinalInscriptionContentRequest requests raw inscription content.
+type OrdinalInscriptionContentRequest struct {
+	TxID       chainhash.Hash `json:"tx_id"`
+	InputIndex uint32         `json:"input_index"`
+}
+
+// OrdinalInscriptionContentResponse is the response for OrdinalInscriptionContentRequest.
+type OrdinalInscriptionContentResponse struct {
+	ContentType string          `json:"content_type"`
+	Content     api.ByteSlice   `json:"content"`
+	Error       *protocol.Error `json:"error,omitempty"`
+}
+
+// OrdinalInscriptionsByBlockRequest lists inscriptions created in a block.
+type OrdinalInscriptionsByBlockRequest struct {
+	Hash chainhash.Hash `json:"hash"`
+	// IncludeSat enables on-demand sat number computation via backward
+	// chain walk. This is expensive (seconds per inscription at depth)
+	// because sat ranges are not yet stored per outpoint. When false
+	// the response returns SatNumber=0. Default: false.
+	IncludeSat bool `json:"include_sat"`
+}
+
+// OrdinalInscriptionsByBlockResponse is the response for OrdinalInscriptionsByBlockRequest.
+type OrdinalInscriptionsByBlockResponse struct {
+	Inscriptions []*OrdinalInscription `json:"inscriptions"`
+	Error        *protocol.Error       `json:"error,omitempty"`
+}
+
+// OrdinalInscriptionsByAddressRequest lists inscriptions held by UTXOs at an address.
+type OrdinalInscriptionsByAddressRequest struct {
+	Address string `json:"address"`
+	Start   uint32 `json:"start"`
+	Count   uint32 `json:"count"`
+	// IncludeSat enables on-demand sat number computation via backward
+	// chain walk. This is expensive (seconds per inscription at depth)
+	// because sat ranges are not yet stored per outpoint. When false
+	// the response returns SatNumber=0. Default: false.
+	IncludeSat bool `json:"include_sat"`
+}
+
+// OrdinalInscriptionsByAddressResponse is the response for OrdinalInscriptionsByAddressRequest.
+type OrdinalInscriptionsByAddressResponse struct {
+	Inscriptions []*OrdinalInscription `json:"inscriptions"`
+	Error        *protocol.Error       `json:"error,omitempty"`
+}
+
+// OrdinalInscriptionsBySatRequest lists all inscriptions on a given sat.
+type OrdinalInscriptionsBySatRequest struct {
+	SatNumber uint64 `json:"sat_number"`
+}
+
+// OrdinalInscriptionsBySatResponse is the response for OrdinalInscriptionsBySatRequest.
+type OrdinalInscriptionsBySatResponse struct {
+	Inscriptions []*OrdinalInscription `json:"inscriptions"`
+	Error        *protocol.Error       `json:"error,omitempty"`
+}
+
+// OrdinalSatRangesByOutpointRequest looks up sat ranges for a UTXO.
+type OrdinalSatRangesByOutpointRequest struct {
+	TxID chainhash.Hash `json:"tx_id"`
+	Vout uint32         `json:"vout"`
+}
+
+// OrdinalSatRangesByOutpointResponse is the response for OrdinalSatRangesByOutpointRequest.
+type OrdinalSatRangesByOutpointResponse struct {
+	SatRanges []SatRange      `json:"sat_ranges"`
+	Error     *protocol.Error `json:"error,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                              reflect.TypeFor[PingRequest](),
 	CmdPingResponse:                             reflect.TypeFor[PingResponse](),
@@ -761,6 +887,18 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdTxUnwatchRequest:                         reflect.TypeFor[TxUnwatchRequest](),
 	CmdTxUnwatchResponse:                        reflect.TypeFor[TxUnwatchResponse](),
 	CmdTxNotification:                           reflect.TypeFor[TxNotification](),
+	CmdOrdinalInscriptionByIDRequest:            reflect.TypeFor[OrdinalInscriptionByIDRequest](),
+	CmdOrdinalInscriptionByIDResponse:           reflect.TypeFor[OrdinalInscriptionByIDResponse](),
+	CmdOrdinalInscriptionContentRequest:         reflect.TypeFor[OrdinalInscriptionContentRequest](),
+	CmdOrdinalInscriptionContentResponse:        reflect.TypeFor[OrdinalInscriptionContentResponse](),
+	CmdOrdinalInscriptionsByBlockRequest:        reflect.TypeFor[OrdinalInscriptionsByBlockRequest](),
+	CmdOrdinalInscriptionsByBlockResponse:       reflect.TypeFor[OrdinalInscriptionsByBlockResponse](),
+	CmdOrdinalInscriptionsByAddressRequest:      reflect.TypeFor[OrdinalInscriptionsByAddressRequest](),
+	CmdOrdinalInscriptionsByAddressResponse:     reflect.TypeFor[OrdinalInscriptionsByAddressResponse](),
+	CmdOrdinalInscriptionsBySatRequest:          reflect.TypeFor[OrdinalInscriptionsBySatRequest](),
+	CmdOrdinalInscriptionsBySatResponse:         reflect.TypeFor[OrdinalInscriptionsBySatResponse](),
+	CmdOrdinalSatRangesByOutpointRequest:        reflect.TypeFor[OrdinalSatRangesByOutpointRequest](),
+	CmdOrdinalSatRangesByOutpointResponse:       reflect.TypeFor[OrdinalSatRangesByOutpointResponse](),
 }
 
 type tbcAPI struct{}

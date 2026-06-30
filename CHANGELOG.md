@@ -67,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   P2PKH, P2WPKH, and BIP-86 P2TR addresses from a single compressed
   public key and indexes the key under all three
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Add ordinal indexer to TBC: tracks individual satoshi ownership via
+  FIFO sat range redistribution and indexes Bitcoin inscriptions
+  including cursed, reinscriptions, parent-child, and delegation.
+  New LevelDB "ordinals" database; DB version 6 → 7.
+- Add output value LRU cache (`TBC_ORDINAL_OUTPUT_CACHE_SIZE`, default
+  256 MB) for ordinal indexer; cache miss path uses `lazyBlock` for
+  zero-copy per-tx access and `TxLoc` for O(1) byte offset jumps.
 - Add `TxByID` to the `gozer.Gozer` interface with `tbcGozer`
   implementation backed by TBC RPC
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).

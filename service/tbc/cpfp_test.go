@@ -178,6 +178,62 @@ func (stubDB) ZKSpendableOutputs(context.Context, tbcd.ScriptHash) ([]tbcd.ZKSpe
 	panic("stub")
 }
 
+func (stubDB) BlockHeaderByOrdinalIndex(context.Context) (*tbcd.BlockHeader, error) {
+	panic("stub")
+}
+
+func (stubDB) BlockOrdinalUpdate(context.Context, int, map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue, chainhash.Hash) error {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscriptionByID(context.Context, [36]byte) ([]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscriptionsByBlockHash(context.Context, chainhash.Hash) ([][36]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscriptionsByOutpoint(context.Context, tbcd.Outpoint) ([][36]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscriptionsByOutpointWithOffset(context.Context, tbcd.Outpoint) ([]tbcd.OrdinalLocatedInscription, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalBigOByOutpoint(context.Context, tbcd.Outpoint) ([]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscribedSatsInRange(context.Context, uint64, uint64) ([]uint64, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscribedSatBounds(context.Context) (uint64, uint64, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalInscriptionsBySat(context.Context, uint64) ([][36]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalValueByKey(context.Context, tbcd.OrdinalKey) ([]byte, error) {
+	panic("stub")
+}
+
+func (stubDB) ReadOrdinalWork(context.Context, uint32, int) ([]tbcd.OrdinalWorkEntry, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalWatermarkGet(context.Context) (uint32, bool, error) {
+	panic("stub")
+}
+
+func (stubDB) OrdinalPopulatorUpdate(context.Context, map[tbcd.OrdinalKey]tbcd.OrdinalValue, map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue) error {
+	panic("stub")
+}
+
 // TestTxOutByOutpoint verifies that txOutByOutpoint resolves an
 // output from a parent transaction that is in the mempool.
 func TestTxOutByOutpoint(t *testing.T) {
