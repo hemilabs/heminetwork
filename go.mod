@@ -8,7 +8,8 @@ require (
 	codeberg.org/miekg/dns v0.5.26
 	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
 	github.com/btcsuite/btcd/btcec/v2 v2.5.0
-	github.com/btcsuite/btcd/btcutil v1.2.0
+	github.com/btcsuite/btcd/btcutil v1.1.5
+	github.com/btcsuite/btcd/btcutil/v2 v2.0.0
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.2.0
 	github.com/btcsuite/btcwallet/wallet/txsizes v1.2.5
 	github.com/coder/websocket v1.8.15
