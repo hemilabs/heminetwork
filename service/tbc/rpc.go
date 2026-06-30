@@ -794,7 +794,7 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 	log.Tracef("handleBlockInsertRawRequest")
 	defer log.Tracef("handleBlockInsertRawRequest exit")
 
-	b := wire.NewMsgBlock(nil)
+	b := &wire.MsgBlock{}
 	err := b.Deserialize(bytes.NewBuffer(req.Block))
 	if err != nil {
 		return &tbcapi.BlockInsertResponse{

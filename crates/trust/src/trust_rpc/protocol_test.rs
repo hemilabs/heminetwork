@@ -5,10 +5,10 @@ fn test_encode_decode() {
     let payload = Payload::PingRequest(PingRequest {
         timestamp: 1234567890,
     });
-    let msg = encode("1", &payload).unwrap();
-    let json_str = marshal(&msg).unwrap();
+    let msg = payload.encode("1").unwrap();
+    let json_str = msg.marshal().unwrap();
 
-    let parsed = unmarshal(&json_str).unwrap();
+    let parsed = Message::unmarshal(&json_str).unwrap();
     assert_eq!(parsed.header.command, "tbcapi-ping-request");
     assert_eq!(parsed.header.id, "1");
 
@@ -22,10 +22,10 @@ fn test_encode_decode() {
         origin_timestamp: 1000,
         timestamp: 2000,
     });
-    let msg = encode("2", &payload).unwrap();
-    let json_str = marshal(&msg).unwrap();
+    let msg = payload.encode("2").unwrap();
+    let json_str = msg.marshal().unwrap();
 
-    let parsed = unmarshal(&json_str).unwrap();
+    let parsed = Message::unmarshal(&json_str).unwrap();
     assert_eq!(parsed.header.command, "tbcapi-ping-response");
 
     let decoded = parsed.decode().unwrap();
@@ -74,7 +74,7 @@ fn test_header_id_empty() {
 #[test]
 fn test_unmarshal_missing_id() {
     let json_str = r#"{"header":{"command":"tbcapi-ping-request"},"payload":{"timestamp":42}}"#;
-    let msg = unmarshal(json_str).unwrap();
+    let msg = Message::unmarshal(json_str).unwrap();
     assert_eq!(msg.header.id, "");
 
     let decoded = msg.decode().unwrap();
@@ -87,6 +87,6 @@ fn test_unmarshal_missing_id() {
 #[test]
 fn test_unknown_command() {
     let json_str = r#"{"header":{"command":"unknown-cmd"},"payload":{}}"#;
-    let msg = unmarshal(json_str).unwrap();
+    let msg = Message::unmarshal(json_str).unwrap();
     assert!(msg.parse_command().is_err());
 }
