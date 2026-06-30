@@ -51,11 +51,16 @@ const (
 	logLevel = "INFO"
 
 	// XXX think about these durations
-	DefaultClientIdleTimeout = 5 * time.Minute  // Reap timer for client persistence
-	DefaultRequestTimeout    = 9 * time.Second  // Smaller than 12s
-	DefaultPollFrequency     = 11 * time.Second // Smaller than 12s
-	DefaultListenAddress     = "localhost:8545" // Default geth port
-	DefaultControlAddress    = "localhost:1337" // Default control port
+	DefaultClientIdleTimeout  = 5 * time.Minute  // Reap timer for client persistence
+	DefaultRequestTimeout     = 9 * time.Second  // Smaller than 12s
+	DefaultReadHeaderTimeout  = 10 * time.Second // Slowloris header defense
+	DefaultReadTimeout        = 30 * time.Second // Full request read ceiling
+	DefaultWriteTimeout       = 30 * time.Second // Response write ceiling
+	DefaultIdleTimeout        = 60 * time.Second // Keep-alive reap
+	DefaultMaxControlBodySize = int64(1 << 20)   // 1 MiB, control endpoint body limit
+	DefaultPollFrequency      = 11 * time.Second // Smaller than 12s
+	DefaultListenAddress      = "localhost:8545" // Default geth port
+	DefaultControlAddress     = "localhost:1337" // Default control port
 
 	expectedClients = 1000
 
@@ -170,7 +175,12 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
+	ReadHeaderTimeout       time.Duration
+	ReadTimeout             time.Duration
 	RequestTimeout          time.Duration
+	IdleTimeout             time.Duration
+	WriteTimeout            time.Duration
+	MaxControlBodySize      int64
 }
 
 func NewDefaultConfig() *Config {
@@ -181,7 +191,12 @@ func NewDefaultConfig() *Config {
 		PollFrequency:       DefaultPollFrequency,
 		Network:             "mainnet",
 		PrometheusNamespace: appName,
+		ReadHeaderTimeout:   DefaultReadHeaderTimeout,
+		ReadTimeout:         DefaultReadTimeout,
 		RequestTimeout:      DefaultRequestTimeout,
+		IdleTimeout:         DefaultIdleTimeout,
+		WriteTimeout:        DefaultWriteTimeout,
+		MaxControlBodySize:  DefaultMaxControlBodySize,
 		MaxRequestSize:      defaultMaxRequestSize,
 	}
 }
@@ -350,7 +365,8 @@ func (s *Server) Collectors() []prometheus.Collector {
 			}, s.promConnections),
 		}
 		if measureLatency {
-			s.promCollectors = append(s.promCollectors,
+			s.promCollectors = append(
+				s.promCollectors,
 				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 					Namespace: s.cfg.PrometheusNamespace,
 					Name:      "avg_client_setup_latency",
@@ -942,6 +958,7 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	log.Tracef("handleControlAddRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleControlAddRequest exit: %v", r.RemoteAddr)
 
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxControlBodySize)
 	ns := make([]Node, 0, 16)
 	err := json.NewDecoder(r.Body).Decode(&ns)
 	if err != nil {
@@ -971,6 +988,7 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	log.Tracef("handleControlRemoveRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleControlRemoveRequest exit: %v", r.RemoteAddr)
 
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxControlBodySize)
 	ns := make([]Node, 0, 16)
 	err := json.NewDecoder(r.Body).Decode(&ns)
 	if err != nil {
@@ -1061,8 +1079,12 @@ func (s *Server) Run(pctx context.Context) error {
 	mux.HandleFunc("/", s.handleProxyRequest)
 
 	s.httpServer = &http.Server{
-		Handler:     mux,
-		BaseContext: func(_ net.Listener) context.Context { return ctx },
+		Handler:           mux,
+		BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
+		ReadTimeout:       s.cfg.ReadTimeout,
+		WriteTimeout:      s.cfg.WriteTimeout,
+		IdleTimeout:       s.cfg.IdleTimeout,
 	}
 	go func() {
 		log.Infof("Listening: %s", ln.Addr())
@@ -1085,9 +1107,13 @@ func (s *Server) Run(pctx context.Context) error {
 		handle("Control", cmux, RouteControlList, s.handleControlListRequest)
 
 		ctrlHttpServer := &http.Server{
-			Addr:        s.cfg.ControlAddress,
-			Handler:     cmux,
-			BaseContext: func(_ net.Listener) context.Context { return ctx },
+			Addr:              s.cfg.ControlAddress,
+			Handler:           cmux,
+			BaseContext:       func(_ net.Listener) context.Context { return ctx },
+			ReadHeaderTimeout: s.cfg.ReadHeaderTimeout,
+			ReadTimeout:       s.cfg.ReadTimeout,
+			WriteTimeout:      s.cfg.WriteTimeout,
+			IdleTimeout:       s.cfg.IdleTimeout,
 		}
 		go func() {
 			log.Infof("Control listening: %s", s.cfg.ControlAddress)
