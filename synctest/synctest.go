@@ -390,7 +390,7 @@ func notifySlackHook(ctx context.Context, c *config, syncInfo *tbc.SyncInfo, doc
 }
 
 func notifyHooks(ctx context.Context, c *config, syncInfo *tbc.SyncInfo) {
-	// add hooks here for reporting progess to places outside of the test
+	// add hooks here for reporting progress to places outside of the test
 	// itself (ex. slack)
 	log.Tracef("notifying")
 	var dockerLogs string

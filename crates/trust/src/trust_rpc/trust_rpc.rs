@@ -70,7 +70,7 @@ enum ChannelEvent {
 ///
 /// Long running tasks (jobs) that require longer execution periods can
 /// survive even after the connection is dropped, so one can attempt to
-/// resubscribe to its notfications upon restarting.
+/// resubscribe to its notifications upon restarting.
 pub struct TrustRPC {
     config: Config,
     rt: Runtime,

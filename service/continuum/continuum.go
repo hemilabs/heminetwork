@@ -341,7 +341,7 @@ func (s *Server) Run(pctx context.Context) error {
 		go func() {
 			<-ctx.Done()
 			if err := listener.Close(); err != nil {
-				log.Errorf("listner close: %v", err)
+				log.Errorf("listener close: %v", err)
 			}
 			s.deleteAllSessions()
 		}()
