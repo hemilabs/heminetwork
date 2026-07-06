@@ -781,8 +781,12 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 			s.routedReceived.Add(1)
 		}
 
-		log.Tracef("%v", spew.Sdump(header))
-		log.Tracef("%v", spew.Sdump(payload))
+		// Gate on trace level so spew.Sdump does not run on
+		// every message when tracing is disabled.
+		if log.IsTraceEnabled() {
+			log.Tracef("%v", spew.Sdump(header))
+			log.Tracef("%v", spew.Sdump(payload))
+		}
 
 		// Dispatch payload through the registration-based handler map.
 		dc := &dispatchCtx{
