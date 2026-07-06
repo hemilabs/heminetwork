@@ -341,18 +341,14 @@ func continuumReshare(ctx context.Context, args map[string]string) error {
 //	                         same dispatch as explicit members.
 //
 // Exactly one of members= or auto= must be provided.
-func resolveCommittee(ctx context.Context, t *continuum.Transport,
-	secret *continuum.Secret, args map[string]string,
-) ([]continuum.Identity, error) {
+func resolveCommittee(ctx context.Context, t *continuum.Transport, secret *continuum.Secret, args map[string]string) ([]continuum.Identity, error) {
 	return resolveCommitteePrefix(ctx, t, secret, args, "")
 }
 
 // resolveCommitteePrefix is resolveCommittee with a key prefix.
 // Reshare uses "old_" and "new_" prefixes so old_members=/old_auto=
 // and new_members=/new_auto= resolve independently.
-func resolveCommitteePrefix(ctx context.Context, t *continuum.Transport,
-	secret *continuum.Secret, args map[string]string, prefix string,
-) ([]continuum.Identity, error) {
+func resolveCommitteePrefix(ctx context.Context, t *continuum.Transport, secret *continuum.Secret, args map[string]string, prefix string) ([]continuum.Identity, error) {
 	membersKey := prefix + "members"
 	autoKey := prefix + "auto"
 
@@ -416,9 +412,7 @@ func parseMembers(s string) ([]continuum.Identity, error) {
 // this — the smart contract provides explicit identities.  auto= feeds
 // the result into the same dispatch as members=, so the ceremony code
 // doesn't know or care how the committee was selected.
-func autoSelectPeers(ctx context.Context, t *continuum.Transport,
-	secret *continuum.Secret, n int,
-) ([]continuum.Identity, error) {
+func autoSelectPeers(ctx context.Context, t *continuum.Transport, secret *continuum.Secret, n int) ([]continuum.Identity, error) {
 	// Ask the local node for its peer list.
 	if err := t.Write(secret.Identity, continuum.PeerListAdminRequest{}); err != nil {
 		return nil, fmt.Errorf("peer list request: %w", err)
