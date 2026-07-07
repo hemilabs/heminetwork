@@ -162,7 +162,7 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enab
 	}
 	if outputValueCacheSize > 0 {
 		var err error
-		oi.outputValueCache, err = lru.New[chainhash.Hash, []uint64](
+		oi.outputValueCache, err = lru.New(
 			outputValueCacheSize,
 			func(_ chainhash.Hash, v []uint64) int {
 				// Key: 32 bytes (chainhash.Hash)
