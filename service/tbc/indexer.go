@@ -107,9 +107,19 @@ type indexerCommon struct {
 	enabled  bool
 	indexing atomic.Uint32
 
-	p       indexer        // parent indexer
-	g       geometryParams // geometry params
-	genesis *HashHeight    // genesis block override
+	p           indexer        // parent indexer
+	g           geometryParams // geometry params
+	genesis     *HashHeight    // genesis block override
+	logInterval uint64         // progress log cadence in blocks, 0 = default
+}
+
+// logIntervalBlocks returns the progress log cadence in blocks. Slow
+// indexers may set logInterval to log more often than the default.
+func (c *indexerCommon) logIntervalBlocks() uint64 {
+	if c.logInterval != 0 {
+		return c.logInterval
+	}
+	return 10000
 }
 
 func (c *indexerCommon) Enabled() bool {
@@ -454,7 +464,7 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 
 		// Try not to overshoot the cache to prevent costly allocations
 		_, _, pct := cache.Stats()
-		if bh.Height%1000 == 0 || pct > percentage || blocksProcessed == 1 {
+		if bh.Height%c.logIntervalBlocks() == 0 || pct > percentage || blocksProcessed == 1 {
 			log.Infof("%v indexer: %v cache %v%%%v", c, hh, pct,
 				c.p.readCacheInfo())
 		}
@@ -527,7 +537,7 @@ func (c *indexerCommon) parseBlocksReverse(ctx context.Context, endHash *chainha
 
 		// Try not to overshoot the cache to prevent costly allocations
 		_, _, pct := cache.Stats()
-		if bh.Height%1000 == 0 || pct > percentage || blocksProcessed == 1 {
+		if bh.Height%c.logIntervalBlocks() == 0 || pct > percentage || blocksProcessed == 1 {
 			log.Infof("%v unindexer: %v cache %v%%%v", c, hh, pct,
 				c.p.readCacheInfo())
 		}

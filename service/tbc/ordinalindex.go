@@ -159,6 +159,9 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enab
 		g:       g,
 		p:       oi,
 		genesis: ordinalGenesis,
+		// Ordinal indexing is much slower than the other indexers,
+		// log progress more often.
+		logInterval: 1000,
 	}
 	if outputValueCacheSize > 0 {
 		var err error
