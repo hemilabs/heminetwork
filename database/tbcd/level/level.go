@@ -2854,6 +2854,12 @@ func (l *ldb) OrdinalPopulatorUpdate(ctx context.Context, ordData map[tbcd.Ordin
 
 	batch := new(leveldb.Batch)
 	for k, v := range ordData {
+		// The populator's contract is 'i'/'a'/'m' keys only. The wind
+		// prefetch depends on nothing but BlockOrdinalUpdate writing
+		// the 'O' keyspace; reject any future drift loudly.
+		if k[0] == 'O' {
+			return fmt.Errorf("populator must not write 'O' keys: %x", k[:])
+		}
 		if v.IsDelete() {
 			batch.Delete(k[:])
 		} else {

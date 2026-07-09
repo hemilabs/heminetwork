@@ -104,6 +104,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory-constrained hosts. Rolling back to an older binary after the
   table-size change is safe: readers are size-agnostic and compaction
   converges table sizes over time.
+- Ordinal indexer 'O' acceleration lookups for a block are prefetched
+  in one 128-wide parallel pass instead of one serial point-Get per
+  input; the DB is immutable during a wind, so detection semantics are
+  unchanged.
 - Ordinal indexer parent-transaction lookups read only the
   transaction's bytes from the raw block store via a ranged read
   (TxLoc-guided pread) instead of fetching the whole multi-MB block;
