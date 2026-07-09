@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `TBC_ORDINAL_VERIFY_BIGO` (default `false`): debug cross-check of
+  every consumed ordinal 'O' acceleration value against the tx index.
+  A lookup failure surfaces as an error; a genuine value mismatch means
+  a corrupt ordinal index and panics with reindex instructions. Enable
+  when soaking changes to the ordinal 'O' write paths; it re-does the
+  lookup the fast path exists to skip, so it is slow.
+
+
 - Add `BlockRawByHash` to DB interface and `lazyBlock` type for zero-copy
   per-tx block access without full deserialization
   ([#1051](https://github.com/hemilabs/heminetwork/pull/1051)).
@@ -84,6 +92,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- All leveldb databases now share one managed 512 MiB block cache and
+  one 4096-handle table file pool (previously 8 MiB and 500 handles
+  private per database); write-heavy databases get larger write buffers
+  (ordinals 128 MiB, transactions/outputs 64 MiB) and 8 MiB tables
+  (ordinals, transactions). Steady-state memory floor rises roughly
+  1 GiB; capacities are logged at startup and a warning fires when
+  RLIMIT_NOFILE cannot cover the file pool. Set `GOMEMLIMIT` on
+  memory-constrained hosts. Rolling back to an older binary after the
+  table-size change is safe: readers are size-agnostic and compaction
+  converges table sizes over time.
+- Ordinal indexer flushes are additionally bounded by bytes (~1 GiB of
+  cached index payload), not only by entry count, and flush batches are
+  written in bounded chunks inside one atomic transaction. Fixes
+  unbounded memory growth and quadratic batch-buffer copying observed
+  during inscription-dense mainnet ranges.
+
+
 - `BlockTxUpdate` uses stack-allocated reusable buffers instead of slicing
   loop variables, avoiding potential data integrity issues
   ([#1052](https://github.com/hemilabs/heminetwork/pull/1052),
@@ -111,6 +136,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#972](https://github.com/hemilabs/heminetwork/pull/972)).
 
 ### Fixed
+
+- Fix ordinal indexer cache memory ratcheting: the write cache retained
+  its high-water bucket arrays across flushes forever (observed live as
+  Go runtime Sys climbing 3.4 GiB to 7.0 GiB during a dense-zone
+  reindex). The cache now releases each window after flushing.
+- Fix a nil-pointer panic in the ordinal indexer when a parent
+  transaction's index entry predates the v6 TxLoc format; legacy
+  entries now take the block-scan fallback.
+
 
 - Fix typos across the codebase
   ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733),

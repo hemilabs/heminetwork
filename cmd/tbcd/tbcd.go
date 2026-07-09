@@ -179,6 +179,12 @@ var (
 			Help:         "enable/disable ordinal (sat range + inscription) indexer",
 			Print:        config.PrintAll,
 		},
+		"TBC_ORDINAL_VERIFY_BIGO": config.Config{
+			Value:        &cfg.OrdinalVerifyBigO,
+			DefaultValue: false,
+			Help:         "debug: cross-check ordinal 'O' values against the tx index (slow)",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
