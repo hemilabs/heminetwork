@@ -22,6 +22,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb/opt"
 	"github.com/hemilabs/x/leveldb/leveldb/util"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
@@ -83,12 +84,19 @@ var (
 	ordinalIndexHashKey  = []byte("ordinalindexhash")  // last indexed ordinal block hash
 )
 
-// ordinalBatchBytesPerOutpoint estimates the average serialized batch
-// bytes per outpoint in the ordinal cache. Each outpoint generates
-// ~5 sub-entries (o, O, i, b, n) averaging ~300 bytes each in the
-// LevelDB batch (key + value + varint overhead). Used to pre-allocate
-// the batch via MakeBatch to avoid repeated Batch.grow reallocations.
-const ordinalBatchBytesPerOutpoint = 1500
+// defaultOrdinalBatchChunkSize bounds the leveldb batch built during
+// ordinal flushes. goleveldb grows batch buffers sublinearly once they
+// are large, so appending one huge block-batch memcpys quadratically
+// (measured at ~20% of CPU during dense-zone flushes). Writing the
+// batch into the open transaction in chunks of this size stays atomic
+// — nothing is visible until commit — while bounding memory and
+// regrowth.
+const defaultOrdinalBatchChunkSize = 16 * 1024 * 1024
+
+// batchRecordOverhead approximates goleveldb's per-record batch
+// overhead (type byte + key/value varint lengths; verified against the
+// fork's appendRec worst case of 11 bytes).
+const batchRecordOverhead = 12
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -102,6 +110,12 @@ type ldb struct {
 	rawPool level.RawPool
 
 	blockCache *lru.Cache[chainhash.Hash, []byte]
+
+	// Ordinal flush parameters, per instance so tests can shrink the
+	// chunk size and inject write failures without package-global
+	// state.
+	ordinalBatchChunkSize int
+	ordinalTxWrite        func(tx *leveldb.Transaction, b *leveldb.Batch) error
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
@@ -216,17 +230,53 @@ func NewConfig(network, home, headerCacheSizeS, blockCacheSizeS string) (*Config
 	}, nil
 }
 
+// Shared leveldb cache sizing. One block cache and one table file
+// handle pool serve ALL databases; hot databases (ordinals,
+// transactions) claim capacity from the common pool as needed. These
+// are deliberately not user-tunable.
+const (
+	levelBlockCacheSize = 512 * opt.MiB // shared block cache (filter/index/data blocks)
+	levelOpenFiles      = 4096          // shared open table file handles
+)
+
 func open(ctx context.Context, cfg *Config) (*ldb, error) {
-	ld, err := level.New(ctx, level.NewDefaultConfig(cfg.Home))
+	lcfg := level.NewDefaultConfig(cfg.Home)
+	lcfg.BlockCacheCapacity = levelBlockCacheSize
+	lcfg.OpenFilesCacheCapacity = levelOpenFiles
+
+	// Per-database overrides tuned to workload. Write-heavy databases
+	// get larger memtables (fewer L0 flushes and compactions) and
+	// larger tables (fewer files, so fewer filter/index blocks compete
+	// for cache). Shared cachers are installed into these by level.New;
+	// memtables cost up to 2x WriteBuffer per database.
+	ordOpts := lcfg.Options
+	ordOpts.WriteBuffer = 128 * opt.MiB
+	ordOpts.CompactionTableSize = 8 * opt.MiB
+	txOpts := lcfg.Options
+	txOpts.WriteBuffer = 64 * opt.MiB
+	txOpts.CompactionTableSize = 8 * opt.MiB
+	outOpts := lcfg.Options
+	outOpts.WriteBuffer = 64 * opt.MiB
+	lcfg.DBOptions = map[string]opt.Options{
+		level.OrdinalDB:      ordOpts,
+		level.TransactionsDB: txOpts,
+		level.OutputsDB:      outOpts,
+	}
+
+	ld, err := level.New(ctx, lcfg)
 	if err != nil {
 		return nil, err
 	}
 
 	l := &ldb{
-		Database: ld,
-		pool:     ld.DB(),
-		rawPool:  ld.RawDB(),
-		cfg:      cfg,
+		Database:              ld,
+		pool:                  ld.DB(),
+		rawPool:               ld.RawDB(),
+		cfg:                   cfg,
+		ordinalBatchChunkSize: defaultOrdinalBatchChunkSize,
+		ordinalTxWrite: func(tx *leveldb.Transaction, b *leveldb.Batch) error {
+			return tx.Write(b, nil)
+		},
 	}
 
 	welcome := make([]string, 0, 10)
@@ -263,6 +313,9 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 	} else {
 		welcome = append(welcome, "Blockheader cache: DISABLED")
 	}
+	sharedBlock, sharedFiles := ld.CacheCapacities()
+	welcome = append(welcome, fmt.Sprintf("leveldb shared block cache: %v, open files: %d",
+		humanize.IBytes(uint64(sharedBlock)), sharedFiles))
 
 	if Welcome {
 		for k := range welcome {
@@ -2512,6 +2565,15 @@ func (l *ldb) BlockHeaderByOrdinalIndex(ctx context.Context) (*tbcd.BlockHeader,
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
+// BlockOrdinalUpdate atomically writes the ordinal cache and work maps
+// plus the index-hash checkpoint.
+//
+// CONTRACT: data and work are CONSUMED — entries are drained as they
+// are written. On error nothing was persisted (the transaction is
+// discarded) but the maps are partially drained and their contents are
+// undefined; the caller must discard them and rebuild from scratch.
+// Retrying with the same maps would commit a checkpoint that overstates
+// what was written.
 func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, work map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error {
 	log.Tracef("BlockOrdinalUpdate")
 	defer log.Tracef("BlockOrdinalUpdate exit")
@@ -2528,13 +2590,55 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 
 	// The cache is updated in a way that makes the direction
 	// irrelevant. The block's index data ('o'/'p'/'i'/'n'/'a'/watermark),
-	// the work queue ('w'), and the index-hash pointer all commit in a
-	// single batch so the ordinal DB never observes a partial block.
+	// the work queue ('w'), and the index-hash pointer all land in ONE
+	// transaction so the ordinal DB never observes a partial block. The
+	// records are written into the transaction in bounded chunks — see
+	// ordinalBatchChunkSize — which stays atomic because nothing is
+	// visible until commit.
 	//
 	// Unpack each OrdinalCacheEntry into LevelDB batch operations,
 	// constructing DB keys from Outpoint + offset. Same pattern as
 	// BlockUtxoUpdate constructing 'u'+'h' keys from Outpoint→CacheOutput.
-	ordBatch := leveldb.MakeBatch(len(data) * ordinalBatchBytesPerOutpoint)
+	// Size the initial batch by content so tip-sized updates (a
+	// handful of records) do not allocate a full chunk; cap at the
+	// chunk size which flushing keeps as the working bound.
+	est := len(data)*256 + len(work)*64 + 1024
+	ordBatch := leveldb.MakeBatch(min(est, l.ordinalBatchChunkSize))
+	var pending int
+	// flush is only invoked with records pending: add() guards on
+	// pending > 0 and the final call follows the index-hash put. An
+	// empty write would be a harmless no-op regardless.
+	flush := func() error {
+		if werr := l.ordinalTxWrite(ordTx, ordBatch); werr != nil {
+			return fmt.Errorf("ordinal insert: %w", werr)
+		}
+		ordBatch.Reset()
+		pending = 0
+		return nil
+	}
+	// add flushes the pending chunk BEFORE appending a record that
+	// would push it past the chunk size, so the batch buffer never
+	// regrows for records smaller than the chunk. A single record
+	// larger than the chunk still fits: the batch grows once and
+	// Reset retains the capacity for the rest of the call.
+	add := func(k, v []byte, del bool) error {
+		rec := len(k) + len(v) + batchRecordOverhead
+		if pending > 0 && pending+rec > l.ordinalBatchChunkSize {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		if del {
+			ordBatch.Delete(k)
+		} else {
+			ordBatch.Put(k, v)
+		}
+		pending += rec
+		return nil
+	}
+	put := func(k, v []byte) error { return add(k, v, false) }
+	del := func(k []byte) error { return add(k, nil, true) }
+
 	for op, entry := range data {
 		// 'o' entries: 'o' + txid(32) + vout(4) + offset(8) = 45 bytes
 		for offset, v := range entry.Inscriptions {
@@ -2543,9 +2647,12 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 			copy(key[1:37], op[1:37]) // txid + vout
 			binary.BigEndian.PutUint64(key[37:], offset)
 			if v == nil {
-				ordBatch.Delete(key[:])
+				err = del(key[:])
 			} else {
-				ordBatch.Put(key[:], v)
+				err = put(key[:], v)
+			}
+			if err != nil {
+				return err
 			}
 		}
 
@@ -2556,9 +2663,12 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 			copy(key[1:37], op[1:37])
 			binary.BigEndian.PutUint64(key[37:], offset)
 			if v == nil {
-				ordBatch.Delete(key[:])
+				err = del(key[:])
 			} else {
-				ordBatch.Put(key[:], v)
+				err = put(key[:], v)
+			}
+			if err != nil {
+				return err
 			}
 		}
 
@@ -2569,18 +2679,24 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 			oKey[0] = 'O'
 			copy(oKey[1:37], op[1:37])
 			if entry.BigO == nil {
-				ordBatch.Delete(oKey[:])
+				err = del(oKey[:])
 			} else {
-				ordBatch.Put(oKey[:], entry.BigO)
+				err = put(oKey[:], entry.BigO)
+			}
+			if err != nil {
+				return err
 			}
 		}
 
 		// Auxiliary entries ('i', 'n', 'a', 'm'): already in DB key format.
 		for k, v := range entry.Aux {
 			if v.IsDelete() {
-				ordBatch.Delete(k[:])
+				err = del(k[:])
 			} else {
-				ordBatch.Put(k[:], v.Bytes())
+				err = put(k[:], v.Bytes())
+			}
+			if err != nil {
+				return err
 			}
 		}
 
@@ -2588,20 +2704,31 @@ func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tb
 	}
 	for k, v := range work {
 		if v.IsDelete() {
-			ordBatch.Delete(k[:])
+			err = del(k[:])
 		} else {
-			ordBatch.Put(k[:], v[:])
+			err = put(k[:], v[:])
+		}
+		if err != nil {
+			return err
 		}
 		delete(work, k)
 	}
 
-	ordBatch.Put(ordinalIndexHashKey, ordinalIndexHash[:])
-
-	if err = ordTx.Write(ordBatch, nil); err != nil {
-		return fmt.Errorf("ordinal insert: %w", err)
+	if err = put(ordinalIndexHashKey, ordinalIndexHash[:]); err != nil {
+		return err
+	}
+	if err = flush(); err != nil {
+		return err
 	}
 	if err = ordCommit(); err != nil {
 		return fmt.Errorf("ordinal commit: %w", err)
+	}
+
+	if log.IsDebugEnabled() {
+		ordDB := l.pool[level.OrdinalDB]
+		cached, _ := ordDB.GetProperty("leveldb.cachedblock")
+		opened, _ := ordDB.GetProperty("leveldb.openedtables")
+		log.Debugf("ordinal leveldb cachedblock=%v openedtables=%v", cached, opened)
 	}
 
 	return nil
