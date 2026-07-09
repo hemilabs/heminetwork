@@ -401,6 +401,12 @@ type flotsam struct {
 	srcHasO        bool // true if srcBlockHash/srcOutputValue are valid
 }
 
+// ordinalFetchWidth bounds windBlock's parallel DB fan-outs (the 'O'
+// prefetch and the parent value fetch): enough in-flight point reads
+// to keep an NVMe queue busy without starving compaction, mirroring
+// the utxo indexer's proven fixup width.
+const ordinalFetchWidth = 128
+
 // flotsamMatchIdx returns the input index that positions a flotsam in
 // the FIFO stream: the reveal input for reveals (from the inscription
 // ID), the spending input for transfers.
@@ -460,6 +466,88 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	var cheapTime, expensiveTime time.Duration
 	var flotsamTxs, iovCalls, totalInputs int
 
+	// Prefetch the committed 'O' entry for every input in the block
+	// in one parallel pass. The DB is immutable during a wind — all
+	// writes buffer in the OrdinalCache until commit — so these point
+	// Gets are order-independent pure reads; the sequential detection
+	// loop below applies same-window placements via the cache overlay
+	// exactly as it did when it issued the Gets itself. This converts
+	// ~one serial DB round trip per input into a 128-wide fan-out.
+	prefetchStart := time.Now()
+	prefetchLen := 0
+	for _, tx := range txs {
+		if blockchain.IsCoinBase(tx) {
+			continue
+		}
+		prefetchLen += len(tx.MsgTx().TxIn)
+	}
+	prefetchOps := make([]tbcd.Outpoint, 0, prefetchLen)
+	for _, tx := range txs {
+		if blockchain.IsCoinBase(tx) {
+			continue
+		}
+		for _, txIn := range tx.MsgTx().TxIn {
+			prefetchOps = append(prefetchOps,
+				tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+					txIn.PreviousOutPoint.Index))
+		}
+	}
+	// Slots in vals/errs are disjoint because each goroutine writes
+	// only its own index j — no lock needed regardless of outpoint
+	// duplication. (TBC does not validate consensus, so a malformed
+	// block COULD repeat an outpoint; duplicates are harmless here:
+	// the immutable DB returns identical values and the sequential
+	// map build below just overwrites with the same value.)
+	bigOPrefetch := make(map[tbcd.Outpoint][]byte, len(prefetchOps))
+	if len(prefetchOps) > 0 {
+		vals := make([][]byte, len(prefetchOps))
+		errs := make([]error, len(prefetchOps))
+		slots := min(len(prefetchOps), ordinalFetchWidth)
+		sem := make(chan struct{}, slots)
+		for range slots {
+			sem <- struct{}{}
+		}
+		var wg sync.WaitGroup
+		for j := range prefetchOps {
+			// Deterministic cancellation point; the select below
+			// only guards the blocked-on-semaphore case (reachable
+			// via timing only, mirroring the value-fetch pattern).
+			if err := ctx.Err(); err != nil {
+				wg.Wait()
+				return err
+			}
+			// The Done arm is reachable only when cancellation races
+			// a full semaphore (workers stop returning tokens on
+			// cancel); the deterministic exit is the ctx.Err() check
+			// above. Mirrors the value-fetch pattern below.
+			select {
+			case <-ctx.Done():
+				wg.Wait()
+				return ctx.Err()
+			case <-sem:
+			}
+			wg.Add(1)
+			go func(j int) {
+				defer wg.Done()
+				defer func() {
+					select {
+					case <-ctx.Done():
+					case sem <- struct{}{}:
+					}
+				}()
+				vals[j], errs[j] = i.g.db.OrdinalBigOByOutpoint(ctx, prefetchOps[j])
+			}(j)
+		}
+		wg.Wait()
+		for j, perr := range errs {
+			if perr != nil {
+				return fmt.Errorf("bigO prefetch %v: %w", prefetchOps[j], perr)
+			}
+			bigOPrefetch[prefetchOps[j]] = vals[j]
+		}
+	}
+	cheapTime += time.Since(prefetchStart)
+
 	for txBlockIdx, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
 			continue
@@ -473,11 +561,15 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 			spentOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
 
-			// Fast path: point Get 'O' with bloom filter.
-			// Rejects 99.99% of inputs without creating an iterator.
-			bigOVal, bigOErr := i.g.db.OrdinalBigOByOutpoint(ctx, spentOP)
-			if bigOErr != nil {
-				return fmt.Errorf("bigO lookup %v: %w", spentOP, bigOErr)
+			// Fast path: prefetched point Get 'O'. The prefetch is
+			// exhaustive by construction — it iterates exactly the
+			// inputs this loop iterates — so a miss means the two
+			// walks drifted apart. Fail loud (file convention for
+			// invariant violations) rather than silently regressing
+			// to serial lookups.
+			bigOVal, prefetched := bigOPrefetch[spentOP]
+			if !prefetched {
+				panic(fmt.Sprintf("bug: outpoint %v missed bigO prefetch", spentOP))
 			}
 			// Apply cache overlay for 'O' (same-block tombstone or update).
 			if entry, ok := cache.m[spentOP]; ok && entry.BigOSet {
@@ -635,10 +727,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			values[0], errs[0] = i.inputOutputValue(ctx, txIns[0].PreviousOutPoint.Hash, txIns[0].PreviousOutPoint.Index)
 			iovCalls++
 		} else if fetchCount > 1 {
-			slots := fetchCount
-			if slots > 128 {
-				slots = 128
-			}
+			slots := min(fetchCount, ordinalFetchWidth)
 			sem := make(chan struct{}, slots)
 			for range slots {
 				sem <- struct{}{}
