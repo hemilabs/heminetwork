@@ -50,6 +50,17 @@ type ordStubDB struct {
 	txIdLookups int // BlockHashByTxId call count == iov lookups
 	inflight    int
 	maxInflight int
+	// bigO lookup accounting: the prefetch must issue exactly one Get
+	// per block input and the detection loop must issue none.
+	bigOLookups     int
+	bigOInflight    int
+	maxBigOInflight int
+	bigOErr         error
+	bigOGateWaiters int
+	// bigOGate, when non-nil, blocks the first 'O' lookup until a
+	// second concurrent lookup arrives — deterministic overlap proof
+	// for the prefetch fan-out, mirroring overlapGate.
+	bigOGate    chan struct{}
 	gateWaiters int
 	// rawBlocks serves BlockRawByHash for entries that have a v6 loc
 	// but need the whole-block path (zeroLoc scenarios).
@@ -89,6 +100,33 @@ func stubBlockBytes(tx *wire.MsgTx) ([]byte, wire.TxLoc, error) {
 }
 
 func (d *ordStubDB) OrdinalBigOByOutpoint(_ context.Context, op tbcd.Outpoint) ([]byte, error) {
+	d.mtx.Lock()
+	d.bigOLookups++
+	d.bigOInflight++
+	if d.bigOInflight > d.maxBigOInflight {
+		d.maxBigOInflight = d.bigOInflight
+	}
+	fail := d.bigOErr
+	gate := d.bigOGate
+	if gate != nil {
+		d.bigOGateWaiters++
+		if d.bigOGateWaiters == 2 {
+			close(gate)
+			d.bigOGate = nil // subsequent lookups pass freely
+		}
+	}
+	d.mtx.Unlock()
+	if gate != nil {
+		<-gate // released when a second lookup is concurrently inside
+	}
+	defer func() {
+		d.mtx.Lock()
+		d.bigOInflight--
+		d.mtx.Unlock()
+	}()
+	if fail != nil {
+		return nil, fail
+	}
 	return d.bigO[op], nil
 }
 
@@ -918,8 +956,12 @@ func TestServerWiresVerifyBigO(t *testing.T) {
 }
 
 // BenchmarkWindBlock pins the wind hot path for the two dominant
-// shapes. Expected (dev box): 1-in transfer ~2us/op, 0 lookups;
-// sweep ~1ms/op dominated by placement writes.
+// shapes. NOTE: the stub answers Gets instantly, so these numbers
+// measure the prefetch fan-out OVERHEAD (~0.6us/input), not its win —
+// against real DB latency (~110us/Get) the prefetch converts ~0.77s
+// of serial reads per dense block into ~10ms. Expected (dev box):
+// 1-in transfer ~115us/op; sweep1000 ~900us/op. Regression tripwire
+// for the machinery, not the I/O.
 func BenchmarkWindBlock(b *testing.B) {
 	shapes := []struct {
 		name string
@@ -1091,5 +1133,166 @@ func TestWindBlockZeroLocFallsBack(t *testing.T) {
 	dst := cache.Map()[tbcd.NewOutpoint(txid, 0)]
 	if dst == nil || dst.Inscriptions[10000] == nil {
 		t.Fatal("zero-loc entry did not resolve via whole-block fallback")
+	}
+}
+
+// TestWindBlockBigOPrefetch pins the prefetch contract: exactly one
+// 'O' lookup per block input (the parallel prefetch), zero direct Gets
+// from the detection loop — a drift between collection and detection
+// iteration would show as extra lookups.
+func TestWindBlockBigOPrefetch(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	// Transfer with 'O' plus a plain 3-input tx: 4 inputs total.
+	_, parentPTxid := ordTestParent(1, 5000)
+	spentP := tbcd.NewOutpoint(parentPTxid, 0)
+	ordTestTrackedOutpoint(db, spentP, makeInscriptionID(&parentPTxid, 0), 0, 5000)
+	tx1 := wire.NewMsgTx(wire.TxVersion)
+	tx1.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentPTxid, 0), nil, nil))
+	tx1.AddTxOut(wire.NewTxOut(5000, []byte{txscript.OP_TRUE}))
+
+	tx2 := wire.NewMsgTx(wire.TxVersion)
+	for i := range 3 {
+		_, ptxid := ordTestParent(byte(10+i), 700)
+		tx2.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&ptxid, 0), nil, nil))
+	}
+	tx2.AddTxOut(wire.NewTxOut(2000, []byte{txscript.OP_TRUE}))
+
+	b := ordTestBlock(800000, 625000000, tx1, tx2)
+	cache := NewOrdinalCache(1000, 0)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, cache); err != nil {
+		t.Fatal(err)
+	}
+	if db.bigOLookups != 4 {
+		t.Fatalf("expected exactly 4 'O' lookups (one per input via prefetch), got %d",
+			db.bigOLookups)
+	}
+	// The transfer must still be detected through the prefetched value.
+	if dst := cache.Map()[tbcd.NewOutpoint(tx1.TxHash(), 0)]; dst == nil || dst.Inscriptions[0] == nil {
+		t.Fatal("transfer not detected via prefetched 'O'")
+	}
+}
+
+// TestWindBlockBigOPrefetchParallel pins the concurrency contract of
+// the prefetch fan-out on a 130-input tx: genuine overlap (enforced
+// deterministically by the stub's bigO rendezvous gate) and never more
+// than ordinalFetchWidth in flight — a serial regression or a clamp
+// removal both fail.
+func TestWindBlockBigOPrefetchParallel(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+	db.bigOGate = make(chan struct{})
+
+	tx := wire.NewMsgTx(wire.TxVersion)
+	for i := range 129 {
+		parent, parentTxid := ordTestParent(byte(i), 10)
+		db.parents[parentTxid] = parent
+		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 0), nil, nil))
+	}
+	_, parentRTxid := ordTestParent(0xf0, 900)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentRTxid, 0), nil, nil))
+	tx.TxIn[129].Witness = buildInscriptionWitness("text/plain", "last input")
+	tx.AddTxOut(wire.NewTxOut(2000, []byte{txscript.OP_TRUE}))
+
+	b := ordTestBlock(800000, 625000000, tx)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, NewOrdinalCache(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if db.bigOLookups != 130 {
+		t.Fatalf("expected 130 prefetch lookups, got %d", db.bigOLookups)
+	}
+	if db.maxBigOInflight > ordinalFetchWidth {
+		t.Fatalf("prefetch clamp exceeded: %d concurrent", db.maxBigOInflight)
+	}
+	if db.maxBigOInflight < 2 {
+		t.Fatalf("no prefetch concurrency observed (max in-flight %d)", db.maxBigOInflight)
+	}
+}
+
+// TestWindBlockBigOPrefetchError propagates a prefetch failure.
+func TestWindBlockBigOPrefetchError(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+	db.bigOErr = errors.New("disk on fire")
+
+	_, parentTxid := ordTestParent(1, 5000)
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 0), nil, nil))
+	tx.AddTxOut(wire.NewTxOut(5000, []byte{txscript.OP_TRUE}))
+
+	b := ordTestBlock(800000, 625000000, tx)
+	err := oi.windBlock(t.Context(), 800000, b.Hash(), b, NewOrdinalCache(1000, 0))
+	if err == nil || !strings.Contains(err.Error(), "bigO prefetch") {
+		t.Fatalf("want prefetch error, got %v", err)
+	}
+	if !errors.Is(err, db.bigOErr) {
+		t.Fatalf("prefetch error must wrap the cause: %v", err)
+	}
+}
+
+// TestWindBlockPrefetchCancelled: a cancelled context stops the
+// prefetch at its deterministic check.
+func TestWindBlockPrefetchCancelled(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	_, parentTxid := ordTestParent(1, 5000)
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 0), nil, nil))
+	tx.AddTxOut(wire.NewTxOut(5000, []byte{txscript.OP_TRUE}))
+	b := ordTestBlock(800000, 625000000, tx)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	err := oi.windBlock(ctx, 800000, b.Hash(), b, NewOrdinalCache(1000, 0))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	if db.bigOLookups != 0 {
+		t.Fatalf("lookups issued after cancellation: %d", db.bigOLookups)
+	}
+}
+
+// TestWindBlockSameBlockChainWithPrefetch pins the one scenario where
+// prefetching at block start could diverge from Get-at-detection: tx A
+// reveals an inscription and tx B spends it within the same block. The
+// prefetch sees DB-nil for A's outpoint; detection must find it via
+// the cache overlay, exactly as the serial order did.
+func TestWindBlockSameBlockChainWithPrefetch(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	_, parentTxid := ordTestParent(1, 5000)
+	txA := wire.NewMsgTx(wire.TxVersion)
+	txA.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 0), nil, nil))
+	txA.TxIn[0].Witness = buildInscriptionWitness("text/plain", "chained")
+	txA.AddTxOut(wire.NewTxOut(5000, []byte{txscript.OP_TRUE}))
+	txATxid := txA.TxHash()
+
+	txB := wire.NewMsgTx(wire.TxVersion)
+	txB.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&txATxid, 0), nil, nil))
+	txB.AddTxOut(wire.NewTxOut(5000, []byte{txscript.OP_TRUE}))
+	txBTxid := txB.TxHash()
+
+	b := ordTestBlock(800000, 625000000, txA, txB)
+	cache := NewOrdinalCache(1000, 0)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, cache); err != nil {
+		t.Fatal(err)
+	}
+	// Two inputs, two prefetch lookups, none from detection.
+	if db.bigOLookups != 2 {
+		t.Fatalf("expected 2 prefetch lookups, got %d", db.bigOLookups)
+	}
+	m := cache.Map()
+	// A's placement must be tombstoned by B's spend...
+	src := m[tbcd.NewOutpoint(txATxid, 0)]
+	if src == nil || src.Inscriptions[0] != nil {
+		t.Fatal("same-block source not tombstoned")
+	}
+	// ...and the inscription must land at B via the overlay.
+	dst := m[tbcd.NewOutpoint(txBTxid, 0)]
+	if dst == nil || dst.Inscriptions[0] == nil {
+		t.Fatal("same-block chained transfer not detected via overlay")
 	}
 }
