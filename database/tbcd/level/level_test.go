@@ -2244,3 +2244,28 @@ func TestDbUpgradeV6E2E(t *testing.T) {
 
 	db3.Close()
 }
+
+func TestLevelSharedCacheWiring(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	cfg, err := NewConfig("testnet3", t.TempDir(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	blockBytes, openFiles := db.CacheCapacities()
+	if blockBytes != levelBlockCacheSize || openFiles != levelOpenFiles {
+		t.Fatalf("shared cache capacities not wired: got %d/%d, want %d/%d",
+			blockBytes, openFiles, levelBlockCacheSize, levelOpenFiles)
+	}
+}
