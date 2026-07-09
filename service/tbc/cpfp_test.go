@@ -34,7 +34,11 @@ func (stubDB) BlockHashByTxId(context.Context, chainhash.Hash) (*chainhash.Hash,
 
 // The remaining methods satisfy the tbcd.Database interface but
 // should never be reached by parseTx when BlockHashByTxId fails.
-func (stubDB) Version(context.Context) (int, error)                { panic("stub") }
+func (stubDB) Version(context.Context) (int, error) { panic("stub") }
+
+func (stubDB) BlockTxRawByLoc(context.Context, chainhash.Hash, wire.TxLoc) ([]byte, error) {
+	panic("stub")
+}
 func (stubDB) MetadataDel(context.Context, []byte) error           { panic("stub") }
 func (stubDB) MetadataGet(context.Context, []byte) ([]byte, error) { panic("stub") }
 func (stubDB) MetadataPut(context.Context, []byte, []byte) error   { panic("stub") }

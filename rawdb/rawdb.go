@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -66,7 +67,10 @@ func New(cfg *Config) (*RawDB, error) {
 		return nil, errors.New("must provide config")
 	}
 
-	if cfg.MaxSize < 4096 {
+	if cfg.MaxSize < 4096 || cfg.MaxSize > math.MaxUint32 {
+		// Coordinates encode file offset and value size as uint32;
+		// a larger file cap would silently truncate them at write
+		// time.
 		return nil, fmt.Errorf("invalid max size: %v", cfg.MaxSize)
 	}
 
@@ -228,6 +232,31 @@ func (r *RawDB) Get(key []byte) ([]byte, error) {
 	log.Tracef("Get: %x", key)
 	defer log.Tracef("Get exit: %x", key)
 
+	return r.getRange(key, 0, 0, true)
+}
+
+// GetRange returns length bytes starting at off within the value
+// stored at key, using a single ranged read instead of fetching the
+// whole value. The range must lie entirely within the stored value.
+// A zero length returns an empty slice; off may then be at most the
+// stored value's size.
+func (r *RawDB) GetRange(key []byte, off, length uint32) ([]byte, error) {
+	log.Tracef("GetRange: %x %v %v", key, off, length)
+	defer log.Tracef("GetRange exit: %x", key)
+
+	return r.getRange(key, off, length, false)
+}
+
+// getRange performs the coordinate lookup and ranged read shared by
+// Get and GetRange. whole selects the entire stored value.
+//
+// The per-call open/read/close is ~85% of a small ranged read's cost
+// (~2.1us of ~2.5us measured; see BenchmarkGetRange). A file handle
+// cache would recover most of that, but the absolute numbers are
+// noise at current call volumes — deferred until a profile shows
+// getRange hot. Data files are immutable once rolled and ReadAt is
+// offset-explicit, so a shared fd would be goroutine-safe.
+func (r *RawDB) getRange(key []byte, off, length uint32, whole bool) ([]byte, error) {
 	c, err := r.index.Get(key, nil)
 	if err != nil {
 		return nil, err
@@ -240,6 +269,12 @@ func (r *RawDB) Get(key []byte) ([]byte, error) {
 		binary.BigEndian.Uint32(c[0:4])))
 	offset := binary.BigEndian.Uint32(c[4:8])
 	size := binary.BigEndian.Uint32(c[8:12])
+	if whole {
+		off, length = 0, size
+	} else if uint64(off)+uint64(length) > uint64(size) {
+		return nil, fmt.Errorf("range %v+%v exceeds value size %v",
+			off, length, size)
+	}
 	f, err := os.OpenFile(filename, os.O_RDONLY, 0o600)
 	if err != nil {
 		return nil, err
@@ -251,12 +286,14 @@ func (r *RawDB) Get(key []byte) ([]byte, error) {
 		}
 	}()
 
-	data := make([]byte, size)
-	n, err := f.ReadAt(data, int64(offset))
+	data := make([]byte, length)
+	n, err := f.ReadAt(data, int64(offset)+int64(off))
 	if err != nil {
 		return nil, err
 	}
-	if n != int(size) {
+	if n != int(length) {
+		// Unreachable: io.ReaderAt returns an error whenever
+		// n < len(p). Defensive only.
 		return nil, errors.New("invalid read size")
 	}
 

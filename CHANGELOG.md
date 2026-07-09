@@ -117,6 +117,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory-constrained hosts. Rolling back to an older binary after the
   table-size change is safe: readers are size-agnostic and compaction
   converges table sizes over time.
+- Ordinal indexer parent-transaction lookups read only the
+  transaction's bytes from the raw block store via a ranged read
+  (TxLoc-guided pread) instead of fetching the whole multi-MB block;
+  legacy pre-v6 index entries keep the whole-block fallback.
 - Ordinal indexer flushes are additionally bounded by bytes (~1 GiB of
   cached index payload), not only by entry count, and flush batches are
   written in bounded chunks inside one atomic transaction. Fixes
