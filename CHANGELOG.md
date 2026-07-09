@@ -97,7 +97,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   private per database); write-heavy databases get larger write buffers
   (ordinals 128 MiB, transactions/outputs 64 MiB) and 8 MiB tables
   (ordinals, transactions). Steady-state memory floor rises roughly
-  1 GiB; capacities are logged at startup and a warning fires when
+  1 GiB; the ordinals database uses 16-bit bloom filters (existing
+  tables remain readable and convert via compaction); capacities are
+  logged at startup and a warning fires when
   RLIMIT_NOFILE cannot cover the file pool. Set `GOMEMLIMIT` on
   memory-constrained hosts. Rolling back to an older binary after the
   table-size change is safe: readers are size-agnostic and compaction

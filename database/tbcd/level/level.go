@@ -22,6 +22,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb/filter"
 	"github.com/hemilabs/x/leveldb/leveldb/opt"
 	"github.com/hemilabs/x/leveldb/leveldb/util"
 	"github.com/juju/loggo/v2"
@@ -252,6 +253,15 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 	ordOpts := lcfg.Options
 	ordOpts.WriteBuffer = 128 * opt.MiB
 	ordOpts.CompactionTableSize = 8 * opt.MiB
+	// The ordinal wind path issues one point-Get per tx input against
+	// the 'O' keyspace; negatives dominate, so bloom false positives
+	// convert directly into wasted (uncached) block reads. 16 bits/key
+	// (~0.05% FP vs ~0.8% at the global 10) removes that tail for a
+	// 60% larger filter block footprint on this database only. The
+	// bloom format stores the hash count per filter block, so existing
+	// 10-bit tables remain readable and convert as compaction rewrites
+	// them.
+	ordOpts.Filter = filter.NewBloomFilter(16)
 	txOpts := lcfg.Options
 	txOpts.WriteBuffer = 64 * opt.MiB
 	txOpts.CompactionTableSize = 8 * opt.MiB
