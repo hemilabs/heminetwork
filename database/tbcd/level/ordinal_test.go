@@ -827,3 +827,19 @@ func TestBlockOrdinalUpdateDebugStats(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestOrdinalPopulatorRejectsBigO: the wind prefetch depends on
+// BlockOrdinalUpdate being the only 'O' writer; the populator must
+// reject 'O'-prefixed keys loudly.
+func TestOrdinalPopulatorRejectsBigO(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db := createOrdinalDB(ctx, t)
+	ordData := map[tbcd.OrdinalKey]tbcd.OrdinalValue{
+		{'O', 0x01}: {0x02},
+	}
+	if err := db.OrdinalPopulatorUpdate(ctx, ordData, nil); err == nil {
+		t.Fatal("populator accepted an 'O' key")
+	}
+}
