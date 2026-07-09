@@ -897,9 +897,10 @@ func txOutTotal(txOut []*wire.TxOut) uint64 {
 }
 
 // inputOutputValue returns the satoshi value of the output at txid:vout.
-// Uses the outputValueCache: on miss, fetches the raw block bytes via
-// BlockRawByHash and uses lazyBlock to find the tx and extract output
-// values without deserializing the entire block.
+// Uses the outputValueCache: on miss, does a ranged read of just the
+// tx bytes via BlockTxRawByLoc (TxLoc-guided) and verifies the bytes
+// hash to the requested txid; legacy entries without a TxLoc fall back
+// to BlockRawByHash + lazyBlock, which locates the tx by hash.
 func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Hash, vout uint32) (uint64, error) {
 	// Cache hit path.
 	if i.outputValueCache != nil {
@@ -917,29 +918,39 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 		return 0, fmt.Errorf("tx %v: %w", txid, err)
 	}
 
-	// Fetch raw block bytes — no deserialization.
-	raw, err := i.g.db.BlockRawByHash(ctx, *blockHash)
-	if err != nil {
-		return 0, fmt.Errorf("block raw %v: %w", blockHash, err)
-	}
-
 	var vals []uint64
 	if loc != nil && loc.TxLen > 0 {
-		// Fast path: TxLoc available, extract output values directly.
-		if loc.TxStart+loc.TxLen > len(raw) {
-			return 0, fmt.Errorf("tx loc out of range: %d+%d > %d",
-				loc.TxStart, loc.TxLen, len(raw))
+		// Fast path: TxLoc available. Ranged read of just the tx
+		// bytes — one pread of loc.TxLen instead of the whole
+		// multi-MB block.
+		raw, err := i.g.db.BlockTxRawByLoc(ctx, *blockHash, *loc)
+		if err != nil {
+			return 0, fmt.Errorf("block tx raw %v: %w", blockHash, err)
 		}
 		var msgTx wire.MsgTx
-		if err := msgTx.Deserialize(bytes.NewReader(raw[loc.TxStart : loc.TxStart+loc.TxLen])); err != nil {
+		if err := msgTx.Deserialize(bytes.NewReader(raw)); err != nil {
 			return 0, fmt.Errorf("deserialize tx at offset %d: %w", loc.TxStart, err)
+		}
+		// The ranged read trusts the tx index's loc; unlike the
+		// legacy path (which locates the tx BY hash) nothing else
+		// verifies these bytes are the requested tx. One sha256d
+		// converts an in-range-but-wrong loc from silently feeding
+		// another tx's values into sat arithmetic into a loud error.
+		if gotTxid := msgTx.TxHash(); gotTxid != txid {
+			return 0, fmt.Errorf("tx loc corrupt: got %v want %v in block %v",
+				gotTxid, txid, blockHash)
 		}
 		vals = make([]uint64, len(msgTx.TxOut))
 		for j, out := range msgTx.TxOut {
 			vals[j] = uint64(out.Value)
 		}
 	} else {
-		// Slow path: legacy entry, scan with lazyBlock.
+		// Slow path: legacy entry without TxLoc, fetch the whole
+		// block and scan with lazyBlock.
+		raw, err := i.g.db.BlockRawByHash(ctx, *blockHash)
+		if err != nil {
+			return 0, fmt.Errorf("block raw %v: %w", blockHash, err)
+		}
 		lb, err := newLazyBlock(raw)
 		if err != nil {
 			return 0, fmt.Errorf("lazy block %v: %w", blockHash, err)

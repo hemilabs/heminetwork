@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
@@ -2267,5 +2268,141 @@ func TestLevelSharedCacheWiring(t *testing.T) {
 	if blockBytes != levelBlockCacheSize || openFiles != levelOpenFiles {
 		t.Fatalf("shared cache capacities not wired: got %d/%d, want %d/%d",
 			blockBytes, openFiles, levelBlockCacheSize, levelOpenFiles)
+	}
+}
+
+// TestBlockTxRawByLoc reads one transaction's bytes via a ranged read
+// and verifies them against slicing the whole raw block.
+func TestBlockTxRawByLoc(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	cfg, err := NewConfig("localnet", t.TempDir(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Store raw "block" bytes directly in the raw pool; the ranged
+	// read is agnostic to block structure.
+	var hash chainhash.Hash
+	hash[0] = 0x5b
+	raw := make([]byte, 2048)
+	for i := range raw {
+		raw[i] = byte(i * 7)
+	}
+	if err := db.rawPool[level.BlocksDB].Insert(hash[:], raw); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.BlockTxRawByLoc(ctx, hash, wire.TxLoc{TxStart: 300, TxLen: 400})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, raw[300:700]) {
+		t.Fatal("ranged read returned wrong bytes")
+	}
+
+	// Range beyond the block must fail.
+	if _, err := db.BlockTxRawByLoc(ctx, hash, wire.TxLoc{TxStart: 2000, TxLen: 100}); err == nil {
+		t.Fatal("expected out-of-range error")
+	}
+	// Invalid loc must fail.
+	if _, err := db.BlockTxRawByLoc(ctx, hash, wire.TxLoc{TxStart: -1, TxLen: 10}); err == nil {
+		t.Fatal("expected invalid loc error")
+	}
+	if _, err := db.BlockTxRawByLoc(ctx, hash, wire.TxLoc{TxStart: 0, TxLen: 0}); err == nil {
+		t.Fatal("expected invalid loc error")
+	}
+	// Oversized loc fields must be rejected, not truncated to uint32:
+	// silent truncation would return the wrong bytes with a nil error.
+	if _, err := db.BlockTxRawByLoc(ctx, hash, wire.TxLoc{TxStart: 1<<32 + 300, TxLen: 400}); err == nil {
+		t.Fatal("expected oversized TxStart rejection")
+	}
+	if _, err := db.BlockTxRawByLoc(ctx, hash, wire.TxLoc{TxStart: 300, TxLen: 1 << 32}); err == nil {
+		t.Fatal("expected oversized TxLen rejection")
+	}
+	// Unknown block maps to BlockNotFoundError.
+	var missing chainhash.Hash
+	missing[0] = 0x5c
+	_, err = db.BlockTxRawByLoc(ctx, missing, wire.TxLoc{TxStart: 0, TxLen: 1})
+	var bnf database.BlockNotFoundError
+	if !errors.As(err, &bnf) {
+		t.Fatalf("want BlockNotFoundError, got %v", err)
+	}
+}
+
+// TestBlockTxRawByLocRealBlock composes the three real pieces this
+// feature depends on: a genuine serialized block in the raw pool, the
+// TxLocs the tx indexer records (btcutil block.TxLoc()), and the
+// ranged read. Each loc must select bytes that deserialize to exactly
+// that transaction — pinning TxLoc/serialization alignment.
+func TestBlockTxRawByLocRealBlock(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	cfg, err := NewConfig("localnet", t.TempDir(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Regtest genesis block: a real block with a real coinbase; add a
+	// second tx with witness data to pin witness-inclusive TxLocs.
+	msg := chaincfg.RegressionNetParams.GenesisBlock.Copy()
+	wtx := wire.NewMsgTx(wire.TxVersion)
+	var prev chainhash.Hash
+	prev[0] = 0x9d
+	wtx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: *wire.NewOutPoint(&prev, 0),
+		Witness:          wire.TxWitness{{0x01, 0x02, 0x03}},
+	})
+	wtx.AddTxOut(wire.NewTxOut(1234, []byte{0x51}))
+	if err := msg.AddTransaction(wtx); err != nil {
+		t.Fatal(err)
+	}
+
+	blk := btcutil.NewBlock(msg)
+	raw, err := blk.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	locs, err := blk.TxLoc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := *blk.Hash()
+	if err := db.rawPool[level.BlocksDB].Insert(hash[:], raw); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, tx := range blk.Transactions() {
+		got, err := db.BlockTxRawByLoc(ctx, hash, locs[i])
+		if err != nil {
+			t.Fatalf("tx %d: %v", i, err)
+		}
+		var msgTx wire.MsgTx
+		if err := msgTx.Deserialize(bytes.NewReader(got)); err != nil {
+			t.Fatalf("tx %d: ranged bytes do not deserialize: %v", i, err)
+		}
+		if gotHash := msgTx.TxHash(); gotHash != *tx.Hash() {
+			t.Fatalf("tx %d: got %v want %v", i, gotHash, tx.Hash())
+		}
 	}
 }

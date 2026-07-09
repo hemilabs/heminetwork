@@ -113,6 +113,15 @@ type Database interface {
 	// BlocksInsert(ctx context.Context, bs []*btcutil.Block) (int64, error)
 	BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Block, error)
 	BlockRawByHash(ctx context.Context, hash chainhash.Hash) ([]byte, error)
+	// BlockTxRawByLoc returns the raw bytes of the transaction at loc
+	// within the block identified by hash, using a ranged read of just
+	// the transaction instead of fetching the whole block. loc is
+	// TRUSTED and must originate from BlockHashByTxId against the same
+	// store: out-of-range locs return an error, but an in-range wrong
+	// loc returns whatever bytes live there — no validation that they
+	// are a transaction, let alone the requested one. Callers must
+	// deserialize and verify.
+	BlockTxRawByLoc(ctx context.Context, hash chainhash.Hash, loc wire.TxLoc) ([]byte, error)
 	BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool, error)
 	BlockCacheStats() CacheStats
 

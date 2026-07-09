@@ -1684,6 +1684,30 @@ func (l *ldb) BlockRawByHash(ctx context.Context, hash chainhash.Hash) ([]byte, 
 	return eb, nil
 }
 
+// BlockTxRawByLoc returns the raw bytes of one transaction via a
+// ranged read of the raw block store: index lookup plus a single
+// pread of loc.TxLen bytes, instead of reading the whole block.
+func (l *ldb) BlockTxRawByLoc(ctx context.Context, hash chainhash.Hash, loc wire.TxLoc) ([]byte, error) {
+	log.Tracef("BlockTxRawByLoc")
+	defer log.Tracef("BlockTxRawByLoc exit")
+
+	if loc.TxStart < 0 || loc.TxLen <= 0 ||
+		int64(loc.TxStart) > math.MaxUint32 ||
+		int64(loc.TxLen) > math.MaxUint32 {
+		return nil, fmt.Errorf("invalid tx location %v: %v+%v",
+			hash, loc.TxStart, loc.TxLen)
+	}
+	bDB := l.rawPool[level.BlocksDB]
+	b, err := bDB.GetRange(hash[:], uint32(loc.TxStart), uint32(loc.TxLen))
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.BlockNotFoundError{Hash: hash}
+		}
+		return nil, fmt.Errorf("block tx raw get: %w", err)
+	}
+	return b, nil
+}
+
 func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool, error) {
 	log.Tracef("BlockExistsByHash")
 	defer log.Tracef("BlockExistsByHash exit")
