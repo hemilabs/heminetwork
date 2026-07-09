@@ -41,7 +41,9 @@ type ordStubDB struct {
 	// legacyBlocks serves parents whose tx-index entry predates v6:
 	// BlockHashByTxId returns a nil TxLoc (as the real database does,
 	// level.go BlockHashByTxId) and BlockRawByHash serves the full
-	// serialized block for the lazyBlock slow path.
+	// serialized block for the lazyBlock slow path. A nil entry means
+	// "legacy entry whose raw block is missing" and makes
+	// BlockRawByHash report the block as not found.
 	legacyBlocks map[chainhash.Hash][]byte
 
 	mtx         sync.Mutex
@@ -49,10 +51,41 @@ type ordStubDB struct {
 	inflight    int
 	maxInflight int
 	gateWaiters int
+	// rawBlocks serves BlockRawByHash for entries that have a v6 loc
+	// but need the whole-block path (zeroLoc scenarios).
+	rawBlocks map[chainhash.Hash][]byte
 	// overlapGate, when non-nil, blocks the first lookup until a
 	// second concurrent lookup arrives, making observed overlap
 	// deterministic without timing assumptions.
 	overlapGate chan struct{}
+	// badLocLen/badLocOff corrupt the TxLoc returned by
+	// BlockHashByTxId to drive the ranged-read error paths; wrongTx
+	// serves a DIFFERENT valid tx's bytes at the loc; zeroLoc returns
+	// a non-nil TxLoc with TxLen 0 (corrupt/short v6 index value).
+	badLocLen bool
+	badLocOff bool
+	wrongTx   bool
+	zeroLoc   bool
+}
+
+// ordStubPrefix pads stub "blocks" so TxLocs carry a real nonzero
+// TxStart, pinning the offset plumbing of the fast path (real locs
+// are always >= 81: header + varint + coinbase).
+const ordStubPrefix = 80
+
+// stubBlockBytes returns the fake raw block for a parent tx: junk
+// prefix followed by the serialized tx, with the tx's TxLoc.
+func stubBlockBytes(tx *wire.MsgTx) ([]byte, wire.TxLoc, error) {
+	var buf bytes.Buffer
+	if err := tx.Serialize(&buf); err != nil {
+		return nil, wire.TxLoc{}, err
+	}
+	raw := make([]byte, ordStubPrefix+buf.Len())
+	for i := range ordStubPrefix {
+		raw[i] = 0xa5 // junk: misuse of TxStart must not decode
+	}
+	copy(raw[ordStubPrefix:], buf.Bytes())
+	return raw, wire.TxLoc{TxStart: ordStubPrefix, TxLen: buf.Len()}, nil
 }
 
 func (d *ordStubDB) OrdinalBigOByOutpoint(_ context.Context, op tbcd.Outpoint) ([]byte, error) {
@@ -96,16 +129,53 @@ func (d *ordStubDB) BlockHashByTxId(_ context.Context, txId chainhash.Hash) (*ch
 	if !ok {
 		return nil, nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", txId))
 	}
-	var buf bytes.Buffer
-	if err := tx.Serialize(&buf); err != nil {
+	if d.zeroLoc {
+		bh := txId
+		return &bh, &wire.TxLoc{}, nil // corrupt v6 entry: zero loc
+	}
+	_, loc, err := stubBlockBytes(tx)
+	if err != nil {
 		return nil, nil, err
 	}
+	if d.badLocLen {
+		loc.TxLen++ // past the stored bytes: ranged read must fail
+	}
+	if d.badLocOff {
+		loc.TxStart++ // misaligned: deserialize must fail
+		loc.TxLen--
+	}
 	bh := txId // fake block hash: the parent txid itself
-	return &bh, &wire.TxLoc{TxStart: 0, TxLen: buf.Len()}, nil
+	return &bh, &loc, nil
+}
+
+func (d *ordStubDB) BlockTxRawByLoc(_ context.Context, hash chainhash.Hash, loc wire.TxLoc) ([]byte, error) {
+	tx, ok := d.parents[hash] // fake block hash: the parent txid
+	if !ok {
+		return nil, database.BlockNotFoundError{Hash: hash}
+	}
+	if d.wrongTx {
+		// Serve a different, valid transaction's bytes: in-range
+		// wrong locs deserialize fine and must be caught by the
+		// caller's txid verification.
+		other, _ := ordTestParent(0xee, 31337)
+		tx = other
+	}
+	raw, _, err := stubBlockBytes(tx)
+	if err != nil {
+		return nil, err
+	}
+	if loc.TxStart < 0 || loc.TxLen <= 0 || loc.TxStart+loc.TxLen > len(raw) {
+		return nil, fmt.Errorf("range %v+%v exceeds value size %v",
+			loc.TxStart, loc.TxLen, len(raw))
+	}
+	return raw[loc.TxStart : loc.TxStart+loc.TxLen], nil
 }
 
 func (d *ordStubDB) BlockRawByHash(_ context.Context, hash chainhash.Hash) ([]byte, error) {
-	if raw, ok := d.legacyBlocks[hash]; ok {
+	if raw, ok := d.legacyBlocks[hash]; ok && raw != nil {
+		return raw, nil
+	}
+	if raw, ok := d.rawBlocks[hash]; ok {
 		return raw, nil
 	}
 	tx, ok := d.parents[hash]
@@ -924,5 +994,102 @@ func TestNewServerRejectsZeroOrdinalCache(t *testing.T) {
 	cfg.MaxCachedOrdinals = 0
 	if _, err := NewServer(cfg); err == nil {
 		t.Fatal("NewServer accepted MaxCachedOrdinals=0 with ordinal index enabled")
+	}
+}
+
+// TestWindBlockRangedReadErrors drives the three inputOutputValue error
+// branches of the ranged-read fast path and the legacy fallback.
+func TestWindBlockRangedReadErrors(t *testing.T) {
+	build := func(db *ordStubDB) *btcutil.Block {
+		parentA, parentATxid := ordTestParent(1, 10000)
+		db.parents[parentATxid] = parentA
+		_, parentBTxid := ordTestParent(2, 600)
+		tx := wire.NewMsgTx(wire.TxVersion)
+		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentATxid, 0), nil, nil))
+		tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentBTxid, 0), nil, nil))
+		tx.TxIn[1].Witness = buildInscriptionWitness("text/plain", "boom")
+		tx.AddTxOut(wire.NewTxOut(20000, []byte{txscript.OP_TRUE}))
+		return ordTestBlock(800000, 625000000, tx)
+	}
+
+	tests := []struct {
+		name    string
+		mut     func(db *ordStubDB)
+		wantErr string
+	}{
+		{"rangedReadFails", func(db *ordStubDB) { db.badLocLen = true }, "block tx raw"},
+		{"deserializeFails", func(db *ordStubDB) { db.badLocOff = true }, "deserialize tx"},
+		{"legacyBlockMissing", func(db *ordStubDB) {
+			// Legacy tx-index entry (nil TxLoc) whose raw block is
+			// absent: the whole-block fallback must surface the error.
+			for txid := range db.parents {
+				db.legacyBlocks[txid] = nil
+				delete(db.parents, txid)
+			}
+		}, "block raw"},
+		{"wrongTxAtLoc", func(db *ordStubDB) { db.wrongTx = true }, "tx loc corrupt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newOrdStubDB()
+			oi := newOrdTestIndexer(t, db, false)
+			b := build(db)
+			tt.mut(db)
+			err := oi.windBlock(t.Context(), 800000, b.Hash(), b, NewOrdinalCache(1000, 0))
+			if err == nil {
+				t.Fatal("expected wind error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("want %q in error, got: %v", tt.wantErr, err)
+			}
+			if tt.name == "legacyBlockMissing" {
+				// The typed error must survive the %w chain.
+				var bnf database.BlockNotFoundError
+				if !errors.As(err, &bnf) {
+					t.Fatalf("want BlockNotFoundError, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestWindBlockZeroLocFallsBack: a non-nil TxLoc with TxLen 0 (corrupt
+// or short v6 index value) must route to the whole-block fallback, not
+// the ranged read.
+func TestWindBlockZeroLocFallsBack(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	parentA, parentATxid := ordTestParent(1, 10000)
+	db.parents[parentATxid] = parentA
+	db.zeroLoc = true
+	// Serve the raw block for the fallback path.
+	blk := ordTestBlock(799999, 625000000, parentA)
+	var buf bytes.Buffer
+	if err := blk.MsgBlock().Serialize(&buf); err != nil {
+		t.Fatal(err)
+	}
+	db.legacyBlocks[parentATxid] = buf.Bytes()
+	// zeroLoc takes precedence over the legacy branch in the stub's
+	// BlockHashByTxId only when the parent is still present; keep it.
+	delete(db.legacyBlocks, parentATxid)
+	db.rawBlocks = map[chainhash.Hash][]byte{parentATxid: buf.Bytes()}
+
+	_, parentBTxid := ordTestParent(2, 600)
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentATxid, 0), nil, nil))
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentBTxid, 0), nil, nil))
+	tx.TxIn[1].Witness = buildInscriptionWitness("text/plain", "zero loc")
+	tx.AddTxOut(wire.NewTxOut(20000, []byte{txscript.OP_TRUE}))
+	txid := tx.TxHash()
+
+	b := ordTestBlock(800000, 625000000, tx)
+	cache := NewOrdinalCache(1000, 0)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, cache); err != nil {
+		t.Fatal(err)
+	}
+	dst := cache.Map()[tbcd.NewOutpoint(txid, 0)]
+	if dst == nil || dst.Inscriptions[10000] == nil {
+		t.Fatal("zero-loc entry did not resolve via whole-block fallback")
 	}
 }
