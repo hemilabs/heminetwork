@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -29,12 +28,19 @@ import (
 type ordinalIndexer struct {
 	indexerCommon
 
-	runCtx         context.Context
-	cacheCapacity  int
-	workCache      map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue
-	computeInscSat func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error)
-	watermarkGap   time.Duration
-	populating     atomic.Uint32 // reentrancy guard for onSyncComplete
+	runCtx          context.Context
+	cacheCapacity   int
+	workCache       map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue
+	computeInscSat  func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error)
+	watermarkGap    time.Duration
+	populating      atomic.Uint32 // reentrancy guard for onSyncComplete
+	verifyBigO      bool          // cross-check 'O' outputValue against the tx index
+	cacheByteBudget int           // cache flush budget in bytes; 0 = default
+
+	// cache is the live write cache created by newCache; retained so
+	// readCacheInfo can report the byte dimension. Accessed only from
+	// the indexer goroutine.
+	cache *OrdinalCache
 
 	// Watermark state. Loaded from DB on first access, written atomically
 	// via the 'm' prefix OrdinalKey in the ordinal cache.
@@ -54,33 +60,80 @@ var (
 	_ indexer = (*ordinalIndexer)(nil)
 )
 
+// defaultOrdinalCacheByteBudget caps the approximate bytes of key/value
+// payload held in the ordinal cache between flushes. Sub-entry counts
+// alone do not bound memory: 'i' values carry inscription bodies
+// (multi-KB average, hundreds of KB max), so a count cap is anywhere
+// from hundreds of MB to tens of GB depending on chain content. The
+// flush decision triggers on whichever budget (count or bytes) fills
+// first. Per-block overshoot is bounded by consensus (block size).
+const defaultOrdinalCacheByteBudget = 1 << 30 // 1 GiB
+
+// ordinalCacheEntryOverhead approximates the fixed heap cost of one
+// OrdinalCacheEntry: three map headers plus buckets, the outpoint key
+// and the entry pointer in the top-level map.
+const ordinalCacheEntryOverhead = 400
+
+// ordinalCacheSubEntryOverhead approximates the per-sub-entry map
+// bookkeeping (key, value header, bucket share).
+const ordinalCacheSubEntryOverhead = 64
+
 // OrdinalCache wraps map[Outpoint]*OrdinalCacheEntry for the indexer
 // framework. Len() returns a running count of sub-entry writes
 // (inscriptions + predecessors + aux) — this drives the flush decision
 // so the cache accurately reflects DB operation count, not outpoint count.
 // Overwrites cause slight overcount; flush threshold is 95% so early
-// flushing is harmless.
+// flushing is harmless. A byte budget bounds memory independently of
+// the count: Stats reports the fuller of the two dimensions.
 type OrdinalCache struct {
 	capacity   int
+	byteBudget int
 	entryCount int
+	byteCount  int
 	m          map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry
 }
 
-func NewOrdinalCache(capacity int) *OrdinalCache {
+// ordinalCachePresize is the initial bucket reservation for the cache
+// map. Deliberately modest: the map grows to what a window actually
+// needs and Clear releases it again.
+const ordinalCachePresize = 8192
+
+// NewOrdinalCache returns a cache that flushes on whichever budget
+// fills first: capacity sub-entries or byteBudget approximate bytes.
+// byteBudget <= 0 selects the default.
+func NewOrdinalCache(capacity, byteBudget int) *OrdinalCache {
+	if capacity < 1 {
+		// Enforce the divide-by-zero invariant at the single
+		// construction point; NewServer validates the configured
+		// value with a proper error.
+		capacity = defaultMaxCachedOrdinals
+	}
+	if byteBudget <= 0 {
+		byteBudget = defaultOrdinalCacheByteBudget
+	}
 	return &OrdinalCache{
-		capacity: capacity,
-		m:        make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, capacity),
+		capacity:   capacity,
+		byteBudget: byteBudget,
+		m:          make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, ordinalCachePresize),
 	}
 }
 
 func (c *OrdinalCache) Clear() {
-	if c.entryCount > c.capacity+c.capacity/10 {
-		c.m = make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, c.capacity)
-		runtime.GC()
-	} else {
-		clear(c.m)
-	}
+	// Always drop the backing map. clear() would retain the bucket
+	// array at its high-water size forever (Go maps never shrink), so
+	// every overshooting window would ratchet memory up in perpetuity.
+	// Dropping the map frees the previous window — buckets, entries
+	// and inscription bodies — for collection before the next window
+	// starts growing. (Pages return to the OS lazily via the runtime
+	// scavenger; the guarantee here is heap reuse, not RSS.)
+	//
+	// No collection here: flush-path callers (the indexer framework)
+	// run runtime.GC() immediately after Clear, and OOM safety is
+	// carried by the byte budget bounding live growth plus the GC
+	// pacer — not by eager collection.
+	c.m = make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, ordinalCachePresize)
 	c.entryCount = 0
+	c.byteCount = 0
 }
 
 // Len returns the running count of sub-entry writes since the last Clear.
@@ -94,45 +147,66 @@ func (c *OrdinalCache) Cap() int {
 
 func (c *OrdinalCache) Stats() (length int, capacity int, pct int) {
 	length = c.Len()
-	return length, c.Cap(), length * 100 / c.Cap()
+	pct = length * 100 / c.Cap()
+	if bytePct := c.byteCount * 100 / c.byteBudget; bytePct > pct {
+		pct = bytePct
+	}
+	return length, c.Cap(), pct
 }
 
 func (c *OrdinalCache) Map() map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry {
 	return c.m
 }
 
-// PutInscription writes an 'o' sub-entry and increments the counter.
+// PutInscription writes an 'o' sub-entry and increments the counters.
 func (c *OrdinalCache) PutInscription(op tbcd.Outpoint, offset uint64, v []byte) {
-	e := getEntry(c.m, op)
+	e := c.getEntry(op)
 	e.Inscriptions[offset] = v
 	c.entryCount++
+	c.byteCount += ordinalCacheSubEntryOverhead + len(v)
 }
 
-// PutPredecessor writes a 'p' sub-entry and increments the counter.
+// PutPredecessor writes a 'p' sub-entry and increments the counters.
 func (c *OrdinalCache) PutPredecessor(op tbcd.Outpoint, offset uint64, v []byte) {
-	e := getEntry(c.m, op)
+	e := c.getEntry(op)
 	e.Predecessors[offset] = v
 	c.entryCount++
+	c.byteCount += ordinalCacheSubEntryOverhead + len(v)
 }
 
 // PutBigO writes the 'O' acceleration entry for an outpoint.
 // v == nil signals deletion (tombstone).
 func (c *OrdinalCache) PutBigO(op tbcd.Outpoint, v []byte) {
-	e := getEntry(c.m, op)
+	e := c.getEntry(op)
 	e.BigO = v
 	e.BigOSet = true
 	c.entryCount++
+	c.byteCount += ordinalCacheSubEntryOverhead + len(v)
 }
 
-// PutAux writes a non-outpoint sub-entry ('i','n','a','m') and increments the counter.
+// PutAux writes a non-outpoint sub-entry ('i','n','a','m') and increments the counters.
 func (c *OrdinalCache) PutAux(op tbcd.Outpoint, key tbcd.OrdinalKey, v tbcd.OrdinalValue) {
-	e := getEntry(c.m, op)
+	e := c.getEntry(op)
 	e.Aux[key] = v
 	c.entryCount++
+	c.byteCount += ordinalCacheSubEntryOverhead + len(key) + len(v.Bytes())
 }
 
-// getEntry returns the cache entry for op, creating it if absent.
-func getEntry(cache map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, op tbcd.Outpoint) *tbcd.OrdinalCacheEntry {
+// getEntry returns the cache entry for op, creating and accounting it
+// if absent.
+func (c *OrdinalCache) getEntry(op tbcd.Outpoint) *tbcd.OrdinalCacheEntry {
+	if e, ok := c.m[op]; ok {
+		return e
+	}
+	c.byteCount += ordinalCacheEntryOverhead
+	return rawGetEntry(c.m, op)
+}
+
+// rawGetEntry returns the entry for op in a raw cache map, creating it
+// if absent. It performs NO byte accounting — use the OrdinalCache
+// method on live caches; this exists for map construction outside the
+// accounted cache (tests, fixtures).
+func rawGetEntry(cache map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, op tbcd.Outpoint) *tbcd.OrdinalCacheEntry {
 	e, ok := cache[op]
 	if !ok {
 		e = &tbcd.OrdinalCacheEntry{
@@ -145,28 +219,43 @@ func getEntry(cache map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, op tbcd.Outpoint)
 	return e
 }
 
-func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enabled bool, ordinalGenesis *HashHeight, computeInscSat func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error), watermarkGap time.Duration, outputValueCacheSize int) Indexer {
+// OrdinalIndexerConfig carries the ordinal indexer construction
+// parameters.
+type OrdinalIndexerConfig struct {
+	CacheLen             int // flush budget in cache sub-entries
+	CacheByteBudget      int // flush budget in bytes; 0 = default
+	Enabled              bool
+	Genesis              *HashHeight // ordinal genesis override
+	ComputeInscSat       func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error)
+	WatermarkGap         time.Duration
+	OutputValueCacheSize int  // LRU for parent tx output values; 0 disables
+	VerifyBigO           bool // debug: cross-check 'O' values against the tx index
+}
+
+func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexerConfig) Indexer {
 	oi := &ordinalIndexer{
-		runCtx:         ctx,
-		cacheCapacity:  cacheLen,
-		workCache:      make(map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue),
-		computeInscSat: computeInscSat,
-		watermarkGap:   watermarkGap,
+		runCtx:          ctx,
+		cacheCapacity:   cfg.CacheLen,
+		cacheByteBudget: cfg.CacheByteBudget,
+		workCache:       make(map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue),
+		computeInscSat:  cfg.ComputeInscSat,
+		watermarkGap:    cfg.WatermarkGap,
+		verifyBigO:      cfg.VerifyBigO,
 	}
 	oi.indexerCommon = indexerCommon{
 		name:    "ordinal",
-		enabled: enabled,
+		enabled: cfg.Enabled,
 		g:       g,
 		p:       oi,
-		genesis: ordinalGenesis,
+		genesis: cfg.Genesis,
 		// Ordinal indexing is much slower than the other indexers,
 		// log progress more often.
 		logInterval: 1000,
 	}
-	if outputValueCacheSize > 0 {
+	if cfg.OutputValueCacheSize > 0 {
 		var err error
 		oi.outputValueCache, err = lru.New(
-			outputValueCacheSize,
+			cfg.OutputValueCacheSize,
 			func(_ chainhash.Hash, v []uint64) int {
 				// Key: 32 bytes (chainhash.Hash)
 				// Value: 24 (slice header) + 8*len (backing array)
@@ -182,7 +271,8 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cacheLen int, enab
 }
 
 func (i *ordinalIndexer) newCache() indexerCache {
-	return NewOrdinalCache(i.cacheCapacity)
+	i.cache = NewOrdinalCache(i.cacheCapacity, i.cacheByteBudget)
+	return i.cache
 }
 
 func (i *ordinalIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -309,6 +399,16 @@ type flotsam struct {
 	srcBlockHash   chainhash.Hash
 	srcOutputValue uint64
 	srcHasO        bool // true if srcBlockHash/srcOutputValue are valid
+}
+
+// flotsamMatchIdx returns the input index that positions a flotsam in
+// the FIFO stream: the reveal input for reveals (from the inscription
+// ID), the spending input for transfers.
+func flotsamMatchIdx(f *flotsam) uint32 {
+	if f.isReveal {
+		return binary.LittleEndian.Uint32(f.inscID[32:36])
+	}
+	return f.srcInputIdx
 }
 
 // ordinalRevealSentinel marks an 'o' entry as a reveal (no prior location
@@ -471,24 +571,28 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		// (which is ordinalRevealSentinel for reveals and must stay that
 		// way in the stored 'o' value for unwind compatibility).
 		expStart := time.Now()
-		var maxIdx uint32
-		for fi := range fl {
-			var idx uint32
-			if fl[fi].isReveal {
-				idx = binary.LittleEndian.Uint32(fl[fi].inscID[32:36])
-			} else {
-				idx = fl[fi].srcInputIdx
-			}
-			if idx > maxIdx {
-				maxIdx = idx
-			}
-		}
-		// Parallel fetch: pre-fetch all input values 0..maxIdx
+		// Sort flotsam by their positioning input up front: the
+		// FIFO walk below is then O(F + maxIdx) instead of the
+		// quadratic O(F x maxIdx) scan an inscription-sweep tx
+		// (thousands of inscribed inputs in one tx) could exploit.
+		// fl is re-sorted by pos afterwards, so this order is free.
+		sort.Slice(fl, func(a, b int) bool {
+			return flotsamMatchIdx(&fl[a]) < flotsamMatchIdx(&fl[b])
+		})
+		maxIdx := flotsamMatchIdx(&fl[len(fl)-1])
+		// Parallel fetch: pre-fetch input values 0..maxIdx-1
 		// concurrently. Each goroutine writes to a disjoint slot
 		// in the values slice — no mutex needed. Follows the UTXO
 		// fixupCacheChannel pattern: bounded semaphore channel,
 		// WaitGroup, token return on completion.
-		fetchCount := int(maxIdx) + 1
+		//
+		// A flotsam's FIFO position depends only on the values of
+		// the inputs BEFORE it: the positioning loop below adds
+		// values[idx] to the running sum after matching flotsam at
+		// idx, so the value of the last flotsam-bearing input
+		// (maxIdx) is never consumed. For the dominant 1-input
+		// shape (mints, simple transfers) this means zero fetches.
+		fetchCount := int(maxIdx)
 		values := make([]uint64, fetchCount)
 		errs := make([]error, fetchCount)
 		txIns := tx.MsgTx().TxIn
@@ -501,19 +605,26 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				continue
 			}
 			idx := fl[fi].srcInputIdx
-			if int(idx) < fetchCount {
-				// Verify O outputValue matches inputOutputValue.
-				// Zero mainnet evidence for transfers — panic on
-				// mismatch. Remove this assert once verified.
+			if i.verifyBigO {
+				// Debug cross-check: verify 'O' outputValue
+				// against the tx index for every 'O'-carried
+				// transfer, including ones whose value is never
+				// consumed. Re-does the lookup the 'O' entry
+				// exists to skip. A lookup failure is a normal
+				// error (disk, shutdown) and is returned; only a
+				// genuine value mismatch — a corrupt ordinal
+				// index — panics.
 				prevOut := txIns[idx].PreviousOutPoint
 				iov, ioverr := i.inputOutputValue(ctx, prevOut.Hash, prevOut.Index)
 				if ioverr != nil {
-					panic(fmt.Sprintf("bigO verify iov %v: %v", prevOut, ioverr))
+					return fmt.Errorf("bigO verify iov %v: %w", prevOut, ioverr)
 				}
 				if iov != fl[fi].srcOutputValue {
-					panic(fmt.Sprintf("bigO outputValue mismatch at %v: O=%d iov=%d",
+					panic(fmt.Sprintf("ordinal index corrupt: 'O' outputValue mismatch at %v: O=%d tx index=%d; delete the ordinals database and reindex, and report this",
 						prevOut, fl[fi].srcOutputValue, iov))
 				}
+			}
+			if int(idx) < fetchCount {
 				values[idx] = fl[fi].srcOutputValue
 				filled[idx] = true
 			}
@@ -566,25 +677,23 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 		}
 
-		// Sequential FIFO positioning using fetched values.
+		// Sequential FIFO positioning using fetched values: walk
+		// inputs once with a running prefix sum, advancing through
+		// the matchIdx-sorted flotsam. The last flotsam input's own
+		// value was not fetched and is never added. O(F + maxIdx).
 		var inputValue uint64
-		for idx := range fetchCount {
-			for fi := range fl {
-				var matchIdx uint32
-				if fl[fi].isReveal {
-					matchIdx = binary.LittleEndian.Uint32(fl[fi].inscID[32:36])
-				} else {
-					matchIdx = fl[fi].srcInputIdx
-				}
-				if matchIdx == uint32(idx) {
-					if fl[fi].isReveal {
-						fl[fi].pos = inputValue
-					} else {
-						fl[fi].pos = inputValue + fl[fi].srcOffset
-					}
+		idx := 0
+		for fi := range fl {
+			for m := int(flotsamMatchIdx(&fl[fi])); idx < m; idx++ {
+				if idx < fetchCount {
+					inputValue += values[idx]
 				}
 			}
-			inputValue += values[idx]
+			if fl[fi].isReveal {
+				fl[fi].pos = inputValue
+			} else {
+				fl[fi].pos = inputValue + fl[fi].srcOffset
+			}
 		}
 		expensiveTime += time.Since(expStart)
 
@@ -671,10 +780,14 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 		// NOTE: blockFeeBase is only accumulated from flotsam txs
 		// (non-flotsam txs skip before reaching this line) and
-		// inputValue only covers inputs 0..maxIdx (shortcircuit).
+		// inputValue only covers inputs 0..maxIdx-1 (shortcircuit;
+		// the last flotsam input's value is not fetched at all).
 		// This makes feePoolOff incorrect for fee-carried inscriptions,
-		// which are practically nonexistent on mainnet.
-		blockFeeBase += inputValue - outTotal
+		// which are practically nonexistent on mainnet. Guard the
+		// subtraction so the undercounted inputValue cannot wrap.
+		if inputValue > outTotal {
+			blockFeeBase += inputValue - outTotal
+		}
 	}
 
 	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls cheap %v expensive %v total %v",
@@ -811,7 +924,7 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 	}
 
 	var vals []uint64
-	if loc.TxLen > 0 {
+	if loc != nil && loc.TxLen > 0 {
 		// Fast path: TxLoc available, extract output values directly.
 		if loc.TxStart+loc.TxLen > len(raw) {
 			return 0, fmt.Errorf("tx loc out of range: %d+%d > %d",
@@ -1302,7 +1415,15 @@ func (i *ordinalIndexer) populateWork() {
 	}
 }
 
-func (i *ordinalIndexer) readCacheInfo() string { return "" }
+// readCacheInfo reports the byte dimension of the live cache so
+// byte-triggered flushes are distinguishable from count-triggered
+// ones in the indexer progress logs.
+func (i *ordinalIndexer) readCacheInfo() string {
+	if i.cache == nil {
+		return ""
+	}
+	return fmt.Sprintf(" bytes %v/%v", i.cache.byteCount, i.cache.byteBudget)
+}
 
 // Key construction helpers. These match the SOW prefix scheme exactly.
 
