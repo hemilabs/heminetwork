@@ -11,8 +11,11 @@ import (
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/database"
+	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
@@ -497,5 +500,330 @@ func TestBlockOrdinalUpdateAtomicData(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("'w' work entry not committed in same call: got %d entries", len(entries))
+	}
+}
+
+// TestBlockOrdinalUpdateChunkedBatch shrinks the flush chunk size so a
+// single BlockOrdinalUpdate spans many mid-loop chunk writes (both put
+// and delete paths), then verifies every record — and the index-hash
+// pointer written in the final chunk — survives intact.
+func TestBlockOrdinalUpdateChunkedBatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db := createOrdinalDB(ctx, t)
+	db.ordinalBatchChunkSize = 4096
+	var flushes int
+	innerWrite := db.ordinalTxWrite
+	db.ordinalTxWrite = func(tx *leveldb.Transaction, b *leveldb.Batch) error {
+		flushes++
+		return innerWrite(tx, b)
+	}
+
+	const outpoints = 64
+	value := func(i int) []byte {
+		v := make([]byte, 512)
+		for j := range v {
+			v[j] = byte(i + 1)
+		}
+		return v
+	}
+
+	cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+	ops := make([]tbcd.Outpoint, 0, outpoints)
+	for i := range outpoints {
+		txid := chainhash.Hash{byte(i), 0x77}
+		op := tbcd.NewOutpoint(txid, uint32(i))
+		ops = append(ops, op)
+		e := testGetEntry(cache, op)
+		v := value(i)
+		e.Inscriptions[uint64(i)] = v
+		e.Predecessors[uint64(i)] = v
+		e.BigO = v[:40]
+		e.BigOSet = true
+	}
+	workCache := make(map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue)
+	for i := range 8 {
+		var k tbcd.OrdinalWorkKey
+		k[0] = 'w'
+		k[1] = byte(i)
+		workCache[k] = tbcd.OrdinalWorkValue{0x01}
+	}
+
+	indexHash := chainhash.Hash{0xaa}
+	if err := db.BlockOrdinalUpdate(ctx, 1, cache, workCache, indexHash); err != nil {
+		t.Fatal(err)
+	}
+	// ~64 outpoints x ~1.7KB of records against a 4096-byte chunk must
+	// have produced many chunk writes; assert chunking actually
+	// happened so accounting regressions cannot silently degrade this
+	// test to a single monolithic write.
+	if flushes < 15 {
+		t.Fatalf("expected many chunk flushes, got %d", flushes)
+	}
+
+	for i, op := range ops {
+		located, err := db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(located) != 1 {
+			t.Fatalf("op %d: got %d entries, want 1", i, len(located))
+		}
+		if located[0].Offset != uint64(i) {
+			t.Fatalf("op %d: offset %d", i, located[0].Offset)
+		}
+		if len(located[0].Value) != 512 || located[0].Value[100] != byte(i+1) {
+			t.Fatalf("op %d: value corrupted after chunked write", i)
+		}
+		bigO, err := db.OrdinalBigOByOutpoint(ctx, op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(bigO) != 40 || bigO[0] != byte(i+1) {
+			t.Fatalf("op %d: 'O' corrupted after chunked write", i)
+		}
+	}
+
+	// Index-hash pointer must land with the final flush.
+	gotHash, err := db.pool[level.OrdinalDB].Get(ordinalIndexHashKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh := chainhash.Hash(gotHash)
+	if !gh.IsEqual(&indexHash) {
+		t.Fatalf("index hash: got %x", gotHash)
+	}
+
+	// Second pass: tombstone everything, exercising the delete flush path.
+	cache = make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+	for i, op := range ops {
+		e := testGetEntry(cache, op)
+		e.Inscriptions[uint64(i)] = nil
+		e.Predecessors[uint64(i)] = nil
+		e.BigO = nil
+		e.BigOSet = true
+	}
+	workCache = make(map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue)
+	for i := range 8 {
+		var k tbcd.OrdinalWorkKey
+		k[0] = 'w'
+		k[1] = byte(i)
+		workCache[k] = tbcd.OrdinalWorkValueDelete
+	}
+	if err := db.BlockOrdinalUpdate(ctx, 1, cache, workCache, chainhash.Hash{0xbb}); err != nil {
+		t.Fatal(err)
+	}
+	for i, op := range ops {
+		located, err := db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(located) != 0 {
+			t.Fatalf("op %d: %d entries survive tombstoning", i, len(located))
+		}
+		bigO, err := db.OrdinalBigOByOutpoint(ctx, op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bigO != nil {
+			t.Fatalf("op %d: 'O' survives tombstoning", i)
+		}
+	}
+}
+
+// TestBlockOrdinalUpdateInvalidDirection rejects directions other than
+// wind (1) and unwind (-1).
+func TestBlockOrdinalUpdateInvalidDirection(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db := createOrdinalDB(ctx, t)
+	if err := db.BlockOrdinalUpdate(ctx, 0, nil, nil, chainhash.Hash{}); err == nil {
+		t.Fatal("direction 0 accepted")
+	}
+}
+
+// TestBlockOrdinalUpdateWriteErrors injects flush failures to verify
+// every record loop propagates a chunk-write error, and covers the
+// empty-final-flush path.
+func TestBlockOrdinalUpdateWriteErrors(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db := createOrdinalDB(ctx, t)
+	realWrite := db.ordinalTxWrite
+
+	errBoom := errors.New("boom")
+	op := tbcd.NewOutpoint(chainhash.Hash{0x42}, 1)
+	v := make([]byte, 40)
+
+	mk := func(mut func(e *tbcd.OrdinalCacheEntry)) map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry {
+		m := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+		mut(testGetEntry(m, op))
+		return m
+	}
+
+	// Each case carries TWO records of one kind: flush-before-append
+	// means the first append never flushes and the second triggers the
+	// failing flush inside that record loop, pinning each loop's error
+	// branch. bigO needs two outpoints (one 'O' per entry); indexhash
+	// carries one prior record so the index-hash put flushes.
+	mk2 := func(mut func(e *tbcd.OrdinalCacheEntry)) map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry {
+		m := mk(mut)
+		op2 := tbcd.NewOutpoint(chainhash.Hash{0x43}, 2)
+		mut(testGetEntry(m, op2))
+		return m
+	}
+	cases := []struct {
+		name  string
+		data  map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry
+		work  map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue
+		chunk int
+	}{
+		{"inscription", mk(func(e *tbcd.OrdinalCacheEntry) { e.Inscriptions[0] = v; e.Inscriptions[1] = v }), nil, 1},
+		{"predecessor", mk(func(e *tbcd.OrdinalCacheEntry) { e.Predecessors[0] = v; e.Predecessors[1] = v }), nil, 1},
+		{"bigO", mk2(func(e *tbcd.OrdinalCacheEntry) { e.BigO = v; e.BigOSet = true }), nil, 1},
+		{"aux", mk(func(e *tbcd.OrdinalCacheEntry) {
+			e.Aux[tbcd.OrdinalKey{0x01}] = tbcd.OrdinalValue{0x02}
+			e.Aux[tbcd.OrdinalKey{0x03}] = tbcd.OrdinalValue{0x04}
+		}), nil, 1},
+		{"work", nil, map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue{{0x77}: {0x01}, {0x78}: {0x02}}, 1},
+		{"indexhash", nil, map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue{{0x79}: {0x01}}, 1},
+		{"finalflush", nil, nil, 1 << 20},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db.ordinalBatchChunkSize = tc.chunk
+			db.ordinalTxWrite = func(*leveldb.Transaction, *leveldb.Batch) error {
+				return errBoom
+			}
+			err := db.BlockOrdinalUpdate(ctx, 1, tc.data, tc.work, chainhash.Hash{0x99})
+			if !errors.Is(err, errBoom) {
+				t.Fatalf("want injected error, got %v", err)
+			}
+		})
+	}
+
+	// Restore the writer; with chunk size 1 every record flushes
+	// before the next append, so the final flush sees an empty batch
+	// (pending==0) and the update must still succeed end to end.
+	db.ordinalTxWrite = realWrite
+	db.ordinalBatchChunkSize = 1
+	data := mk(func(e *tbcd.OrdinalCacheEntry) { e.Inscriptions[7] = v })
+	if err := db.BlockOrdinalUpdate(ctx, 1, data, nil, chainhash.Hash{0x99}); err != nil {
+		t.Fatal(err)
+	}
+	located, err := db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(located) != 1 || located[0].Offset != 7 {
+		t.Fatalf("record lost with chunk size 1: %+v", located)
+	}
+}
+
+// TestBlockOrdinalUpdateClosedDB covers the transaction-open failure.
+func TestBlockOrdinalUpdateClosedDB(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	cfg, err := NewConfig("localnet", t.TempDir(), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = db.BlockOrdinalUpdate(ctx, 1, nil, nil, chainhash.Hash{})
+	if err == nil {
+		t.Fatal("closed DB accepted ordinal update")
+	}
+	if !errors.Is(err, leveldb.ErrClosed) {
+		t.Fatalf("want leveldb.ErrClosed, got %v", err)
+	}
+}
+
+// BenchmarkBlockOrdinalUpdate pins the dense-zone flush shape:
+// ~2k outpoints carrying 'o'+'p'+'O'+aux records with multi-hundred
+// byte bodies (~8k records/iter). Expected (dev box): ~10ms/op,
+// dominated by leveldb transaction writes, zero batch regrowth.
+func BenchmarkBlockOrdinalUpdate(b *testing.B) {
+	ctx, cancel := context.WithCancel(b.Context())
+	defer cancel()
+
+	home := b.TempDir()
+	cfg, err := NewConfig("localnet", home, "", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			b.Fatal(err)
+		}
+	}()
+
+	mkData := func(seed byte) map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry {
+		data := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, 2048)
+		body := make([]byte, 512)
+		for i := range 2048 {
+			var h chainhash.Hash
+			h[0], h[1], h[2] = byte(i), byte(i>>8), seed
+			op := tbcd.NewOutpoint(h, uint32(i))
+			e := testGetEntry(data, op)
+			e.Inscriptions[uint64(i)] = body
+			e.Predecessors[uint64(i)] = body
+			e.BigO = body[:40]
+			e.BigOSet = true
+			e.Aux[tbcd.OrdinalKey{byte(i), byte(i >> 8), seed}] = body
+		}
+		return data
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		data := mkData(byte(i)) // maps are consumed per call
+		b.StartTimer()
+		if err := db.BlockOrdinalUpdate(ctx, 1, data, nil,
+			chainhash.Hash{byte(i)}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// TestBlockOrdinalUpdateDebugStats exercises the post-commit leveldb
+// property logging with debug enabled.
+func TestBlockOrdinalUpdateDebugStats(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db := createOrdinalDB(ctx, t)
+	if err := loggo.ConfigureLoggers("level=DEBUG"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		// ConfigureLoggers never resets modules it does not name, so
+		// the module must be restored explicitly or the whole package
+		// keeps running at DEBUG.
+		if err := loggo.ConfigureLoggers("level=INFO"); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
+	e := testGetEntry(cache, tbcd.NewOutpoint(chainhash.Hash{0x99}, 0))
+	e.Inscriptions[0] = make([]byte, 40)
+	if err := db.BlockOrdinalUpdate(ctx, 1, cache, nil, chainhash.Hash{0x01}); err != nil {
+		t.Fatal(err)
 	}
 }

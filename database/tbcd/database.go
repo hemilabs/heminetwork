@@ -148,6 +148,10 @@ type Database interface {
 
 	// Ordinals
 	BlockHeaderByOrdinalIndex(ctx context.Context) (*BlockHeader, error)
+	// BlockOrdinalUpdate atomically writes ordinal cache and work maps
+	// plus the index-hash checkpoint. The maps are CONSUMED; after an
+	// error their contents are undefined and must be discarded — never
+	// retry with the same maps.
 	BlockOrdinalUpdate(ctx context.Context, direction int, data map[Outpoint]*OrdinalCacheEntry, work map[OrdinalWorkKey]OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error
 	ReadOrdinalWork(ctx context.Context, belowHeight uint32, limit int) ([]OrdinalWorkEntry, error)
 	OrdinalWatermarkGet(ctx context.Context) (uint32, bool, error)
