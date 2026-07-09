@@ -90,7 +90,7 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 
 	// Aux entries ('i', 'n', 'a') are carried on the outpoint they relate to.
 	// Use seed.outpoint as the host for the first inscription's aux.
-	entry1 := getEntry(cache, seed.outpoint)
+	entry1 := rawGetEntry(cache, seed.outpoint)
 
 	// 'i': inscription value (sat number + block hash + flags).
 	entry1.Aux[ordinalInscriptionKey(seed.inscID)] = tbcd.OrdinalValue(encodeInscriptionValue(
@@ -111,7 +111,7 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	delegate := [36]byte{0xdd, 0xee, 0xff} // delegate inscription ID
 
 	outpoint2 := tbcd.NewOutpoint(seed.txid2, 0)
-	entry2 := getEntry(cache, outpoint2)
+	entry2 := rawGetEntry(cache, outpoint2)
 
 	entry2.Aux[ordinalInscriptionKey(seed.inscID2)] = tbcd.OrdinalValue(encodeInscriptionValue(
 		seed.sat2, &seed.blockHash, true, &InscriptionEnvelope{
@@ -897,7 +897,7 @@ func BenchmarkLocatedAtOutpoint(b *testing.B) {
 			var txid chainhash.Hash
 			binary.BigEndian.PutUint64(txid[:8], uint64(n))
 			nop := tbcd.NewOutpoint(txid, 0)
-			entry := getEntry(cache, nop)
+			entry := rawGetEntry(cache, nop)
 			entry.Inscriptions[0] = encodeOutpointValue([36]byte{byte(n)}, srcKindReveal, 0, ordinalRevealSentinel, 0)
 		}
 		b.Run(fmt.Sprintf("cache=%d", cacheSize), func(b *testing.B) {
@@ -918,7 +918,7 @@ func BenchmarkLocatedAtOutpoint(b *testing.B) {
 // of the cache redesign — flush decisions must reflect actual DB
 // operation count.
 func TestOrdinalCacheLenCountsSubEntries(t *testing.T) {
-	cache := NewOrdinalCache(1000)
+	cache := NewOrdinalCache(1000, 0)
 
 	if cache.Len() != 0 {
 		t.Fatalf("empty cache: Len() = %d, want 0", cache.Len())
@@ -971,10 +971,10 @@ func TestGetEntryCreateAndReuse(t *testing.T) {
 	cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry)
 	op := tbcd.NewOutpoint(chainhash.Hash{0x01}, 0)
 
-	e1 := getEntry(cache, op)
+	e1 := rawGetEntry(cache, op)
 	e1.Inscriptions[0] = []byte{0xaa}
 
-	e2 := getEntry(cache, op)
+	e2 := rawGetEntry(cache, op)
 	if e2 != e1 {
 		t.Fatal("getEntry returned different pointer on hit")
 	}

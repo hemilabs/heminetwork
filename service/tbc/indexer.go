@@ -101,6 +101,11 @@ type geometryParams struct {
 	chain *chaincfg.Params
 }
 
+// flushThresholdPct is the cache fullness percentage, in whichever
+// dimension a cache reports (entry count or bytes), at which the
+// indexer flushes to disk.
+const flushThresholdPct = 95
+
 // indexerCommon is the common base for Indexer implementations.
 type indexerCommon struct {
 	name     string
@@ -439,7 +444,7 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 	}
 
-	const percentage = 95 // flush cache at >95% capacity
+	const percentage = flushThresholdPct
 	var blocksProcessed int
 	for {
 		log.Debugf("indexing %vs: %v", c, hh)
@@ -510,7 +515,7 @@ func (c *indexerCommon) parseBlocksReverse(ctx context.Context, endHash *chainha
 		return 0, last, fmt.Errorf("%v index hash: %w", c, err)
 	}
 
-	const percentage = 95 // flush cache at >95% capacity
+	const percentage = flushThresholdPct
 	var blocksProcessed int
 	hh := &HashHeight{Hash: at.Hash, Height: at.Height}
 	for {
