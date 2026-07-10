@@ -35,12 +35,19 @@ type ordinalIndexer struct {
 	watermarkGap    time.Duration
 	populating      atomic.Uint32 // reentrancy guard for onSyncComplete
 	verifyBigO      bool          // cross-check 'O' outputValue against the tx index
+	warm            bool          // enable the per-block parent value warm phase
 	cacheByteBudget int           // cache flush budget in bytes; 0 = default
 
 	// cache is the live write cache created by newCache; retained so
 	// readCacheInfo can report the byte dimension. Accessed only from
 	// the indexer goroutine.
 	cache *OrdinalCache
+
+	// warmedParents is the number of unique parent txids dispatched to
+	// the warm pool for the most recently wound block. Written and
+	// read only on the indexer goroutine; exists for introspection and
+	// as a deterministic test discriminator for the warm dedup.
+	warmedParents int
 
 	// Watermark state. Loaded from DB on first access, written atomically
 	// via the 'm' prefix OrdinalKey in the ordinal cache.
@@ -230,6 +237,12 @@ type OrdinalIndexerConfig struct {
 	WatermarkGap         time.Duration
 	OutputValueCacheSize int  // LRU for parent tx output values; 0 disables
 	VerifyBigO           bool // debug: cross-check 'O' values against the tx index
+	// XXX(marco): evaluate whether the warm phase stays long term.
+	// Measured neutral in disk-saturated rebuild zones (parallelism
+	// queues into the same IOPS as compaction); its projected wins —
+	// batch-mint dedup, idle-disk tip parallelism — are unproven in
+	// production. This knob exists for that evaluation.
+	Warm bool // warm parent values per block before the sequential pass
 }
 
 func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexerConfig) Indexer {
@@ -241,6 +254,7 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexer
 		computeInscSat:  cfg.ComputeInscSat,
 		watermarkGap:    cfg.WatermarkGap,
 		verifyBigO:      cfg.VerifyBigO,
+		warm:            cfg.Warm,
 	}
 	oi.indexerCommon = indexerCommon{
 		name:    "ordinal",
@@ -407,6 +421,19 @@ type flotsam struct {
 // the utxo indexer's proven fixup width.
 const ordinalFetchWidth = 128
 
+// mustPrefetchedBigO returns the prefetched 'O' value for op. The
+// prefetch is exhaustive by construction — it iterates exactly the
+// inputs the detection loop iterates — so a missing key means the two
+// walks drifted apart: fail loud (file convention for invariant
+// violations) rather than silently regressing to serial lookups.
+func mustPrefetchedBigO(bigOPrefetch map[tbcd.Outpoint][]byte, op tbcd.Outpoint) []byte {
+	v, ok := bigOPrefetch[op]
+	if !ok {
+		panic(fmt.Sprintf("bug: outpoint %v missed bigO prefetch", op))
+	}
+	return v
+}
+
 // flotsamMatchIdx returns the input index that positions a flotsam in
 // the FIFO stream: the reveal input for reveals (from the inscription
 // ID), the spending input for transfers.
@@ -516,25 +543,15 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				wg.Wait()
 				return err
 			}
-			// The Done arm is reachable only when cancellation races
-			// a full semaphore (workers stop returning tokens on
-			// cancel); the deterministic exit is the ctx.Err() check
-			// above. Mirrors the value-fetch pattern below.
-			select {
-			case <-ctx.Done():
-				wg.Wait()
-				return ctx.Err()
-			case <-sem:
-			}
+			// Tokens are returned unconditionally by the workers
+			// (Gets always complete), so plain acquisition cannot
+			// deadlock and the deterministic ctx.Err() check above
+			// is the only cancellation point.
+			<-sem
 			wg.Add(1)
 			go func(j int) {
 				defer wg.Done()
-				defer func() {
-					select {
-					case <-ctx.Done():
-					case sem <- struct{}{}:
-					}
-				}()
+				defer func() { sem <- struct{}{} }()
 				vals[j], errs[j] = i.g.db.OrdinalBigOByOutpoint(ctx, prefetchOps[j])
 			}(j)
 		}
@@ -547,6 +564,21 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		}
 	}
 	cheapTime += time.Since(prefetchStart)
+
+	// Warm the output-value cache with every parent value the
+	// expensive pass will need, and memoize the envelope parse so the
+	// block's witnesses are parsed exactly once. Skipped when the
+	// output-value cache is disabled (warming nothing would double the
+	// reads) or the context is already cancelled.
+	warmStart := time.Now()
+	iovWarm := 0
+	var envMemo [][]*InscriptionEnvelope
+	if i.warm && i.outputValueCache != nil && ctx.Err() == nil {
+		iovWarm, envMemo = i.warmParentValues(ctx, txs, bigOPrefetch)
+	}
+	i.warmedParents = iovWarm
+	warmTime := time.Since(warmStart)
+	cheapTime += warmTime
 
 	for txBlockIdx, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
@@ -561,16 +593,8 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 			spentOP := tbcd.NewOutpoint(prevOut.Hash, prevOut.Index)
 
-			// Fast path: prefetched point Get 'O'. The prefetch is
-			// exhaustive by construction — it iterates exactly the
-			// inputs this loop iterates — so a miss means the two
-			// walks drifted apart. Fail loud (file convention for
-			// invariant violations) rather than silently regressing
-			// to serial lookups.
-			bigOVal, prefetched := bigOPrefetch[spentOP]
-			if !prefetched {
-				panic(fmt.Sprintf("bug: outpoint %v missed bigO prefetch", spentOP))
-			}
+			// Fast path: prefetched point Get 'O'.
+			bigOVal := mustPrefetchedBigO(bigOPrefetch, spentOP)
 			// Apply cache overlay for 'O' (same-block tombstone or update).
 			if entry, ok := cache.m[spentOP]; ok && entry.BigOSet {
 				bigOVal = entry.BigO
@@ -631,8 +655,17 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 
 			// Reveals: does this input carry an inscription envelope?
-			envelope, perr := ParseInscriptionEnvelope(txIn.Witness)
-			if perr == nil && envelope != nil {
+			// The warm pass memoized the parse for the whole block;
+			// without a memo (cache disabled, cancelled) parse here.
+			var envelope *InscriptionEnvelope
+			if envMemo != nil {
+				if row := envMemo[txBlockIdx]; row != nil {
+					envelope = row[inputIdx]
+				}
+			} else if env, perr := ParseInscriptionEnvelope(txIn.Witness); perr == nil {
+				envelope = env
+			}
+			if envelope != nil {
 				inscID := makeInscriptionID(tx.Hash(), uint32(inputIdx))
 				fl = append(fl, flotsam{
 					inscID:      inscID,
@@ -879,8 +912,9 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		}
 	}
 
-	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls cheap %v expensive %v total %v",
+	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls %d iov_warm (%v) cheap %v expensive %v total %v",
 		blockHeight, len(txs)-1, totalInputs, flotsamTxs, iovCalls,
+		iovWarm, warmTime.Round(time.Millisecond),
 		cheapTime.Round(time.Millisecond),
 		expensiveTime.Round(time.Millisecond),
 		time.Since(blockStart).Round(time.Millisecond))
@@ -926,6 +960,121 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	}
 
 	return nil
+}
+
+// warmParentValues warms the output-value cache for a block through a
+// producer/consumer pipeline: the producer feeds every non-coinbase tx
+// into a channel; ONE consumer goroutine computes which parent values
+// the expensive pass will need using the order-independent flotsam
+// signals (envelope, committed 'O'), deduplicates parent txids in a
+// consumer-owned map (batch reveals collapse N-1 duplicate fetches to
+// one, no locks because the map has a single owner), and dispatches
+// unique parents to a bounded fetch pool whose results land in the
+// mutexed LRU. It returns the number of unique parents dispatched and
+// a per-tx envelope memo so the detection loop parses each witness
+// exactly once; the memo is authoritative for every non-coinbase tx.
+//
+// The speculative set matches the sequential pass's needs for
+// consensus-valid, index-consistent blocks; same-window overlay chains
+// under-fetch (covered by the sequential pass's inline fetch) and
+// malformed shapes — double-spend blocks, 'O' rows without 'o' rows —
+// can over-fetch, which wastes one read and affects nothing else.
+// Fetch errors are ignored here because the sequential pass owns
+// correctness and reports failures with full context.
+//
+// The pipeline shape is deliberate even though the producer is
+// currently trivial: it is the substrate for streaming tx feeds
+// (block-scope pipelining) without restructuring.
+func (i *ordinalIndexer) warmParentValues(ctx context.Context, txs []*btcutil.Tx, bigOPrefetch map[tbcd.Outpoint][]byte) (int, [][]*InscriptionEnvelope) {
+	type feedTx struct {
+		idx int
+		tx  *btcutil.Tx
+	}
+	type warmResult struct {
+		warmed int
+		memo   [][]*InscriptionEnvelope
+	}
+	fanoutC := make(chan feedTx, len(txs))
+	warmDone := make(chan warmResult, 1)
+	go func() {
+		memo := make([][]*InscriptionEnvelope, len(txs))
+		seen := make(map[chainhash.Hash]struct{})
+		sem := make(chan struct{}, ordinalFetchWidth)
+		for range ordinalFetchWidth {
+			sem <- struct{}{}
+		}
+		var wwg sync.WaitGroup
+		warmed := 0
+		cancelled := false
+		for ft := range fanoutC {
+			// Drain cheaply once cancelled; a partial memo must not
+			// be handed out (missed reveals), so it is discarded
+			// below. (Reachable only when cancellation races the
+			// feed — timing-dependent, mirrors the select arms.)
+			if ctx.Err() != nil {
+				cancelled = true
+				continue
+			}
+			txIns := ft.tx.MsgTx().TxIn
+			// Highest input carrying a speculative flotsam signal.
+			// The envelope parse runs for EVERY input — including
+			// 'O' hits, whose input may also carry a reveal — so the
+			// memo is complete for the detection loop.
+			specMax := -1
+			for idx, txIn := range txIns {
+				if env, perr := ParseInscriptionEnvelope(txIn.Witness); perr == nil && env != nil {
+					if memo[ft.idx] == nil {
+						memo[ft.idx] = make([]*InscriptionEnvelope, len(txIns))
+					}
+					memo[ft.idx][idx] = env
+					specMax = idx
+					continue
+				}
+				op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+					txIn.PreviousOutPoint.Index)
+				if bigOPrefetch[op] != nil {
+					specMax = idx
+				}
+			}
+			// Positioning needs inputs 0..specMax-1 (the last
+			// flotsam input's own value is never consumed).
+			for idx := 0; idx < specMax; idx++ {
+				op := tbcd.NewOutpoint(txIns[idx].PreviousOutPoint.Hash,
+					txIns[idx].PreviousOutPoint.Index)
+				if bigOPrefetch[op] != nil {
+					continue // value comes from the 'O' prefill
+				}
+				h := txIns[idx].PreviousOutPoint.Hash
+				if _, ok := seen[h]; ok {
+					continue
+				}
+				seen[h] = struct{}{}
+				warmed++
+				<-sem
+				wwg.Add(1)
+				go func(h chainhash.Hash) {
+					defer wwg.Done()
+					defer func() { sem <- struct{}{} }()
+					// Cache warmer only; see method comment.
+					_, _ = i.parentOutputValues(ctx, h)
+				}(h)
+			}
+		}
+		wwg.Wait()
+		if cancelled {
+			memo = nil
+		}
+		warmDone <- warmResult{warmed: warmed, memo: memo}
+	}()
+	for blkIdx, tx := range txs {
+		if blockchain.IsCoinBase(tx) {
+			continue
+		}
+		fanoutC <- feedTx{idx: blkIdx, tx: tx}
+	}
+	close(fanoutC)
+	r := <-warmDone
+	return r.warmed, r.memo
 }
 
 // placeInOutputs locates FIFO position pos within a tx's outputs.
@@ -986,25 +1135,35 @@ func txOutTotal(txOut []*wire.TxOut) uint64 {
 }
 
 // inputOutputValue returns the satoshi value of the output at txid:vout.
-// Uses the outputValueCache: on miss, does a ranged read of just the
-// tx bytes via BlockTxRawByLoc (TxLoc-guided) and verifies the bytes
-// hash to the requested txid; legacy entries without a TxLoc fall back
-// to BlockRawByHash + lazyBlock, which locates the tx by hash.
 func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Hash, vout uint32) (uint64, error) {
+	vals, err := i.parentOutputValues(ctx, txid)
+	if err != nil {
+		return 0, err
+	}
+	if int(vout) >= len(vals) {
+		return 0, fmt.Errorf("vout %d out of range (tx has %d outputs)", vout, len(vals))
+	}
+	return vals[vout], nil
+}
+
+// parentOutputValues returns all output values of txid, serving from
+// the outputValueCache when possible. On miss it does a ranged read of
+// just the tx bytes via BlockTxRawByLoc (TxLoc-guided) and verifies the
+// bytes hash to the requested txid; legacy entries without a TxLoc fall
+// back to BlockRawByHash + lazyBlock, which locates the tx by hash. The
+// fetched values are cached for subsequent lookups.
+func (i *ordinalIndexer) parentOutputValues(ctx context.Context, txid chainhash.Hash) ([]uint64, error) {
 	// Cache hit path.
 	if i.outputValueCache != nil {
 		if vals, ok := i.outputValueCache.Get(txid); ok {
-			if int(vout) >= len(vals) {
-				return 0, fmt.Errorf("cached vout %d out of range (tx has %d outputs)", vout, len(vals))
-			}
-			return vals[vout], nil
+			return vals, nil
 		}
 	}
 
 	// Cache miss: find which block contains this tx.
 	blockHash, loc, err := i.g.db.BlockHashByTxId(ctx, txid)
 	if err != nil {
-		return 0, fmt.Errorf("tx %v: %w", txid, err)
+		return nil, fmt.Errorf("tx %v: %w", txid, err)
 	}
 
 	var vals []uint64
@@ -1014,11 +1173,11 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 		// multi-MB block.
 		raw, err := i.g.db.BlockTxRawByLoc(ctx, *blockHash, *loc)
 		if err != nil {
-			return 0, fmt.Errorf("block tx raw %v: %w", blockHash, err)
+			return nil, fmt.Errorf("block tx raw %v: %w", blockHash, err)
 		}
 		var msgTx wire.MsgTx
 		if err := msgTx.Deserialize(bytes.NewReader(raw)); err != nil {
-			return 0, fmt.Errorf("deserialize tx at offset %d: %w", loc.TxStart, err)
+			return nil, fmt.Errorf("deserialize tx at offset %d: %w", loc.TxStart, err)
 		}
 		// The ranged read trusts the tx index's loc; unlike the
 		// legacy path (which locates the tx BY hash) nothing else
@@ -1026,7 +1185,7 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 		// converts an in-range-but-wrong loc from silently feeding
 		// another tx's values into sat arithmetic into a loud error.
 		if gotTxid := msgTx.TxHash(); gotTxid != txid {
-			return 0, fmt.Errorf("tx loc corrupt: got %v want %v in block %v",
+			return nil, fmt.Errorf("tx loc corrupt: got %v want %v in block %v",
 				gotTxid, txid, blockHash)
 		}
 		vals = make([]uint64, len(msgTx.TxOut))
@@ -1038,24 +1197,16 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 		// block and scan with lazyBlock.
 		raw, err := i.g.db.BlockRawByHash(ctx, *blockHash)
 		if err != nil {
-			return 0, fmt.Errorf("block raw %v: %w", blockHash, err)
+			return nil, fmt.Errorf("block raw %v: %w", blockHash, err)
 		}
 		lb, err := newLazyBlock(raw)
 		if err != nil {
-			return 0, fmt.Errorf("lazy block %v: %w", blockHash, err)
+			return nil, fmt.Errorf("lazy block %v: %w", blockHash, err)
 		}
-		idx, err := lb.FindTx(txid)
+		vals, err = lb.FindTxOutputValues(txid)
 		if err != nil {
-			return 0, fmt.Errorf("tx %v not in block %v: %w", txid, blockHash, err)
+			return nil, fmt.Errorf("tx %v not in block %v: %w", txid, blockHash, err)
 		}
-		vals, err = lb.TxOutputValues(idx)
-		if err != nil {
-			return 0, fmt.Errorf("tx %v output values: %w", txid, err)
-		}
-	}
-
-	if int(vout) >= len(vals) {
-		return 0, fmt.Errorf("vout %d out of range (%d outputs)", vout, len(vals))
 	}
 
 	// Cache all output values for this tx.
@@ -1063,7 +1214,7 @@ func (i *ordinalIndexer) inputOutputValue(ctx context.Context, txid chainhash.Ha
 		i.outputValueCache.Put(txid, vals)
 	}
 
-	return vals[vout], nil
+	return vals, nil
 }
 
 // unwindBlock reverses a single block. Panics if the unwind goes
