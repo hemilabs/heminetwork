@@ -18,3 +18,16 @@ func TestOrdinalVerifyBigOConfig(t *testing.T) {
 		t.Fatal("not wired to cfg.OrdinalVerifyBigO")
 	}
 }
+
+func TestOrdinalWarmConfig(t *testing.T) {
+	c, ok := cm["TBC_ORDINAL_WARM"]
+	if !ok {
+		t.Fatal("TBC_ORDINAL_WARM not registered")
+	}
+	if def, ok := c.DefaultValue.(bool); !ok || !def {
+		t.Fatalf("default must be true, got %v", c.DefaultValue)
+	}
+	if c.Value != any(&cfg.OrdinalWarm) {
+		t.Fatal("not wired to cfg.OrdinalWarm")
+	}
+}
