@@ -117,6 +117,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory-constrained hosts. Rolling back to an older binary after the
   table-size change is safe: readers are size-agnostic and compaction
   converges table sizes over time.
+- Ordinal indexer parent-value lookups are warmed for the whole block
+  through a producer/consumer pipeline that deduplicates parent
+  transactions before fetching: batch reveals (N inputs funded by one
+  commit transaction) fetch their parent once instead of racing N
+  duplicate lookups through the fan-out, and the block's witnesses are
+  parsed once. The wind log line gains iov_warm (unique parents
+  warmed) alongside iov_calls. `TBC_ORDINAL_WARM` (default `true`)
+  toggles the warm phase while its long-term value is evaluated.
 - Ordinal indexer 'O' acceleration lookups for a block are prefetched
   in one 128-wide parallel pass instead of one serial point-Get per
   input; the DB is immutable during a wind, so detection semantics are

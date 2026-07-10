@@ -185,6 +185,12 @@ var (
 			Help:         "debug: cross-check ordinal 'O' values against the tx index (slow)",
 			Print:        config.PrintAll,
 		},
+		"TBC_ORDINAL_WARM": config.Config{
+			Value:        &cfg.OrdinalWarm,
+			DefaultValue: true,
+			Help:         "warm ordinal parent values per block before indexing (under evaluation)",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
