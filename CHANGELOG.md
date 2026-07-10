@@ -117,6 +117,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory-constrained hosts. Rolling back to an older binary after the
   table-size change is safe: readers are size-agnostic and compaction
   converges table sizes over time.
+- The tbcd database layer supports read-only opens
+  (`Config.SetReadOnly`): no recovery writes, no background
+  compaction, writes error. A wind-replay diagnostic
+  (`TestWindReplay`, env-gated) replays chosen blocks through the
+  full ordinal wind against a read-only database — all the work,
+  nothing inserted — for controlled measurement of slow blocks.
 - Ordinal indexer parent-value lookups are warmed for the whole block
   through a producer/consumer pipeline that deduplicates parent
   transactions before fetching: batch reveals (N inputs funded by one
