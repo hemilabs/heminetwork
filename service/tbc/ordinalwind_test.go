@@ -57,6 +57,9 @@ type ordStubDB struct {
 	maxBigOInflight int
 	bigOErr         error
 	bigOGateWaiters int
+	// failNextLookups makes the next N BlockHashByTxId calls fail
+	// transiently, for warm-phase soft-failure tests.
+	failNextLookups int
 	// bigOGate, when non-nil, blocks the first 'O' lookup until a
 	// second concurrent lookup arrives — deterministic overlap proof
 	// for the prefetch fan-out, mirroring overlapGate.
@@ -159,6 +162,13 @@ func (d *ordStubDB) BlockHashByTxId(_ context.Context, txId chainhash.Hash) (*ch
 		d.mtx.Unlock()
 	}()
 
+	d.mtx.Lock()
+	if d.failNextLookups > 0 {
+		d.failNextLookups--
+		d.mtx.Unlock()
+		return nil, nil, errors.New("transient lookup failure")
+	}
+	d.mtx.Unlock()
 	if _, ok := d.legacyBlocks[txId]; ok {
 		bh := txId
 		return &bh, nil, nil // legacy entry: no TxLoc
@@ -244,6 +254,7 @@ func newOrdTestIndexer(t *testing.T, db *ordStubDB, verifyBigO bool) *ordinalInd
 		WatermarkGap:         time.Hour,
 		OutputValueCacheSize: 65536,
 		VerifyBigO:           verifyBigO,
+		Warm:                 true,
 	}).(*ordinalIndexer)
 }
 
@@ -458,8 +469,9 @@ func TestWindBlockVerifyBigOLookupError(t *testing.T) {
 }
 
 // TestWindBlockRevealSecondInput places a reveal on input 1 of a 2-in
-// tx: exactly one value fetch (input 0, the sequential fetchCount==1
-// path) and pos = value(input 0).
+// tx: exactly one value fetch — the warm pass fetches input 0's parent
+// and the sequential path consumes it from the cache — and
+// pos = value(input 0).
 func TestWindBlockRevealSecondInput(t *testing.T) {
 	db := newOrdStubDB()
 	oi := newOrdTestIndexer(t, db, false)
@@ -497,8 +509,8 @@ func TestWindBlockRevealSecondInput(t *testing.T) {
 
 // TestWindBlockPrefilledTransferPlusReveal mixes an 'O'-carried transfer
 // on input 0 with a reveal on input 2: the transfer's value is prefilled
-// from 'O' (no lookup), input 1 is fetched via the parallel path (which
-// must skip the prefilled slot), and the reveal lands at the sum.
+// from 'O' (no lookup — the warm pass also skips it), input 1 is
+// warm-fetched exactly once, and the reveal lands at the sum.
 func TestWindBlockPrefilledTransferPlusReveal(t *testing.T) {
 	db := newOrdStubDB()
 	oi := newOrdTestIndexer(t, db, false)
@@ -590,8 +602,8 @@ func TestWindBlockFeeCarryToCoinbase(t *testing.T) {
 }
 
 // TestWindBlockManyInputsClampsSlots puts a reveal on input 129 of a
-// 130-input tx, forcing the parallel fetch semaphore clamp (128) and a
-// fetch of inputs 0..128.
+// 130-input tx: the warm pool fetches the 129 unique parents under its
+// semaphore clamp (128) and the sequential pass consumes the cache.
 func TestWindBlockManyInputsClampsSlots(t *testing.T) {
 	db := newOrdStubDB()
 	oi := newOrdTestIndexer(t, db, false)
@@ -955,13 +967,15 @@ func TestServerWiresVerifyBigO(t *testing.T) {
 	}
 }
 
-// BenchmarkWindBlock pins the wind hot path for the two dominant
-// shapes. NOTE: the stub answers Gets instantly, so these numbers
-// measure the prefetch fan-out OVERHEAD (~0.6us/input), not its win —
-// against real DB latency (~110us/Get) the prefetch converts ~0.77s
-// of serial reads per dense block into ~10ms. Expected (dev box):
-// 1-in transfer ~115us/op; sweep1000 ~900us/op. Regression tripwire
-// for the machinery, not the I/O.
+// BenchmarkWindBlock pins the wind hot path for the three dominant
+// shapes, including plain500 — a no-flotsam block, the common shape at
+// tip, which must not pay for machinery it does not use. NOTE: the
+// stub answers Gets instantly, so these numbers measure fan-out and
+// warm OVERHEAD, not their win — against real DB latency (~110us/Get)
+// the prefetch and warm convert ~0.77s of serial reads per dense block
+// into ~10ms. Expected (dev box): transfer1in ~170us/op; sweep1000
+// ~890us/op; plain500 ~870us/op. Regression tripwire for the
+// machinery, not the I/O.
 func BenchmarkWindBlock(b *testing.B) {
 	shapes := []struct {
 		name string
@@ -975,6 +989,21 @@ func BenchmarkWindBlock(b *testing.B) {
 			tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 0), nil, nil))
 			tx.AddTxOut(wire.NewTxOut(5000, []byte{txscript.OP_TRUE}))
 			return ordTestBlock(800000, 625000000, tx)
+		}},
+		{"plain500", func(db *ordStubDB) *btcutil.Block {
+			// 500 plain 2-in txs, zero flotsam: the warm scan must
+			// stay cheap when there is nothing to warm.
+			var blockTxs []*wire.MsgTx
+			for i := range 500 {
+				tx := wire.NewMsgTx(wire.TxVersion)
+				for j := range 2 {
+					_, ptxid := ordTestParent(byte(i+j*251), 10)
+					tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&ptxid, uint32(i%4)), nil, nil))
+				}
+				tx.AddTxOut(wire.NewTxOut(15, []byte{txscript.OP_TRUE}))
+				blockTxs = append(blockTxs, tx)
+			}
+			return ordTestBlock(800000, 625000000, blockTxs...)
 		}},
 		{"sweep1000", func(db *ordStubDB) *btcutil.Block {
 			tx := wire.NewMsgTx(wire.TxVersion)
@@ -1294,5 +1323,321 @@ func TestWindBlockSameBlockChainWithPrefetch(t *testing.T) {
 	dst := m[tbcd.NewOutpoint(txBTxid, 0)]
 	if dst == nil || dst.Inscriptions[0] == nil {
 		t.Fatal("same-block chained transfer not detected via overlay")
+	}
+}
+
+// TestWindBlockWarmDedupsBatchParents pins the consumer-side dedup of
+// the warm pipeline: a batch reveal (10 inputs spending one commit
+// parent, envelope on the last input) plus a second tx funded by the
+// SAME parent must fetch that parent exactly once for the whole block
+// — previously each input raced its own fetch through the fan-out.
+func TestWindBlockWarmDedupsBatchParents(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	parent, parentTxid := ordTestParent(1,
+		700, 700, 700, 700, 700, 700, 700, 700, 700, 700, 700, 700)
+	db.parents[parentTxid] = parent
+
+	// Batch reveal: inputs 0..9 spend vouts 0..9, envelope on input 9.
+	batch := wire.NewMsgTx(wire.TxVersion)
+	for i := range 10 {
+		batch.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, uint32(i)), nil, nil))
+	}
+	batch.TxIn[9].Witness = buildInscriptionWitness("text/plain", "batch")
+	batch.AddTxOut(wire.NewTxOut(6500, []byte{txscript.OP_TRUE}))
+
+	// Second reveal funded by vouts 10,11 of the same parent.
+	tx2 := wire.NewMsgTx(wire.TxVersion)
+	tx2.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 10), nil, nil))
+	tx2.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 11), nil, nil))
+	tx2.TxIn[1].Witness = buildInscriptionWitness("text/plain", "second")
+	tx2.AddTxOut(wire.NewTxOut(1300, []byte{txscript.OP_TRUE}))
+
+	b := ordTestBlock(800000, 625000000, batch, tx2)
+	cache := NewOrdinalCache(1000, 0)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, cache); err != nil {
+		t.Fatal(err)
+	}
+	// One unique parent across 10 warm-relevant inputs: exactly one
+	// tx-index lookup for the whole block; the sequential pass serves
+	// everything from the warmed cache.
+	if got := db.lookups(); got != 1 {
+		t.Fatalf("expected exactly 1 parent fetch for the block, got %d", got)
+	}
+	// Deterministic discriminator: the racy pre-warm fan-out could
+	// land on 1 lookup by scheduling luck, but it never records a
+	// deduplicated warm dispatch.
+	if oi.warmedParents != 1 {
+		t.Fatalf("expected 1 warmed parent, got %d", oi.warmedParents)
+	}
+	// Both reveals must be positioned from the shared parent's values:
+	// batch reveal at offset sum(vouts 0..8) = 6300, tx2's at 700.
+	if dst := cache.Map()[tbcd.NewOutpoint(batch.TxHash(), 0)]; dst == nil || dst.Inscriptions[6300] == nil {
+		t.Fatal("batch reveal not positioned from deduped parent values")
+	}
+	if dst := cache.Map()[tbcd.NewOutpoint(tx2.TxHash(), 0)]; dst == nil || dst.Inscriptions[700] == nil {
+		t.Fatal("second reveal not positioned from deduped parent values")
+	}
+}
+
+// TestWindBlockWarmSoftFailure: a transient failure during the warm
+// phase must not fail the wind — the sequential pass retries and owns
+// the outcome.
+func TestWindBlockWarmSoftFailure(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	parentA, parentATxid := ordTestParent(1, 10000)
+	db.parents[parentATxid] = parentA
+	_, parentBTxid := ordTestParent(2, 600)
+
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentATxid, 0), nil, nil))
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentBTxid, 0), nil, nil))
+	tx.TxIn[1].Witness = buildInscriptionWitness("text/plain", "warm soft")
+	tx.AddTxOut(wire.NewTxOut(20000, []byte{txscript.OP_TRUE}))
+
+	db.failNextLookups = 1 // warm fetch of parentA fails transiently
+
+	b := ordTestBlock(800000, 625000000, tx)
+	cache := NewOrdinalCache(1000, 0)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, cache); err != nil {
+		t.Fatalf("transient warm failure must not fail the wind: %v", err)
+	}
+	// Warm failed (1 lookup), sequential retried and succeeded (1 more).
+	if got := db.lookups(); got != 2 {
+		t.Fatalf("expected 2 lookups (failed warm + sequential retry), got %d", got)
+	}
+	if oi.warmedParents != 1 {
+		t.Fatalf("expected 1 warmed parent, got %d", oi.warmedParents)
+	}
+	if dst := cache.Map()[tbcd.NewOutpoint(tx.TxHash(), 0)]; dst == nil || dst.Inscriptions[10000] == nil {
+		t.Fatal("reveal not positioned after warm soft-failure")
+	}
+}
+
+// TestInputOutputValueErrors drives the vout-range branch and the
+// legacy-path error branches of the parent value lookup directly.
+func TestInputOutputValueErrors(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	// vout beyond the parent's outputs.
+	parent, parentTxid := ordTestParent(1, 500)
+	db.parents[parentTxid] = parent
+	if _, err := oi.inputOutputValue(t.Context(), parentTxid, 9); err == nil ||
+		!strings.Contains(err.Error(), "out of range") {
+		t.Fatalf("want vout range error, got %v", err)
+	}
+
+	// Legacy entry whose raw block is garbage: lazyBlock rejects it.
+	var garbage chainhash.Hash
+	garbage[0] = 0xaa
+	db.legacyBlocks[garbage] = []byte{0x01, 0x02}
+	if _, err := oi.inputOutputValue(t.Context(), garbage, 0); err == nil ||
+		!strings.Contains(err.Error(), "lazy block") {
+		t.Fatalf("want lazy block error, got %v", err)
+	}
+
+	// Legacy entry whose block does not contain the tx: FindTx fails.
+	other, _ := ordTestParent(2, 900)
+	blk := ordTestBlock(799999, 625000000, other)
+	var buf bytes.Buffer
+	if err := blk.MsgBlock().Serialize(&buf); err != nil {
+		t.Fatal(err)
+	}
+	var absent chainhash.Hash
+	absent[0] = 0xab
+	db.legacyBlocks[absent] = buf.Bytes()
+	if _, err := oi.inputOutputValue(t.Context(), absent, 0); err == nil ||
+		!strings.Contains(err.Error(), "not in block") {
+		t.Fatalf("want not-in-block error, got %v", err)
+	}
+}
+
+// TestWindBlockWarmSkippedWithoutCache: with the output-value cache
+// disabled the warm phase must not run — warming a nonexistent cache
+// would double every read — and detection parses envelopes itself.
+func TestWindBlockWarmSkippedWithoutCache(t *testing.T) {
+	db := newOrdStubDB()
+	g := geometryParams{db: db, chain: &chaincfg.RegressionNetParams}
+	oi := NewOrdinalIndexer(t.Context(), g, OrdinalIndexerConfig{
+		CacheLen:     1000,
+		Enabled:      true,
+		WatermarkGap: time.Hour,
+		Warm:         true,
+		// OutputValueCacheSize 0: cache disabled.
+	}).(*ordinalIndexer)
+
+	parentA, parentATxid := ordTestParent(1, 10000)
+	db.parents[parentATxid] = parentA
+	_, parentBTxid := ordTestParent(2, 600)
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentATxid, 0), nil, nil))
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentBTxid, 0), nil, nil))
+	tx.TxIn[1].Witness = buildInscriptionWitness("text/plain", "no cache")
+	tx.AddTxOut(wire.NewTxOut(20000, []byte{txscript.OP_TRUE}))
+	txid := tx.TxHash()
+
+	b := ordTestBlock(800000, 625000000, tx)
+	cache := NewOrdinalCache(1000, 0)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, cache); err != nil {
+		t.Fatal(err)
+	}
+	// One sequential fetch only; an ungated warm would add a second.
+	if got := db.lookups(); got != 1 {
+		t.Fatalf("expected 1 lookup with cache disabled, got %d", got)
+	}
+	if oi.warmedParents != 0 {
+		t.Fatalf("warm ran with cache disabled: %d", oi.warmedParents)
+	}
+	// Detection still finds the reveal via its own parse.
+	if dst := cache.Map()[tbcd.NewOutpoint(txid, 0)]; dst == nil || dst.Inscriptions[10000] == nil {
+		t.Fatal("reveal not detected without memo")
+	}
+}
+
+// TestWindBlockWarmSkippedWhenCancelled: a context cancelled before the
+// warm phase (empty prefetch: coinbase-only block) skips warming.
+func TestWindBlockWarmSkippedWhenCancelled(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+	oi.warmedParents = 99 // must be overwritten
+
+	b := ordTestBlock(800000, 625000000) // coinbase only
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := oi.windBlock(ctx, 800000, b.Hash(), b, NewOrdinalCache(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if oi.warmedParents != 0 {
+		t.Fatalf("warm ran with cancelled context: %d", oi.warmedParents)
+	}
+	if db.lookups() != 0 || db.bigOLookups != 0 {
+		t.Fatal("lookups issued for empty cancelled block")
+	}
+}
+
+// TestWindBlockRevealOnTrackedInput: an input that BOTH spends a
+// tracked inscription ('O' hit) and carries an envelope must produce
+// both flotsam — the memo must include envelopes on 'O'-hit inputs.
+func TestWindBlockRevealOnTrackedInput(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	_, parentPTxid := ordTestParent(1, 5000)
+	spentOP := tbcd.NewOutpoint(parentPTxid, 0)
+	inscP := makeInscriptionID(&parentPTxid, 0)
+	ordTestTrackedOutpoint(db, spentOP, inscP, 3, 5000)
+
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentPTxid, 0), nil, nil))
+	tx.TxIn[0].Witness = buildInscriptionWitness("text/plain", "reveal on spend")
+	tx.AddTxOut(wire.NewTxOut(5000, []byte{txscript.OP_TRUE}))
+	txid := tx.TxHash()
+
+	b := ordTestBlock(800000, 625000000, tx)
+	cache := NewOrdinalCache(1000, 0)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, cache); err != nil {
+		t.Fatal(err)
+	}
+	dst := cache.Map()[tbcd.NewOutpoint(txid, 0)]
+	if dst == nil {
+		t.Fatal("no destination entry")
+	}
+	// Transfer keeps its offset (3), the reveal lands at pos 0. Both
+	// must exist; a memo that skips 'O'-hit inputs loses the reveal.
+	if dst.Inscriptions[3] == nil {
+		t.Fatal("transfer lost")
+	}
+	if dst.Inscriptions[0] == nil {
+		t.Fatal("reveal lost: envelope not memoized on 'O'-hit input")
+	}
+}
+
+// TestWarmParentValuesCancelledFeed drives the consumer's drain branch
+// directly: a cancelled context at feed time must scan nothing, warm
+// nothing, and discard the memo (a partial memo would lose reveals).
+func TestWarmParentValuesCancelledFeed(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+
+	parent, parentTxid := ordTestParent(1, 700, 700)
+	db.parents[parentTxid] = parent
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 0), nil, nil))
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentTxid, 1), nil, nil))
+	tx.TxIn[1].Witness = buildInscriptionWitness("text/plain", "cancelled")
+	tx.AddTxOut(wire.NewTxOut(1300, []byte{txscript.OP_TRUE}))
+	b := ordTestBlock(800000, 625000000, tx)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	warmed, memo := oi.warmParentValues(ctx, b.Transactions(),
+		map[tbcd.Outpoint][]byte{})
+	if warmed != 0 {
+		t.Fatalf("cancelled feed warmed %d parents", warmed)
+	}
+	if memo != nil {
+		t.Fatal("cancelled feed must discard the partial memo")
+	}
+	if db.lookups() != 0 {
+		t.Fatal("cancelled feed issued lookups")
+	}
+}
+
+// TestMustPrefetchedBigO pins the drift guard: a present key returns
+// its value (nil-valued means "no 'O' entry"), a missing key panics —
+// the detection loop must never silently regress to serial lookups.
+func TestMustPrefetchedBigO(t *testing.T) {
+	op := tbcd.NewOutpoint(chainhash.Hash{0x01}, 0)
+	m := map[tbcd.Outpoint][]byte{op: nil}
+	if v := mustPrefetchedBigO(m, op); v != nil {
+		t.Fatalf("want nil value for prefetched miss, got %x", v)
+	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for outpoint missing from prefetch")
+		}
+		if !strings.Contains(fmt.Sprint(r), "missed bigO prefetch") {
+			t.Fatalf("wrong panic: %v", r)
+		}
+	}()
+	mustPrefetchedBigO(m, tbcd.NewOutpoint(chainhash.Hash{0x02}, 1))
+}
+
+// TestWindBlockWarmKnobOff: with the warm knob disabled the pipeline
+// must not run and detection parses envelopes itself — identical
+// results, fetches on demand.
+func TestWindBlockWarmKnobOff(t *testing.T) {
+	db := newOrdStubDB()
+	oi := newOrdTestIndexer(t, db, false)
+	oi.warm = false
+
+	parentA, parentATxid := ordTestParent(1, 10000)
+	db.parents[parentATxid] = parentA
+	_, parentBTxid := ordTestParent(2, 600)
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentATxid, 0), nil, nil))
+	tx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&parentBTxid, 0), nil, nil))
+	tx.TxIn[1].Witness = buildInscriptionWitness("text/plain", "knob off")
+	tx.AddTxOut(wire.NewTxOut(20000, []byte{txscript.OP_TRUE}))
+	txid := tx.TxHash()
+
+	b := ordTestBlock(800000, 625000000, tx)
+	cache := NewOrdinalCache(1000, 0)
+	if err := oi.windBlock(t.Context(), 800000, b.Hash(), b, cache); err != nil {
+		t.Fatal(err)
+	}
+	if oi.warmedParents != 0 {
+		t.Fatalf("warm ran with knob off: %d", oi.warmedParents)
+	}
+	if got := db.lookups(); got != 1 {
+		t.Fatalf("expected 1 on-demand lookup, got %d", got)
+	}
+	if dst := cache.Map()[tbcd.NewOutpoint(txid, 0)]; dst == nil || dst.Inscriptions[10000] == nil {
+		t.Fatal("reveal not detected with warm off")
 	}
 }

@@ -1350,3 +1350,73 @@ func FuzzNewLazyBlock(f *testing.F) {
 		_, _ = lb.FindTx(chainhash.Hash{})
 	})
 }
+
+// TestFindTxOutputValuesErrors covers the combined lookup's error
+// paths: boundary-scan failure, computeTxID failure (corrupted offsets,
+// mirroring TestFindTxComputeTxIDError), and not-found.
+func TestFindTxOutputValuesErrors(t *testing.T) {
+	// Boundary scan failure: valid length, garbage content.
+	garbage := make([]byte, wire.MaxBlockHeaderPayload+10)
+	for i := range garbage {
+		garbage[i] = 0xff
+	}
+	lb, err := newLazyBlock(garbage)
+	if err != nil {
+		t.Fatalf("newLazyBlock: %v", err)
+	}
+	if _, err := lb.FindTxOutputValues(chainhash.Hash{0x01}); err == nil {
+		t.Fatal("expected boundary scan error")
+	}
+
+	// computeTxID failure via corrupted offsets.
+	lb2, err := newLazyBlock(genesisBlockBytes(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lb2.mu.Lock()
+	if err := lb2.ensureTxOffsets(); err != nil {
+		lb2.mu.Unlock()
+		t.Fatal(err)
+	}
+	lb2.txOffsets = []wire.TxLoc{{TxStart: 0, TxLen: 9}}
+	lb2.txWitness = []bool{true}
+	lb2.mu.Unlock()
+	if _, err := lb2.FindTxOutputValues(chainhash.Hash{0x01}); err == nil {
+		t.Fatal("expected computeTxID error")
+	}
+
+	// Not found on a valid block.
+	lb3, err := newLazyBlock(genesisBlockBytes(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lb3.FindTxOutputValues(chainhash.Hash{0x02}); err == nil ||
+		!strings.Contains(err.Error(), "not found") {
+		t.Fatalf("want not-found error, got %v", err)
+	}
+
+	// Happy path parity with the two-step lookup.
+	lb4, err := newLazyBlock(genesisBlockBytes(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cbTxid, err := lb4.TxHash(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx, err := lb4.FindTx(cbTxid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := lb4.TxOutputValues(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := lb4.FindTxOutputValues(cbTxid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("combined lookup mismatch: %v vs %v", got, want)
+	}
+}
