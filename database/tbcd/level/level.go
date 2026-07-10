@@ -165,10 +165,19 @@ type Config struct {
 	headerCacheSize int    // parsed size of block header cache
 	nonInteractive  bool   // Set to true to prevent user interaction
 	upgradeOpen     bool   // Set to true when doing an open during upgrade
+	readOnly        bool   // Set to true to open every database read-only
 }
 
 func (cfg *Config) SetNoninteractive(x bool) {
 	cfg.nonInteractive = x
+}
+
+// SetReadOnly opens every database read-only: no journal recovery
+// writes, no background compaction, and any write returns an error.
+// Diagnostic and inspection tooling uses this to measure or examine a
+// database without perturbing it.
+func (cfg *Config) SetReadOnly(x bool) {
+	cfg.readOnly = x
 }
 
 func (cfg *Config) SetUpgradeOpen(x bool) {
@@ -244,6 +253,9 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 	lcfg := level.NewDefaultConfig(cfg.Home)
 	lcfg.BlockCacheCapacity = levelBlockCacheSize
 	lcfg.OpenFilesCacheCapacity = levelOpenFiles
+	// Read-only must be set before the per-database overrides below,
+	// which copy lcfg.Options and inherit it.
+	lcfg.Options.ReadOnly = cfg.readOnly
 
 	// Per-database overrides tuned to workload. Write-heavy databases
 	// get larger memtables (fewer L0 flushes and compactions) and
@@ -469,6 +481,17 @@ func (l *ldb) transactionBatchGet(ctx context.Context, t *leveldb.Transaction, a
 		rows[k] = tbcd.Row{Key: keys[k], Value: value, Error: err}
 	}
 	return rows, nil
+}
+
+// LevelDBProperty returns a leveldb property (e.g. "leveldb.iostats",
+// "leveldb.cachedblock", "leveldb.openedtables") for the named
+// database. Diagnostic tooling only; not part of tbcd.Database.
+func (l *ldb) LevelDBProperty(dbName, property string) (string, error) {
+	db, ok := l.pool[dbName]
+	if !ok {
+		return "", fmt.Errorf("unknown database %q", dbName)
+	}
+	return db.GetProperty(property)
 }
 
 func (l *ldb) Version(ctx context.Context) (int, error) {
