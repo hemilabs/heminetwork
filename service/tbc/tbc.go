@@ -203,7 +203,6 @@ type Config struct {
 	OrdinalIndex            bool
 	MaxCachedOrdinals       int
 	OrdinalOutputCacheSize  string // LRU read cache for tx output values; "0" or "" disables
-	OrdinalVerifyBigO       bool   // debug: cross-check 'O' values against the tx index (slow)
 	OrdinalWatermarkGap     time.Duration
 
 	// Admin API
@@ -3190,7 +3189,6 @@ func (s *Server) dbOpen(ctx context.Context) error {
 			ComputeInscSat:       s.computeInscribedSat,
 			WatermarkGap:         s.cfg.OrdinalWatermarkGap,
 			OutputValueCacheSize: ovcSize,
-			VerifyBigO:           s.cfg.OrdinalVerifyBigO,
 		})
 	}
 
