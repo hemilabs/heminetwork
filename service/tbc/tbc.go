@@ -204,7 +204,6 @@ type Config struct {
 	MaxCachedOrdinals       int
 	OrdinalOutputCacheSize  string // LRU read cache for tx output values; "0" or "" disables
 	OrdinalVerifyBigO       bool   // debug: cross-check 'O' values against the tx index (slow)
-	OrdinalWarm             bool   // XXX evaluate: per-block parent value warm phase
 	OrdinalWatermarkGap     time.Duration
 
 	// Admin API
@@ -231,7 +230,6 @@ func NewDefaultConfig() *Config {
 		UtxoReadCacheSize:      "1gb",
 		MaxCachedOrdinals:      defaultMaxCachedOrdinals,
 		OrdinalOutputCacheSize: "256mb",
-		OrdinalWarm:            true,
 		OrdinalWatermarkGap:    24 * time.Hour,
 		MempoolEnabled:         true,
 		NotificationBlocking:   false, // Default anyway, but dangerous so be explicit
@@ -1976,7 +1974,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 	case wire.InvTypeBlock:
 	default:
 		// log.Infof("%v: %T", p, m)
-		log.Infof("handleInv (%v) %v", p, msg.InvList[0].Type)
+		log.Tracef("handleInv (%v) %v", p, msg.InvList[0].Type)
 	}
 	log.Tracef("handleInv (%v)", p)
 	defer log.Tracef("handleInv exit (%v)", p)
@@ -2003,9 +2001,9 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 		case wire.InvTypeFilteredBlock:
 			log.Debugf("inventory filtered block: %v", v.Hash)
 		case wire.InvTypeWitnessBlock:
-			log.Infof("inventory witness block: %v", v.Hash)
+			log.Tracef("inventory witness block: %v", v.Hash)
 		case wire.InvTypeWitnessTx:
-			log.Infof("inventory witness tx: %v", v.Hash)
+			log.Tracef("inventory witness tx: %v", v.Hash)
 		case wire.InvTypeFilteredWitnessBlock:
 			log.Debugf("inventory filtered witness block: %v", v.Hash)
 		default:
@@ -3193,7 +3191,6 @@ func (s *Server) dbOpen(ctx context.Context) error {
 			WatermarkGap:         s.cfg.OrdinalWatermarkGap,
 			OutputValueCacheSize: ovcSize,
 			VerifyBigO:           s.cfg.OrdinalVerifyBigO,
-			Warm:                 s.cfg.OrdinalWarm,
 		})
 	}
 

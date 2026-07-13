@@ -63,6 +63,8 @@ func (i *txIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexe
 	return nil
 }
 
+func (i *txIndexer) beforeWind(_, _ uint64) {}
+
 func (i *txIndexer) onSyncComplete() {}
 
 func (i *txIndexer) readCacheInfo() string { return "" }
