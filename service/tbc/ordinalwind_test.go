@@ -245,7 +245,7 @@ func (d *ordStubDB) lookups() int {
 	return d.txIdLookups
 }
 
-func newOrdTestIndexer(t *testing.T, db *ordStubDB, verifyBigO bool) *ordinalIndexer {
+func newOrdTestIndexer(t *testing.T, db *ordStubDB) *ordinalIndexer {
 	t.Helper()
 	g := geometryParams{db: db, chain: &chaincfg.RegressionNetParams}
 	oi := NewOrdinalIndexer(t.Context(), g, OrdinalIndexerConfig{
@@ -253,7 +253,6 @@ func newOrdTestIndexer(t *testing.T, db *ordStubDB, verifyBigO bool) *ordinalInd
 		Enabled:              true,
 		WatermarkGap:         time.Hour,
 		OutputValueCacheSize: 65536,
-		VerifyBigO:           verifyBigO,
 	}).(*ordinalIndexer)
 	oi.warm = true
 	return oi
@@ -329,7 +328,7 @@ func newOrdStubDB() *ordStubDB {
 // lookups — the last (only) input's value is never fetched.
 func TestWindBlockTransferZeroFetch(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	parent, parentTxid := ordTestParent(1, 5000)
 	_ = parent // never looked up; that is the point
@@ -382,8 +381,10 @@ func TestWindBlockTransferZeroFetch(t *testing.T) {
 // flag enabled and a matching parent output value: exactly one lookup
 // (the cross-check) and a successful wind.
 func TestWindBlockVerifyBigOPass(t *testing.T) {
+	ordinalVerifyBigO = true
+	t.Cleanup(func() { ordinalVerifyBigO = false })
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, true)
+	oi := newOrdTestIndexer(t, db)
 
 	parent, parentTxid := ordTestParent(1, 5000)
 	db.parents[parentTxid] = parent
@@ -412,8 +413,10 @@ func TestWindBlockVerifyBigOPass(t *testing.T) {
 // TestWindBlockVerifyBigOMismatchPanic corrupts the 'O' outputValue and
 // expects the verify cross-check to panic.
 func TestWindBlockVerifyBigOMismatchPanic(t *testing.T) {
+	ordinalVerifyBigO = true
+	t.Cleanup(func() { ordinalVerifyBigO = false })
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, true)
+	oi := newOrdTestIndexer(t, db)
 
 	parent, parentTxid := ordTestParent(1, 5000)
 	db.parents[parentTxid] = parent
@@ -444,8 +447,10 @@ func TestWindBlockVerifyBigOMismatchPanic(t *testing.T) {
 // shutdown) and must not crash the daemon; only genuine value
 // mismatches panic.
 func TestWindBlockVerifyBigOLookupError(t *testing.T) {
+	ordinalVerifyBigO = true
+	t.Cleanup(func() { ordinalVerifyBigO = false })
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, true)
+	oi := newOrdTestIndexer(t, db)
 
 	_, parentTxid := ordTestParent(1, 5000) // NOT installed in db.parents
 	spentOP := tbcd.NewOutpoint(parentTxid, 0)
@@ -475,7 +480,7 @@ func TestWindBlockVerifyBigOLookupError(t *testing.T) {
 // pos = value(input 0).
 func TestWindBlockRevealSecondInput(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	parentA, parentATxid := ordTestParent(1, 10000)
 	db.parents[parentATxid] = parentA
@@ -514,7 +519,7 @@ func TestWindBlockRevealSecondInput(t *testing.T) {
 // warm-fetched exactly once, and the reveal lands at the sum.
 func TestWindBlockPrefilledTransferPlusReveal(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	_, parentPTxid := ordTestParent(1, 5000)
 	spentOP := tbcd.NewOutpoint(parentPTxid, 0)
@@ -560,7 +565,7 @@ func TestWindBlockPrefilledTransferPlusReveal(t *testing.T) {
 // exercises the fee-base accumulation guard (inputValue > outTotal).
 func TestWindBlockFeeCarryToCoinbase(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	parentA, parentATxid := ordTestParent(1, 10000)
 	db.parents[parentATxid] = parentA
@@ -607,7 +612,7 @@ func TestWindBlockFeeCarryToCoinbase(t *testing.T) {
 // semaphore clamp (128) and the sequential pass consumes the cache.
 func TestWindBlockManyInputsClampsSlots(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	tx := wire.NewMsgTx(wire.TxVersion)
 	for i := range 129 {
@@ -654,7 +659,7 @@ func TestWindBlockManyInputsClampsSlots(t *testing.T) {
 // windBlock returns it.
 func TestWindBlockMissingParentError(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	_, parentATxid := ordTestParent(1, 10000) // NOT installed: lookup fails
 	parentB, parentBTxid := ordTestParent(2, 7000)
@@ -785,7 +790,7 @@ func TestOrdinalCacheClearReleasesMemory(t *testing.T) {
 // indexer framework acts on.
 func TestWindBlockByteBudgetSignalsFlush(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 	oi.cacheByteBudget = 512
 
 	_, parentTxid := ordTestParent(1, 600)
@@ -814,7 +819,7 @@ func TestWindBlockByteBudgetSignalsFlush(t *testing.T) {
 // sentinel). Fails when the guard is removed.
 func TestWindBlockFeeBaseWrapGuard(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	// tx1: 1-input transfer landing in its output. fetchCount==0 so
 	// inputValue==0 while outTotal==5000: the guarded subtraction
@@ -900,7 +905,7 @@ func TestOrdinalCacheAccountingAccuracy(t *testing.T) {
 // dereferencing the nil location.
 func TestWindBlockLegacyTxLocFallsBack(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	parentA, parentATxid := ordTestParent(1, 10000)
 	rawBlock := func() []byte {
@@ -932,39 +937,6 @@ func TestWindBlockLegacyTxLocFallsBack(t *testing.T) {
 	}
 	if v, ok := dst.Inscriptions[10000]; !ok || v == nil {
 		t.Fatalf("reveal not positioned via legacy lazyBlock path: %v", dst.Inscriptions)
-	}
-}
-
-// TestServerWiresVerifyBigO proves the flag travels the production
-// path: Config -> Server -> dbOpen -> ordinal indexer.
-func TestServerWiresVerifyBigO(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	cfg := NewDefaultConfig()
-	cfg.Network = networkLocalnet
-	cfg.LevelDBHome = t.TempDir()
-	cfg.OrdinalIndex = true
-	cfg.OrdinalVerifyBigO = true
-	cfg.MempoolEnabled = false
-	s, err := NewServer(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.dbOpen(ctx); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := s.dbClose(); err != nil {
-			t.Logf("db close: %v", err)
-		}
-	}()
-	oi, ok := s.oi.(*ordinalIndexer)
-	if !ok {
-		t.Fatalf("ordinal indexer type: %T", s.oi)
-	}
-	if !oi.verifyBigO {
-		t.Fatal("OrdinalVerifyBigO did not reach the indexer")
 	}
 }
 
@@ -1046,7 +1018,7 @@ func BenchmarkWindBlock(b *testing.B) {
 
 // TestReadCacheInfoBeforeWind covers the no-live-cache branch.
 func TestReadCacheInfoBeforeWind(t *testing.T) {
-	oi := newOrdTestIndexer(t, newOrdStubDB(), false)
+	oi := newOrdTestIndexer(t, newOrdStubDB())
 	if got := oi.readCacheInfo(); got != "" {
 		t.Fatalf("expected empty cache info before wind, got %q", got)
 	}
@@ -1104,7 +1076,7 @@ func TestWindBlockRangedReadErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db := newOrdStubDB()
-			oi := newOrdTestIndexer(t, db, false)
+			oi := newOrdTestIndexer(t, db)
 			b := build(db)
 			tt.mut(db)
 			err := oi.windBlock(t.Context(), 800000, b.Hash(), b, NewOrdinalCache(1000, 0))
@@ -1130,7 +1102,7 @@ func TestWindBlockRangedReadErrors(t *testing.T) {
 // the ranged read.
 func TestWindBlockZeroLocFallsBack(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	parentA, parentATxid := ordTestParent(1, 10000)
 	db.parents[parentATxid] = parentA
@@ -1172,7 +1144,7 @@ func TestWindBlockZeroLocFallsBack(t *testing.T) {
 // iteration would show as extra lookups.
 func TestWindBlockBigOPrefetch(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	// Transfer with 'O' plus a plain 3-input tx: 4 inputs total.
 	_, parentPTxid := ordTestParent(1, 5000)
@@ -1211,7 +1183,7 @@ func TestWindBlockBigOPrefetch(t *testing.T) {
 // removal both fail.
 func TestWindBlockBigOPrefetchParallel(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 	db.bigOGate = make(chan struct{})
 
 	tx := wire.NewMsgTx(wire.TxVersion)
@@ -1243,7 +1215,7 @@ func TestWindBlockBigOPrefetchParallel(t *testing.T) {
 // TestWindBlockBigOPrefetchError propagates a prefetch failure.
 func TestWindBlockBigOPrefetchError(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 	db.bigOErr = errors.New("disk on fire")
 
 	_, parentTxid := ordTestParent(1, 5000)
@@ -1265,7 +1237,7 @@ func TestWindBlockBigOPrefetchError(t *testing.T) {
 // prefetch at its deterministic check.
 func TestWindBlockPrefetchCancelled(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	_, parentTxid := ordTestParent(1, 5000)
 	tx := wire.NewMsgTx(wire.TxVersion)
@@ -1291,7 +1263,7 @@ func TestWindBlockPrefetchCancelled(t *testing.T) {
 // the cache overlay, exactly as the serial order did.
 func TestWindBlockSameBlockChainWithPrefetch(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	_, parentTxid := ordTestParent(1, 5000)
 	txA := wire.NewMsgTx(wire.TxVersion)
@@ -1334,7 +1306,7 @@ func TestWindBlockSameBlockChainWithPrefetch(t *testing.T) {
 // — previously each input raced its own fetch through the fan-out.
 func TestWindBlockWarmDedupsBatchParents(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	parent, parentTxid := ordTestParent(1,
 		700, 700, 700, 700, 700, 700, 700, 700, 700, 700, 700, 700)
@@ -1387,7 +1359,7 @@ func TestWindBlockWarmDedupsBatchParents(t *testing.T) {
 // the outcome.
 func TestWindBlockWarmSoftFailure(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	parentA, parentATxid := ordTestParent(1, 10000)
 	db.parents[parentATxid] = parentA
@@ -1422,7 +1394,7 @@ func TestWindBlockWarmSoftFailure(t *testing.T) {
 // legacy-path error branches of the parent value lookup directly.
 func TestInputOutputValueErrors(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	// vout beyond the parent's outputs.
 	parent, parentTxid := ordTestParent(1, 500)
@@ -1503,7 +1475,7 @@ func TestWindBlockWarmSkippedWithoutCache(t *testing.T) {
 // warm phase (empty prefetch: coinbase-only block) skips warming.
 func TestWindBlockWarmSkippedWhenCancelled(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 	oi.warmedParents = 99 // must be overwritten
 
 	b := ordTestBlock(800000, 625000000) // coinbase only
@@ -1525,7 +1497,7 @@ func TestWindBlockWarmSkippedWhenCancelled(t *testing.T) {
 // both flotsam — the memo must include envelopes on 'O'-hit inputs.
 func TestWindBlockRevealOnTrackedInput(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	_, parentPTxid := ordTestParent(1, 5000)
 	spentOP := tbcd.NewOutpoint(parentPTxid, 0)
@@ -1562,7 +1534,7 @@ func TestWindBlockRevealOnTrackedInput(t *testing.T) {
 // nothing, and discard the memo (a partial memo would lose reveals).
 func TestWarmParentValuesCancelledFeed(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 
 	parent, parentTxid := ordTestParent(1, 700, 700)
 	db.parents[parentTxid] = parent
@@ -1614,7 +1586,7 @@ func TestMustPrefetchedBigO(t *testing.T) {
 // identical results, fetches on demand.
 func TestWindBlockWarmKnobOff(t *testing.T) {
 	db := newOrdStubDB()
-	oi := newOrdTestIndexer(t, db, false)
+	oi := newOrdTestIndexer(t, db)
 	oi.warm = false
 
 	parentA, parentATxid := ordTestParent(1, 10000)

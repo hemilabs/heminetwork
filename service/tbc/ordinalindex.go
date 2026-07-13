@@ -25,6 +25,8 @@ import (
 	"github.com/hemilabs/heminetwork/v2/lru"
 )
 
+var ordinalVerifyBigO bool
+
 type ordinalIndexer struct {
 	indexerCommon
 
@@ -34,7 +36,6 @@ type ordinalIndexer struct {
 	computeInscSat  func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error)
 	watermarkGap    time.Duration
 	populating      atomic.Uint32 // reentrancy guard for onSyncComplete
-	verifyBigO      bool          // cross-check 'O' outputValue against the tx index
 	warm            bool          // auto-managed: true at tip (gap<=1), false during catchup
 	cacheByteBudget int           // cache flush budget in bytes; 0 = default
 
@@ -235,8 +236,7 @@ type OrdinalIndexerConfig struct {
 	Genesis              *HashHeight // ordinal genesis override
 	ComputeInscSat       func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error)
 	WatermarkGap         time.Duration
-	OutputValueCacheSize int  // LRU for parent tx output values; 0 disables
-	VerifyBigO           bool // debug: cross-check 'O' values against the tx index
+	OutputValueCacheSize int // LRU for parent tx output values; 0 disables
 }
 
 func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexerConfig) Indexer {
@@ -247,7 +247,6 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexer
 		workCache:       make(map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue),
 		computeInscSat:  cfg.ComputeInscSat,
 		watermarkGap:    cfg.WatermarkGap,
-		verifyBigO:      cfg.VerifyBigO,
 	}
 	oi.indexerCommon = indexerCommon{
 		name:    "ordinal",
@@ -723,7 +722,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				continue
 			}
 			idx := fl[fi].srcInputIdx
-			if i.verifyBigO {
+			if ordinalVerifyBigO {
 				// Debug cross-check: verify 'O' outputValue
 				// against the tx index for every 'O'-carried
 				// transfer, including ones whose value is never
