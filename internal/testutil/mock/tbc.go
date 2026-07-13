@@ -79,14 +79,6 @@ func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keyst
 func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.Mempool, w http.ResponseWriter, r *http.Request) (string, error) {
 	cmd, id, payload, err := tbcapi.Read(f.pctx, c)
 	if err != nil {
-		var ce websocket.CloseError
-		if errors.As(err, &ce) {
-			panic(fmt.Errorf("handleWebsocketRead: %w", err))
-		}
-		if errors.Is(err, io.EOF) {
-			panic(errors.New("handleWebsocketRead: EOF"))
-		}
-
 		return "", fmt.Errorf("handleWebsocketRead: %w", err)
 	}
 	log.Tracef("%v: command is %v", f.name, cmd)
@@ -383,6 +375,10 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		method, err := f.handle(wsConn, utxos, mp, w, r)
 		if err != nil {
 			log.Errorf("exiting mockTBCHandleFunc: %v", err)
+			var ce websocket.CloseError
+			if errors.As(err, &ce) || errors.Is(err, io.EOF) {
+				return nil
+			}
 			return err
 		}
 		f.notifyMsg(f.pctx, method)

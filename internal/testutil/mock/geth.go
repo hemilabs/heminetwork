@@ -292,7 +292,10 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		if err != nil {
 			log.Errorf("exiting mockOpGethHandleFunc: %v", err)
 			if errors.Is(err, io.EOF) {
-				log.Tracef("websocket was closed")
+				return nil
+			}
+			var ce websocket.CloseError
+			if errors.As(err, &ce) {
 				return nil
 			}
 
