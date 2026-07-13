@@ -84,6 +84,7 @@ type indexer interface {
 	process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error // Process block
 	commit(ctx context.Context, direction int, hash chainhash.Hash, c indexerCache) error   // Commit index cache to disk
 	fixupCacheHook(ctx context.Context, block *btcutil.Block, c indexerCache) error         // Fixup cache
+	beforeWind(startHeight, endHeight uint64)                                               // Called before wind loop; gap = endHeight - startHeight
 	onSyncComplete()                                                                        // Called after sync reaches target
 	readCacheInfo() string                                                                  // Optional read cache stats for log line
 }
@@ -313,6 +314,8 @@ func (c *indexerCommon) wind(ctx context.Context, startBH, endBH *tbcd.BlockHead
 	// cleared and its items will be collected by GC.
 	cache := c.p.newCache()
 	defer cache.Clear()
+
+	c.p.beforeWind(startBH.Height, endBH.Height)
 
 	log.Infof("Start indexing %vs at hash %v height %v", c, startBH, startBH.Height)
 	log.Infof("End indexing %vs at hash %v height %v", c, endBH, endBH.Height)

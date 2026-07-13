@@ -65,7 +65,6 @@ func dbProps(pr interface {
 //	TBC_REPLAY_NETWORK  network directory (default mainnet)
 //	TBC_REPLAY_HEIGHTS  comma-separated block heights, required
 //	TBC_REPLAY_PASSES   replays per height (default 2)
-//	TBC_REPLAY_WARM     "0" disables the warm phase (default on)
 //
 // Per pass the test also reports what the wind READ: syscall count,
 // bytes through read(2), bytes actually fetched from disk
@@ -110,8 +109,6 @@ func TestWindReplay(t *testing.T) {
 		}
 		passes = p
 	}
-	warm := os.Getenv("TBC_REPLAY_WARM") != "0"
-
 	ctx := t.Context()
 	cfg, err := level.NewConfig(network, home, "2mb", "512mb")
 	if err != nil {
@@ -144,11 +141,11 @@ func TestWindReplay(t *testing.T) {
 			Enabled:              true,
 			WatermarkGap:         24 * time.Hour,
 			OutputValueCacheSize: 256 << 20,
-			Warm:                 warm,
 		}).(*ordinalIndexer)
+	oi.warm = true
 
-	t.Logf("replay: network=%s warm=%v passes=%d heights=%v",
-		network, warm, passes, heights)
+	t.Logf("replay: network=%s passes=%d heights=%v",
+		network, passes, heights)
 	for _, height := range heights {
 		bhs, err := db.BlockHeadersByHeight(ctx, height)
 		if err != nil {

@@ -35,7 +35,7 @@ type ordinalIndexer struct {
 	watermarkGap    time.Duration
 	populating      atomic.Uint32 // reentrancy guard for onSyncComplete
 	verifyBigO      bool          // cross-check 'O' outputValue against the tx index
-	warm            bool          // enable the per-block parent value warm phase
+	warm            bool          // auto-managed: true at tip (gap<=1), false during catchup
 	cacheByteBudget int           // cache flush budget in bytes; 0 = default
 
 	// cache is the live write cache created by newCache; retained so
@@ -237,12 +237,6 @@ type OrdinalIndexerConfig struct {
 	WatermarkGap         time.Duration
 	OutputValueCacheSize int  // LRU for parent tx output values; 0 disables
 	VerifyBigO           bool // debug: cross-check 'O' values against the tx index
-	// XXX(marco): evaluate whether the warm phase stays long term.
-	// Measured neutral in disk-saturated rebuild zones (parallelism
-	// queues into the same IOPS as compaction); its projected wins —
-	// batch-mint dedup, idle-disk tip parallelism — are unproven in
-	// production. This knob exists for that evaluation.
-	Warm bool // warm parent values per block before the sequential pass
 }
 
 func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexerConfig) Indexer {
@@ -254,7 +248,6 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexer
 		computeInscSat:  cfg.ComputeInscSat,
 		watermarkGap:    cfg.WatermarkGap,
 		verifyBigO:      cfg.VerifyBigO,
-		warm:            cfg.Warm,
 	}
 	oi.indexerCommon = indexerCommon{
 		name:    "ordinal",
@@ -490,7 +483,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	var blockFeeBase uint64
 
 	blockStart := time.Now()
-	var cheapTime, expensiveTime time.Duration
+	var detectTime, resolveTime time.Duration
 	var flotsamTxs, iovCalls, totalInputs int
 
 	// Prefetch the committed 'O' entry for every input in the block
@@ -563,7 +556,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			bigOPrefetch[prefetchOps[j]] = vals[j]
 		}
 	}
-	cheapTime += time.Since(prefetchStart)
+	detectTime += time.Since(prefetchStart)
 
 	// Warm the output-value cache with every parent value the
 	// expensive pass will need, and memoize the envelope parse so the
@@ -578,7 +571,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	}
 	i.warmedParents = iovWarm
 	warmTime := time.Since(warmStart)
-	cheapTime += warmTime
+	detectTime += warmTime
 
 	for txBlockIdx, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
@@ -587,7 +580,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		txid := *tx.Hash()
 
 		var fl []flotsam
-		cheapStart := time.Now()
+		detectStart := time.Now()
 		for inputIdx, txIn := range tx.MsgTx().TxIn {
 			prevOut := txIn.PreviousOutPoint
 
@@ -677,7 +670,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 		}
 
-		cheapTime += time.Since(cheapStart)
+		detectTime += time.Since(detectStart)
 		totalInputs += len(tx.MsgTx().TxIn)
 
 		if len(fl) == 0 {
@@ -695,7 +688,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		// Reveal input index comes from inscID[32:36], NOT srcInputIdx
 		// (which is ordinalRevealSentinel for reveals and must stay that
 		// way in the stored 'o' value for unwind compatibility).
-		expStart := time.Now()
+		resolveStart := time.Now()
 		// Sort flotsam by their positioning input up front: the
 		// FIFO walk below is then O(F + maxIdx) instead of the
 		// quadratic O(F x maxIdx) scan an inscription-sweep tx
@@ -817,7 +810,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				fl[fi].pos = inputValue + fl[fi].srcOffset
 			}
 		}
-		expensiveTime += time.Since(expStart)
+		resolveTime += time.Since(resolveStart)
 
 		sort.Slice(fl, func(a, b int) bool { return fl[a].pos < fl[b].pos })
 
@@ -912,11 +905,12 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		}
 	}
 
-	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls %d iov_warm (%v) cheap %v expensive %v total %v",
+	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls %d iov_warm detect %v (warm %v) resolve %v total %v",
 		blockHeight, len(txs)-1, totalInputs, flotsamTxs, iovCalls,
-		iovWarm, warmTime.Round(time.Millisecond),
-		cheapTime.Round(time.Millisecond),
-		expensiveTime.Round(time.Millisecond),
+		iovWarm,
+		detectTime.Round(time.Millisecond),
+		warmTime.Round(time.Millisecond),
+		resolveTime.Round(time.Millisecond),
 		time.Since(blockStart).Round(time.Millisecond))
 
 	// Coinbase phase.
@@ -1535,6 +1529,15 @@ func (i *ordinalIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ i
 // and the populator will grind through backward walks after sync
 // completes. Downside: hours of background computation.
 //
+
+func (i *ordinalIndexer) beforeWind(startHeight, endHeight uint64) {
+	gap := endHeight - startHeight
+	wasWarm := i.warm
+	i.warm = gap <= 1
+	if wasWarm != i.warm {
+		log.Infof("ordinal warm %v (gap %d)", i.warm, gap)
+	}
+}
 
 func (i *ordinalIndexer) onSyncComplete() {
 	if !i.populating.CompareAndSwap(0, 1) {
