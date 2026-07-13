@@ -18,4 +18,3 @@ func TestOrdinalVerifyBigOConfig(t *testing.T) {
 		t.Fatal("not wired to cfg.OrdinalVerifyBigO")
 	}
 }
-
