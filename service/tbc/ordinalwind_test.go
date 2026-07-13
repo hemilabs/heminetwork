@@ -248,14 +248,15 @@ func (d *ordStubDB) lookups() int {
 func newOrdTestIndexer(t *testing.T, db *ordStubDB, verifyBigO bool) *ordinalIndexer {
 	t.Helper()
 	g := geometryParams{db: db, chain: &chaincfg.RegressionNetParams}
-	return NewOrdinalIndexer(t.Context(), g, OrdinalIndexerConfig{
+	oi := NewOrdinalIndexer(t.Context(), g, OrdinalIndexerConfig{
 		CacheLen:             1000,
 		Enabled:              true,
 		WatermarkGap:         time.Hour,
 		OutputValueCacheSize: 65536,
 		VerifyBigO:           verifyBigO,
-		Warm:                 true,
 	}).(*ordinalIndexer)
+	oi.warm = true
+	return oi
 }
 
 // ordTestParent returns a parent tx with the given output values and a
@@ -1466,9 +1467,9 @@ func TestWindBlockWarmSkippedWithoutCache(t *testing.T) {
 		CacheLen:     1000,
 		Enabled:      true,
 		WatermarkGap: time.Hour,
-		Warm:         true,
 		// OutputValueCacheSize 0: cache disabled.
 	}).(*ordinalIndexer)
+	oi.warm = true
 
 	parentA, parentATxid := ordTestParent(1, 10000)
 	db.parents[parentATxid] = parentA
@@ -1608,9 +1609,9 @@ func TestMustPrefetchedBigO(t *testing.T) {
 	mustPrefetchedBigO(m, tbcd.NewOutpoint(chainhash.Hash{0x02}, 1))
 }
 
-// TestWindBlockWarmKnobOff: with the warm knob disabled the pipeline
-// must not run and detection parses envelopes itself — identical
-// results, fetches on demand.
+// TestWindBlockWarmKnobOff: with warm disabled (catchup mode) the
+// pipeline must not run and detection parses envelopes itself —
+// identical results, fetches on demand.
 func TestWindBlockWarmKnobOff(t *testing.T) {
 	db := newOrdStubDB()
 	oi := newOrdTestIndexer(t, db, false)
