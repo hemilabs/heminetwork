@@ -482,8 +482,12 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	var blockFeeBase uint64
 
 	blockStart := time.Now()
-	var detectTime, resolveTime time.Duration
+	var prefetchTime, scanTime, resolveTime time.Duration
 	var flotsamTxs, iovCalls, totalInputs int
+	var bigOHits int
+	var scanTrackedTime time.Duration
+	var scanTrackedCalls int
+	var scanEnvParses int
 
 	// Prefetch the committed 'O' entry for every input in the block
 	// in one parallel pass. The DB is immutable during a wind — all
@@ -555,7 +559,12 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			bigOPrefetch[prefetchOps[j]] = vals[j]
 		}
 	}
-	detectTime += time.Since(prefetchStart)
+	prefetchTime = time.Since(prefetchStart)
+	for _, v := range bigOPrefetch {
+		if v != nil {
+			bigOHits++
+		}
+	}
 
 	// Warm the output-value cache with every parent value the
 	// expensive pass will need, and memoize the envelope parse so the
@@ -570,7 +579,6 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 	}
 	i.warmedParents = iovWarm
 	warmTime := time.Since(warmStart)
-	detectTime += warmTime
 
 	for txBlockIdx, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
@@ -605,7 +613,10 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 
 			// Inscription hit. Full 'o' scan for data (only ~200/block).
 			if bigOVal != nil || hasCacheInscription {
+				trackedStart := time.Now()
 				tracked, terr := i.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, spentOP)
+				scanTrackedTime += time.Since(trackedStart)
+				scanTrackedCalls++
 				if terr != nil {
 					return fmt.Errorf("tracked lookup %v: %w", spentOP, terr)
 				}
@@ -656,6 +667,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				}
 			} else if env, perr := ParseInscriptionEnvelope(txIn.Witness); perr == nil {
 				envelope = env
+				scanEnvParses++
 			}
 			if envelope != nil {
 				inscID := makeInscriptionID(tx.Hash(), uint32(inputIdx))
@@ -669,7 +681,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			}
 		}
 
-		detectTime += time.Since(detectStart)
+		scanTime += time.Since(detectStart)
 		totalInputs += len(tx.MsgTx().TxIn)
 
 		if len(fl) == 0 {
@@ -904,13 +916,24 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		}
 	}
 
-	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls %d iov_warm detect %v (warm %v) resolve %v total %v",
+	var iovStats string
+	if i.outputValueCache != nil {
+		s := i.outputValueCache.Stats()
+		iovStats = fmt.Sprintf(" iov_lru h=%d m=%d p=%d items=%d",
+			s.Hits, s.Misses, s.Purges, s.Items)
+	}
+	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls %d iov_warm "+
+		"bigO %d/%d prefetch %v scan %v (tracked %v/%d envparse %d) warm %v resolve %v total %v%s",
 		blockHeight, len(txs)-1, totalInputs, flotsamTxs, iovCalls,
 		iovWarm,
-		detectTime.Round(time.Millisecond),
+		bigOHits, len(bigOPrefetch),
+		prefetchTime.Round(time.Millisecond),
+		scanTime.Round(time.Millisecond),
+		scanTrackedTime.Round(time.Millisecond), scanTrackedCalls, scanEnvParses,
 		warmTime.Round(time.Millisecond),
 		resolveTime.Round(time.Millisecond),
-		time.Since(blockStart).Round(time.Millisecond))
+		time.Since(blockStart).Round(time.Millisecond),
+		iovStats)
 
 	// Coinbase phase.
 	if len(feeList) > 0 {
