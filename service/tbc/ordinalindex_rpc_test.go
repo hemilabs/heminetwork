@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -758,7 +759,13 @@ func TestPrometheusOrdinalMetric(t *testing.T) {
 	home := t.TempDir()
 	_ = createFullOrdinalDB(ctx, t, home)
 
-	promAddr := "127.0.0.1:19123"
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	promAddr := ln.Addr().String()
+	ln.Close()
+
 	cfg := &Config{
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
@@ -798,17 +805,24 @@ func TestPrometheusOrdinalMetric(t *testing.T) {
 			break
 		}
 	}
-	// Give prometheus listener time to bind.
-	time.Sleep(200 * time.Millisecond)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		fmt.Sprintf("http://%s/metrics", promAddr), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET /metrics: %v", err)
+	// Poll until prometheus listener is ready.
+	var resp *http.Response
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			fmt.Sprintf("http://%s/metrics", promAddr), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err = http.DefaultClient.Do(req)
+		if err == nil {
+			break
+		}
 	}
 	defer resp.Body.Close()
 
