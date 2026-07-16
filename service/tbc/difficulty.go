@@ -24,7 +24,8 @@ type tbcHeaderCtx struct {
 	prevBlock chainhash.Hash
 	parent    *tbcHeaderCtx
 
-	db tbcd.Database
+	ctx context.Context
+	db  tbcd.Database
 }
 
 var _ blockchain.HeaderCtx = (*tbcHeaderCtx)(nil)
@@ -40,8 +41,7 @@ func (h *tbcHeaderCtx) Parent() blockchain.HeaderCtx {
 	if h.height <= 0 || h.db == nil {
 		return nil
 	}
-	// context.Background: btcd's HeaderCtx interface has no context param.
-	bh, err := h.db.BlockHeaderByHash(context.Background(), h.prevBlock)
+	bh, err := h.db.BlockHeaderByHash(h.ctx, h.prevBlock)
 	if err != nil {
 		return nil
 	}
@@ -54,6 +54,7 @@ func (h *tbcHeaderCtx) Parent() blockchain.HeaderCtx {
 		bits:      wbh.Bits,
 		ts:        wbh.Timestamp.Unix(),
 		prevBlock: wbh.PrevBlock,
+		ctx:       h.ctx,
 		db:        h.db,
 	}
 	h.parent = p
@@ -126,6 +127,7 @@ func (s *Server) verifyDifficultyRetarget(ctx context.Context, headers []*wire.B
 		bits:      pwbh.Bits,
 		ts:        pwbh.Timestamp.Unix(),
 		prevBlock: pwbh.PrevBlock,
+		ctx:       ctx,
 		db:        s.g.db,
 	}
 
@@ -143,6 +145,7 @@ func (s *Server) verifyDifficultyRetarget(ctx context.Context, headers []*wire.B
 			ts:        hdr.Timestamp.Unix(),
 			prevBlock: hdr.PrevBlock,
 			parent:    prev,
+			ctx:       ctx,
 			db:        s.g.db,
 		}
 	}
