@@ -5874,7 +5874,8 @@ func (b *btcNode) mineWithInscriptionAndTransfer(name string, parentBlk *block, 
 // the prefetched result (map hit, no inline DB read).
 //
 // Chain: genesis -> b1 -> b2(inscription reveal) -> [sync/flush]
-//                                                -> b3(transfer spending b2 inscription)
+//
+//	-> b3(transfer spending b2 inscription)
 func TestOrdinalTrackedPrefetchTransfer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
