@@ -5788,3 +5788,694 @@ func TestOrdinalBigOLifecycle(t *testing.T) {
 	}
 	t.Log("BigO lifecycle: write with correct values, tombstone on unwind — all correct")
 }
+
+// mineWithInscriptionAndTransfer creates a block containing two txs:
+// tx1 reveals an inscription (spending parent's coinbase), and tx2
+// immediately spends tx1's inscription output (same-block transfer).
+// Must be called with b.mtx held.
+func (b *btcNode) mineWithInscriptionAndTransfer(name string, parentBlk *block, payToAddress btcutil.Address) (*block, error) {
+	parentHash := parentBlk.Hash()
+	parent, ok := b.chain[parentHash.String()]
+	if !ok {
+		return nil, errors.New("parent hash not found")
+	}
+
+	// tx1: inscription reveal spending parent's coinbase.
+	coinbaseTx := parent.TxByIndex(0)
+	tx1, err := b.newSignedTxFromTx(name+":insc", coinbaseTx, 3000000000)
+	if err != nil {
+		return nil, fmt.Errorf("inscription tx: %w", err)
+	}
+	tx1.MsgTx().TxIn[0].Witness = buildInscriptionWitness(
+		"text/plain;charset=utf-8", "same-block inscription in "+name)
+
+	// tx2: transfer spending tx1's output[0] (the inscription output).
+	tx1Out0 := tx1.MsgTx().TxOut[0]
+	tx2 := wire.NewMsgTx(wire.TxVersion)
+	tx2.AddTxIn(wire.NewTxIn(wire.NewOutPoint(tx1.Hash(), 0), nil, nil))
+
+	_, _, transferAddr, err := b.newKey(name + ":transfer")
+	if err != nil {
+		return nil, fmt.Errorf("transfer key: %w", err)
+	}
+	transferPkScript, err := txscript.PayToAddrScript(transferAddr)
+	if err != nil {
+		return nil, err
+	}
+	tx2.AddTxOut(wire.NewTxOut(tx1Out0.Value-10000, transferPkScript))
+
+	_, addrs, _, err := txscript.ExtractPkScriptAddrs(tx1Out0.PkScript, b.params)
+	if err != nil {
+		return nil, err
+	}
+	if len(addrs) != 1 {
+		return nil, fmt.Errorf("expected 1 address, got %d", len(addrs))
+	}
+	nk, ok := b.keys[addrs[0].String()]
+	if !ok {
+		return nil, fmt.Errorf("no key for tx1 output address %v", addrs[0])
+	}
+	sigScript, err := txscript.SignTxOutput(b.params, tx2, 0,
+		tx1Out0.PkScript, txscript.SigHashAll,
+		txscript.KeyClosure(func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+			return nk.key, true, nil
+		}), nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("sign transfer: %w", err)
+	}
+	tx2.TxIn[0].SignatureScript = sigScript
+
+	b.t.Logf("same-block: insc tx %v → transfer tx %v (spending %v:0)",
+		tx1.Hash(), btcutil.NewTx(tx2).Hash(), tx1.Hash())
+
+	en := testutil.RandomBytes(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	nextHeight := parent.Height() + 1
+	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextHeight,
+		parentHash, extraNonce, []*btcutil.Tx{tx1, btcutil.NewTx(tx2)})
+	if err != nil {
+		return nil, err
+	}
+	blk := newBlock(b.params, name, bt)
+	if _, err := b.insertBlock(blk); err != nil {
+		return nil, err
+	}
+	if blk.Height() > b.height {
+		b.height = blk.Height()
+	}
+	return blk, nil
+}
+
+// TestOrdinalTrackedPrefetchTransfer exercises the tracked prefetch
+// hit path: an inscription created in a prior block has its 'O' and 'o'
+// entries committed to LevelDB. When a later block spends that outpoint,
+// the bigO prefetch finds the positive 'O' entry, the tracked prefetch
+// fan-out pre-reads the 'o' entries in parallel, and the scan loop uses
+// the prefetched result (map hit, no inline DB read).
+//
+// Chain: genesis -> b1 -> b2(inscription reveal) -> [sync/flush]
+//                                                -> b3(transfer spending b2 inscription)
+func TestOrdinalTrackedPrefetchTransfer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		OrdinalWatermarkGap:     24 * time.Hour,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       1000,
+		Network:                 networkLocalnet,
+		RequestTimeout:          10,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	address := n.address
+	parent := chaincfg.RegressionNetParams.GenesisHash
+
+	// b1: plain block for a spendable coinbase.
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b2: inscription block.
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	// Sync and flush b2 so the 'O' and 'o' entries are committed to LevelDB.
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	inscTx := b2.TxByIndex(1)
+	inscTxid := *inscTx.Hash()
+	inscOP := tbcd.NewOutpoint(inscTxid, 0)
+
+	// Verify 'O' is committed.
+	bigOBefore, err := s.g.db.OrdinalBigOByOutpoint(ctx, inscOP)
+	if err != nil {
+		t.Fatalf("OrdinalBigOByOutpoint before transfer: %v", err)
+	}
+	if bigOBefore == nil {
+		t.Fatal("'O' entry not committed before transfer block")
+	}
+
+	// Verify 'o' is committed.
+	oBefore, err := s.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, inscOP)
+	if err != nil {
+		t.Fatalf("OrdinalInscriptionsByOutpointWithOffset before transfer: %v", err)
+	}
+	if len(oBefore) != 1 {
+		t.Fatalf("expected 1 'o' entry before transfer, got %d", len(oBefore))
+	}
+	origInscID := oBefore[0].InscID
+	t.Logf("inscription committed: inscID=%x at outpoint %v", origInscID[:4], inscOP)
+
+	// b3: transfer block — spends the inscription output from b2.
+	// This exercises the tracked prefetch hit path: bigOPrefetch finds
+	// the positive 'O', trackedPrefetch pre-reads the 'o' entries, and
+	// the scan loop uses trackedPrefetch[inscOP] directly.
+	l, err = s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	b3InscTx := inscTx
+	transferTx, err := func() (*btcutil.Tx, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return n.newSignedTxFromTx("b3:transfer", b3InscTx, 100000000)
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	en := testutil.RandomBytes(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	b3bt, err := func() (*btcutil.Block, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return newBlockTemplate(t, n.params, address, 3, b2.Hash(),
+			extraNonce, []*btcutil.Tx{transferTx})
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3 := func() *block {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		blk := newBlock(n.params, "b3", b3bt)
+		if _, err := n.insertBlock(blk); err != nil {
+			t.Fatal(err)
+		}
+		if blk.Height() > n.height {
+			n.height = blk.Height()
+		}
+		return blk
+	}()
+	if err := n.SendBlockheader(ctx, b3.MsgBlock().Header); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// After transfer: old outpoint should have no inscription.
+	oAfter, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, inscOP)
+	if err != nil {
+		t.Fatalf("OrdinalInscriptionsByOutpoint at old outpoint: %v", err)
+	}
+	if len(oAfter) != 0 {
+		t.Fatalf("old outpoint should have 0 inscriptions after transfer, got %d", len(oAfter))
+	}
+	bigOAfter, err := s.g.db.OrdinalBigOByOutpoint(ctx, inscOP)
+	if err != nil {
+		t.Fatalf("OrdinalBigOByOutpoint at old outpoint: %v", err)
+	}
+	if bigOAfter != nil {
+		t.Fatal("old outpoint 'O' should be tombstoned after transfer")
+	}
+
+	// New outpoint should carry the inscription.
+	transferTxid := *transferTx.Hash()
+	transferOP := tbcd.NewOutpoint(transferTxid, 0)
+	oNew, err := s.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, transferOP)
+	if err != nil {
+		t.Fatalf("OrdinalInscriptionsByOutpointWithOffset at new outpoint: %v", err)
+	}
+	if len(oNew) != 1 {
+		t.Fatalf("expected 1 inscription at new outpoint, got %d", len(oNew))
+	}
+	if oNew[0].InscID != origInscID {
+		t.Fatalf("inscription ID mismatch: got %x, want %x", oNew[0].InscID[:4], origInscID[:4])
+	}
+	bigONew, err := s.g.db.OrdinalBigOByOutpoint(ctx, transferOP)
+	if err != nil {
+		t.Fatalf("OrdinalBigOByOutpoint at new outpoint: %v", err)
+	}
+	if bigONew == nil {
+		t.Fatal("new outpoint should have 'O' entry after transfer")
+	}
+	if len(bigONew) != 40 {
+		t.Fatalf("'O' value length: got %d, want 40", len(bigONew))
+	}
+	var newBlockHash chainhash.Hash
+	copy(newBlockHash[:], bigONew[:32])
+	b3Hash := *b3.Hash()
+	if !newBlockHash.IsEqual(&b3Hash) {
+		t.Fatalf("'O' blockHash after transfer: got %v, want %v", newBlockHash, b3Hash)
+	}
+	t.Log("tracked prefetch transfer: inscription moved via prefetch hit path — correct")
+}
+
+// TestOrdinalTrackedPrefetchSameBlock exercises the tracked prefetch
+// cache fallback path: an inscription is created and spent within the
+// same block. The inscription outpoint has no committed 'O' entry (only
+// a cache entry from the same block), so it is NOT in trackedPrefetch.
+// The scan loop falls through to an inline DB read (which returns empty),
+// then the cache overlay appends the same-block inscription.
+//
+// Chain: genesis -> b1 -> b2(inscription reveal + same-block transfer)
+func TestOrdinalTrackedPrefetchSameBlock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		OrdinalWatermarkGap:     24 * time.Hour,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       1000,
+		Network:                 networkLocalnet,
+		RequestTimeout:          10,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	address := n.address
+	parent := chaincfg.RegressionNetParams.GenesisHash
+
+	// b1: plain block for a spendable coinbase.
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b2: inscription reveal + same-block transfer in one block.
+	// tx1 creates the inscription, tx2 immediately spends it.
+	// This forces the cache fallback: the inscription outpoint is NOT
+	// in bigOPrefetch (not in DB), so trackedPrefetch misses. The scan
+	// loop falls to inline DB read + cache overlay.
+	b2, err := func() (*block, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return n.mineWithInscriptionAndTransfer("b2", b1, address)
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.SendBlockheader(ctx, b2.MsgBlock().Header); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// tx1 = inscription reveal (block index 1), tx2 = transfer (block index 2).
+	tx1 := b2.TxByIndex(1)
+	tx2 := b2.TxByIndex(2)
+	tx1Txid := *tx1.Hash()
+	tx2Txid := *tx2.Hash()
+
+	// The inscription output (tx1:0) should be tombstoned — it was
+	// spent in the same block by tx2.
+	revealOP := tbcd.NewOutpoint(tx1Txid, 0)
+	oReveal, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, revealOP)
+	if err != nil {
+		t.Fatalf("OrdinalInscriptionsByOutpoint at reveal outpoint: %v", err)
+	}
+	if len(oReveal) != 0 {
+		t.Fatalf("reveal outpoint should have 0 inscriptions (same-block spend), got %d", len(oReveal))
+	}
+	bigOReveal, err := s.g.db.OrdinalBigOByOutpoint(ctx, revealOP)
+	if err != nil {
+		t.Fatalf("OrdinalBigOByOutpoint at reveal outpoint: %v", err)
+	}
+	if bigOReveal != nil {
+		t.Fatal("reveal outpoint 'O' should be tombstoned (same-block spend)")
+	}
+	t.Log("reveal outpoint correctly tombstoned (same-block spend)")
+
+	// The transfer output (tx2:0) should carry the inscription.
+	transferOP := tbcd.NewOutpoint(tx2Txid, 0)
+	oTransfer, err := s.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, transferOP)
+	if err != nil {
+		t.Fatalf("OrdinalInscriptionsByOutpointWithOffset at transfer outpoint: %v", err)
+	}
+	if len(oTransfer) != 1 {
+		t.Fatalf("expected 1 inscription at transfer outpoint, got %d", len(oTransfer))
+	}
+	bigOTransfer, err := s.g.db.OrdinalBigOByOutpoint(ctx, transferOP)
+	if err != nil {
+		t.Fatalf("OrdinalBigOByOutpoint at transfer outpoint: %v", err)
+	}
+	if bigOTransfer == nil {
+		t.Fatal("transfer outpoint should have 'O' entry")
+	}
+	if len(bigOTransfer) != 40 {
+		t.Fatalf("'O' value length: got %d, want 40", len(bigOTransfer))
+	}
+	var transferBlockHash chainhash.Hash
+	copy(transferBlockHash[:], bigOTransfer[:32])
+	b2Hash := *b2.Hash()
+	if !transferBlockHash.IsEqual(&b2Hash) {
+		t.Fatalf("'O' blockHash at transfer outpoint: got %v, want %v", transferBlockHash, b2Hash)
+	}
+	t.Log("same-block transfer: inscription moved via cache fallback — correct")
+
+	// Verify the inscription is also visible via InscriptionsByBlock.
+	inscs, err := s.InscriptionsByBlock(ctx, b2Hash, false)
+	if err != nil {
+		t.Fatalf("InscriptionsByBlock: %v", err)
+	}
+	if len(inscs) != 1 {
+		t.Fatalf("expected 1 inscription in block, got %d", len(inscs))
+	}
+	t.Logf("InscriptionsByBlock verified: %v", inscs[0].TxID)
+
+	// Unwind via longer fork and verify cleanup.
+	l, err = s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	f1, err := n.MineAndSend(ctx, "f1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2, err := n.MineAndSend(ctx, "f2", f1.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f3, err := n.MineAndSend(ctx, "f3", f2.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = n.MineAndSend(ctx, "f4", f3.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatalf("reorg sync: %v", err)
+	}
+
+	// Both reveal and transfer outpoints should be gone after unwind.
+	oRevealAfter, _ := s.g.db.OrdinalInscriptionsByOutpoint(ctx, revealOP)
+	if len(oRevealAfter) != 0 {
+		t.Fatalf("reveal outpoint should be empty after unwind, got %d", len(oRevealAfter))
+	}
+	oTransferAfter, _ := s.g.db.OrdinalInscriptionsByOutpoint(ctx, transferOP)
+	if len(oTransferAfter) != 0 {
+		t.Fatalf("transfer outpoint should be empty after unwind, got %d", len(oTransferAfter))
+	}
+	bigORevealAfter, _ := s.g.db.OrdinalBigOByOutpoint(ctx, revealOP)
+	if bigORevealAfter != nil {
+		t.Fatal("reveal 'O' should be gone after unwind")
+	}
+	bigOTransferAfter, _ := s.g.db.OrdinalBigOByOutpoint(ctx, transferOP)
+	if bigOTransferAfter != nil {
+		t.Fatal("transfer 'O' should be gone after unwind")
+	}
+	t.Log("same-block transfer: unwind cleanup — all correct")
+}
+
+// TestOrdinalTrackedPrefetchCancel verifies that context cancellation
+// during the tracked prefetch fan-out is handled correctly. When the
+// context is cancelled, the semaphore-acquire select detects ctx.Done()
+// and returns ctx.Err() without leaking goroutines.
+func TestOrdinalTrackedPrefetchCancel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+
+	n, err := newFakeNode(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := n.Stop(); err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !testutil.ErrorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		BlockSanity:             false,
+		OrdinalIndex:            true,
+		OrdinalWatermarkGap:     24 * time.Hour,
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		MaxCachedOrdinals:       1000,
+		Network:                 networkLocalnet,
+		RequestTimeout:          10,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{n.Address()},
+		NotificationBlocking:    true,
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
+
+	address := n.address
+	parent := chaincfg.RegressionNetParams.GenesisHash
+
+	// b1: plain block for a spendable coinbase.
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b2: inscription block.
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineWithInscription)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+	l.Unsubscribe()
+
+	// Sync b2 so 'O' entries are committed.
+	if err := s.SyncIndexersToBest(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3: transfer block, will trigger tracked prefetch.
+	l, err = s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	inscTx := b2.TxByIndex(1)
+	transferTx, err := func() (*btcutil.Tx, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return n.newSignedTxFromTx("b3:transfer", inscTx, 100000000)
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	en := testutil.RandomBytes(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	b3bt, err := func() (*btcutil.Block, error) {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		return newBlockTemplate(t, n.params, address, 3, b2.Hash(),
+			extraNonce, []*btcutil.Tx{transferTx})
+	}()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = func() *block {
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+		blk := newBlock(n.params, "b3", b3bt)
+		if _, err := n.insertBlock(blk); err != nil {
+			t.Fatal(err)
+		}
+		if blk.Height() > n.height {
+			n.height = blk.Height()
+		}
+		return blk
+	}()
+	if err := n.SendBlockheader(ctx, b3bt.MsgBlock().Header); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cancel the context and attempt to sync. The wind pipeline should
+	// detect the cancelled context and return an error.
+	cancelledCtx, cancelNow := context.WithCancel(ctx)
+	cancelNow()
+
+	err = s.SyncIndexersToBest(cancelledCtx)
+	if err == nil {
+		t.Fatal("expected error from SyncIndexersToBest with cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	t.Logf("cancelled context correctly propagated: %v", err)
+}
