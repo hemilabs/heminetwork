@@ -3971,39 +3971,56 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 	}
 	sh := tbcd.NewScriptHashFromScript(script)
 
-	// XXX(marco): fetches ALL UTXOs into memory. For high-activity
-	// addresses (exchange hot wallets) this is a memory bomb. Paginate
-	// UtxosByScriptHash in batches and break early once start+count
-	// inscriptions are accumulated.
-	utxos, err := s.g.db.UtxosByScriptHash(ctx, sh, 0, ^uint64(0))
-	if err != nil {
-		return nil, fmt.Errorf("utxos for %s: %w", encodedAddress, err)
+	need := start + count
+	if count == 0 {
+		need = ^uint32(0)
 	}
 
-	result := make([]*tbcapi.OrdinalInscription, 0)
-	for _, utxo := range utxos {
+	const utxoBatchSize = 1000
+	var (
+		result  = make([]*tbcapi.OrdinalInscription, 0)
+		utxoOff uint64
+	)
+	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		op := tbcd.NewOutpoint(*utxo.ChainHash(), utxo.OutputIndex())
-
-		// Scan 'o' entries at this outpoint for tracked inscriptions.
-		located, err := s.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+		utxos, err := s.g.db.UtxosByScriptHash(ctx, sh, utxoOff, utxoBatchSize)
 		if err != nil {
-			log.Warningf("InscriptionsByAddress: scan 'o' at %v: %v", op, err)
-			continue
+			return nil, fmt.Errorf("utxos for %s: %w", encodedAddress, err)
 		}
-		for _, li := range located {
-			insc, err := s.populateInscription(ctx, li.InscID, includeSat)
+		if len(utxos) == 0 {
+			break
+		}
+		utxoOff += uint64(len(utxos))
+
+		for _, utxo := range utxos {
+			op := tbcd.NewOutpoint(*utxo.ChainHash(), utxo.OutputIndex())
+
+			located, err := s.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
 			if err != nil {
-				return nil, err
+				log.Warningf("InscriptionsByAddress: scan 'o' at %v: %v", op, err)
+				continue
 			}
-			result = append(result, insc)
+			for _, li := range located {
+				insc, err := s.populateInscription(ctx, li.InscID, includeSat)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, insc)
+				if uint32(len(result)) >= need {
+					goto paginate
+				}
+			}
+		}
+
+		if uint64(len(utxos)) < utxoBatchSize {
+			break
 		}
 	}
 
-	// Apply pagination.
+paginate:
 	if uint32(len(result)) <= start {
 		return result[:0], nil
 	}

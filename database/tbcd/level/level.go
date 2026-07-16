@@ -2970,11 +2970,6 @@ func (l *ldb) OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chai
 	return result, nil
 }
 
-// OrdinalInscriptionsByOutpointWithOffset returns the inscriptions located
-// at the given outpoint along with each one's byte offset within the
-// output, by prefix-scanning 'o' + txid + vout. Results are in offset
-// order (the key sorts by offset). Used by forward FIFO transfer tracking.
-
 // OrdinalBigOByOutpoint does a point Get for the 'O' acceleration
 // index at the given outpoint. Returns nil, nil if not found (bloom
 // filter rejection). The key is fully specified: 'O' + txid + vout.
@@ -2993,6 +2988,10 @@ func (l *ldb) OrdinalBigOByOutpoint(ctx context.Context, op tbcd.Outpoint) ([]by
 	return v, nil
 }
 
+// OrdinalInscriptionsByOutpointWithOffset returns the inscriptions located
+// at the given outpoint along with each one's byte offset within the
+// output, by prefix-scanning 'o' + txid + vout. Results are in offset
+// order (the key sorts by offset). Used by forward FIFO transfer tracking.
 func (l *ldb) OrdinalInscriptionsByOutpointWithOffset(ctx context.Context, op tbcd.Outpoint) ([]tbcd.OrdinalLocatedInscription, error) {
 	log.Tracef("OrdinalInscriptionsByOutpointWithOffset")
 	defer log.Tracef("OrdinalInscriptionsByOutpointWithOffset exit")
