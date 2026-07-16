@@ -173,6 +173,7 @@ type Config struct {
 	BlockCacheSize          string
 	HeaderCacheSize         string
 	BlockSanity             bool
+	ForceBlockDownload      bool
 	HemiIndex               bool
 	LevelDBHome             string
 	ListenAddress           string
@@ -3001,6 +3002,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	cfg.ForceBlockDownload = s.cfg.ForceBlockDownload
 	s.g.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return err

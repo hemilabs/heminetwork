@@ -134,14 +134,15 @@ func headerHash(header []byte) *chainhash.Hash {
 }
 
 type Config struct {
-	BlockCacheSize  string // size of block cache
-	HeaderCacheSize string // size of block header cache
-	Home            string // home directory
-	Network         string // network e.g. "testnet3", "mainnet" etc
-	blockCacheSize  int    // parsed size of block cache
-	headerCacheSize int    // parsed size of block header cache
-	nonInteractive  bool   // Set to true to prevent user interaction
-	upgradeOpen     bool   // Set to true when doing an open during upgrade
+	BlockCacheSize     string // size of block cache
+	HeaderCacheSize    string // size of block header cache
+	Home               string // home directory
+	Network            string // network e.g. "testnet3", "mainnet" etc
+	ForceBlockDownload bool   // re-download blocks even if already on disk
+	blockCacheSize     int    // parsed size of block cache
+	headerCacheSize    int    // parsed size of block header cache
+	nonInteractive     bool   // Set to true to prevent user interaction
+	upgradeOpen        bool   // Set to true when doing an open during upgrade
 }
 
 func (cfg *Config) SetNoninteractive(x bool) {
@@ -1339,14 +1340,21 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			hhBatch.Put(hhKey, []byte{})
 		}
 
-		// Insert a synthesized height_hash key that serves as an index
-		// to see which blocks are missing.
-		ok, err = blocksDB.Has(hhKey)
-		if err != nil {
-			return tbcd.ITInvalid, nil, nil, 0,
-				fmt.Errorf("blocks has: %w", err)
-		} else if !ok {
+		// Mark the block as missing unless we already have it on
+		// disk. The rawdb indexes blocks by their 32-byte hash,
+		// so we check with bhash (not the height+hash hhKey).
+		// When ForceBlockDownload is set, skip the check and
+		// always re-download to guard against on-disk corruption.
+		if l.cfg.ForceBlockDownload {
 			bmBatch.Put(hhKey, []byte{})
+		} else {
+			ok, err = blocksDB.Has(bhash[:])
+			if err != nil {
+				return tbcd.ITInvalid, nil, nil, 0,
+					fmt.Errorf("blocks has: %w", err)
+			} else if !ok {
+				bmBatch.Put(hhKey, []byte{})
+			}
 		}
 
 		// XXX reason about pre encoding. Due to the caller code being

@@ -850,18 +850,18 @@ func TestE2ERealMainnetRejectEveryBitFlip(t *testing.T) {
 		t.Fatalf("inserting headers: %v", err)
 	}
 
-	real := headers[32255]
+	realHeader := headers[32255]
 
 	// Flip each bit in the Bits field and verify rejection.
 	for bit := 0; bit < 32; bit++ {
-		mutated := *real
-		mutated.Bits = real.Bits ^ (1 << bit)
+		mutated := *realHeader
+		mutated.Bits = realHeader.Bits ^ (1 << bit)
 		mutated.Nonce = uint32(bit)
 
 		_, err := addExternalHeaders(t, s, []*wire.BlockHeader{&mutated})
 		if err == nil {
 			t.Fatalf("bit flip %d: bits 0x%08x should be rejected (real: 0x%08x)",
-				bit, mutated.Bits, real.Bits)
+				bit, mutated.Bits, realHeader.Bits)
 		}
 	}
 }
