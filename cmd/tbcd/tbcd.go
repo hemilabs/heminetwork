@@ -115,7 +115,7 @@ var (
 		},
 		"TBC_MAX_CACHED_ORDINALS": config.Config{
 			Value:        &cfg.MaxCachedOrdinals,
-			DefaultValue: int(1e6),
+			DefaultValue: 500000,
 			Help:         "maximum cached ordinal entries during indexing",
 			Print:        config.PrintAll,
 		},
