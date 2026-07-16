@@ -559,12 +559,62 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			bigOPrefetch[prefetchOps[j]] = vals[j]
 		}
 	}
-	prefetchTime = time.Since(prefetchStart)
 	for _, v := range bigOPrefetch {
 		if v != nil {
 			bigOHits++
 		}
 	}
+
+	// Prefetch 'o' entries for every positive bigO hit in parallel.
+	// The DB is immutable during wind, so these prefix scans are
+	// order-independent. The sequential scan loop applies same-block
+	// cache overlay on top of these results. Outpoints with only a
+	// cache inscription (no committed 'O') are rare and fall back to
+	// an inline DB read.
+	trackedOps := make([]tbcd.Outpoint, 0, bigOHits)
+	for op, v := range bigOPrefetch {
+		if v != nil {
+			trackedOps = append(trackedOps, op)
+		}
+	}
+	trackedPrefetch := make(map[tbcd.Outpoint][]tbcd.OrdinalLocatedInscription, len(trackedOps))
+	if len(trackedOps) > 0 {
+		tResults := make([][]tbcd.OrdinalLocatedInscription, len(trackedOps))
+		tErrs := make([]error, len(trackedOps))
+		slots := min(len(trackedOps), ordinalFetchWidth)
+		sem := make(chan struct{}, slots)
+		for range slots {
+			sem <- struct{}{}
+		}
+		var wg sync.WaitGroup
+		for j := range trackedOps {
+			select {
+			case <-ctx.Done():
+				wg.Wait()
+				return ctx.Err()
+			case <-sem:
+			}
+			wg.Add(1)
+			go func(j int) {
+				defer wg.Done()
+				defer func() {
+					select {
+					case <-ctx.Done():
+					case sem <- struct{}{}:
+					}
+				}()
+				tResults[j], tErrs[j] = i.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, trackedOps[j])
+			}(j)
+		}
+		wg.Wait()
+		for j, perr := range tErrs {
+			if perr != nil {
+				return fmt.Errorf("tracked prefetch %v: %w", trackedOps[j], perr)
+			}
+			trackedPrefetch[trackedOps[j]] = tResults[j]
+		}
+	}
+	prefetchTime = time.Since(prefetchStart)
 
 	// Warm the output-value cache with every parent value the
 	// expensive pass will need, and memoize the envelope parse so the
@@ -614,12 +664,16 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 			// Inscription hit. Full 'o' scan for data (only ~200/block).
 			if bigOVal != nil || hasCacheInscription {
 				trackedStart := time.Now()
-				tracked, terr := i.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, spentOP)
+				tracked, ok := trackedPrefetch[spentOP]
+				if !ok {
+					var terr error
+					tracked, terr = i.g.db.OrdinalInscriptionsByOutpointWithOffset(ctx, spentOP)
+					if terr != nil {
+						return fmt.Errorf("tracked lookup %v: %w", spentOP, terr)
+					}
+				}
 				scanTrackedTime += time.Since(trackedStart)
 				scanTrackedCalls++
-				if terr != nil {
-					return fmt.Errorf("tracked lookup %v: %w", spentOP, terr)
-				}
 				// Cache overlay for same-block inscriptions.
 				if entry, ok := cache.m[spentOP]; ok {
 					for offset, v := range entry.Inscriptions {
