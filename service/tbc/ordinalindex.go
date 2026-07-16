@@ -25,8 +25,6 @@ import (
 	"github.com/hemilabs/heminetwork/v2/lru"
 )
 
-var ordinalVerifyBigO bool
-
 type ordinalIndexer struct {
 	indexerCommon
 
@@ -38,6 +36,7 @@ type ordinalIndexer struct {
 	populating      atomic.Uint32 // reentrancy guard for onSyncComplete
 	warm            bool          // auto-managed: true at tip (gap<=1), false during catchup
 	cacheByteBudget int           // cache flush budget in bytes; 0 = default
+	verifyBigO      bool          // cross-check 'O' outputValue against tx index
 
 	// cache is the live write cache created by newCache; retained so
 	// readCacheInfo can report the byte dimension. Accessed only from
@@ -314,18 +313,6 @@ func ordinalWorkKey(blockHeight uint32, seq uint16) tbcd.OrdinalWorkKey {
 	binary.BigEndian.PutUint32(key[1:5], blockHeight)
 	binary.BigEndian.PutUint16(key[5:7], seq)
 	return key
-}
-
-// encodeWorkValue encodes the inscription ID into the work queue value.
-// The inscription ID (reveal_txid(32) + input_index(4)) is sufficient for
-// the background populator to locate the reveal and compute the sat number.
-// Layout: inscription_id(36), zero-padded to the fixed work-value width.
-//
-//nolint:unused // kept for revival with watermark/populator
-func encodeWorkValue(inscID [36]byte) tbcd.OrdinalWorkValue {
-	var v tbcd.OrdinalWorkValue
-	copy(v[:36], inscID[:])
-	return v
 }
 
 // watermarkOrdinalKey returns the 'm' prefix OrdinalKey used to store
@@ -788,7 +775,7 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 				continue
 			}
 			idx := fl[fi].srcInputIdx
-			if ordinalVerifyBigO {
+			if i.verifyBigO {
 				// Debug cross-check: verify 'O' outputValue
 				// against the tx index for every 'O'-carried
 				// transfer, including ones whose value is never
@@ -915,12 +902,6 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 						encodeInscriptionValue(0, blockHash, f.cursed, f.envelope))
 					cache.PutAux(auxOP, ordinalBlockInscriptionKey(blockHash, inscriptionSeq),
 						f.inscID[:])
-					// 'w': work queue for background sat-number populator.
-					// XXX(marco): disabled — populator is not active while
-					// watermark is disabled. May be revived for deferred
-					// sat computation once sat ranges are stored per outpoint.
-					// Original:
-					// i.workCache[ordinalWorkKey(blockHeight, uint16(inscriptionSeq))] = encodeWorkValue(f.inscID)
 				}
 				inscriptionSeq++
 			}
@@ -976,7 +957,11 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		iovStats = fmt.Sprintf(" iov_lru h=%d m=%d p=%d items=%d",
 			s.Hits, s.Misses, s.Purges, s.Items)
 	}
-	log.Infof("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls %d iov_warm "+
+	logf := log.Debugf
+	if i.warm {
+		logf = log.Infof
+	}
+	logf("ordinal wind height %d: %d txs (%d inputs) %d flotsam_txs %d iov_calls %d iov_warm "+
 		"bigO %d/%d prefetch %v scan %v (tracked %v/%d envparse %d) warm %v resolve %v total %v%s",
 		blockHeight, len(txs)-1, totalInputs, flotsamTxs, iovCalls,
 		iovWarm,

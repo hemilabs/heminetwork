@@ -381,10 +381,9 @@ func TestWindBlockTransferZeroFetch(t *testing.T) {
 // flag enabled and a matching parent output value: exactly one lookup
 // (the cross-check) and a successful wind.
 func TestWindBlockVerifyBigOPass(t *testing.T) {
-	ordinalVerifyBigO = true
-	t.Cleanup(func() { ordinalVerifyBigO = false })
 	db := newOrdStubDB()
 	oi := newOrdTestIndexer(t, db)
+	oi.verifyBigO = true
 
 	parent, parentTxid := ordTestParent(1, 5000)
 	db.parents[parentTxid] = parent
@@ -413,10 +412,9 @@ func TestWindBlockVerifyBigOPass(t *testing.T) {
 // TestWindBlockVerifyBigOMismatchPanic corrupts the 'O' outputValue and
 // expects the verify cross-check to panic.
 func TestWindBlockVerifyBigOMismatchPanic(t *testing.T) {
-	ordinalVerifyBigO = true
-	t.Cleanup(func() { ordinalVerifyBigO = false })
 	db := newOrdStubDB()
 	oi := newOrdTestIndexer(t, db)
+	oi.verifyBigO = true
 
 	parent, parentTxid := ordTestParent(1, 5000)
 	db.parents[parentTxid] = parent
@@ -447,10 +445,9 @@ func TestWindBlockVerifyBigOMismatchPanic(t *testing.T) {
 // shutdown) and must not crash the daemon; only genuine value
 // mismatches panic.
 func TestWindBlockVerifyBigOLookupError(t *testing.T) {
-	ordinalVerifyBigO = true
-	t.Cleanup(func() { ordinalVerifyBigO = false })
 	db := newOrdStubDB()
 	oi := newOrdTestIndexer(t, db)
+	oi.verifyBigO = true
 
 	_, parentTxid := ordTestParent(1, 5000) // NOT installed in db.parents
 	spentOP := tbcd.NewOutpoint(parentTxid, 0)
