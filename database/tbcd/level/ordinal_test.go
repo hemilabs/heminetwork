@@ -252,10 +252,10 @@ func TestBlockOrdinalUpdateEmptyCache(t *testing.T) {
 	}
 }
 
-// TestDbUpgradeV6 validates the v5 → v6 upgrade that adds the ordinals
-// index database. The upgrade must:
-//   - create the OrdinalDB LevelDB (happens automatically via openDB);
-//   - bump the schema version from 5 to 6;
+// TestDbUpgradeV7 validates the v6 → v7 upgrade that adds 16-bit bloom
+// filters to the ordinals database. The upgrade must:
+//   - reopen the OrdinalDB with the new filter policy;
+//   - bump the schema version from 6 to 7;
 //   - leave all existing data intact.
 func TestDbUpgradeV7(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
@@ -267,36 +267,36 @@ func TestDbUpgradeV7(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Phase 1: open with upgrade skipping, stamp version to 5, close.
+	// Phase 1: open with upgrade skipping, stamp version to 6, close.
 	cfg.SetUpgradeOpen(true)
 	db, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Seed a survivor row in MetadataDB to verify v6 doesn't wipe
+	// Seed a survivor row in MetadataDB to verify v7 doesn't wipe
 	// existing data.
-	survivorKey := []byte("v6-test-survivor")
+	survivorKey := []byte("v7-test-survivor")
 	survivorVal := []byte("must-survive-upgrade")
 	if err := db.MetadataPut(ctx, survivorKey, survivorVal); err != nil {
 		t.Fatal(err)
 	}
 
-	// Stamp version to 5.
-	v5 := make([]byte, 8)
-	binary.BigEndian.PutUint64(v5, 6)
-	if err := db.MetadataPut(ctx, versionKey, v5); err != nil {
+	// Stamp version to 6.
+	v6 := make([]byte, 8)
+	binary.BigEndian.PutUint64(v6, 6)
+	if err := db.MetadataPut(ctx, versionKey, v6); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Phase 2: reopen — the v5→v6 upgrade runs automatically.
+	// Phase 2: reopen — the v6→v7 upgrade runs automatically.
 	cfg.SetUpgradeOpen(false)
 	db2, err := New(ctx, cfg)
 	if err != nil {
-		t.Fatalf("reopen (runs v6): %v", err)
+		t.Fatalf("reopen (runs v7): %v", err)
 	}
 	defer func() {
 		if err := db2.Close(); err != nil {
@@ -304,7 +304,7 @@ func TestDbUpgradeV7(t *testing.T) {
 		}
 	}()
 
-	// Assertion 1: version is now 6.
+	// Assertion 1: version is now 7.
 	ver, err := db2.Version(ctx)
 	if err != nil {
 		t.Fatal(err)
