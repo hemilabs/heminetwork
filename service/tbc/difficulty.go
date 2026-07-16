@@ -40,6 +40,7 @@ func (h *tbcHeaderCtx) Parent() blockchain.HeaderCtx {
 	if h.height <= 0 || h.db == nil {
 		return nil
 	}
+	// context.Background: btcd's HeaderCtx interface has no context param.
 	bh, err := h.db.BlockHeaderByHash(context.Background(), h.prevBlock)
 	if err != nil {
 		return nil
@@ -87,10 +88,13 @@ func (c *tbcChainCtx) MaxRetargetTimespan() int64 {
 	return int64(c.params.TargetTimespan/time.Second) * c.params.RetargetAdjustmentFactor
 }
 
+// VerifyCheckpoint always returns true: tbc handles checkpoints
+// independently and calls CheckBlockHeaderContext with skipCheckpoint=true.
 func (c *tbcChainCtx) VerifyCheckpoint(height int32, hash *chainhash.Hash) bool {
 	return true
 }
 
+// FindPreviousCheckpoint returns nil: see VerifyCheckpoint.
 func (c *tbcChainCtx) FindPreviousCheckpoint() (blockchain.HeaderCtx, error) {
 	return nil, nil
 }

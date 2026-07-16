@@ -5,6 +5,7 @@
 package tbc
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math/big"
 	"os"
@@ -406,6 +407,8 @@ func newE2EDifficultyServer(t *testing.T, network string) *Server {
 		t.Fatal(err)
 	}
 
+	t.Cleanup(func() { s.dbClose() })
+
 	stateId := [32]byte{0x01}
 	if err := s.ExternalHeaderSetup(t.Context(), stateId[:]); err != nil {
 		t.Fatal(err)
@@ -640,25 +643,12 @@ func loadMainnetHeaders(t *testing.T) []*wire.BlockHeader {
 	headers := make([]*wire.BlockHeader, count)
 	for i := range headers {
 		hdr := &wire.BlockHeader{}
-		if err := hdr.Deserialize(newBytesReader(data[i*80 : (i+1)*80])); err != nil {
+		if err := hdr.Deserialize(bytes.NewReader(data[i*80 : (i+1)*80])); err != nil {
 			t.Fatalf("deserialize header at index %d: %v", i, err)
 		}
 		headers[i] = hdr
 	}
 	return headers
-}
-
-type bytesReader struct {
-	data []byte
-	pos  int
-}
-
-func newBytesReader(data []byte) *bytesReader { return &bytesReader{data: data} }
-
-func (r *bytesReader) Read(p []byte) (int, error) {
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
 }
 
 // TestE2ERealMainnetRetarget feeds 32260 real mainnet block headers
