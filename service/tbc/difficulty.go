@@ -135,6 +135,9 @@ func (s *Server) verifyHeaderContext(ctx context.Context, headers []*wire.BlockH
 		err := blockchain.CheckBlockHeaderContext(hdr, prev,
 			blockchain.BFNone, chainCtx, true)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return fmt.Errorf("header %d (height %d) context check: %w",
 				i, prev.height+1, err)
 		}

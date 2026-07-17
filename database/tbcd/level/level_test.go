@@ -1323,8 +1323,7 @@ func TestBlocksMissing(t *testing.T) {
 }
 
 func TestBlocksMissingSkipsExistingBlocks(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+	ctx := t.Context()
 
 	db, discard := createNewDB(t, ctx)
 	defer discard()
