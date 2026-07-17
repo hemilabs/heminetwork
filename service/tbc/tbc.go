@@ -173,7 +173,6 @@ type Config struct {
 	BlockCacheSize          string
 	HeaderCacheSize         string
 	BlockSanity             bool
-	ForceBlockDownload      bool
 	HemiIndex               bool
 	LevelDBHome             string
 	ListenAddress           string
@@ -1569,9 +1568,9 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 		return nil
 	}
 
-	if err := s.verifyDifficultyRetarget(ctx, headers.Headers); err != nil {
+	if err := s.verifyHeaderContext(ctx, headers.Headers); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("difficulty retarget: %w", err)
+			fmt.Errorf("header context verify: %w", err)
 	}
 
 	// We aren't checking error because we want to pass everything from db
@@ -1655,8 +1654,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		pbhHash = new(msg.Headers[k].BlockHash())
 	}
 
-	if err := s.verifyDifficultyRetarget(ctx, msg.Headers); err != nil {
-		return fmt.Errorf("difficulty retarget: %w", err)
+	if err := s.verifyHeaderContext(ctx, msg.Headers); err != nil {
+		return fmt.Errorf("header context verify: %w", err)
 	}
 
 	// When running in normal (not External Header) mode, do not set
@@ -3002,7 +3001,6 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cfg.ForceBlockDownload = s.cfg.ForceBlockDownload
 	s.g.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return err

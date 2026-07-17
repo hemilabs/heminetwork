@@ -100,9 +100,9 @@ func (c *tbcChainCtx) FindPreviousCheckpoint() (blockchain.HeaderCtx, error) {
 	return nil, nil
 }
 
-// verifyDifficultyRetarget checks that each header in the batch has correct
-// difficulty bits according to the retarget rules for the configured network.
-func (s *Server) verifyDifficultyRetarget(ctx context.Context, headers []*wire.BlockHeader) error {
+// verifyHeaderContext checks that each header in the batch passes btcd's
+// CheckBlockHeaderContext: difficulty retarget, median-time-past, and version.
+func (s *Server) verifyHeaderContext(ctx context.Context, headers []*wire.BlockHeader) error {
 	if len(headers) == 0 {
 		return nil
 	}
@@ -115,11 +115,11 @@ func (s *Server) verifyDifficultyRetarget(ctx context.Context, headers []*wire.B
 	// Look up the parent of the first header in the batch.
 	pbh, err := s.g.db.BlockHeaderByHash(ctx, headers[0].PrevBlock)
 	if err != nil {
-		return fmt.Errorf("difficulty verify parent lookup: %w", err)
+		return fmt.Errorf("header context parent lookup: %w", err)
 	}
 	pwbh, err := pbh.Wire()
 	if err != nil {
-		return fmt.Errorf("difficulty verify parent decode: %w", err)
+		return fmt.Errorf("header context parent decode: %w", err)
 	}
 
 	prev := &tbcHeaderCtx{
@@ -135,7 +135,7 @@ func (s *Server) verifyDifficultyRetarget(ctx context.Context, headers []*wire.B
 		err := blockchain.CheckBlockHeaderContext(hdr, prev,
 			blockchain.BFNone, chainCtx, true)
 		if err != nil {
-			return fmt.Errorf("header %d (height %d) difficulty check: %w",
+			return fmt.Errorf("header %d (height %d) context check: %w",
 				i, prev.height+1, err)
 		}
 

@@ -26,7 +26,7 @@ import (
 func main() {
 	target := flag.Int("blocks", 32260, "number of block headers to fetch")
 	out := flag.String("out", "mainnet_headers.bin", "output file")
-	peer := flag.String("peer", "", "peer address (host:port); if empty, uses DNS seeds)")
+	peer := flag.String("peer", "", "peer address (host:port); if empty, uses DNS seeds")
 	flag.Parse()
 
 	params := &chaincfg.MainNetParams
@@ -145,7 +145,10 @@ func main() {
 				hdrs = m
 			case *wire.MsgPing:
 				pong := wire.NewMsgPong(m.Nonce)
-				wire.WriteMessage(conn, pong, pver, btcnet)
+				if err := wire.WriteMessage(conn, pong, pver, btcnet); err != nil {
+					fmt.Fprintf(os.Stderr, "pong: %v\n", err)
+					os.Exit(1)
+				}
 				continue
 			default:
 				continue
@@ -179,7 +182,10 @@ func main() {
 
 	var countBuf [4]byte
 	binary.LittleEndian.PutUint32(countBuf[:], uint32(len(allHeaders)))
-	f.Write(countBuf[:])
+	if _, err := f.Write(countBuf[:]); err != nil {
+		fmt.Fprintf(os.Stderr, "write count: %v\n", err)
+		os.Exit(1)
+	}
 
 	for i, hdr := range allHeaders {
 		if err := hdr.BtcEncode(f, 0, wire.BaseEncoding); err != nil {

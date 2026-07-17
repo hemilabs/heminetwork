@@ -1330,8 +1330,7 @@ func TestBlocksMissingSkipsExistingBlocks(t *testing.T) {
 	defer discard()
 
 	// Insert genesis header.
-	var genesis tbcd.BlockHeader
-	genesis, _, err := insertBlockHeader(ctx, db, genesis.BlockHash(), 0, 0)
+	genesis, _, err := insertBlockHeader(ctx, db, &chainhash.Hash{}, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

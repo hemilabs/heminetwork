@@ -59,12 +59,6 @@ var (
 			Help:         "enable/disable block sanity checks before inserting",
 			Print:        config.PrintAll,
 		},
-		"TBC_FORCE_BLOCK_DOWNLOAD": config.Config{
-			Value:        &cfg.ForceBlockDownload,
-			DefaultValue: false,
-			Help:         "re-download all blocks even if already on disk (use to recover from corruption)",
-			Print:        config.PrintAll,
-		},
 		"TBC_JWT_TOKEN": config.Config{
 			Value:        &cfg.JWTSecret,
 			DefaultValue: "",

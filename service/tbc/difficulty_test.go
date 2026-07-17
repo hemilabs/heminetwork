@@ -128,7 +128,7 @@ func TestVerifyDifficultyRetargetPass(t *testing.T) {
 	headers := makeChain(5, chaincfg.MainNetParams.GenesisBlock.Header,
 		chaincfg.MainNetParams.PowLimitBits, 10*time.Minute)
 
-	if err := s.verifyDifficultyRetarget(t.Context(), headers); err != nil {
+	if err := s.verifyHeaderContext(t.Context(), headers); err != nil {
 		t.Fatalf("expected pass, got: %v", err)
 	}
 }
@@ -140,7 +140,7 @@ func TestVerifyDifficultyRetargetBadBits(t *testing.T) {
 		chaincfg.MainNetParams.PowLimitBits, 10*time.Minute)
 	headers[2].Bits = 0x1c00ffff
 
-	if err := s.verifyDifficultyRetarget(t.Context(), headers); err == nil {
+	if err := s.verifyHeaderContext(t.Context(), headers); err == nil {
 		t.Fatal("expected difficulty error for bad bits")
 	}
 }
@@ -151,7 +151,7 @@ func TestVerifyDifficultyRetargetSkipsRegtest(t *testing.T) {
 	headers := makeChain(3, chaincfg.RegressionNetParams.GenesisBlock.Header,
 		0xdeadbeef, 10*time.Minute)
 
-	if err := s.verifyDifficultyRetarget(t.Context(), headers); err != nil {
+	if err := s.verifyHeaderContext(t.Context(), headers); err != nil {
 		t.Fatalf("regtest should skip check, got: %v", err)
 	}
 }
@@ -159,7 +159,7 @@ func TestVerifyDifficultyRetargetSkipsRegtest(t *testing.T) {
 func TestVerifyDifficultyRetargetEmpty(t *testing.T) {
 	s := newDifficultyTestServer(t, &chaincfg.MainNetParams)
 
-	if err := s.verifyDifficultyRetarget(t.Context(), nil); err != nil {
+	if err := s.verifyHeaderContext(t.Context(), nil); err != nil {
 		t.Fatalf("empty headers should pass, got: %v", err)
 	}
 }
@@ -173,7 +173,7 @@ func TestVerifyDifficultyRetargetMultiBatch(t *testing.T) {
 	insertHeaders(t, s, batch1)
 
 	batch2 := makeChain(5, *batch1[len(batch1)-1], bits, 10*time.Minute)
-	if err := s.verifyDifficultyRetarget(t.Context(), batch2); err != nil {
+	if err := s.verifyHeaderContext(t.Context(), batch2); err != nil {
 		t.Fatalf("cross-batch verification should pass: %v", err)
 	}
 }
@@ -197,7 +197,7 @@ func TestVerifyDifficultyRetargetMedianTime(t *testing.T) {
 		Nonce:     999,
 	}
 
-	err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{badHdr})
+	err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{badHdr})
 	if err == nil {
 		t.Fatal("expected median time error for backdated header")
 	}
@@ -237,7 +237,7 @@ func TestVerifyDifficultyRetargetBoundary(t *testing.T) {
 		Bits:      expectedBits,
 		Nonce:     1,
 	}
-	if err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdr2016}); err != nil {
+	if err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdr2016}); err != nil {
 		t.Fatalf("correct retarget bits should pass: %v", err)
 	}
 
@@ -245,7 +245,7 @@ func TestVerifyDifficultyRetargetBoundary(t *testing.T) {
 	hdr2016bad := *hdr2016
 	hdr2016bad.Bits = bits
 	hdr2016bad.Nonce = 2
-	if err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{&hdr2016bad}); err == nil {
+	if err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{&hdr2016bad}); err == nil {
 		t.Fatal("old bits at retarget boundary should be rejected")
 	}
 }
@@ -282,7 +282,7 @@ func TestVerifyDifficultyRetargetBoundaryBatch(t *testing.T) {
 		expectedBits, spacing)
 
 	batch := append(beforeRetarget, afterRetarget...)
-	if err := s.verifyDifficultyRetarget(t.Context(), batch); err != nil {
+	if err := s.verifyHeaderContext(t.Context(), batch); err != nil {
 		t.Fatalf("batch spanning retarget boundary should pass: %v", err)
 	}
 
@@ -290,7 +290,7 @@ func TestVerifyDifficultyRetargetBoundaryBatch(t *testing.T) {
 	badAfter := makeChain(5, *beforeRetarget[len(beforeRetarget)-1],
 		bits, spacing)
 	badBatch := append(beforeRetarget, badAfter...)
-	if err := s.verifyDifficultyRetarget(t.Context(), badBatch); err == nil {
+	if err := s.verifyHeaderContext(t.Context(), badBatch); err == nil {
 		t.Fatal("batch with wrong bits after retarget should be rejected")
 	}
 }
@@ -353,7 +353,7 @@ func TestVerifyDifficultyRetargetFork(t *testing.T) {
 		Bits:      aBits,
 		Nonce:     1,
 	}
-	if err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdrA}); err != nil {
+	if err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdrA}); err != nil {
 		t.Fatalf("chain A retarget should pass: %v", err)
 	}
 
@@ -365,7 +365,7 @@ func TestVerifyDifficultyRetargetFork(t *testing.T) {
 		Bits:      bBits,
 		Nonce:     1,
 	}
-	if err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdrB}); err != nil {
+	if err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdrB}); err != nil {
 		t.Fatalf("chain B retarget should pass: %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestVerifyDifficultyRetargetFork(t *testing.T) {
 	hdrBwrong := *hdrB
 	hdrBwrong.Bits = aBits
 	hdrBwrong.Nonce = 2
-	if err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{&hdrBwrong}); err == nil {
+	if err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{&hdrBwrong}); err == nil {
 		t.Fatal("chain A bits on chain B should be rejected")
 	}
 
@@ -381,7 +381,7 @@ func TestVerifyDifficultyRetargetFork(t *testing.T) {
 	hdrAwrong := *hdrA
 	hdrAwrong.Bits = bBits
 	hdrAwrong.Nonce = 3
-	if err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{&hdrAwrong}); err == nil {
+	if err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{&hdrAwrong}); err == nil {
 		t.Fatal("chain B bits on chain A should be rejected")
 	}
 }
@@ -389,7 +389,7 @@ func TestVerifyDifficultyRetargetFork(t *testing.T) {
 // --- E2E tests ---
 //
 // These exercise the full Server through AddExternalHeaders rather than
-// calling verifyDifficultyRetarget directly.
+// calling verifyHeaderContext directly.
 
 func newE2EDifficultyServer(t *testing.T, network string) *Server {
 	t.Helper()
@@ -752,7 +752,7 @@ func TestVerifyDifficultyRetargetUnknownParent(t *testing.T) {
 		Nonce:     1,
 	}
 
-	err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdr})
+	err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdr})
 	if err == nil {
 		t.Fatal("should fail when parent hash is not in DB")
 	}
@@ -781,7 +781,7 @@ func TestVerifyDifficultyRetargetTimestampAtMedian(t *testing.T) {
 		Bits:      bits,
 		Nonce:     1,
 	}
-	err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdr})
+	err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdr})
 	if err == nil {
 		t.Fatal("timestamp at median (not after) should be rejected")
 	}
@@ -797,7 +797,7 @@ func TestVerifyDifficultyRetargetBadBitsMidBatch(t *testing.T) {
 	// Corrupt bits at position 7 (mid-batch).
 	headers[7].Bits = 0x17034567
 
-	err := s.verifyDifficultyRetarget(t.Context(), headers)
+	err := s.verifyHeaderContext(t.Context(), headers)
 	if err == nil {
 		t.Fatal("bad bits mid-batch should be rejected")
 	}
@@ -818,7 +818,7 @@ func TestVerifyDifficultyRetargetBadBitsFirstHeader(t *testing.T) {
 		Nonce:     1,
 	}
 
-	err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdr})
+	err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdr})
 	if err == nil {
 		t.Fatal("bad bits on first header should be rejected")
 	}
@@ -878,7 +878,7 @@ func FuzzVerifyDifficultyBits(f *testing.F) {
 			Nonce:     1,
 		}
 
-		err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdr})
+		err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdr})
 
 		// Only PowLimitBits should pass for block 1 on mainnet.
 		if bits == chaincfg.MainNetParams.PowLimitBits {
@@ -918,7 +918,7 @@ func FuzzVerifyDifficultyTimestamp(f *testing.F) {
 			Nonce:     1,
 		}
 
-		err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdr})
+		err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdr})
 
 		// Block 1's median time is just genesis (one block), so any
 		// timestamp strictly after genesis should pass.
@@ -963,7 +963,7 @@ func FuzzVerifyDifficultyRetargetBits(f *testing.F) {
 			Nonce:     1,
 		}
 
-		err := s.verifyDifficultyRetarget(t.Context(), []*wire.BlockHeader{hdr})
+		err := s.verifyHeaderContext(t.Context(), []*wire.BlockHeader{hdr})
 
 		if bits == expectedBits {
 			if err != nil {
