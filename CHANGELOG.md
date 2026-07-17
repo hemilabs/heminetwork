@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Verify incoming block headers against btcd's `CheckBlockHeaderContext`
+  (difficulty retarget, median-time-past, version) before insertion in
+  both P2P and external-header modes
+  ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
+
 - Add `BlockRawByHash` to DB interface and `lazyBlock` type for zero-copy
   per-tx block access without full deserialization
   ([#1051](https://github.com/hemilabs/heminetwork/pull/1051)).
@@ -115,6 +120,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#972](https://github.com/hemilabs/heminetwork/pull/972)).
 
 ### Fixed
+
+- Fix `BlockHeadersInsert` marking blocks as missing even when their
+  bodies already exist on disk; the existence check used the wrong key
+  format (41-byte height+hash instead of 32-byte hash)
+  ([#536](https://github.com/hemilabs/heminetwork/issues/536),
+  [#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
 
 - Fix typos across the codebase
   ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733),
