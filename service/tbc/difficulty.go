@@ -24,8 +24,9 @@ type tbcHeaderCtx struct {
 	prevBlock chainhash.Hash
 	parent    *tbcHeaderCtx
 
-	ctx context.Context
-	db  tbcd.Database
+	genesisHeight int32 // height of the chain's genesis (0 for P2P, N for effective genesis)
+	ctx           context.Context
+	db            tbcd.Database
 }
 
 var _ blockchain.HeaderCtx = (*tbcHeaderCtx)(nil)
@@ -38,7 +39,7 @@ func (h *tbcHeaderCtx) Parent() blockchain.HeaderCtx {
 	if h.parent != nil {
 		return h.parent
 	}
-	if h.height <= 0 || h.db == nil {
+	if h.height <= h.genesisHeight || h.db == nil {
 		return nil
 	}
 	bh, err := h.db.BlockHeaderByHash(h.ctx, h.prevBlock)
@@ -50,12 +51,13 @@ func (h *tbcHeaderCtx) Parent() blockchain.HeaderCtx {
 		return nil
 	}
 	p := &tbcHeaderCtx{
-		height:    int32(bh.Height),
-		bits:      wbh.Bits,
-		ts:        wbh.Timestamp.Unix(),
-		prevBlock: wbh.PrevBlock,
-		ctx:       h.ctx,
-		db:        h.db,
+		height:        int32(bh.Height),
+		bits:          wbh.Bits,
+		ts:            wbh.Timestamp.Unix(),
+		prevBlock:     wbh.PrevBlock,
+		genesisHeight: h.genesisHeight,
+		ctx:           h.ctx,
+		db:            h.db,
 	}
 	h.parent = p
 	return p
@@ -111,6 +113,12 @@ func (s *Server) verifyHeaderContext(ctx context.Context, headers []*wire.BlockH
 	}
 
 	chainCtx := &tbcChainCtx{params: s.g.chain}
+	var genesisHeight int32
+	var blocksPerRetarget int32
+	if s.cfg.ExternalHeaderMode {
+		genesisHeight = int32(s.cfg.GenesisHeightOffset)
+		blocksPerRetarget = chainCtx.BlocksPerRetarget()
+	}
 
 	// Look up the parent of the first header in the batch.
 	pbh, err := s.g.db.BlockHeaderByHash(ctx, headers[0].PrevBlock)
@@ -123,17 +131,32 @@ func (s *Server) verifyHeaderContext(ctx context.Context, headers []*wire.BlockH
 	}
 
 	prev := &tbcHeaderCtx{
-		height:    int32(pbh.Height),
-		bits:      pwbh.Bits,
-		ts:        pwbh.Timestamp.Unix(),
-		prevBlock: pwbh.PrevBlock,
-		ctx:       ctx,
-		db:        s.g.db,
+		height:        int32(pbh.Height),
+		bits:          pwbh.Bits,
+		ts:            pwbh.Timestamp.Unix(),
+		prevBlock:     pwbh.PrevBlock,
+		genesisHeight: genesisHeight,
+		ctx:           ctx,
+		db:            s.g.db,
 	}
 
 	for i, hdr := range headers {
+		headerHeight := prev.height + 1
+
+		// In ExternalHeaderMode, at a retarget boundary within the
+		// first retarget period after the effective genesis, btcd walks
+		// back BlocksPerRetarget ancestors but we don't have enough
+		// depth — use BFFastAdd to skip difficulty/median-time checks
+		// but still verify version.
+		flags := blockchain.BFNone
+		if s.cfg.ExternalHeaderMode &&
+			headerHeight%blocksPerRetarget == 0 &&
+			headerHeight-genesisHeight < blocksPerRetarget {
+			flags = blockchain.BFFastAdd
+		}
+
 		err := blockchain.CheckBlockHeaderContext(hdr, prev,
-			blockchain.BFNone, chainCtx, true)
+			flags, chainCtx, true)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -143,13 +166,14 @@ func (s *Server) verifyHeaderContext(ctx context.Context, headers []*wire.BlockH
 		}
 
 		prev = &tbcHeaderCtx{
-			height:    int32(pbh.Height) + int32(i) + 1,
-			bits:      hdr.Bits,
-			ts:        hdr.Timestamp.Unix(),
-			prevBlock: hdr.PrevBlock,
-			parent:    prev,
-			ctx:       ctx,
-			db:        s.g.db,
+			height:        int32(pbh.Height) + int32(i) + 1,
+			bits:          hdr.Bits,
+			ts:            hdr.Timestamp.Unix(),
+			prevBlock:     hdr.PrevBlock,
+			parent:        prev,
+			genesisHeight: genesisHeight,
+			ctx:           ctx,
+			db:            s.g.db,
 		}
 	}
 

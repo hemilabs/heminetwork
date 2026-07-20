@@ -46,6 +46,7 @@ func newDifficultyTestServer(t *testing.T, params *chaincfg.Params) *Server {
 	}
 
 	return &Server{
+		cfg: &Config{},
 		g: geometryParams{
 			db:    db,
 			chain: params,
@@ -610,6 +611,286 @@ func TestE2EDifficultyFork(t *testing.T) {
 	if _, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdrBwrong}); err == nil {
 		t.Fatal("chain B with chain A's bits should be rejected")
 	}
+}
+
+// newE2EEffectiveGenesisServer creates an ExternalHeaderMode server with an
+// effective genesis at the given height. The genesis block uses mainnet params
+// with PowLimitBits.
+func newE2EEffectiveGenesisServer(t *testing.T, genesisHeight uint64) (*Server, wire.BlockHeader) {
+	t.Helper()
+
+	genesis := wire.BlockHeader{
+		Version:   1,
+		Timestamp: time.Unix(1231006505, 0), // same as real genesis
+		Bits:      chaincfg.MainNetParams.PowLimitBits,
+		Nonce:     1,
+	}
+
+	cfg := NewDefaultConfig()
+	cfg.LevelDBHome = t.TempDir()
+	cfg.ExternalHeaderMode = true
+	cfg.Network = "mainnet"
+	cfg.BlockCacheSize = ""
+	cfg.HeaderCacheSize = ""
+	cfg.MempoolEnabled = false
+	cfg.EffectiveGenesisBlock = &genesis
+	cfg.GenesisHeightOffset = genesisHeight
+	cfg.GenesisDifficultyOffset = *big.NewInt(1)
+
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.dbClose() })
+
+	stateId := [32]byte{0x01}
+	if err := s.ExternalHeaderSetup(t.Context(), stateId[:]); err != nil {
+		t.Fatal(err)
+	}
+	return s, genesis
+}
+
+// TestE2EEffectiveGenesisRetargetMidPeriod verifies header context
+// verification when the effective genesis is mid-retarget-period (height
+// 1000). The first retarget boundary at height 2016 has insufficient
+// ancestor depth (1016 < 2016) so BFFastAdd applies. The second retarget
+// at 4032 has enough depth (3032 >= 2016) for full verification.
+func TestE2EEffectiveGenesisRetargetMidPeriod(t *testing.T) {
+	const genesisHeight = 1000
+
+	s, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
+
+	bits := chaincfg.MainNetParams.PowLimitBits
+	spacing := 10 * time.Minute
+
+	// Heights 1001 through 2015.
+	preRetarget1 := makeChain(2016-genesisHeight-1, genesis, bits, spacing)
+	if _, err := addExternalHeaders(t, s, preRetarget1); err != nil {
+		t.Fatalf("inserting pre-retarget-1 headers: %v", err)
+	}
+
+	height, _, err := s.BlockHeaderBest(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if height != 2015 {
+		t.Fatalf("expected best height 2015, got %d", height)
+	}
+
+	// Height 2016: first retarget boundary. Only 1016 blocks of ancestor
+	// depth (< 2016), so BFFastAdd skips difficulty verification.
+	lastPre := preRetarget1[len(preRetarget1)-1]
+	hdr2016 := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: lastPre.BlockHash(),
+		Timestamp: lastPre.Timestamp.Add(spacing),
+		Bits:      bits,
+		Nonce:     1,
+	}
+	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdr2016})
+	if err != nil {
+		t.Fatalf("height 2016 should be accepted (BFFastAdd): %v", err)
+	}
+	if it != tbcd.ITChainExtend {
+		t.Fatalf("expected ITChainExtend, got %v", it)
+	}
+	t.Log("height 2016: accepted with BFFastAdd (insufficient ancestor depth)")
+
+	// Heights 2017 to 4031.
+	period2 := makeChain(4032-2016-1, *hdr2016, bits, spacing)
+	if _, err := addExternalHeaders(t, s, period2); err != nil {
+		t.Fatalf("inserting period-2 headers: %v", err)
+	}
+
+	height, _, err = s.BlockHeaderBest(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if height != 4031 {
+		t.Fatalf("expected best height 4031, got %d", height)
+	}
+
+	// Height 4032: second retarget. Ancestor depth is 3032 (>= 2016),
+	// full verification applies.
+	lastPeriod2 := period2[len(period2)-1]
+	actualTimespan := lastPeriod2.Timestamp.Unix() - hdr2016.Timestamp.Unix()
+	expectedBits := computeRetargetBits(bits, actualTimespan, &chaincfg.MainNetParams)
+
+	hdr4032 := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: lastPeriod2.BlockHash(),
+		Timestamp: lastPeriod2.Timestamp.Add(spacing),
+		Bits:      expectedBits,
+		Nonce:     1,
+	}
+	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032})
+	if err != nil {
+		t.Fatalf("height 4032 with correct bits should be accepted: %v", err)
+	}
+	if it != tbcd.ITChainExtend {
+		t.Fatalf("expected ITChainExtend, got %v", it)
+	}
+	t.Logf("height 4032: accepted with correct retarget bits 0x%08x", expectedBits)
+
+	// Wrong bits at 4032 — must be rejected.
+	hdr4032bad := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: lastPeriod2.BlockHash(),
+		Timestamp: lastPeriod2.Timestamp.Add(spacing),
+		Bits:      bits,
+		Nonce:     2,
+	}
+	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032bad})
+	if err == nil {
+		t.Fatal("height 4032 with wrong bits should be rejected")
+	}
+	if it != tbcd.ITInvalid {
+		t.Fatalf("expected ITInvalid, got %v", it)
+	}
+	t.Log("height 4032: correctly rejected wrong bits")
+
+	height, _, err = s.BlockHeaderBest(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if height != 4032 {
+		t.Fatalf("expected best height 4032, got %d", height)
+	}
+}
+
+// TestE2EEffectiveGenesisRetargetAligned verifies the edge case where the
+// effective genesis falls exactly on a retarget boundary. In this case, the
+// very first header batch starts a new retarget period and should use full
+// verification from the start (ancestor depth = blocksPerRetarget at the
+// next boundary).
+func TestE2EEffectiveGenesisRetargetAligned(t *testing.T) {
+	const genesisHeight = 2016 // exactly on a retarget boundary
+
+	s, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
+
+	bits := chaincfg.MainNetParams.PowLimitBits
+	spacing := 10 * time.Minute
+
+	// Build 2015 headers (heights 2017-4031).
+	pre := makeChain(2015, genesis, bits, spacing)
+	if _, err := addExternalHeaders(t, s, pre); err != nil {
+		t.Fatalf("inserting pre-retarget headers: %v", err)
+	}
+
+	// Height 4032: retarget boundary. Depth from genesis = 4032-2016 =
+	// 2016 which is exactly blocksPerRetarget, so full verification
+	// should apply (headerHeight - genesisHeight = 4032-2016 = 2016
+	// which is NOT < 2016).
+	lastPre := pre[len(pre)-1]
+	actualTimespan := lastPre.Timestamp.Unix() - genesis.Timestamp.Unix()
+	expectedBits := computeRetargetBits(bits, actualTimespan, &chaincfg.MainNetParams)
+
+	hdr4032 := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: lastPre.BlockHash(),
+		Timestamp: lastPre.Timestamp.Add(spacing),
+		Bits:      expectedBits,
+		Nonce:     1,
+	}
+	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032})
+	if err != nil {
+		t.Fatalf("height 4032 with correct bits should be accepted: %v", err)
+	}
+	if it != tbcd.ITChainExtend {
+		t.Fatalf("expected ITChainExtend, got %v", it)
+	}
+
+	// Wrong bits should be rejected.
+	hdr4032bad := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: lastPre.BlockHash(),
+		Timestamp: lastPre.Timestamp.Add(spacing),
+		Bits:      bits,
+		Nonce:     2,
+	}
+	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032bad})
+	if err == nil {
+		t.Fatal("height 4032 with wrong bits should be rejected")
+	}
+	if it != tbcd.ITInvalid {
+		t.Fatalf("expected ITInvalid, got %v", it)
+	}
+	t.Logf("retarget-aligned genesis: correctly verified at height 4032 (bits 0x%08x)", expectedBits)
+}
+
+// TestE2EEffectiveGenesisRetargetJustBelow verifies the boundary where the
+// effective genesis is one block below a retarget boundary (height 2015).
+// The first retarget at height 2016 has depth 2016-2015=1 which is < 2016,
+// so BFFastAdd applies. The second retarget at 4032 has depth 2017 >= 2016,
+// so full verification applies.
+func TestE2EEffectiveGenesisRetargetJustBelow(t *testing.T) {
+	const genesisHeight = 2015 // one block below retarget boundary
+
+	s, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
+
+	bits := chaincfg.MainNetParams.PowLimitBits
+	spacing := 10 * time.Minute
+
+	// Height 2016 is only 1 block after genesis — BFFastAdd is required
+	// because RelativeAncestorCtx(2015) can't walk back far enough.
+	hdr2016 := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: genesis.BlockHash(),
+		Timestamp: genesis.Timestamp.Add(spacing),
+		Bits:      bits,
+		Nonce:     1,
+	}
+	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdr2016})
+	if err != nil {
+		t.Fatalf("height 2016 should be accepted (BFFastAdd, depth=1): %v", err)
+	}
+	if it != tbcd.ITChainExtend {
+		t.Fatalf("expected ITChainExtend, got %v", it)
+	}
+	t.Log("height 2016: accepted with BFFastAdd (genesis at 2015, depth=1)")
+
+	// Build heights 2017-4031 with consistent bits.
+	period2 := makeChain(4032-2016-1, *hdr2016, bits, spacing)
+	if _, err := addExternalHeaders(t, s, period2); err != nil {
+		t.Fatalf("inserting period-2 headers: %v", err)
+	}
+
+	// Height 4032: depth = 4032-2015 = 2017 >= 2016, full verification.
+	lastPeriod2 := period2[len(period2)-1]
+	actualTimespan := lastPeriod2.Timestamp.Unix() - hdr2016.Timestamp.Unix()
+	expectedBits := computeRetargetBits(bits, actualTimespan, &chaincfg.MainNetParams)
+
+	hdr4032 := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: lastPeriod2.BlockHash(),
+		Timestamp: lastPeriod2.Timestamp.Add(spacing),
+		Bits:      expectedBits,
+		Nonce:     1,
+	}
+	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032})
+	if err != nil {
+		t.Fatalf("height 4032 with correct bits should be accepted: %v", err)
+	}
+	if it != tbcd.ITChainExtend {
+		t.Fatalf("expected ITChainExtend, got %v", it)
+	}
+
+	// Wrong bits at 4032 should be rejected.
+	hdr4032bad := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: lastPeriod2.BlockHash(),
+		Timestamp: lastPeriod2.Timestamp.Add(spacing),
+		Bits:      bits,
+		Nonce:     2,
+	}
+	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032bad})
+	if err == nil {
+		t.Fatal("height 4032 with wrong bits should be rejected")
+	}
+	if it != tbcd.ITInvalid {
+		t.Fatalf("expected ITInvalid, got %v", it)
+	}
+	t.Logf("genesis at 2015: full verification at 4032 (bits 0x%08x)", expectedBits)
 }
 
 // --- Real mainnet E2E tests ---
