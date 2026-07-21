@@ -36,7 +36,7 @@ jobs:
       pull-requests: write # Required to update pull request labels.
     steps:
       - name: "Label pull requests"
-        uses: actions/labeler@f27b608878404679385c85cfa523b85ccb86e213 # v6.1.0
+        uses: actions/labeler@b8dd2d9be0f68b860e7dae5dae7d772984eacd6d # v6.2.0
 
       - name: "Update changelog labels"
         uses: hemilabs/actions/changelog-labeler@8f87619b7f0122c39e14a32514ab3e4e0d4c3966 # v2.3.0
