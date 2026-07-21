@@ -411,6 +411,7 @@ services:
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      - "--p2p.no-discovery"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -494,6 +495,7 @@ services:
       - "--l1.beacon.ignore=true"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
       - "--syncmode=execution-layer"
+      - "--p2p.no-discovery"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -685,6 +687,7 @@ services:
       - "--l1.beacon.ignore=true"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
       - "--syncmode=consensus-layer"
+      - "--p2p.no-discovery"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
