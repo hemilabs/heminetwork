@@ -17,9 +17,7 @@ import (
 
 func TestInsertBlockSanityCheck(t *testing.T) {
 	s := &Server{
-		cfg: &Config{
-			BlockSanity: true,
-		},
+		cfg:        &Config{},
 		timeSource: blockchain.NewMedianTime(),
 	}
 	s.g.chain = &chaincfg.TestNet3Params

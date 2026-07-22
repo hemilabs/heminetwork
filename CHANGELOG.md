@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Witness sighash algorithms require the spent output's value; the old type
   carried only the pkScript
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Remove `TBC_BLOCK_SANITY` environment variable; `CheckBlockSanity` is
+  now unconditional on every block insert
+  ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
 
 ### Added
 

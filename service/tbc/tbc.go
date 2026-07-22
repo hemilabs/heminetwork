@@ -172,7 +172,6 @@ type Config struct {
 	AutoIndex               bool
 	BlockCacheSize          string
 	HeaderCacheSize         string
-	BlockSanity             bool
 	HemiIndex               bool
 	LevelDBHome             string
 	ListenAddress           string

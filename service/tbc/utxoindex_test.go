@@ -290,8 +290,8 @@ func TestUtxoReadCacheIntegration(t *testing.T) {
 	}()
 
 	cfg := &Config{
-		AutoIndex:               false,
-		BlockSanity:             false,
+		AutoIndex: false,
+
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            3, // small write cache to force flushes
 		Network:                 networkLocalnet,

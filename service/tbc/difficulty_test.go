@@ -1193,6 +1193,113 @@ func TestE2ERealMainnetRejectEveryBitFlip(t *testing.T) {
 	}
 }
 
+// TestE2EHeaderSanityRejectsBadPoW verifies that AddExternalHeaders rejects
+// a header with invalid proof-of-work (hash above target).
+func TestE2EHeaderSanityRejectsBadPoW(t *testing.T) {
+	params := testRetargetParams()
+	s := newE2EDifficultyServer(t, "mainnet", params)
+
+	genesis := *s.cfg.EffectiveGenesisBlock
+	bits := params.PowLimitBits
+
+	// Insert one valid header so the chain has height > 0.
+	valid := makeMinedChain(1, genesis, bits, 10*time.Minute)
+	if _, err := addExternalHeaders(t, s, valid); err != nil {
+		t.Fatalf("inserting valid header: %v", err)
+	}
+
+	// Craft a header with a nonce that produces bad PoW: set Bits to
+	// an extremely low target so no random hash satisfies it.
+	badHdr := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: valid[0].BlockHash(),
+		Timestamp: valid[0].Timestamp.Add(10 * time.Minute),
+		Bits:      0x01003456, // target ≈ 0x00, virtually impossible to satisfy
+		Nonce:     1,
+	}
+	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{badHdr})
+	if err == nil {
+		t.Fatal("header with bad PoW should be rejected by sanity check")
+	}
+	if it != tbcd.ITInvalid {
+		t.Fatalf("expected ITInvalid, got %v", it)
+	}
+	if !strings.Contains(err.Error(), "header sanity") {
+		t.Fatalf("expected header sanity error, got: %v", err)
+	}
+}
+
+// TestBlockHeadersInsertRejectsBadPoW verifies the public BlockHeadersInsert
+// API rejects headers with invalid proof-of-work.
+func TestBlockHeadersInsertRejectsBadPoW(t *testing.T) {
+	params := testRetargetParams()
+	s := newE2EDifficultyServer(t, "mainnet", params)
+
+	genesis := *s.cfg.EffectiveGenesisBlock
+
+	badHdr := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: genesis.BlockHash(),
+		Timestamp: genesis.Timestamp.Add(10 * time.Minute),
+		Bits:      0x01003456,
+		Nonce:     1,
+	}
+	msg := &wire.MsgHeaders{Headers: []*wire.BlockHeader{badHdr}}
+	it, _, _, _, err := s.BlockHeadersInsert(t.Context(), msg)
+	if err == nil {
+		t.Fatal("BlockHeadersInsert should reject header with bad PoW")
+	}
+	if it != tbcd.ITInvalid {
+		t.Fatalf("expected ITInvalid, got %v", it)
+	}
+	if !strings.Contains(err.Error(), "header sanity") {
+		t.Fatalf("expected header sanity error, got: %v", err)
+	}
+}
+
+// TestBlockHeadersInsertRejectsBadContext verifies the public
+// BlockHeadersInsert API rejects headers with wrong difficulty bits.
+func TestBlockHeadersInsertRejectsBadContext(t *testing.T) {
+	params := testRetargetParams()
+	s := newE2EDifficultyServer(t, "mainnet", params)
+
+	genesis := *s.cfg.EffectiveGenesisBlock
+	bits := params.PowLimitBits
+
+	// Insert a valid chain up to height 2015.
+	pre := makeMinedChain(2015, genesis, bits, 8*time.Minute)
+	for i := 0; i < len(pre); i += 2000 {
+		end := i + 2000
+		if end > len(pre) {
+			end = len(pre)
+		}
+		msg := &wire.MsgHeaders{Headers: pre[i:end]}
+		if _, _, _, _, err := s.BlockHeadersInsert(t.Context(), msg); err != nil {
+			t.Fatalf("inserting pre-retarget headers via public API: %v", err)
+		}
+	}
+
+	// Block 2016 with wrong bits (no retarget applied).
+	hdr2016 := &wire.BlockHeader{
+		Version:   1,
+		PrevBlock: pre[len(pre)-1].BlockHash(),
+		Timestamp: pre[len(pre)-1].Timestamp.Add(8 * time.Minute),
+		Bits:      bits,
+	}
+	mineHeader(hdr2016)
+	msg := &wire.MsgHeaders{Headers: []*wire.BlockHeader{hdr2016}}
+	it, _, _, _, err := s.BlockHeadersInsert(t.Context(), msg)
+	if err == nil {
+		t.Fatal("BlockHeadersInsert should reject wrong retarget bits")
+	}
+	if it != tbcd.ITInvalid {
+		t.Fatalf("expected ITInvalid, got %v", it)
+	}
+	if !strings.Contains(err.Error(), "header context") {
+		t.Fatalf("expected header context error, got: %v", err)
+	}
+}
+
 // --- Fuzz tests ---
 
 func FuzzVerifyDifficultyBits(f *testing.F) {

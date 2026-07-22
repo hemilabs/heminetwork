@@ -53,12 +53,6 @@ var (
 			Help:         "size of blockheader cache",
 			Print:        config.PrintAll,
 		},
-		"TBC_BLOCK_SANITY": config.Config{
-			Value:        &cfg.BlockSanity,
-			DefaultValue: true,
-			Help:         "enable/disable block sanity checks before inserting",
-			Print:        config.PrintAll,
-		},
 		"TBC_JWT_TOKEN": config.Config{
 			Value:        &cfg.JWTSecret,
 			DefaultValue: "",

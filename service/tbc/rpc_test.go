@@ -1490,14 +1490,14 @@ func TestRpcZK(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		ZKIndex:         true,
-		LevelDBHome:     home,
-		ListenAddress:   "127.0.0.1:0",
-		MaxCachedTxs:    1000,
-		MaxCachedZK:     1000,
-		Network:         networkLocalnet,
-		Seeds:           []string{"192.0.2.1:8333"},
+
+		ZKIndex:       true,
+		LevelDBHome:   home,
+		ListenAddress: "127.0.0.1:0",
+		MaxCachedTxs:  1000,
+		MaxCachedZK:   1000,
+		Network:       networkLocalnet,
+		Seeds:         []string{"192.0.2.1:8333"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -2125,10 +2125,10 @@ func TestNotFoundError(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:               false,
-		BlockCacheSize:          "10mb",
-		HeaderCacheSize:         "1mb",
-		BlockSanity:             false,
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+
 		HemiIndex:               true,
 		LevelDBHome:             t.TempDir(),
 		ListenAddress:           "127.0.0.1:0",
@@ -2385,10 +2385,10 @@ func createLocalTBCServer(ctx context.Context, t *testing.T, jwtSecret string) (
 	}()
 
 	cfg := &Config{
-		AutoIndex:               false,
-		BlockCacheSize:          "10mb",
-		HeaderCacheSize:         "1mb",
-		BlockSanity:             false,
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000,
 		PeersWanted:             1,
@@ -2786,10 +2786,10 @@ func TestTxWatchNotification(t *testing.T) {
 	var dupErr database.DuplicateError
 
 	cfg := &Config{
-		AutoIndex:               false,
-		BlockCacheSize:          "10mb",
-		HeaderCacheSize:         "1mb",
-		BlockSanity:             false,
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+
 		HemiIndex:               true,
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000,
@@ -2922,10 +2922,10 @@ func TestTxWatchFilterDrop(t *testing.T) {
 	var dupErr database.DuplicateError
 
 	cfg := &Config{
-		AutoIndex:               false,
-		BlockCacheSize:          "10mb",
-		HeaderCacheSize:         "1mb",
-		BlockSanity:             false,
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+
 		HemiIndex:               true,
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000,
@@ -3045,10 +3045,10 @@ func txWatchTestServer(t *testing.T) (*Server, *websocket.Conn, *tbcWs) {
 	var dupErr database.DuplicateError
 
 	cfg := &Config{
-		AutoIndex:               false,
-		BlockCacheSize:          "10mb",
-		HeaderCacheSize:         "1mb",
-		BlockSanity:             false,
+		AutoIndex:       false,
+		BlockCacheSize:  "10mb",
+		HeaderCacheSize: "1mb",
+
 		HemiIndex:               true,
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000,
