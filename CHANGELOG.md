@@ -126,6 +126,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   format (41-byte height+hash instead of 32-byte hash)
   ([#536](https://github.com/hemilabs/heminetwork/issues/536),
   [#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
+- Fix header context verification crash in ExternalHeaderMode when the
+  effective genesis is not retarget-aligned; the first retarget boundary
+  now skips difficulty verification when ancestor depth is insufficient
+  ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
 
 - Fix typos across the codebase
   ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733),
