@@ -77,8 +77,23 @@ func insertHeaders(t *testing.T, s *Server, headers []*wire.BlockHeader) {
 	}
 }
 
+// mineHeader finds a nonce that satisfies proof-of-work for the header's Bits.
+// Only feasible for permissive targets (e.g. regtest PowLimitBits).
+func mineHeader(hdr *wire.BlockHeader) {
+	target := blockchain.CompactToBig(hdr.Bits)
+	for nonce := uint32(0); ; nonce++ {
+		hdr.Nonce = nonce
+		hash := hdr.BlockHash()
+		hashNum := blockchain.HashToBig(&hash)
+		if hashNum.Cmp(target) <= 0 {
+			return
+		}
+	}
+}
+
 // makeChain creates count headers chained from prevBlock with the given bits
-// and spacing between timestamps.
+// and spacing between timestamps. Headers have sequential nonces but are NOT
+// mined — use makeMinedChain for tests that require valid PoW.
 func makeChain(count int, prevBlock wire.BlockHeader, bits uint32, spacing time.Duration) []*wire.BlockHeader {
 	headers := make([]*wire.BlockHeader, count)
 	prevHash := prevBlock.BlockHash()
@@ -91,6 +106,26 @@ func makeChain(count int, prevBlock wire.BlockHeader, bits uint32, spacing time.
 			Bits:      bits,
 			Nonce:     uint32(i + 1),
 		}
+		headers[i] = hdr
+		prevHash = hdr.BlockHash()
+		prevTs = hdr.Timestamp
+	}
+	return headers
+}
+
+// makeMinedChain is like makeChain but mines a valid nonce for each header.
+func makeMinedChain(count int, prevBlock wire.BlockHeader, bits uint32, spacing time.Duration) []*wire.BlockHeader {
+	headers := make([]*wire.BlockHeader, count)
+	prevHash := prevBlock.BlockHash()
+	prevTs := prevBlock.Timestamp
+	for i := range headers {
+		hdr := &wire.BlockHeader{
+			Version:   1,
+			PrevBlock: prevHash,
+			Timestamp: prevTs.Add(spacing),
+			Bits:      bits,
+		}
+		mineHeader(hdr)
 		headers[i] = hdr
 		prevHash = hdr.BlockHash()
 		prevTs = hdr.Timestamp
@@ -392,7 +427,23 @@ func TestVerifyDifficultyRetargetFork(t *testing.T) {
 // These exercise the full Server through AddExternalHeaders rather than
 // calling verifyHeaderContext directly.
 
-func newE2EDifficultyServer(t *testing.T, network string) *Server {
+// testRetargetParams returns chain params with mainnet retarget rules
+// but regtest PoW limits, allowing synthetic test headers to pass PoW
+// verification without actual mining effort.
+func testRetargetParams() *chaincfg.Params {
+	p := chaincfg.MainNetParams
+	p.PowLimit = new(big.Int).Set(chaincfg.RegressionNetParams.PowLimit)
+	p.PowLimitBits = chaincfg.RegressionNetParams.PowLimitBits
+	p.PoWNoRetargeting = false
+	return &p
+}
+
+// newE2EDifficultyServer creates an ExternalHeaderMode server. If
+// chainOverride is non-nil, the server's chain params are replaced
+// after setup (useful for synthetic tests that need permissive PoW).
+// When overriding, a custom genesis with the override's PowLimitBits
+// is used so that subsequent headers' bits are consistent.
+func newE2EDifficultyServer(t *testing.T, network string, chainOverride *chaincfg.Params) *Server {
 	t.Helper()
 
 	cfg := NewDefaultConfig()
@@ -402,6 +453,16 @@ func newE2EDifficultyServer(t *testing.T, network string) *Server {
 	cfg.BlockCacheSize = ""
 	cfg.HeaderCacheSize = ""
 	cfg.MempoolEnabled = false
+
+	if chainOverride != nil {
+		genesis := wire.BlockHeader{
+			Version:   1,
+			Timestamp: time.Unix(1231006505, 0),
+			Bits:      chainOverride.PowLimitBits,
+		}
+		mineHeader(&genesis)
+		cfg.EffectiveGenesisBlock = &genesis
+	}
 
 	s, err := NewServer(cfg)
 	if err != nil {
@@ -413,6 +474,9 @@ func newE2EDifficultyServer(t *testing.T, network string) *Server {
 	stateId := [32]byte{0x01}
 	if err := s.ExternalHeaderSetup(t.Context(), stateId[:]); err != nil {
 		t.Fatal(err)
+	}
+	if chainOverride != nil {
+		s.g.chain = chainOverride
 	}
 	return s
 }
@@ -438,25 +502,26 @@ func addExternalHeaders(t *testing.T, s *Server, headers []*wire.BlockHeader) (t
 	return lastIT, nil
 }
 
-// TestE2EDifficultyRetargetAccept feeds 2016 mainnet-like headers through
+// TestE2EDifficultyRetargetAccept feeds 2016 headers through
 // AddExternalHeaders and verifies that block 2016 with correct retarget
 // bits is accepted through the full server stack.
 func TestE2EDifficultyRetargetAccept(t *testing.T) {
-	s := newE2EDifficultyServer(t, "mainnet")
+	params := testRetargetParams()
+	s := newE2EDifficultyServer(t, "mainnet", params)
 
-	bits := chaincfg.MainNetParams.PowLimitBits
-	genesis := chaincfg.MainNetParams.GenesisBlock.Header
+	bits := params.PowLimitBits
+	genesis := *s.cfg.EffectiveGenesisBlock
 	spacing := 8 * time.Minute
 
 	// Insert blocks 1-2015.
-	pre := makeChain(2015, genesis, bits, spacing)
+	pre := makeMinedChain(2015, genesis, bits, spacing)
 	if _, err := addExternalHeaders(t, s, pre); err != nil {
 		t.Fatalf("inserting pre-retarget headers: %v", err)
 	}
 
 	// Compute expected retarget bits.
 	actualTimespan := pre[len(pre)-1].Timestamp.Unix() - genesis.Timestamp.Unix()
-	expectedBits := computeRetargetBits(bits, actualTimespan, &chaincfg.MainNetParams)
+	expectedBits := computeRetargetBits(bits, actualTimespan, params)
 
 	// Block 2016 with correct bits.
 	hdr2016 := &wire.BlockHeader{
@@ -464,8 +529,8 @@ func TestE2EDifficultyRetargetAccept(t *testing.T) {
 		PrevBlock: pre[len(pre)-1].BlockHash(),
 		Timestamp: pre[len(pre)-1].Timestamp.Add(spacing),
 		Bits:      expectedBits,
-		Nonce:     1,
 	}
+	mineHeader(hdr2016)
 	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdr2016})
 	if err != nil {
 		t.Fatalf("block 2016 with correct bits should be accepted: %v", err)
@@ -487,25 +552,27 @@ func TestE2EDifficultyRetargetAccept(t *testing.T) {
 // TestE2EDifficultyRetargetReject verifies that AddExternalHeaders rejects
 // a header at the retarget boundary with wrong difficulty bits.
 func TestE2EDifficultyRetargetReject(t *testing.T) {
-	s := newE2EDifficultyServer(t, "mainnet")
+	params := testRetargetParams()
+	s := newE2EDifficultyServer(t, "mainnet", params)
 
-	bits := chaincfg.MainNetParams.PowLimitBits
-	genesis := chaincfg.MainNetParams.GenesisBlock.Header
+	bits := params.PowLimitBits
+	genesis := *s.cfg.EffectiveGenesisBlock
 	spacing := 8 * time.Minute
 
-	pre := makeChain(2015, genesis, bits, spacing)
+	pre := makeMinedChain(2015, genesis, bits, spacing)
 	if _, err := addExternalHeaders(t, s, pre); err != nil {
 		t.Fatalf("inserting pre-retarget headers: %v", err)
 	}
 
-	// Block 2016 with old (wrong) bits.
+	// Block 2016 with old (wrong) bits — sanity check passes but
+	// context check rejects the wrong retarget.
 	hdr2016 := &wire.BlockHeader{
 		Version:   1,
 		PrevBlock: pre[len(pre)-1].BlockHash(),
 		Timestamp: pre[len(pre)-1].Timestamp.Add(spacing),
 		Bits:      bits,
-		Nonce:     1,
 	}
+	mineHeader(hdr2016)
 	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdr2016})
 	if err == nil {
 		t.Fatal("block 2016 with wrong bits should be rejected")
@@ -528,33 +595,34 @@ func TestE2EDifficultyRetargetReject(t *testing.T) {
 // AddExternalHeaders with different block timings, verifying that each
 // fork's retarget is evaluated independently through the full server.
 func TestE2EDifficultyFork(t *testing.T) {
-	s := newE2EDifficultyServer(t, "mainnet")
+	params := testRetargetParams()
+	s := newE2EDifficultyServer(t, "mainnet", params)
 
-	bits := chaincfg.MainNetParams.PowLimitBits
-	genesis := chaincfg.MainNetParams.GenesisBlock.Header
+	bits := params.PowLimitBits
+	genesis := *s.cfg.EffectiveGenesisBlock
 
 	// Shared prefix: blocks 1-2000.
-	shared := makeChain(2000, genesis, bits, 10*time.Minute)
+	shared := makeMinedChain(2000, genesis, bits, 10*time.Minute)
 	if _, err := addExternalHeaders(t, s, shared); err != nil {
 		t.Fatalf("inserting shared prefix: %v", err)
 	}
 	forkPoint := shared[len(shared)-1]
 
 	// Chain A: blocks 2001-2015 fast (5min), block 2016 with retarget.
-	chainA := makeChain(15, *forkPoint, bits, 5*time.Minute)
+	chainA := makeMinedChain(15, *forkPoint, bits, 5*time.Minute)
 	if _, err := addExternalHeaders(t, s, chainA); err != nil {
 		t.Fatalf("inserting chain A: %v", err)
 	}
 	aTimespan := chainA[len(chainA)-1].Timestamp.Unix() - genesis.Timestamp.Unix()
-	aBits := computeRetargetBits(bits, aTimespan, &chaincfg.MainNetParams)
+	aBits := computeRetargetBits(bits, aTimespan, params)
 
 	hdrA2016 := &wire.BlockHeader{
 		Version:   1,
 		PrevBlock: chainA[len(chainA)-1].BlockHash(),
 		Timestamp: chainA[len(chainA)-1].Timestamp.Add(10 * time.Minute),
 		Bits:      aBits,
-		Nonce:     1,
 	}
+	mineHeader(hdrA2016)
 	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdrA2016})
 	if err != nil {
 		t.Fatalf("chain A block 2016 should be accepted: %v", err)
@@ -563,27 +631,13 @@ func TestE2EDifficultyFork(t *testing.T) {
 		t.Fatalf("chain A: expected ITChainExtend, got %v", it)
 	}
 
-	// Chain B: blocks 2001-2015 slower (8min), different nonces.
-	chainB := make([]*wire.BlockHeader, 15)
-	prevHash := forkPoint.BlockHash()
-	prevTs := forkPoint.Timestamp
-	for i := range chainB {
-		hdr := &wire.BlockHeader{
-			Version:   1,
-			PrevBlock: prevHash,
-			Timestamp: prevTs.Add(8 * time.Minute),
-			Bits:      bits,
-			Nonce:     uint32(20000 + i),
-		}
-		chainB[i] = hdr
-		prevHash = hdr.BlockHash()
-		prevTs = hdr.Timestamp
-	}
+	// Chain B: blocks 2001-2015 slower (8min).
+	chainB := makeMinedChain(15, *forkPoint, bits, 8*time.Minute)
 	if _, err := addExternalHeaders(t, s, chainB); err != nil {
 		t.Fatalf("inserting chain B: %v", err)
 	}
 	bTimespan := chainB[len(chainB)-1].Timestamp.Unix() - genesis.Timestamp.Unix()
-	bBits := computeRetargetBits(bits, bTimespan, &chaincfg.MainNetParams)
+	bBits := computeRetargetBits(bits, bTimespan, params)
 
 	t.Logf("chain A retarget bits: 0x%08x  chain B retarget bits: 0x%08x",
 		aBits, bBits)
@@ -594,8 +648,8 @@ func TestE2EDifficultyFork(t *testing.T) {
 		PrevBlock: chainB[len(chainB)-1].BlockHash(),
 		Timestamp: chainB[len(chainB)-1].Timestamp.Add(10 * time.Minute),
 		Bits:      bBits,
-		Nonce:     1,
 	}
+	mineHeader(hdrB2016)
 	if _, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdrB2016}); err != nil {
 		t.Fatalf("chain B block 2016 should be accepted: %v", err)
 	}
@@ -606,25 +660,26 @@ func TestE2EDifficultyFork(t *testing.T) {
 		PrevBlock: chainB[len(chainB)-1].BlockHash(),
 		Timestamp: chainB[len(chainB)-1].Timestamp.Add(10 * time.Minute),
 		Bits:      aBits,
-		Nonce:     2,
 	}
+	mineHeader(hdrBwrong)
 	if _, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdrBwrong}); err == nil {
 		t.Fatal("chain B with chain A's bits should be rejected")
 	}
 }
 
 // newE2EEffectiveGenesisServer creates an ExternalHeaderMode server with an
-// effective genesis at the given height. The genesis block uses mainnet params
-// with PowLimitBits.
-func newE2EEffectiveGenesisServer(t *testing.T, genesisHeight uint64) (*Server, wire.BlockHeader) {
+// effective genesis at the given height. Uses testRetargetParams for
+// permissive PoW with mainnet retarget rules.
+func newE2EEffectiveGenesisServer(t *testing.T, genesisHeight uint64) (*Server, *chaincfg.Params, wire.BlockHeader) {
 	t.Helper()
 
+	params := testRetargetParams()
 	genesis := wire.BlockHeader{
 		Version:   1,
-		Timestamp: time.Unix(1231006505, 0), // same as real genesis
-		Bits:      chaincfg.MainNetParams.PowLimitBits,
-		Nonce:     1,
+		Timestamp: time.Unix(1231006505, 0),
+		Bits:      params.PowLimitBits,
 	}
+	mineHeader(&genesis)
 
 	cfg := NewDefaultConfig()
 	cfg.LevelDBHome = t.TempDir()
@@ -647,7 +702,8 @@ func newE2EEffectiveGenesisServer(t *testing.T, genesisHeight uint64) (*Server, 
 	if err := s.ExternalHeaderSetup(t.Context(), stateId[:]); err != nil {
 		t.Fatal(err)
 	}
-	return s, genesis
+	s.g.chain = params
+	return s, params, genesis
 }
 
 // TestE2EEffectiveGenesisRetargetMidPeriod verifies header context
@@ -658,13 +714,13 @@ func newE2EEffectiveGenesisServer(t *testing.T, genesisHeight uint64) (*Server, 
 func TestE2EEffectiveGenesisRetargetMidPeriod(t *testing.T) {
 	const genesisHeight = 1000
 
-	s, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
+	s, params, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
 
-	bits := chaincfg.MainNetParams.PowLimitBits
+	bits := params.PowLimitBits
 	spacing := 10 * time.Minute
 
 	// Heights 1001 through 2015.
-	preRetarget1 := makeChain(2016-genesisHeight-1, genesis, bits, spacing)
+	preRetarget1 := makeMinedChain(2016-genesisHeight-1, genesis, bits, spacing)
 	if _, err := addExternalHeaders(t, s, preRetarget1); err != nil {
 		t.Fatalf("inserting pre-retarget-1 headers: %v", err)
 	}
@@ -685,8 +741,8 @@ func TestE2EEffectiveGenesisRetargetMidPeriod(t *testing.T) {
 		PrevBlock: lastPre.BlockHash(),
 		Timestamp: lastPre.Timestamp.Add(spacing),
 		Bits:      bits,
-		Nonce:     1,
 	}
+	mineHeader(hdr2016)
 	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdr2016})
 	if err != nil {
 		t.Fatalf("height 2016 should be accepted (BFFastAdd): %v", err)
@@ -697,7 +753,7 @@ func TestE2EEffectiveGenesisRetargetMidPeriod(t *testing.T) {
 	t.Log("height 2016: accepted with BFFastAdd (insufficient ancestor depth)")
 
 	// Heights 2017 to 4031.
-	period2 := makeChain(4032-2016-1, *hdr2016, bits, spacing)
+	period2 := makeMinedChain(4032-2016-1, *hdr2016, bits, spacing)
 	if _, err := addExternalHeaders(t, s, period2); err != nil {
 		t.Fatalf("inserting period-2 headers: %v", err)
 	}
@@ -714,15 +770,15 @@ func TestE2EEffectiveGenesisRetargetMidPeriod(t *testing.T) {
 	// full verification applies.
 	lastPeriod2 := period2[len(period2)-1]
 	actualTimespan := lastPeriod2.Timestamp.Unix() - hdr2016.Timestamp.Unix()
-	expectedBits := computeRetargetBits(bits, actualTimespan, &chaincfg.MainNetParams)
+	expectedBits := computeRetargetBits(bits, actualTimespan, params)
 
 	hdr4032 := &wire.BlockHeader{
 		Version:   1,
 		PrevBlock: lastPeriod2.BlockHash(),
 		Timestamp: lastPeriod2.Timestamp.Add(spacing),
 		Bits:      expectedBits,
-		Nonce:     1,
 	}
+	mineHeader(hdr4032)
 	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032})
 	if err != nil {
 		t.Fatalf("height 4032 with correct bits should be accepted: %v", err)
@@ -738,8 +794,8 @@ func TestE2EEffectiveGenesisRetargetMidPeriod(t *testing.T) {
 		PrevBlock: lastPeriod2.BlockHash(),
 		Timestamp: lastPeriod2.Timestamp.Add(spacing),
 		Bits:      bits,
-		Nonce:     2,
 	}
+	mineHeader(hdr4032bad)
 	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032bad})
 	if err == nil {
 		t.Fatal("height 4032 with wrong bits should be rejected")
@@ -766,13 +822,13 @@ func TestE2EEffectiveGenesisRetargetMidPeriod(t *testing.T) {
 func TestE2EEffectiveGenesisRetargetAligned(t *testing.T) {
 	const genesisHeight = 2016 // exactly on a retarget boundary
 
-	s, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
+	s, params, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
 
-	bits := chaincfg.MainNetParams.PowLimitBits
+	bits := params.PowLimitBits
 	spacing := 10 * time.Minute
 
 	// Build 2015 headers (heights 2017-4031).
-	pre := makeChain(2015, genesis, bits, spacing)
+	pre := makeMinedChain(2015, genesis, bits, spacing)
 	if _, err := addExternalHeaders(t, s, pre); err != nil {
 		t.Fatalf("inserting pre-retarget headers: %v", err)
 	}
@@ -783,15 +839,15 @@ func TestE2EEffectiveGenesisRetargetAligned(t *testing.T) {
 	// which is NOT < 2016).
 	lastPre := pre[len(pre)-1]
 	actualTimespan := lastPre.Timestamp.Unix() - genesis.Timestamp.Unix()
-	expectedBits := computeRetargetBits(bits, actualTimespan, &chaincfg.MainNetParams)
+	expectedBits := computeRetargetBits(bits, actualTimespan, params)
 
 	hdr4032 := &wire.BlockHeader{
 		Version:   1,
 		PrevBlock: lastPre.BlockHash(),
 		Timestamp: lastPre.Timestamp.Add(spacing),
 		Bits:      expectedBits,
-		Nonce:     1,
 	}
+	mineHeader(hdr4032)
 	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032})
 	if err != nil {
 		t.Fatalf("height 4032 with correct bits should be accepted: %v", err)
@@ -806,8 +862,8 @@ func TestE2EEffectiveGenesisRetargetAligned(t *testing.T) {
 		PrevBlock: lastPre.BlockHash(),
 		Timestamp: lastPre.Timestamp.Add(spacing),
 		Bits:      bits,
-		Nonce:     2,
 	}
+	mineHeader(hdr4032bad)
 	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032bad})
 	if err == nil {
 		t.Fatal("height 4032 with wrong bits should be rejected")
@@ -826,9 +882,9 @@ func TestE2EEffectiveGenesisRetargetAligned(t *testing.T) {
 func TestE2EEffectiveGenesisRetargetJustBelow(t *testing.T) {
 	const genesisHeight = 2015 // one block below retarget boundary
 
-	s, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
+	s, params, genesis := newE2EEffectiveGenesisServer(t, genesisHeight)
 
-	bits := chaincfg.MainNetParams.PowLimitBits
+	bits := params.PowLimitBits
 	spacing := 10 * time.Minute
 
 	// Height 2016 is only 1 block after genesis — BFFastAdd is required
@@ -838,8 +894,8 @@ func TestE2EEffectiveGenesisRetargetJustBelow(t *testing.T) {
 		PrevBlock: genesis.BlockHash(),
 		Timestamp: genesis.Timestamp.Add(spacing),
 		Bits:      bits,
-		Nonce:     1,
 	}
+	mineHeader(hdr2016)
 	it, err := addExternalHeaders(t, s, []*wire.BlockHeader{hdr2016})
 	if err != nil {
 		t.Fatalf("height 2016 should be accepted (BFFastAdd, depth=1): %v", err)
@@ -850,7 +906,7 @@ func TestE2EEffectiveGenesisRetargetJustBelow(t *testing.T) {
 	t.Log("height 2016: accepted with BFFastAdd (genesis at 2015, depth=1)")
 
 	// Build heights 2017-4031 with consistent bits.
-	period2 := makeChain(4032-2016-1, *hdr2016, bits, spacing)
+	period2 := makeMinedChain(4032-2016-1, *hdr2016, bits, spacing)
 	if _, err := addExternalHeaders(t, s, period2); err != nil {
 		t.Fatalf("inserting period-2 headers: %v", err)
 	}
@@ -858,15 +914,15 @@ func TestE2EEffectiveGenesisRetargetJustBelow(t *testing.T) {
 	// Height 4032: depth = 4032-2015 = 2017 >= 2016, full verification.
 	lastPeriod2 := period2[len(period2)-1]
 	actualTimespan := lastPeriod2.Timestamp.Unix() - hdr2016.Timestamp.Unix()
-	expectedBits := computeRetargetBits(bits, actualTimespan, &chaincfg.MainNetParams)
+	expectedBits := computeRetargetBits(bits, actualTimespan, params)
 
 	hdr4032 := &wire.BlockHeader{
 		Version:   1,
 		PrevBlock: lastPeriod2.BlockHash(),
 		Timestamp: lastPeriod2.Timestamp.Add(spacing),
 		Bits:      expectedBits,
-		Nonce:     1,
 	}
+	mineHeader(hdr4032)
 	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032})
 	if err != nil {
 		t.Fatalf("height 4032 with correct bits should be accepted: %v", err)
@@ -881,8 +937,8 @@ func TestE2EEffectiveGenesisRetargetJustBelow(t *testing.T) {
 		PrevBlock: lastPeriod2.BlockHash(),
 		Timestamp: lastPeriod2.Timestamp.Add(spacing),
 		Bits:      bits,
-		Nonce:     2,
 	}
+	mineHeader(hdr4032bad)
 	it, err = addExternalHeaders(t, s, []*wire.BlockHeader{hdr4032bad})
 	if err == nil {
 		t.Fatal("height 4032 with wrong bits should be rejected")
@@ -941,7 +997,7 @@ func TestE2ERealMainnetRetarget(t *testing.T) {
 		t.Skipf("need at least 32260 headers, got %d", len(headers))
 	}
 
-	s := newE2EDifficultyServer(t, "mainnet")
+	s := newE2EDifficultyServer(t, "mainnet", nil)
 
 	// Insert all 32260 headers in batches through AddExternalHeaders.
 	if _, err := addExternalHeaders(t, s, headers[:32260]); err != nil {
@@ -976,7 +1032,7 @@ func TestE2ERealMainnetRejectBadRetarget(t *testing.T) {
 		t.Skipf("need at least 32260 headers, got %d", len(headers))
 	}
 
-	s := newE2EDifficultyServer(t, "mainnet")
+	s := newE2EDifficultyServer(t, "mainnet", nil)
 
 	// Insert blocks 1-32255 (all at difficulty 1).
 	if _, err := addExternalHeaders(t, s, headers[:32255]); err != nil {
@@ -1114,7 +1170,7 @@ func TestE2ERealMainnetRejectEveryBitFlip(t *testing.T) {
 		t.Skipf("need at least 32260 headers, got %d", len(headers))
 	}
 
-	s := newE2EDifficultyServer(t, "mainnet")
+	s := newE2EDifficultyServer(t, "mainnet", nil)
 
 	// Insert up to block 32255 (just before the retarget).
 	if _, err := addExternalHeaders(t, s, headers[:32255]); err != nil {

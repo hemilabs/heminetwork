@@ -1568,6 +1568,10 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 		return nil
 	}
 
+	if err := s.verifyHeaderSanity(headers.Headers); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("header sanity: %w", err)
+	}
 	if err := s.verifyHeaderContext(ctx, headers.Headers); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("header context verify: %w", err)
@@ -1654,6 +1658,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		pbhHash = new(msg.Headers[k].BlockHash())
 	}
 
+	if err := s.verifyHeaderSanity(msg.Headers); err != nil {
+		return fmt.Errorf("header sanity: %w", err)
+	}
 	if err := s.verifyHeaderContext(ctx, msg.Headers); err != nil {
 		return fmt.Errorf("header context verify: %w", err)
 	}
@@ -1739,13 +1746,11 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 }
 
 func (s *Server) insertBlock(ctx context.Context, block *btcutil.Block) (int64, error) {
-	if s.cfg.BlockSanity {
-		err := blockchain.CheckBlockSanity(block, s.g.chain.PowLimit,
-			s.timeSource)
-		if err != nil {
-			return 0, fmt.Errorf("insert block sanity check %v: %w",
-				block.Hash(), err)
-		}
+	err := blockchain.CheckBlockSanity(block, s.g.chain.PowLimit,
+		s.timeSource)
+	if err != nil {
+		return 0, fmt.Errorf("insert block sanity check %v: %w",
+			block.Hash(), err)
 	}
 
 	height, err := s.g.db.BlockInsert(ctx, block)
@@ -1783,6 +1788,14 @@ func (s *Server) BlockInsert(ctx context.Context, blk *wire.MsgBlock) (int64, er
 }
 
 func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+	if err := s.verifyHeaderSanity(headers.Headers); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("header sanity: %w", err)
+	}
+	if err := s.verifyHeaderContext(ctx, headers.Headers); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("header context verify: %w", err)
+	}
 	return s.insertBlockheader(ctx, headers, nil)
 }
 
@@ -1800,29 +1813,6 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 		// kick cache
 		go s.syncBlocks(ctx)
 	}()
-
-	if s.cfg.BlockSanity {
-		err := blockchain.CheckBlockSanity(block, s.g.chain.PowLimit,
-			s.timeSource)
-		if err != nil {
-			return fmt.Errorf("handle block unable to validate block hash %v: %w",
-				bhs, err)
-		}
-
-		// Contextual check of block
-		//
-		// We do want these checks however we download the blockchain
-		// out of order this we will have to do something clever for
-		// prevNode.
-		//
-		// header := &block.MsgBlock().Header
-		// flags := blockchain.BFNone
-		// err := blockchain.CheckBlockHeaderContext(header, prevNode, flags, bctxt, false)
-		// if err != nil {
-		//	log.Errorf("Unable to validate context of block hash %v: %v", bhs, err)
-		//	return
-		// }
-	}
 
 	height, err := s.insertBlock(ctx, block) // XXX see if we can use raw here
 	if err != nil {

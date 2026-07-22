@@ -43,9 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Verify incoming block headers against btcd's `CheckBlockHeaderContext`
-  (difficulty retarget, median-time-past, version) before insertion in
-  both P2P and external-header modes
+- Verify incoming block headers against btcd's `CheckBlockHeaderSanity`
+  (PoW, timestamp) and `CheckBlockHeaderContext` (difficulty retarget,
+  median-time-past, version) before insertion in all paths: P2P,
+  external-header, and public API modes
+  ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
+- Make `CheckBlockSanity` unconditional on block insert, removing the
+  opt-in `BlockSanity` config gate
   ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
 
 - Add `BlockRawByHash` to DB interface and `lazyBlock` type for zero-copy

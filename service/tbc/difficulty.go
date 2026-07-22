@@ -102,6 +102,20 @@ func (c *tbcChainCtx) FindPreviousCheckpoint() (blockchain.HeaderCtx, error) {
 	return nil, nil
 }
 
+// verifyHeaderSanity checks each header in the batch for proof-of-work
+// validity and timestamp sanity. These are context-free checks that
+// apply to all networks including regtest.
+func (s *Server) verifyHeaderSanity(headers []*wire.BlockHeader) error {
+	for i, hdr := range headers {
+		err := blockchain.CheckBlockHeaderSanity(hdr, s.g.chain.PowLimit,
+			s.timeSource, blockchain.BFNone)
+		if err != nil {
+			return fmt.Errorf("header %d sanity: %w", i, err)
+		}
+	}
+	return nil
+}
+
 // verifyHeaderContext checks that each header in the batch passes btcd's
 // CheckBlockHeaderContext: difficulty retarget, median-time-past, and version.
 func (s *Server) verifyHeaderContext(ctx context.Context, headers []*wire.BlockHeader) error {
