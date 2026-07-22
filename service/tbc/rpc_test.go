@@ -27,9 +27,9 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/juju/loggo/v2"
+	"github.com/moby/moby/api/types/network"
 	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/hemilabs/heminetwork/v2/api"
@@ -716,7 +716,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			defer cancel()
 
 			var bitcoindContainer testcontainers.Container
-			var mappedPeerPort nat.Port
+			var mappedPeerPort network.Port
 			initialBlocks := 0
 			if !tti.doNotGenerate {
 				initialBlocks = 4
@@ -926,7 +926,7 @@ func TestUtxosByAddress(t *testing.T) {
 			defer cancel()
 
 			var bitcoindContainer testcontainers.Container
-			var mappedPeerPort nat.Port
+			var mappedPeerPort network.Port
 			initialBlocks := 0
 			if !tti.doNotGenerate {
 				initialBlocks = 4
@@ -1954,7 +1954,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 		t.Run(tti.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			port, err := nat.NewPort("tcp", "9999")
+			port, err := network.ParsePort("9999/tcp")
 			if err != nil {
 				t.Fatal(err)
 			}
