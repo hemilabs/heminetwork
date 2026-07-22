@@ -43,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `TBC_ORDINAL_VERIFY_BIGO` (default `false`): debug cross-check of
+  every consumed ordinal 'O' acceleration value against the tx index.
+  A lookup failure surfaces as an error; a genuine value mismatch means
+  a corrupt ordinal index and panics with reindex instructions. Enable
+  when soaking changes to the ordinal 'O' write paths; it re-does the
+  lookup the fast path exists to skip, so it is slow.
+
+
 - Add `BlockRawByHash` to DB interface and `lazyBlock` type for zero-copy
   per-tx block access without full deserialization
   ([#1051](https://github.com/hemilabs/heminetwork/pull/1051)).
@@ -71,6 +79,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   P2PKH, P2WPKH, and BIP-86 P2TR addresses from a single compressed
   public key and indexes the key under all three
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Add ordinal indexer to TBC: tracks individual satoshi ownership via
+  FIFO sat range redistribution and indexes Bitcoin inscriptions
+  including cursed, reinscriptions, parent-child, and delegation.
+  New LevelDB "ordinals" database; DB version 6 → 7
+  ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
+- Add output value LRU cache (`TBC_ORDINAL_OUTPUT_CACHE_SIZE`, default
+  256 MB) for ordinal indexer; cache miss path uses `lazyBlock` for
+  zero-copy per-tx access and `TxLoc` for O(1) byte offset jumps
+  ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
 - Add `TxByID` to the `gozer.Gozer` interface with `tbcGozer`
   implementation backed by TBC RPC
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
@@ -87,6 +104,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GetTSSKey` / `PurgeTSSKey` / `LookupTSSKeyByAddr` interface methods.
 
 ### Changed
+
+- All leveldb databases now share one managed 512 MiB block cache and
+  one 4096-handle table file pool (previously 8 MiB and 500 handles
+  private per database); write-heavy databases get larger write buffers
+  (ordinals 128 MiB, transactions/outputs 64 MiB) and 8 MiB tables
+  (ordinals, transactions). Steady-state memory floor rises roughly
+  1 GiB; the ordinals database uses 16-bit bloom filters (existing
+  tables remain readable and convert via compaction); capacities are
+  logged at startup and a warning fires when
+  RLIMIT_NOFILE cannot cover the file pool. Set `GOMEMLIMIT` on
+  memory-constrained hosts. Rolling back to an older binary after the
+  table-size change is safe: readers are size-agnostic and compaction
+  converges table sizes over time.
+- The tbcd database layer supports read-only opens
+  (`Config.SetReadOnly`): no recovery writes, no background
+  compaction, writes error. A wind-replay diagnostic
+  (`TestWindReplay`, env-gated) replays chosen blocks through the
+  full ordinal wind against a read-only database — all the work,
+  nothing inserted — for controlled measurement of slow blocks.
+- Ordinal indexer parent-value lookups are warmed for the whole block
+  through a producer/consumer pipeline that deduplicates parent
+  transactions before fetching: batch reveals (N inputs funded by one
+  commit transaction) fetch their parent once instead of racing N
+  duplicate lookups through the fan-out, and the block's witnesses are
+  parsed once. The wind log line gains iov_warm (unique parents
+  warmed) alongside iov_calls. `TBC_ORDINAL_WARM` (default `true`)
+  toggles the warm phase while its long-term value is evaluated.
+- Ordinal indexer 'O' acceleration lookups for a block are prefetched
+  in one 128-wide parallel pass instead of one serial point-Get per
+  input; the DB is immutable during a wind, so detection semantics are
+  unchanged.
+- Ordinal indexer parent-transaction lookups read only the
+  transaction's bytes from the raw block store via a ranged read
+  (TxLoc-guided pread) instead of fetching the whole multi-MB block;
+  legacy pre-v6 index entries keep the whole-block fallback.
+- Ordinal indexer flushes are additionally bounded by bytes (~1 GiB of
+  cached index payload), not only by entry count, and flush batches are
+  written in bounded chunks inside one atomic transaction. Fixes
+  unbounded memory growth and quadratic batch-buffer copying observed
+  during inscription-dense mainnet ranges.
+
 
 - `BlockTxUpdate` uses stack-allocated reusable buffers instead of slicing
   loop variables, avoiding potential data integrity issues
@@ -115,6 +173,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#972](https://github.com/hemilabs/heminetwork/pull/972)).
 
 ### Fixed
+
+- Fix ordinal indexer cache memory ratcheting: the write cache retained
+  its high-water bucket arrays across flushes forever (observed live as
+  Go runtime Sys climbing 3.4 GiB to 7.0 GiB during a dense-zone
+  reindex). The cache now releases each window after flushing.
+- Fix a nil-pointer panic in the ordinal indexer when a parent
+  transaction's index entry predates the v6 TxLoc format; legacy
+  entries now take the block-scan fallback.
+
 
 - Fix typos across the codebase
   ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733),

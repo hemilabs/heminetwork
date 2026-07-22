@@ -118,6 +118,30 @@ func (lb *lazyBlock) FindTx(txid chainhash.Hash) (int, error) {
 // TxOutputValues parses only the output section of transaction i and
 // returns the value (in satoshis) of each output. The only heap allocation
 // is the result slice.
+// FindTxOutputValues locates txid in the block and returns its output
+// values in one step. The extraction shares the return with the lookup,
+// so there is no separate error path for "found but unparseable" — the
+// offsets that located the tx are the offsets extraction reads.
+func (lb *lazyBlock) FindTxOutputValues(txid chainhash.Hash) ([]uint64, error) {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	if err := lb.ensureTxOffsets(); err != nil {
+		return nil, err
+	}
+	for i := range lb.txOffsets {
+		loc := lb.txOffsets[i]
+		txBytes := lb.raw[loc.TxStart : loc.TxStart+loc.TxLen]
+		h, err := computeTxID(txBytes, lb.txWitness[i])
+		if err != nil {
+			return nil, fmt.Errorf("lazyBlock: tx %d: %w", i, err)
+		}
+		if h == txid {
+			return extractOutputValues(txBytes, lb.txWitness[i])
+		}
+	}
+	return nil, fmt.Errorf("lazyBlock: tx %v not found", txid)
+}
+
 func (lb *lazyBlock) TxOutputValues(i int) ([]uint64, error) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()

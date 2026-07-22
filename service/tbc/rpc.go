@@ -198,6 +198,69 @@ func (s *Server) getTBCAPICommandHandler(cmd protocol.Command, payload any) func
 		return func(ctx context.Context) (any, error) {
 			return s.handleZKSpendableOutputsRequest(ctx, payload.(*tbcapi.ZKSpendableOutputsRequest))
 		}
+	case tbcapi.CmdOrdinalInscriptionByIDRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionByIDRequest(ctx, payload.(*tbcapi.OrdinalInscriptionByIDRequest))
+		}
+	case tbcapi.CmdOrdinalInscriptionContentRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionContentRequest(ctx, payload.(*tbcapi.OrdinalInscriptionContentRequest))
+		}
+	case tbcapi.CmdOrdinalInscriptionsByBlockRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionsByBlockRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsByBlockRequest))
+		}
+	case tbcapi.CmdOrdinalInscriptionsByAddressRequest:
+		return func(ctx context.Context) (any, error) {
+			return s.handleOrdinalInscriptionsByAddressRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsByAddressRequest))
+		}
+	// XXX(marco): InscriptionsBySat and SatRangesByOutpoint are disabled.
+	//
+	// SatRangesByOutpoint is hard-blocked on stored sat ranges per
+	// outpoint ('r' prefix). There is no alternative — it returns sat
+	// ranges by definition.
+	//
+	// InscriptionsBySat has two possible paths to re-enable:
+	//
+	// Path A (no stored ranges): re-enable the watermark/populator
+	// background goroutine. After initial sync completes, the populator
+	// picks up 'w' work queue entries and backward-walks each inscription
+	// to compute its sat number. It writes the real sat into 'i' and
+	// creates the 'a' (sat→inscription) entry. InscriptionsBySat starts
+	// working as the populator catches up. Downside: the backward walk
+	// takes hours to complete for all inscriptions, so there's a lag
+	// between sync and sat data availability.
+	//
+	// Path B (stored ranges): store sat ranges per outpoint during
+	// windBlock. Every tx output gets an 'r' entry with FIFO-split
+	// ranges from inputs. Inscription sat numbers are O(1) lookups
+	// during wind, 'a' index is populated inline. Both RPCs work
+	// immediately after sync. Downside: 'r' entries for every output
+	// is UTXO-index-sized data (~33 entries per block) requiring
+	// careful cache/flush tuning.
+	//
+	// case tbcapi.CmdOrdinalInscriptionsBySatRequest:
+	// 	return func(ctx context.Context) (any, error) {
+	// 		return s.handleOrdinalInscriptionsBySatRequest(ctx, payload.(*tbcapi.OrdinalInscriptionsBySatRequest))
+	// 	}
+	// case tbcapi.CmdOrdinalSatRangesByOutpointRequest:
+	// 	return func(ctx context.Context) (any, error) {
+	// 		return s.handleOrdinalSatRangesByOutpointRequest(ctx, payload.(*tbcapi.OrdinalSatRangesByOutpointRequest))
+	// 	}
+	case tbcapi.CmdOrdinalInscriptionsBySatRequest:
+		return func(ctx context.Context) (any, error) {
+			log.Warningf("InscriptionsBySat called but disabled (sat ranges not stored per outpoint)")
+			return &tbcapi.OrdinalInscriptionsBySatResponse{
+				Error: protocol.RequestErrorf("InscriptionsBySat is disabled: sat ranges not yet stored per outpoint"),
+			}, nil
+		}
+	case tbcapi.CmdOrdinalSatRangesByOutpointRequest:
+		return func(ctx context.Context) (any, error) {
+			log.Warningf("SatRangesByOutpoint called but disabled (sat ranges not stored per outpoint)")
+			return &tbcapi.OrdinalSatRangesByOutpointResponse{
+				Error: protocol.RequestErrorf("SatRangesByOutpoint is disabled: sat ranges not yet stored per outpoint"),
+			}, nil
+		}
 	default:
 		return nil
 	}
@@ -1614,4 +1677,99 @@ func (s *Server) handleTxUnwatchRequest(ctx context.Context, ws *tbcWs, req *tbc
 	l.Unwatch(scripts)
 
 	return &tbcapi.TxUnwatchResponse{}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionByIDRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionByIDRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionByIDRequest")
+	defer log.Tracef("handleOrdinalInscriptionByIDRequest exit")
+
+	insc, err := s.InscriptionByID(ctx, req.TxID, req.InputIndex, req.IncludeSat)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionByIDResponse{
+				Error: protocol.NotFoundError("inscription",
+					fmt.Sprintf("%v:%d", req.TxID, req.InputIndex)),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionByIDResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionByIDResponse{
+		Inscription: insc,
+	}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionContentRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionContentRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionContentRequest")
+	defer log.Tracef("handleOrdinalInscriptionContentRequest exit")
+
+	contentType, content, err := s.InscriptionContent(ctx, req.TxID, req.InputIndex)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionContentResponse{
+				Error: protocol.NotFoundError("inscription content",
+					fmt.Sprintf("%v:%d", req.TxID, req.InputIndex)),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionContentResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionContentResponse{
+		ContentType: contentType,
+		Content:     content,
+	}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionsByBlockRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionsByBlockRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionsByBlockRequest")
+	defer log.Tracef("handleOrdinalInscriptionsByBlockRequest exit")
+
+	inscriptions, err := s.InscriptionsByBlock(ctx, req.Hash, req.IncludeSat)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionsByBlockResponse{
+				Error: protocol.NotFoundError("block", req.Hash),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionsByBlockResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionsByBlockResponse{
+		Inscriptions: inscriptions,
+	}, nil
+}
+
+func (s *Server) handleOrdinalInscriptionsByAddressRequest(ctx context.Context, req *tbcapi.OrdinalInscriptionsByAddressRequest) (any, error) {
+	log.Tracef("handleOrdinalInscriptionsByAddressRequest")
+	defer log.Tracef("handleOrdinalInscriptionsByAddressRequest exit")
+
+	inscriptions, err := s.InscriptionsByAddress(ctx, req.Address, req.Start, req.Count, req.IncludeSat)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.OrdinalInscriptionsByAddressResponse{
+				Error: protocol.NotFoundError("address", req.Address),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.OrdinalInscriptionsByAddressResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.OrdinalInscriptionsByAddressResponse{
+		Inscriptions: inscriptions,
+	}, nil
 }

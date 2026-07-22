@@ -88,8 +88,7 @@ func New[K comparable, V any](maxCost int, sizeOf func(K, V) int, flags Flag) (*
 }
 
 // Put inserts or updates a key-value pair. If necessary, LRU entries are
-// evicted to stay within the cost budget. Panics if a single entry exceeds
-// the entire cache budget.
+// evicted to stay within the cost budget.
 func (c *Cache[K, V]) Put(k K, v V) {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()

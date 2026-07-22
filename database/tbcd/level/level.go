@@ -22,6 +22,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/x/leveldb/leveldb"
+	"github.com/hemilabs/x/leveldb/leveldb/filter"
+	"github.com/hemilabs/x/leveldb/leveldb/opt"
 	"github.com/hemilabs/x/leveldb/leveldb/util"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
@@ -48,7 +50,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 6
+	ldbVersion = 7
 
 	logLevel = "INFO"
 	verbose  = false
@@ -80,7 +82,22 @@ var (
 	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
 	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
 	zkIndexHashKey       = []byte("zkindexhash")       // last indexed zk block hash
+	ordinalIndexHashKey  = []byte("ordinalindexhash")  // last indexed ordinal block hash
 )
+
+// defaultOrdinalBatchChunkSize bounds the leveldb batch built during
+// ordinal flushes. goleveldb grows batch buffers sublinearly once they
+// are large, so appending one huge block-batch memcpys quadratically
+// (measured at ~20% of CPU during dense-zone flushes). Writing the
+// batch into the open transaction in chunks of this size stays atomic
+// — nothing is visible until commit — while bounding memory and
+// regrowth.
+const defaultOrdinalBatchChunkSize = 16 * 1024 * 1024
+
+// batchRecordOverhead approximates goleveldb's per-record batch
+// overhead (type byte + key/value varint lengths; verified against the
+// fork's appendRec worst case of 11 bytes).
+const batchRecordOverhead = 12
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -94,6 +111,12 @@ type ldb struct {
 	rawPool level.RawPool
 
 	blockCache *lru.Cache[chainhash.Hash, []byte]
+
+	// Ordinal flush parameters, per instance so tests can shrink the
+	// chunk size and inject write failures without package-global
+	// state.
+	ordinalBatchChunkSize int
+	ordinalTxWrite        func(tx *leveldb.Transaction, b *leveldb.Batch) error
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
@@ -142,10 +165,19 @@ type Config struct {
 	headerCacheSize int    // parsed size of block header cache
 	nonInteractive  bool   // Set to true to prevent user interaction
 	upgradeOpen     bool   // Set to true when doing an open during upgrade
+	readOnly        bool   // Set to true to open every database read-only
 }
 
 func (cfg *Config) SetNoninteractive(x bool) {
 	cfg.nonInteractive = x
+}
+
+// SetReadOnly opens every database read-only: no journal recovery
+// writes, no background compaction, and any write returns an error.
+// Diagnostic and inspection tooling uses this to measure or examine a
+// database without perturbing it.
+func (cfg *Config) SetReadOnly(x bool) {
+	cfg.readOnly = x
 }
 
 func (cfg *Config) SetUpgradeOpen(x bool) {
@@ -208,17 +240,65 @@ func NewConfig(network, home, headerCacheSizeS, blockCacheSizeS string) (*Config
 	}, nil
 }
 
+// Shared leveldb cache sizing. One block cache and one table file
+// handle pool serve ALL databases; hot databases (ordinals,
+// transactions) claim capacity from the common pool as needed. These
+// are deliberately not user-tunable.
+const (
+	levelBlockCacheSize = 512 * opt.MiB // shared block cache (filter/index/data blocks)
+	levelOpenFiles      = 4096          // shared open table file handles
+)
+
 func open(ctx context.Context, cfg *Config) (*ldb, error) {
-	ld, err := level.New(ctx, level.NewDefaultConfig(cfg.Home))
+	lcfg := level.NewDefaultConfig(cfg.Home)
+	lcfg.BlockCacheCapacity = levelBlockCacheSize
+	lcfg.OpenFilesCacheCapacity = levelOpenFiles
+	// Read-only must be set before the per-database overrides below,
+	// which copy lcfg.Options and inherit it.
+	lcfg.Options.ReadOnly = cfg.readOnly
+
+	// Per-database overrides tuned to workload. Write-heavy databases
+	// get larger memtables (fewer L0 flushes and compactions) and
+	// larger tables (fewer files, so fewer filter/index blocks compete
+	// for cache). Shared cachers are installed into these by level.New;
+	// memtables cost up to 2x WriteBuffer per database.
+	ordOpts := lcfg.Options
+	ordOpts.WriteBuffer = 128 * opt.MiB
+	ordOpts.CompactionTableSize = 8 * opt.MiB
+	// The ordinal wind path issues one point-Get per tx input against
+	// the 'O' keyspace; negatives dominate, so bloom false positives
+	// convert directly into wasted (uncached) block reads. 16 bits/key
+	// (~0.05% FP vs ~0.8% at the global 10) removes that tail for a
+	// 60% larger filter block footprint on this database only. The
+	// bloom format stores the hash count per filter block, so existing
+	// 10-bit tables remain readable and convert as compaction rewrites
+	// them.
+	ordOpts.Filter = filter.NewBloomFilter(16)
+	txOpts := lcfg.Options
+	txOpts.WriteBuffer = 64 * opt.MiB
+	txOpts.CompactionTableSize = 8 * opt.MiB
+	outOpts := lcfg.Options
+	outOpts.WriteBuffer = 64 * opt.MiB
+	lcfg.DBOptions = map[string]opt.Options{
+		level.OrdinalDB:      ordOpts,
+		level.TransactionsDB: txOpts,
+		level.OutputsDB:      outOpts,
+	}
+
+	ld, err := level.New(ctx, lcfg)
 	if err != nil {
 		return nil, err
 	}
 
 	l := &ldb{
-		Database: ld,
-		pool:     ld.DB(),
-		rawPool:  ld.RawDB(),
-		cfg:      cfg,
+		Database:              ld,
+		pool:                  ld.DB(),
+		rawPool:               ld.RawDB(),
+		cfg:                   cfg,
+		ordinalBatchChunkSize: defaultOrdinalBatchChunkSize,
+		ordinalTxWrite: func(tx *leveldb.Transaction, b *leveldb.Batch) error {
+			return tx.Write(b, nil)
+		},
 	}
 
 	welcome := make([]string, 0, 10)
@@ -255,6 +335,9 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 	} else {
 		welcome = append(welcome, "Blockheader cache: DISABLED")
 	}
+	sharedBlock, sharedFiles := ld.CacheCapacities()
+	welcome = append(welcome, fmt.Sprintf("leveldb shared block cache: %v, open files: %d",
+		humanize.IBytes(uint64(sharedBlock)), sharedFiles))
 
 	if Welcome {
 		for k := range welcome {
@@ -316,6 +399,9 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			// Upgrade to v6: wipe tx index so it rebuilds
 			// with TxLoc values in 't' entries.
 			err = l.v6(ctx)
+		case 6:
+			// Upgrade to v7: add ordinals index database.
+			err = l.v7(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {
@@ -395,6 +481,17 @@ func (l *ldb) transactionBatchGet(ctx context.Context, t *leveldb.Transaction, a
 		rows[k] = tbcd.Row{Key: keys[k], Value: value, Error: err}
 	}
 	return rows, nil
+}
+
+// LevelDBProperty returns a leveldb property (e.g. "leveldb.iostats",
+// "leveldb.cachedblock", "leveldb.openedtables") for the named
+// database. Diagnostic tooling only; not part of tbcd.Database.
+func (l *ldb) LevelDBProperty(dbName, property string) (string, error) {
+	db, ok := l.pool[dbName]
+	if !ok {
+		return "", fmt.Errorf("unknown database %q", dbName)
+	}
+	return db.GetProperty(property)
 }
 
 func (l *ldb) Version(ctx context.Context) (int, error) {
@@ -1610,6 +1707,30 @@ func (l *ldb) BlockRawByHash(ctx context.Context, hash chainhash.Hash) ([]byte, 
 	return eb, nil
 }
 
+// BlockTxRawByLoc returns the raw bytes of one transaction via a
+// ranged read of the raw block store: index lookup plus a single
+// pread of loc.TxLen bytes, instead of reading the whole block.
+func (l *ldb) BlockTxRawByLoc(ctx context.Context, hash chainhash.Hash, loc wire.TxLoc) ([]byte, error) {
+	log.Tracef("BlockTxRawByLoc")
+	defer log.Tracef("BlockTxRawByLoc exit")
+
+	if loc.TxStart < 0 || loc.TxLen <= 0 ||
+		int64(loc.TxStart) > math.MaxUint32 ||
+		int64(loc.TxLen) > math.MaxUint32 {
+		return nil, fmt.Errorf("invalid tx location %v: %v+%v",
+			hash, loc.TxStart, loc.TxLen)
+	}
+	bDB := l.rawPool[level.BlocksDB]
+	b, err := bDB.GetRange(hash[:], uint32(loc.TxStart), uint32(loc.TxLen))
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.BlockNotFoundError{Hash: hash}
+		}
+		return nil, fmt.Errorf("block tx raw get: %w", err)
+	}
+	return b, nil
+}
+
 func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool, error) {
 	log.Tracef("BlockExistsByHash")
 	defer log.Tracef("BlockExistsByHash exit")
@@ -2472,4 +2593,567 @@ func (l *ldb) BlockCacheStats() tbcd.CacheStats {
 		return noStats
 	}
 	return lruStatsToCacheStats(l.blockCache.Stats())
+}
+
+// Ordinals index methods.
+
+func (l *ldb) BlockHeaderByOrdinalIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeaderByOrdinalIndex")
+	defer log.Tracef("BlockHeaderByOrdinalIndex exit")
+
+	ordTx, _, ordDiscard, err := l.startTransaction(level.OrdinalDB)
+	if err != nil {
+		return nil, fmt.Errorf("ordinal open db transaction: %w", err)
+	}
+	defer ordDiscard()
+
+	hash, err := ordTx.Get(ordinalIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("ordinal index get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+// BlockOrdinalUpdate atomically writes the ordinal cache and work maps
+// plus the index-hash checkpoint.
+//
+// CONTRACT: data and work are CONSUMED — entries are drained as they
+// are written. On error nothing was persisted (the transaction is
+// discarded) but the maps are partially drained and their contents are
+// undefined; the caller must discard them and rebuild from scratch.
+// Retrying with the same maps would commit a checkpoint that overstates
+// what was written.
+func (l *ldb) BlockOrdinalUpdate(ctx context.Context, direction int, data map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, work map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue, ordinalIndexHash chainhash.Hash) error {
+	log.Tracef("BlockOrdinalUpdate")
+	defer log.Tracef("BlockOrdinalUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	ordTx, ordCommit, ordDiscard, err := l.startTransaction(level.OrdinalDB)
+	if err != nil {
+		return fmt.Errorf("ordinal open db transaction: %w", err)
+	}
+	defer ordDiscard()
+
+	// The cache is updated in a way that makes the direction
+	// irrelevant. The block's index data ('o'/'p'/'i'/'n'/'a'/watermark),
+	// the work queue ('w'), and the index-hash pointer all land in ONE
+	// transaction so the ordinal DB never observes a partial block. The
+	// records are written into the transaction in bounded chunks — see
+	// ordinalBatchChunkSize — which stays atomic because nothing is
+	// visible until commit.
+	//
+	// Unpack each OrdinalCacheEntry into LevelDB batch operations,
+	// constructing DB keys from Outpoint + offset. Same pattern as
+	// BlockUtxoUpdate constructing 'u'+'h' keys from Outpoint→CacheOutput.
+	// Size the initial batch by content so tip-sized updates (a
+	// handful of records) do not allocate a full chunk; cap at the
+	// chunk size which flushing keeps as the working bound.
+	est := len(data)*256 + len(work)*64 + 1024
+	ordBatch := leveldb.MakeBatch(min(est, l.ordinalBatchChunkSize))
+	var pending int
+	// flush is only invoked with records pending: add() guards on
+	// pending > 0 and the final call follows the index-hash put. An
+	// empty write would be a harmless no-op regardless.
+	flush := func() error {
+		if werr := l.ordinalTxWrite(ordTx, ordBatch); werr != nil {
+			return fmt.Errorf("ordinal insert: %w", werr)
+		}
+		ordBatch.Reset()
+		pending = 0
+		return nil
+	}
+	// add flushes the pending chunk BEFORE appending a record that
+	// would push it past the chunk size, so the batch buffer never
+	// regrows for records smaller than the chunk. A single record
+	// larger than the chunk still fits: the batch grows once and
+	// Reset retains the capacity for the rest of the call.
+	add := func(k, v []byte, del bool) error {
+		rec := len(k) + len(v) + batchRecordOverhead
+		if pending > 0 && pending+rec > l.ordinalBatchChunkSize {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		if del {
+			ordBatch.Delete(k)
+		} else {
+			ordBatch.Put(k, v)
+		}
+		pending += rec
+		return nil
+	}
+	put := func(k, v []byte) error { return add(k, v, false) }
+	del := func(k []byte) error { return add(k, nil, true) }
+
+	for op, entry := range data {
+		// 'o' entries: 'o' + txid(32) + vout(4) + offset(8) = 45 bytes
+		for offset, v := range entry.Inscriptions {
+			var key [45]byte
+			key[0] = 'o'
+			copy(key[1:37], op[1:37]) // txid + vout
+			binary.BigEndian.PutUint64(key[37:], offset)
+			if v == nil {
+				err = del(key[:])
+			} else {
+				err = put(key[:], v)
+			}
+			if err != nil {
+				return err
+			}
+		}
+
+		// 'p' entries: 'p' + txid(32) + vout(4) + offset(8) = 45 bytes
+		for offset, v := range entry.Predecessors {
+			var key [45]byte
+			key[0] = 'p'
+			copy(key[1:37], op[1:37])
+			binary.BigEndian.PutUint64(key[37:], offset)
+			if v == nil {
+				err = del(key[:])
+			} else {
+				err = put(key[:], v)
+			}
+			if err != nil {
+				return err
+			}
+		}
+
+		// 'O' entry: point-Get acceleration index.
+		// 'O' + txid(32) + vout(4) = 37 bytes.
+		if entry.BigOSet {
+			var oKey [37]byte
+			oKey[0] = 'O'
+			copy(oKey[1:37], op[1:37])
+			if entry.BigO == nil {
+				err = del(oKey[:])
+			} else {
+				err = put(oKey[:], entry.BigO)
+			}
+			if err != nil {
+				return err
+			}
+		}
+
+		// Auxiliary entries ('i', 'n', 'a', 'm'): already in DB key format.
+		for k, v := range entry.Aux {
+			if v.IsDelete() {
+				err = del(k[:])
+			} else {
+				err = put(k[:], v.Bytes())
+			}
+			if err != nil {
+				return err
+			}
+		}
+
+		delete(data, op)
+	}
+	for k, v := range work {
+		if v.IsDelete() {
+			err = del(k[:])
+		} else {
+			err = put(k[:], v[:])
+		}
+		if err != nil {
+			return err
+		}
+		delete(work, k)
+	}
+
+	if err = put(ordinalIndexHashKey, ordinalIndexHash[:]); err != nil {
+		return err
+	}
+	if err = flush(); err != nil {
+		return err
+	}
+	if err = ordCommit(); err != nil {
+		return fmt.Errorf("ordinal commit: %w", err)
+	}
+
+	if log.IsDebugEnabled() {
+		ordDB := l.pool[level.OrdinalDB]
+		cached, _ := ordDB.GetProperty("leveldb.cachedblock")
+		opened, _ := ordDB.GetProperty("leveldb.openedtables")
+		log.Debugf("ordinal leveldb cachedblock=%v openedtables=%v", cached, opened)
+	}
+
+	return nil
+}
+
+func (l *ldb) ReadOrdinalWork(ctx context.Context, belowHeight uint32, limit int) ([]tbcd.OrdinalWorkEntry, error) {
+	log.Tracef("ReadOrdinalWork")
+	defer log.Tracef("ReadOrdinalWork exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Range: all 'w' keys from [start, limit) where limit = belowHeight.
+	var startKey tbcd.OrdinalWorkKey
+	startKey[0] = 'w'
+	// height=0, seq=0 — lowest possible 'w' key
+
+	var limitKey tbcd.OrdinalWorkKey
+	limitKey[0] = 'w'
+	binary.BigEndian.PutUint32(limitKey[1:5], belowHeight)
+	// seq=0 — excludes belowHeight itself
+
+	it := ordDB.NewIterator(&util.Range{Start: startKey[:], Limit: limitKey[:]}, nil)
+	defer it.Release()
+
+	// Seek to the end and iterate backward (descending height order).
+	var result []tbcd.OrdinalWorkEntry
+	if !it.Last() {
+		return nil, nil
+	}
+	for {
+		k := it.Key()
+		if len(k) != len(tbcd.OrdinalWorkKey{}) || k[0] != 'w' {
+			break
+		}
+		v := it.Value()
+		if len(v) != len(tbcd.OrdinalWorkValue{}) {
+			return nil, fmt.Errorf("invalid work entry value length: %d", len(v))
+		}
+		var entry tbcd.OrdinalWorkEntry
+		entry.Height = binary.BigEndian.Uint32(k[1:5])
+		entry.Seq = binary.BigEndian.Uint16(k[5:7])
+		copy(entry.InscID[:], v[:36])
+		result = append(result, entry)
+		if len(result) >= limit {
+			break
+		}
+		if !it.Prev() {
+			break
+		}
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("read ordinal work: %w", err)
+	}
+	return result, nil
+}
+
+func (l *ldb) OrdinalWatermarkGet(ctx context.Context) (uint32, bool, error) {
+	log.Tracef("OrdinalWatermarkGet")
+	defer log.Tracef("OrdinalWatermarkGet exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+	var key tbcd.OrdinalKey
+	key[0] = 'm'
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("ordinal watermark get: %w", err)
+	}
+	if len(v) != 4 {
+		return 0, false, fmt.Errorf("ordinal watermark invalid length: %d", len(v))
+	}
+	return binary.BigEndian.Uint32(v), true, nil
+}
+
+// OrdinalPopulatorUpdate atomically writes ordinal data ('i' updates,
+// 'a' entries, watermark) and deletes work queue entries ('w') in a
+// single LevelDB transaction. Used exclusively by the background populator.
+func (l *ldb) OrdinalPopulatorUpdate(ctx context.Context, ordData map[tbcd.OrdinalKey]tbcd.OrdinalValue, workData map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue) error {
+	log.Tracef("OrdinalPopulatorUpdate")
+	defer log.Tracef("OrdinalPopulatorUpdate exit")
+
+	ordTx, ordCommit, ordDiscard, err := l.startTransaction(level.OrdinalDB)
+	if err != nil {
+		return fmt.Errorf("ordinal populator: %w", err)
+	}
+	defer ordDiscard()
+
+	batch := new(leveldb.Batch)
+	for k, v := range ordData {
+		// The populator's contract is 'i'/'a'/'m' keys only. The wind
+		// prefetch depends on nothing but BlockOrdinalUpdate writing
+		// the 'O' keyspace; reject any future drift loudly.
+		if k[0] == 'O' {
+			return fmt.Errorf("populator must not write 'O' keys: %x", k[:])
+		}
+		if v.IsDelete() {
+			batch.Delete(k[:])
+		} else {
+			batch.Put(k[:], v.Bytes())
+		}
+		delete(ordData, k)
+	}
+	for k, v := range workData {
+		if v.IsDelete() {
+			batch.Delete(k[:])
+		} else {
+			batch.Put(k[:], v[:])
+		}
+		delete(workData, k)
+	}
+	if err := ordTx.Write(batch, nil); err != nil {
+		return fmt.Errorf("ordinal populator write: %w", err)
+	}
+	if err := ordCommit(); err != nil {
+		return fmt.Errorf("ordinal populator commit: %w", err)
+	}
+	return nil
+}
+
+func (l *ldb) OrdinalInscriptionByID(ctx context.Context, inscID [36]byte) ([]byte, error) {
+	log.Tracef("OrdinalInscriptionByID")
+	defer log.Tracef("OrdinalInscriptionByID exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+	var key tbcd.OrdinalKey
+	key[0] = 'i'
+	copy(key[1:], inscID[:])
+
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("ordinal inscription: %x", inscID))
+		}
+		return nil, fmt.Errorf("ordinal inscription: %w", err)
+	}
+	return v, nil
+}
+
+func (l *ldb) OrdinalValueByKey(ctx context.Context, key tbcd.OrdinalKey) ([]byte, error) {
+	log.Tracef("OrdinalValueByKey")
+	defer log.Tracef("OrdinalValueByKey exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("ordinal key: %x", key[:]))
+		}
+		return nil, fmt.Errorf("ordinal get: %w", err)
+	}
+	return bytes.Clone(v), nil
+}
+
+func (l *ldb) OrdinalInscriptionsByBlockHash(ctx context.Context, blockHash chainhash.Hash) ([][36]byte, error) {
+	log.Tracef("OrdinalInscriptionsByBlockHash")
+	defer log.Tracef("OrdinalInscriptionsByBlockHash exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Iterate 'n' + block_hash prefix.
+	var prefix [1 + 32]byte
+	prefix[0] = 'n'
+	copy(prefix[1:], blockHash[:])
+
+	var result [][36]byte
+	it := ordDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
+	defer it.Release()
+	for it.Next() {
+		v := it.Value()
+		if len(v) != 36 {
+			return nil, fmt.Errorf("invalid inscription ID length: %d", len(v))
+		}
+		var inscID [36]byte
+		copy(inscID[:], v)
+		result = append(result, inscID)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("ordinal inscriptions by block: %w", err)
+	}
+	return result, nil
+}
+
+// OrdinalBigOByOutpoint does a point Get for the 'O' acceleration
+// index at the given outpoint. Returns nil, nil if not found (bloom
+// filter rejection). The key is fully specified: 'O' + txid + vout.
+func (l *ldb) OrdinalBigOByOutpoint(ctx context.Context, op tbcd.Outpoint) ([]byte, error) {
+	ordDB := l.pool[level.OrdinalDB]
+	var key [37]byte
+	key[0] = 'O'
+	copy(key[1:37], op[1:37])
+	v, err := ordDB.Get(key[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("bigO get %v: %w", op, err)
+	}
+	return v, nil
+}
+
+// OrdinalInscriptionsByOutpointWithOffset returns the inscriptions located
+// at the given outpoint along with each one's byte offset within the
+// output, by prefix-scanning 'o' + txid + vout. Results are in offset
+// order (the key sorts by offset). Used by forward FIFO transfer tracking.
+func (l *ldb) OrdinalInscriptionsByOutpointWithOffset(ctx context.Context, op tbcd.Outpoint) ([]tbcd.OrdinalLocatedInscription, error) {
+	log.Tracef("OrdinalInscriptionsByOutpointWithOffset")
+	defer log.Tracef("OrdinalInscriptionsByOutpointWithOffset exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Prefix: 'o' + txid(32) + vout(4) = 37 bytes. Outpoint is
+	// [u-prefix(1) + txid(32) + vout(4)]; copy op[1:37].
+	var prefix [1 + 32 + 4]byte
+	prefix[0] = 'o'
+	copy(prefix[1:], op[1:37])
+
+	var result []tbcd.OrdinalLocatedInscription
+	it := ordDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
+	defer it.Release()
+	for it.Next() {
+		k := it.Key()
+		// Defensive against on-disk corruption: every 'o' key written
+		// by this code is exactly len(OrdinalKey) and every value is a
+		// 36-byte inscription ID. A mismatch means a corrupt store.
+		if len(k) != len(tbcd.OrdinalKey{}) {
+			return nil, fmt.Errorf("invalid 'o' key length: %d", len(k))
+		}
+		v := it.Value()
+		// The 'o' value is inscID(36) + source location; the read path
+		// only needs the inscID prefix. Guard against a short/corrupt
+		// value.
+		if len(v) < 36 {
+			return nil, fmt.Errorf("invalid 'o' value length: %d", len(v))
+		}
+		var li tbcd.OrdinalLocatedInscription
+		copy(li.InscID[:], v[:36])
+		li.Offset = binary.BigEndian.Uint64(k[37:45])
+		li.Value = append([]byte(nil), v...) // copy; iterator reuses v
+		result = append(result, li)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("ordinal inscriptions by outpoint w/offset: %w", err)
+	}
+	return result, nil
+}
+
+// OrdinalInscriptionsByOutpoint returns the inscription IDs located at the
+// given outpoint, in offset order. Used by InscriptionsByAddress.
+func (l *ldb) OrdinalInscriptionsByOutpoint(ctx context.Context, op tbcd.Outpoint) ([][36]byte, error) {
+	log.Tracef("OrdinalInscriptionsByOutpoint")
+	defer log.Tracef("OrdinalInscriptionsByOutpoint exit")
+
+	located, err := l.OrdinalInscriptionsByOutpointWithOffset(ctx, op)
+	if err != nil {
+		return nil, err
+	}
+	result := make([][36]byte, len(located))
+	for i, li := range located {
+		result[i] = li.InscID
+	}
+	return result, nil
+}
+
+func (l *ldb) OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error) {
+	log.Tracef("OrdinalInscribedSatsInRange")
+	defer log.Tracef("OrdinalInscribedSatsInRange exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Range scan on 'a' prefix for sat numbers in [start, end).
+	// 'a' key: sat_number(8) + inscription_id(36). Sat at bytes 1:9.
+	var startKey tbcd.OrdinalKey
+	startKey[0] = 'a'
+	binary.BigEndian.PutUint64(startKey[1:], start)
+
+	var endKey tbcd.OrdinalKey
+	endKey[0] = 'a'
+	binary.BigEndian.PutUint64(endKey[1:], end)
+
+	var result []uint64
+	it := ordDB.NewIterator(&util.Range{Start: startKey[:], Limit: endKey[:]}, nil)
+	defer it.Release()
+	for it.Next() {
+		k := it.Key()
+		if len(k) != len(tbcd.OrdinalKey{}) || k[0] != 'a' {
+			continue
+		}
+		sat := binary.BigEndian.Uint64(k[1:])
+		result = append(result, sat)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("ordinal inscribed sats in range: %w", err)
+	}
+	return result, nil
+}
+
+// OrdinalInscribedSatBounds returns the min and max inscribed sat numbers
+// in the DB using two iterator seeks. O(1) — does not load all entries.
+// Returns database.ErrNotFound if no inscribed sats exist.
+func (l *ldb) OrdinalInscribedSatBounds(ctx context.Context) (uint64, uint64, error) {
+	log.Tracef("OrdinalInscribedSatBounds")
+	defer log.Tracef("OrdinalInscribedSatBounds exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Find first 'a' entry.
+	var startKey tbcd.OrdinalKey
+	startKey[0] = 'a'
+	it := ordDB.NewIterator(nil, nil)
+	defer it.Release()
+
+	if !it.Seek(startKey[:]) || len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 'a' {
+		return 0, 0, database.NotFoundError("no inscribed sats")
+	}
+	minSat := binary.BigEndian.Uint64(it.Key()[1:])
+
+	// Find last 'a' entry: seek to 'b' (byte after 'a') and step back.
+	var endKey [1]byte
+	endKey[0] = 'b'
+	if !it.Seek(endKey[:]) {
+		// 'b' is past end of DB, go to last entry.
+		if !it.Last() {
+			return 0, 0, database.NotFoundError("no inscribed sats")
+		}
+	} else {
+		if !it.Prev() {
+			return 0, 0, database.NotFoundError("no inscribed sats")
+		}
+	}
+	if len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 'a' {
+		return 0, 0, database.NotFoundError("no inscribed sats")
+	}
+	maxSat := binary.BigEndian.Uint64(it.Key()[1:])
+
+	if err := it.Error(); err != nil {
+		return 0, 0, fmt.Errorf("ordinal inscribed sat bounds: %w", err)
+	}
+	return minSat, maxSat, nil
+}
+
+func (l *ldb) OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error) {
+	log.Tracef("OrdinalInscriptionsBySat")
+	defer log.Tracef("OrdinalInscriptionsBySat exit")
+
+	ordDB := l.pool[level.OrdinalDB]
+
+	// Iterate 'a' + sat_number prefix for all inscription IDs.
+	var prefix [9]byte
+	prefix[0] = 'a'
+	binary.BigEndian.PutUint64(prefix[1:], satNumber)
+
+	var result [][36]byte
+	it := ordDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
+	defer it.Release()
+	for it.Next() {
+		k := it.Key()
+		// Key is 'a'(1) + sat_number(8) + inscription_id(36) = 45 bytes.
+		if len(k) != 45 {
+			return nil, fmt.Errorf("invalid sat inscription key length: %d", len(k))
+		}
+		var inscID [36]byte
+		copy(inscID[:], k[9:])
+		result = append(result, inscID)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("ordinal inscriptions by sat: %w", err)
+	}
+	return result, nil
 }
