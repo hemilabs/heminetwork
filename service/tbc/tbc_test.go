@@ -25,10 +25,10 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/hemilabs/x/leveldb/leveldb"
 	"github.com/juju/loggo/v2"
+	"github.com/moby/moby/api/types/network"
 	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/hemilabs/heminetwork/v2/api"
@@ -1182,7 +1182,7 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 	return hash
 }
 
-func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
+func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort network.Port) (*Server, string) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -1386,7 +1386,7 @@ func bitcoindBlockByHash(ctx context.Context, t *testing.T, bitcoindContainer te
 	return &btcCliBlockHeader
 }
 
-func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks uint64, overrideAddress string) (testcontainers.Container, nat.Port) {
+func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks uint64, overrideAddress string) (testcontainers.Container, network.Port) {
 	t.Helper()
 
 	bitcoindContainer := testutil.CreateBitcoind(ctx)
