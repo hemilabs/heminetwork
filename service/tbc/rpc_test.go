@@ -1496,7 +1496,6 @@ func TestRpcZK(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
 		ZKIndex:         true,
 		LevelDBHome:     home,
 		ListenAddress:   "127.0.0.1:0",

@@ -1241,7 +1241,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort network.P
 // createTbcServerWithOrdinals creates a TBC server connected to a bitcoind
 // peer with ordinal indexing enabled. Identical to createTbcServer except
 // cfg.OrdinalIndex = true.
-func createTbcServerWithOrdinals(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
+func createTbcServerWithOrdinals(ctx context.Context, t *testing.T, mappedPeerPort network.Port) (*Server, string) {
 	t.Helper()
 
 	wd, err := os.Getwd()
