@@ -11,11 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
@@ -562,24 +562,27 @@ func TestAdminRPCBlockHeadersInsert(t *testing.T) {
 
 	b3 := n.blocksAtHeight[3][0]
 	b3h := wireBlockHeaderToTBC(&b3.MsgBlock().Header)
-	validHeader := tbcapi.BlockHeader{
-		Version:    1,
-		PrevHash:   *b3.Hash(),
-		MerkleRoot: chainhash.Hash{0xff, 0xff},
-		Timestamp:  time.Now().Unix(),
-		Bits:       strconv.FormatUint(uint64(123456780), 16),
-		Nonce:      12345,
-	}
 
-	fork := validHeader
-	fork.Nonce = 54321
-	wfork := wire.NewBlockHeader(1, &fork.PrevHash, &fork.MerkleRoot, 123456780, fork.Nonce)
-	fork.Timestamp = wfork.Timestamp.Unix()
+	powLimitBits := chaincfg.RegressionNetParams.PowLimitBits
 
-	forkExtend := fork
-	forkExtend.Bits = strconv.FormatUint(uint64(123456789), 16) // higher diff
-	forkExtend.PrevHash = wfork.BlockHash()
-	forkExtend.Timestamp = time.Now().Unix()
+	wValid := wire.NewBlockHeader(1, b3.Hash(), &chainhash.Hash{0xff, 0xff},
+		powLimitBits, 0)
+	wValid.Timestamp = time.Now()
+	mineHeader(wValid)
+	validHeader := *wireBlockHeaderToTBC(wValid)
+
+	wFork := wire.NewBlockHeader(1, b3.Hash(), &chainhash.Hash{0xfe, 0xfe},
+		powLimitBits, 0)
+	wFork.Timestamp = time.Now()
+	mineHeader(wFork)
+	fork := *wireBlockHeaderToTBC(wFork)
+
+	wForkHash := wFork.BlockHash()
+	wForkExtend := wire.NewBlockHeader(1, &wForkHash, &chainhash.Hash{0xfd, 0xfd},
+		0x1f7fffff, 0)
+	wForkExtend.Timestamp = time.Now()
+	mineHeader(wForkExtend)
+	forkExtend := *wireBlockHeaderToTBC(wForkExtend)
 
 	invalidBitsHeader := validHeader
 	invalidBitsHeader.Bits = "invalidbits"

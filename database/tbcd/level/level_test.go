@@ -1322,6 +1322,74 @@ func TestBlocksMissing(t *testing.T) {
 	}
 }
 
+func TestBlocksMissingSkipsExistingBlocks(t *testing.T) {
+	ctx := t.Context()
+
+	db, discard := createNewDB(t, ctx)
+	defer discard()
+
+	// Insert genesis header.
+	genesis, _, err := insertBlockHeader(ctx, db, &chainhash.Hash{}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-populate rawdb with block bodies for heights 1-3 BEFORE
+	// inserting their headers. This simulates a scenario where block
+	// data is already on disk (e.g. blockheaders DB was wiped but
+	// blocks DB survived).
+	const chainLen = 5
+	type pending struct {
+		block *btcutil.Block
+		hash  chainhash.Hash
+	}
+	prevHash := genesis.BlockHash()
+	blocks := make([]pending, chainLen-1)
+	for i := range blocks {
+		nonce := uint64(i + 1)
+		blk := createTestBlock(prevHash, int64(nonce))
+		blocks[i] = pending{block: blk, hash: *blk.Hash()}
+		prevHash = &blocks[i].hash
+	}
+
+	bDB := db.rawPool[level.BlocksDB]
+	for i := 0; i < 3; i++ {
+		raw, rerr := blocks[i].block.Bytes()
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		if err := bDB.Insert(blocks[i].hash[:], raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Now insert all headers at once. BlockHeadersInsert should detect
+	// that blocks 1-3 already exist on disk and only mark block 4 as
+	// missing.
+	msgh := wire.NewMsgHeaders()
+	for _, b := range blocks {
+		if err := msgh.AddBlockHeader(&b.block.MsgBlock().Header); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, _, _, err = db.BlockHeadersInsert(ctx, msgh, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missing, err := db.BlocksMissing(ctx, chainLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 1 {
+		t.Fatalf("expected 1 missing block, got %d", len(missing))
+	}
+	if missing[0].Height != chainLen-1 {
+		t.Fatalf("expected missing block at height %d, got %d",
+			chainLen-1, missing[0].Height)
+	}
+}
+
 func TestBlockHeadersFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

@@ -128,9 +128,9 @@ func TestDbUpgradeFull(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     true,
-		HemiIndex:       true,
-		LevelDBHome:     home,
+
+		HemiIndex:   true,
+		LevelDBHome: home,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -407,7 +407,6 @@ func TestDbUpgradeV4(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
 		HemiIndex:       true,
 		LevelDBHome:     home,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
@@ -2420,7 +2419,6 @@ func TestEmptyInvMessage(t *testing.T) {
 		AutoIndex:               false,
 		BlockCacheSize:          "10mb",
 		HeaderCacheSize:         "1mb",
-		BlockSanity:             false,
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,

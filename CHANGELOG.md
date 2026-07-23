@@ -40,8 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Witness sighash algorithms require the spent output's value; the old type
   carried only the pkScript
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Remove `TBC_BLOCK_SANITY` environment variable; `CheckBlockSanity` is
+  now unconditional on every block insert
+  ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
 
 ### Added
+
+- Verify incoming block headers against btcd's `CheckBlockHeaderSanity`
+  (PoW, timestamp) and `CheckBlockHeaderContext` (difficulty retarget,
+  median-time-past, version) before insertion in all paths: P2P,
+  external-header, and public API modes
+  ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
+- Make `CheckBlockSanity` unconditional on block insert, removing the
+  opt-in `BlockSanity` config gate
+  ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
 
 - Add `BlockRawByHash` to DB interface and `lazyBlock` type for zero-copy
   per-tx block access without full deserialization
@@ -115,6 +127,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#972](https://github.com/hemilabs/heminetwork/pull/972)).
 
 ### Fixed
+
+- Fix `BlockHeadersInsert` marking blocks as missing even when their
+  bodies already exist on disk; the existence check used the wrong key
+  format (41-byte height+hash instead of 32-byte hash)
+  ([#536](https://github.com/hemilabs/heminetwork/issues/536),
+  [#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
+- Fix header context verification crash in ExternalHeaderMode when the
+  effective genesis is not retarget-aligned; the first retarget boundary
+  now skips difficulty verification when ancestor depth is insufficient
+  ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
 
 - Fix typos across the codebase
   ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733),

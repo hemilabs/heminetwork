@@ -556,8 +556,9 @@ func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcuti
 	}
 	t.Logf("coinbase tx %v: %v", nextBlockHeight, coinbaseTx.Hash())
 
-	if reqDifficulty == 0 {
-		reqDifficulty = uint32(0x1d00ffff)
+	bits := reqDifficulty
+	if bits == 0 {
+		bits = params.PowLimitBits
 	}
 
 	var blockTxs []*btcutil.Tx
@@ -571,7 +572,7 @@ func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcuti
 			PrevBlock:  *parent,
 			MerkleRoot: blockchain.CalcMerkleRoot(blockTxs, false),
 			Timestamp:  time.Now(),
-			Bits:       reqDifficulty,
+			Bits:       bits,
 		},
 	}
 	for _, tx := range blockTxs {
@@ -579,6 +580,8 @@ func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcuti
 			return nil, fmt.Errorf("add transaction to block: %w", err)
 		}
 	}
+
+	mineHeader(&msgBlock.Header)
 
 	b := btcutil.NewBlock(msgBlock)
 	b.SetHeight(nextBlockHeight)
@@ -1105,7 +1108,8 @@ func (b *btcNode) MineAndSendEmpty(ctx context.Context) error {
 func createFakeBlock(prevHash *chainhash.Hash, nonce int64) *btcutil.Block {
 	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
 	bh.Timestamp = time.Unix(nonce, 0)
-	bh.Bits = 0x1d00ffff
+	bh.Bits = chaincfg.RegressionNetParams.PowLimitBits
+	mineHeader(bh)
 	block := wire.NewMsgBlock(bh)
 	btcBlock := btcutil.NewBlock(block)
 	return btcBlock
@@ -1517,8 +1521,8 @@ func TestFork(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		LevelDBHome:     t.TempDir(),
+
+		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -1758,8 +1762,8 @@ func TestIndexNoFork(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		LevelDBHome:     t.TempDir(),
+
+		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -1966,9 +1970,9 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		HemiIndex:       true, // Test keystone index
-		LevelDBHome:     t.TempDir(),
+
+		HemiIndex:   true, // Test keystone index
+		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -2291,8 +2295,8 @@ func TestIndexFork(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		LevelDBHome:     t.TempDir(),
+
+		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -2632,9 +2636,9 @@ func TestKeystoneIndexFork(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		HemiIndex:       true, // Test keystone index
-		LevelDBHome:     t.TempDir(),
+
+		HemiIndex:   true, // Test keystone index
+		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -3220,8 +3224,8 @@ func TestForkCanonicity(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		LevelDBHome:     t.TempDir(),
+
+		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -3277,7 +3281,7 @@ func TestForkCanonicity(t *testing.T) {
 	mainChainHashes := map[string]*chainhash.Hash{"genesis": parent, "b1": b1.Hash()}
 
 	// increase difficulty to ensure b1 -> b5 remains canonical
-	reqDifficulty = uint32(0x1d000fff)
+	reqDifficulty = uint32(0x1f7fffff)
 
 	// mine b2 to b5
 	prevHash := b1.Hash()
@@ -3409,8 +3413,8 @@ func TestCacheOverflow(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:   false,
-		BlockSanity: false,
+		AutoIndex: false,
+
 		HemiIndex:   true, // Test keystone index
 		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
@@ -3575,9 +3579,9 @@ func TestZKIndexFork(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		ZKIndex:         true, // Test zk index
-		LevelDBHome:     t.TempDir(),
+
+		ZKIndex:     true, // Test zk index
+		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -4147,8 +4151,8 @@ func TestIndexFakeHeaders(t *testing.T) {
 		AutoIndex:       false,
 		BlockCacheSize:  "10mb",
 		HeaderCacheSize: "1mb",
-		BlockSanity:     false,
-		LevelDBHome:     t.TempDir(),
+
+		LevelDBHome: t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,

@@ -1339,9 +1339,10 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			hhBatch.Put(hhKey, []byte{})
 		}
 
-		// Insert a synthesized height_hash key that serves as an index
-		// to see which blocks are missing.
-		ok, err = blocksDB.Has(hhKey)
+		// Mark the block as missing unless we already have it on
+		// disk. The rawdb indexes blocks by their 32-byte hash,
+		// so we check with bhash (not the height+hash hhKey).
+		ok, err = blocksDB.Has(bhash[:])
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("blocks has: %w", err)
