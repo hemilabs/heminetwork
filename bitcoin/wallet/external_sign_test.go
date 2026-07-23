@@ -444,7 +444,7 @@ func FuzzECDSASigFromRS(f *testing.F) {
 			return
 		}
 		if _, perr := ecdsa.ParseDERSignature(sig); perr != nil {
-			t.Fatalf("helper emitted unparseable DER: %v", perr)
+			t.Fatalf("helper emitted unparsable DER: %v", perr)
 		}
 	})
 }

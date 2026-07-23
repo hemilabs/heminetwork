@@ -60,7 +60,7 @@ func TestEncryptDecrypt(t *testing.T) {
 			t.Fatal("shared key not equal")
 		}
 
-		// Set keys to simulate incomming key exchange message
+		// Set keys to simulate incoming key exchange message
 		server.encryptionKey = encryptionKeyServer
 		client.encryptionKey = encryptionKeyClient
 

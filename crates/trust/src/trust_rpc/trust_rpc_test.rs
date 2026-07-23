@@ -520,7 +520,7 @@ fn test_reconnect_exponential_backoff() {
             })
             .await;
 
-            // Drop next connection attemps
+            // Drop next connection attempts
             let tokio_listener = tokio::net::TcpListener::from_std(l.try_clone().unwrap()).unwrap();
             for _ in 0..2 {
                 let (stream, _) = tokio_listener.accept().await.unwrap();

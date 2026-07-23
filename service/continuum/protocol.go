@@ -233,7 +233,7 @@ type HelloRequest struct {
 	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
 }
 
-// HelloResponse returns the signed challenge. The remote identity is dervied
+// HelloResponse returns the signed challenge. The remote identity is derived
 // from the signature.
 type HelloResponse struct {
 	Signature []byte `json:"signature"` // Signature of Challenge
@@ -813,7 +813,7 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
-	// Verify signature over sha256(our challenge + our tranport public key)
+	// Verify signature over sha256(our challenge + our transport public key)
 	linkedChallenge := Hash256(ourChallenge[:], t.us.PublicKey().Bytes())
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
