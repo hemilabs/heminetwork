@@ -62,8 +62,10 @@ func (s *Server) rebuildRoutes() {
 	table := bfsRoutes(self, adj)
 
 	s.routeMtx.Lock()
-	s.routeTable = table
-	s.routeBuiltGen = gen
+	if gen >= s.routeBuiltGen {
+		s.routeTable = table
+		s.routeBuiltGen = gen
+	}
 	s.routeMtx.Unlock()
 }
 
