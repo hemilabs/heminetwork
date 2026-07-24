@@ -1262,9 +1262,29 @@ func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID C
 		isBroadcast := data[0] == msgTypeBroadcast
 		cflags := data[1]
 		wireData := data[wireHeaderLen:]
-		fromNew := cflags&cflagFromNew != 0
 
-		// Parse with correct PID set based on sender committee.
+		// Bind the sender's committee to the SIGNED content type, not the
+		// attacker-controlled cflagFromNew wire bit, and reject a message whose
+		// flag disagrees. This forces From.Index to resolve in the committee that
+		// legitimately produces the content, so a sender can only ever occupy its
+		// own slot in its own index space -- closing cross-committee slot seizure
+		// (whether the reinterpreted index is out of range or, worse, in range).
+		content, err := unmarshalTSSContent(wireData)
+		if err != nil {
+			return fmt.Errorf("parse reshare message: %w", err)
+		}
+		if !validTSSContent(content) {
+			return fmt.Errorf("invalid reshare message content from %s", from)
+		}
+		fromNew, ok := reshareContentFromNew(content)
+		if !ok {
+			return fmt.Errorf("non-reshare content in reshare ceremony from %s", from)
+		}
+		if (cflags&cflagFromNew != 0) != fromNew {
+			return fmt.Errorf("reshare committee flag/content mismatch from %s", from)
+		}
+
+		// Resolve the sender in its bound committee's index space.
 		fromIDStr := from.String()
 		pids := c.oldPids
 		if fromNew {
@@ -1280,13 +1300,7 @@ func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID C
 		if fromPid == nil {
 			return errors.New("sender not in reshare ceremony")
 		}
-		parsed, err := parseTSSWireMessage(wireData, fromPid, isBroadcast)
-		if err != nil {
-			return fmt.Errorf("parse reshare message: %w", err)
-		}
-		if !validTSSContent(parsed.Content) {
-			return fmt.Errorf("invalid reshare message content from %s", from)
-		}
+		parsed := &tss.Message{From: fromPid, IsBroadcast: isBroadcast, Content: content}
 		select {
 		case c.inCh <- parsed:
 		case <-ctx.Done():
