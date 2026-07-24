@@ -289,6 +289,12 @@ func (s *Server) dispatchReshare(req CeremonyRequest) {
 // the TSS engine. Translates TSSMessage.Flags back to the
 // byte-prefix format expected by HandleMessage.
 func (s *Server) dispatchTSSMessage(msg TSSMessage) {
+	if len(msg.Data) > maxWireDataLen {
+		log.Errorf("tss msg from %s: data too large (%d bytes)",
+			msg.From, len(msg.Data))
+		return
+	}
+
 	hash := HashTSSMessage(msg.CeremonyID, msg.Data)
 	if _, err := Verify(hash, msg.From, msg.Signature); err != nil {
 		log.Errorf("tss msg from %s: bad signature: %v",

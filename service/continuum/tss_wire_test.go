@@ -109,9 +109,6 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 		{"eddsa.resharing.DGRound4Message", &eddsaResharing.DGRound4Message{}},
 	}
 
-	// Suppress unused variable warning for edPt.
-	_ = edPt
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data, err := marshalTSSContent(tt.content)
