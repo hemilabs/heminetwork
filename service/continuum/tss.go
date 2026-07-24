@@ -486,7 +486,15 @@ func NewTSS(self Identity, store TSSStore, transport TSSTransport) TSS {
 	}
 }
 
-func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []Identity, threshold int) ([]byte, error) {
+func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []Identity, threshold int) (rKeyID []byte, rErr error) {
+	// Backstop: a panic in the round functions (e.g. a nil or duplicate message
+	// slot that ingest checks did not catch) must fail this ceremony, not crash
+	// the node -- the ceremony runs in a bare goroutine with no other recover.
+	defer func() {
+		if r := recover(); r != nil {
+			rKeyID, rErr = nil, fmt.Errorf("keygen ceremony panic: %v", r)
+		}
+	}()
 	log.Tracef("Keygen %x", ceremonyID)
 	defer log.Tracef("Keygen %x exit", ceremonyID)
 
@@ -621,7 +629,14 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 	return keyID[:16], nil
 }
 
-func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte, parties []Identity, threshold int, data [32]byte) ([]byte, []byte, error) {
+func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte, parties []Identity, threshold int, data [32]byte) (rR, rS []byte, rErr error) {
+	// Backstop: contain any round-function panic as a failed ceremony, not a node
+	// crash (the ceremony runs in a bare goroutine with no other recover).
+	defer func() {
+		if r := recover(); r != nil {
+			rR, rS, rErr = nil, nil, fmt.Errorf("sign ceremony panic: %v", r)
+		}
+	}()
 	log.Tracef("Sign %x key=%x", ceremonyID, keyID)
 	defer log.Tracef("Sign %x exit", ceremonyID)
 
@@ -849,7 +864,14 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 	return final.Signature.R, final.Signature.S, nil
 }
 
-func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []byte, oldParties, newParties []Identity, oldThreshold, newThreshold int) error {
+func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []byte, oldParties, newParties []Identity, oldThreshold, newThreshold int) (rErr error) {
+	// Backstop: contain any round-function panic as a failed ceremony, not a node
+	// crash (the ceremony runs in a bare goroutine with no other recover).
+	defer func() {
+		if r := recover(); r != nil {
+			rErr = fmt.Errorf("reshare ceremony panic: %v", r)
+		}
+	}()
 	log.Tracef("Reshare %x key=%x old=%d new=%d", ceremonyID, keyID, len(oldParties), len(newParties))
 	defer log.Tracef("Reshare %x exit", ceremonyID)
 
