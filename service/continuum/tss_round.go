@@ -58,7 +58,7 @@ func (b *msgBuf) collect(ctx context.Context, n int, nParties int, accept func(*
 	keep := make([]*tss.Message, 0, len(b.buf))
 	for _, m := range b.buf {
 		if got < n {
-			if slot, ok := accept(m); ok && out[slot] == nil {
+			if slot, ok := accept(m); ok && slot >= 0 && slot < len(out) && out[slot] == nil {
 				out[slot] = m
 				got++
 				continue
@@ -74,7 +74,7 @@ func (b *msgBuf) collect(ctx context.Context, n int, nParties int, accept func(*
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case msg := <-b.ch:
-			if slot, ok := accept(msg); ok && out[slot] == nil {
+			if slot, ok := accept(msg); ok && slot >= 0 && slot < len(out) && out[slot] == nil {
 				out[slot] = msg
 				got++
 			} else {
@@ -96,14 +96,14 @@ func (b *msgBuf) collectDual(ctx context.Context, n int, nParties int, acceptA f
 	for _, m := range b.buf {
 		matched := false
 		if gotA < n {
-			if slot, ok := acceptA(m); ok && a[slot] == nil {
+			if slot, ok := acceptA(m); ok && slot >= 0 && slot < len(a) && a[slot] == nil {
 				a[slot] = m
 				gotA++
 				matched = true
 			}
 		}
 		if !matched && gotB < n {
-			if slot, ok := acceptB(m); ok && b2[slot] == nil {
+			if slot, ok := acceptB(m); ok && slot >= 0 && slot < len(b2) && b2[slot] == nil {
 				b2[slot] = m
 				gotB++
 				matched = true
@@ -122,14 +122,14 @@ func (b *msgBuf) collectDual(ctx context.Context, n int, nParties int, acceptA f
 		case msg := <-b.ch:
 			matched := false
 			if gotA < n {
-				if slot, ok := acceptA(msg); ok && a[slot] == nil {
+				if slot, ok := acceptA(msg); ok && slot >= 0 && slot < len(a) && a[slot] == nil {
 					a[slot] = msg
 					gotA++
 					matched = true
 				}
 			}
 			if !matched && gotB < n {
-				if slot, ok := acceptB(msg); ok && b2[slot] == nil {
+				if slot, ok := acceptB(msg); ok && slot >= 0 && slot < len(b2) && b2[slot] == nil {
 					b2[slot] = msg
 					gotB++
 					matched = true
