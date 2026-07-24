@@ -1274,6 +1274,9 @@ func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID C
 		if err != nil {
 			return fmt.Errorf("parse reshare message: %w", err)
 		}
+		if !validTSSContent(parsed.Content) {
+			return fmt.Errorf("invalid reshare message content from %s", from)
+		}
 		select {
 		case c.inCh <- parsed:
 		case <-ctx.Done():
@@ -1306,6 +1309,9 @@ func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID C
 	parsed, err := parseTSSWireMessage(wireData, fromPid, isBroadcast)
 	if err != nil {
 		return fmt.Errorf("parse message: %w", err)
+	}
+	if !validTSSContent(parsed.Content) {
+		return fmt.Errorf("invalid message content from %s", from)
 	}
 
 	select {
