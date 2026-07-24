@@ -80,6 +80,29 @@ func validTSSContent(content interface{}) bool {
 	return ok && v.ValidateBasic()
 }
 
+// reshareContentFromNew reports which committee legitimately PRODUCES a reshare
+// content type -- the new committee (true) or the old committee (false); ok is
+// false for any non-reshare type. HandleMessage uses this to bind an inbound
+// message's committee (and thus its resolved From.Index) to the SIGNED content
+// type rather than the attacker-controlled cflagFromNew wire bit, so a sender can
+// only ever occupy its own slot in its own index space. The mapping matches the
+// producing committee the driver sends each round with (round 1/3 old, 2/4 new).
+func reshareContentFromNew(content interface{}) (fromNew, ok bool) {
+	switch content.(type) {
+	case *ecdsaResharing.DGRound1Message, *eddsaResharing.DGRound1Message,
+		*ecdsaResharing.DGRound3Message1, *ecdsaResharing.DGRound3Message2,
+		*eddsaResharing.DGRound3Message1, *eddsaResharing.DGRound3Message2:
+		return false, true // old committee originates round 1 and round 3
+	case *ecdsaResharing.DGRound2Message1, *ecdsaResharing.DGRound2Message2,
+		*eddsaResharing.DGRound2Message,
+		*ecdsaResharing.DGRound4Message1, *ecdsaResharing.DGRound4Message2,
+		*eddsaResharing.DGRound4Message:
+		return true, true // new committee originates round 2 and round 4
+	default:
+		return false, false
+	}
+}
+
 // newContentByType returns a zero-value pointer for the given type name.
 func newContentByType(typeName string) interface{} {
 	switch typeName {
