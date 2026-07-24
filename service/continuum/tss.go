@@ -1236,6 +1236,16 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID CeremonyID, data []byte) error {
 	log.Tracef("HandleMessage from=%s ceremony=%x len=%d", from, ceremonyID, len(data))
 
+	// A ceremony message can never legitimately come from this node: the round
+	// drivers fill their own slot directly and only collect the OTHER parties'
+	// messages by party index. Reject self-attributed messages so a reflected or
+	// relayed-back message cannot occupy this node's own collector slot, which
+	// would leave a real party's slot nil and be dereferenced by the round
+	// functions, crashing the ceremony goroutine.
+	if from == t.self {
+		return errors.New("message attributed to self")
+	}
+
 	t.ceremoniesMu.Lock()
 	c, ok := t.ceremonies[ceremonyID]
 	t.ceremoniesMu.Unlock()
