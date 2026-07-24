@@ -68,6 +68,18 @@ func unmarshalTSSContent(data []byte) (interface{}, error) {
 	return content, nil
 }
 
+// validTSSContent reports whether a parsed message's content passed structural
+// validation. Inbound peer messages must be checked at ingest (HandleMessage),
+// before being handed to the round functions: those assume valid content and
+// otherwise panic (e.g. dereferencing a nil field of an all-nil message). This
+// deliberately lives outside the pure (un)marshal path so serialization can
+// round-trip minimal fixtures. Fail closed: content without ValidateBasic is
+// rejected.
+func validTSSContent(content interface{}) bool {
+	v, ok := content.(interface{ ValidateBasic() bool })
+	return ok && v.ValidateBasic()
+}
+
 // newContentByType returns a zero-value pointer for the given type name.
 func newContentByType(typeName string) interface{} {
 	switch typeName {
