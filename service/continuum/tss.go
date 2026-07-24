@@ -486,7 +486,15 @@ func NewTSS(self Identity, store TSSStore, transport TSSTransport) TSS {
 	}
 }
 
-func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []Identity, threshold int) ([]byte, error) {
+func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []Identity, threshold int) (rKeyID []byte, rErr error) {
+	// Backstop: a panic in the round functions (e.g. a nil or duplicate message
+	// slot that ingest checks did not catch) must fail this ceremony, not crash
+	// the node -- the ceremony runs in a bare goroutine with no other recover.
+	defer func() {
+		if r := recover(); r != nil {
+			rKeyID, rErr = nil, fmt.Errorf("keygen ceremony panic: %v", r)
+		}
+	}()
 	log.Tracef("Keygen %x", ceremonyID)
 	defer log.Tracef("Keygen %x exit", ceremonyID)
 
@@ -621,7 +629,14 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 	return keyID[:16], nil
 }
 
-func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte, parties []Identity, threshold int, data [32]byte) ([]byte, []byte, error) {
+func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte, parties []Identity, threshold int, data [32]byte) (rR, rS []byte, rErr error) {
+	// Backstop: contain any round-function panic as a failed ceremony, not a node
+	// crash (the ceremony runs in a bare goroutine with no other recover).
+	defer func() {
+		if r := recover(); r != nil {
+			rR, rS, rErr = nil, nil, fmt.Errorf("sign ceremony panic: %v", r)
+		}
+	}()
 	log.Tracef("Sign %x key=%x", ceremonyID, keyID)
 	defer log.Tracef("Sign %x exit", ceremonyID)
 
@@ -849,7 +864,14 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 	return final.Signature.R, final.Signature.S, nil
 }
 
-func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []byte, oldParties, newParties []Identity, oldThreshold, newThreshold int) error {
+func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []byte, oldParties, newParties []Identity, oldThreshold, newThreshold int) (rErr error) {
+	// Backstop: contain any round-function panic as a failed ceremony, not a node
+	// crash (the ceremony runs in a bare goroutine with no other recover).
+	defer func() {
+		if r := recover(); r != nil {
+			rErr = fmt.Errorf("reshare ceremony panic: %v", r)
+		}
+	}()
 	log.Tracef("Reshare %x key=%x old=%d new=%d", ceremonyID, keyID, len(oldParties), len(newParties))
 	defer log.Tracef("Reshare %x exit", ceremonyID)
 
@@ -1262,9 +1284,29 @@ func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID C
 		isBroadcast := data[0] == msgTypeBroadcast
 		cflags := data[1]
 		wireData := data[wireHeaderLen:]
-		fromNew := cflags&cflagFromNew != 0
 
-		// Parse with correct PID set based on sender committee.
+		// Bind the sender's committee to the SIGNED content type, not the
+		// attacker-controlled cflagFromNew wire bit, and reject a message whose
+		// flag disagrees. This forces From.Index to resolve in the committee that
+		// legitimately produces the content, so a sender can only ever occupy its
+		// own slot in its own index space -- closing cross-committee slot seizure
+		// (whether the reinterpreted index is out of range or, worse, in range).
+		content, err := unmarshalTSSContent(wireData)
+		if err != nil {
+			return fmt.Errorf("parse reshare message: %w", err)
+		}
+		if !validTSSContent(content) {
+			return fmt.Errorf("invalid reshare message content from %s", from)
+		}
+		fromNew, ok := reshareContentFromNew(content)
+		if !ok {
+			return fmt.Errorf("non-reshare content in reshare ceremony from %s", from)
+		}
+		if (cflags&cflagFromNew != 0) != fromNew {
+			return fmt.Errorf("reshare committee flag/content mismatch from %s", from)
+		}
+
+		// Resolve the sender in its bound committee's index space.
 		fromIDStr := from.String()
 		pids := c.oldPids
 		if fromNew {
@@ -1280,13 +1322,7 @@ func (t *tssImpl) HandleMessage(ctx context.Context, from Identity, ceremonyID C
 		if fromPid == nil {
 			return errors.New("sender not in reshare ceremony")
 		}
-		parsed, err := parseTSSWireMessage(wireData, fromPid, isBroadcast)
-		if err != nil {
-			return fmt.Errorf("parse reshare message: %w", err)
-		}
-		if !validTSSContent(parsed.Content) {
-			return fmt.Errorf("invalid reshare message content from %s", from)
-		}
+		parsed := &tss.Message{From: fromPid, IsBroadcast: isBroadcast, Content: content}
 		select {
 		case c.inCh <- parsed:
 		case <-ctx.Done():
