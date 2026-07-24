@@ -65,6 +65,14 @@ func unmarshalTSSContent(data []byte) (interface{}, error) {
 	if err := json.Unmarshal(env.Content, content); err != nil {
 		return nil, fmt.Errorf("unmarshal %s: %w", env.Type, err)
 	}
+	// Reject structurally invalid content before it reaches the TSS round
+	// functions. tss-lib message types expose ValidateBasic() to check that all
+	// required fields are present and well-formed; without this an attacker can
+	// send e.g. an all-nil KGRound1Message that a round function dereferences,
+	// panicking the ceremony goroutine.
+	if v, ok := content.(interface{ ValidateBasic() bool }); ok && !v.ValidateBasic() {
+		return nil, fmt.Errorf("invalid %s content", env.Type)
+	}
 	return content, nil
 }
 
