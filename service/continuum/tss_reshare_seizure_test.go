@@ -62,7 +62,7 @@ func TestReshareCrossCommitteeSlotSeizureCrashesReshare(t *testing.T) {
 	oldParties := []Identity{a.id, b.id} // oldPC = 2
 	const threshold = 1
 
-	kgCtx, kgCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	kgCtx, kgCancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer kgCancel()
 	keygenCID := NewCeremonyID()
 	var wg sync.WaitGroup
@@ -146,7 +146,7 @@ func TestReshareCrossCommitteeSlotSeizureCrashesReshare(t *testing.T) {
 				"(panic: %v); a reshare message must not be resolved into another "+
 				"committee's index space", res)
 		}
-		t.Fatalf("reshare returned before consuming the injected message; the "+
+		t.Fatalf("reshare returned before consuming the injected message; the " +
 			"seizure path was not exercised")
 	case <-time.After(settleWindow):
 		// No crash: a fixed node bound the committee to the content type and
