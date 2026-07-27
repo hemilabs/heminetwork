@@ -996,9 +996,10 @@ func TestReshareUnmarshalKeyShareError(t *testing.T) {
 
 func TestHandleMessageUnknownCeremony(t *testing.T) {
 	secret, _ := NewSecret()
+	other, _ := NewSecret()
 	impl := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{})
 
-	err := impl.HandleMessage(t.Context(), secret.Identity, NewCeremonyID(), []byte{msgTypeBroadcast, 0x00})
+	err := impl.HandleMessage(t.Context(), other.Identity, NewCeremonyID(), []byte{msgTypeBroadcast, 0x00})
 	if !errors.Is(err, ErrUnknownCeremony) {
 		t.Fatalf("expected ErrUnknownCeremony, got: %v", err)
 	}
@@ -1006,6 +1007,7 @@ func TestHandleMessageUnknownCeremony(t *testing.T) {
 
 func TestHandleMessageTooShort(t *testing.T) {
 	secret, _ := NewSecret()
+	other, _ := NewSecret()
 	ti := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{}).(*tssImpl)
 
 	cid := NewCeremonyID()
@@ -1013,7 +1015,7 @@ func TestHandleMessageTooShort(t *testing.T) {
 	ti.ceremonies[cid] = &ceremony{ctype: CeremonyKeygen}
 	ti.ceremoniesMu.Unlock()
 
-	err := ti.HandleMessage(t.Context(), secret.Identity, cid, []byte{msgTypeP2P})
+	err := ti.HandleMessage(t.Context(), other.Identity, cid, []byte{msgTypeP2P})
 	if err == nil || err.Error() != "message too short" {
 		t.Fatalf("expected 'message too short', got: %v", err)
 	}
@@ -1021,6 +1023,7 @@ func TestHandleMessageTooShort(t *testing.T) {
 
 func TestHandleMessageReshareTooShort(t *testing.T) {
 	secret, _ := NewSecret()
+	other, _ := NewSecret()
 	ti := NewTSS(secret.Identity, newMockTSSStore(), noopTransport{}).(*tssImpl)
 
 	cid := NewCeremonyID()
@@ -1028,7 +1031,7 @@ func TestHandleMessageReshareTooShort(t *testing.T) {
 	ti.ceremonies[cid] = &ceremony{ctype: CeremonyReshare}
 	ti.ceremoniesMu.Unlock()
 
-	err := ti.HandleMessage(t.Context(), secret.Identity, cid, []byte{msgTypeBroadcast, cflagToNew})
+	err := ti.HandleMessage(t.Context(), other.Identity, cid, []byte{msgTypeBroadcast, cflagToNew})
 	if err == nil || err.Error() != "reshare message too short" {
 		t.Fatalf("expected 'reshare message too short', got: %v", err)
 	}

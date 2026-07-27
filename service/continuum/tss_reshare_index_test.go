@@ -170,7 +170,7 @@ func TestReshareDoesNotCrashOnCrossCommitteePartyIndex(t *testing.T) {
 		if err != nil {
 			t.Fatalf("new secret: %v", err)
 		}
-		newSecrets[s.Identity.String()] = s
+		newSecrets[s.String()] = s
 		newParties = append(newParties, s.Identity)
 	}
 	sortedNew, _, _, _, err := (&tssImpl{}).buildResharePartyContext(newParties, true)

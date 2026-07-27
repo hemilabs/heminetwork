@@ -223,3 +223,61 @@ func TestNewContentByTypeExhaustive(t *testing.T) {
 		t.Error("expected nil for unknown type")
 	}
 }
+
+func TestReshareContentFromNew(t *testing.T) {
+	tests := []struct {
+		name    string
+		content interface{}
+		want    bool
+		wantOK  bool
+	}{
+		// Old committee (rounds 1, 3)
+		{"ecdsa.DGRound1", &ecdsaResharing.DGRound1Message{}, false, true},
+		{"ecdsa.DGRound3Message1", &ecdsaResharing.DGRound3Message1{}, false, true},
+		{"ecdsa.DGRound3Message2", &ecdsaResharing.DGRound3Message2{}, false, true},
+		{"eddsa.DGRound1", &eddsaResharing.DGRound1Message{}, false, true},
+		{"eddsa.DGRound3Message1", &eddsaResharing.DGRound3Message1{}, false, true},
+		{"eddsa.DGRound3Message2", &eddsaResharing.DGRound3Message2{}, false, true},
+		// New committee (rounds 2, 4)
+		{"ecdsa.DGRound2Message1", &ecdsaResharing.DGRound2Message1{}, true, true},
+		{"ecdsa.DGRound2Message2", &ecdsaResharing.DGRound2Message2{}, true, true},
+		{"ecdsa.DGRound4Message1", &ecdsaResharing.DGRound4Message1{}, true, true},
+		{"ecdsa.DGRound4Message2", &ecdsaResharing.DGRound4Message2{}, true, true},
+		{"eddsa.DGRound2", &eddsaResharing.DGRound2Message{}, true, true},
+		{"eddsa.DGRound4", &eddsaResharing.DGRound4Message{}, true, true},
+		// Non-reshare types
+		{"keygen", &ecdsaKeygen.KGRound1Message{}, false, false},
+		{"signing", &ecdsaSigning.SignRound1Message1{}, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := reshareContentFromNew(tt.content)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Fatalf("fromNew = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidTSSContentRejectsInvalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		input interface{}
+	}{
+		{"nil", nil},
+		{"no ValidateBasic", struct{}{}},
+		{"zero KGRound1", &ecdsaKeygen.KGRound1Message{}},
+		{"zero SignRound1", &ecdsaSigning.SignRound1Message1{}},
+		{"zero DGRound1", &ecdsaResharing.DGRound1Message{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if validTSSContent(tt.input) {
+				t.Fatal("validTSSContent accepted invalid content")
+			}
+		})
+	}
+}
