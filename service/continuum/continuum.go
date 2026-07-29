@@ -400,16 +400,16 @@ func (s *Server) deleteAllSessions() {
 	}
 }
 
-func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, error) {
+func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, []byte, error) {
 	transport, err := NewTransportFromCurve(ecdh.X25519()) // Only supported curve.
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("new transport: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("new transport: %w", err)
 	}
 
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
 		// Expected from port scanners, TLS probes, wrong protocol.
-		return nil, nil, nil, fmt.Errorf("key exchange: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("key exchange: %w", err)
 	}
 
 	// After KX, transport owns conn.  Ensure cleanup on failure so
@@ -421,10 +421,10 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 		}
 	}()
 
-	id, naclPub, err := transport.Handshake(ctx, s.secret)
+	id, naclPub, naclPubSig, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		// Expected from misconfigured peers and version mismatches.
-		return nil, nil, nil, fmt.Errorf("handshake: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("handshake: %w", err)
 	}
 
 	// DNS verification for incoming connections.  Loopback is
@@ -432,11 +432,11 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 	// cannot verify (no hostname yet).  In reverse/all mode,
 	// reverse-verify the remote IP.
 	if err := s.verifyInboundDNS(ctx, conn.RemoteAddr(), *id); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	ok = true
-	return id, transport, naclPub, nil
+	return id, transport, naclPub, naclPubSig, nil
 }
 
 // isDuplicate returns true if the message identified by header hash
@@ -1241,7 +1241,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		log.Warningf("connectPeer kx %v: %v", addr, err)
 		return
 	}
-	them, naclPub, err := transport.Handshake(ctx, s.secret)
+	them, naclPub, naclPubSig, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		log.Warningf("connectPeer handshake %v: %v", addr, err)
 		return
@@ -1273,11 +1273,12 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 	s.rebuildRoutes()
 
 	s.addPeer(ctx, PeerRecord{
-		Identity: *them,
-		Address:  recordAddr,
-		NaClPub:  naclPub,
-		Version:  ProtocolVersion,
-		LastSeen: time.Now().Unix(),
+		Identity:  *them,
+		Address:   recordAddr,
+		NaClPub:   naclPub,
+		Version:   ProtocolVersion,
+		LastSeen:  time.Now().Unix(),
+		Signature: naclPubSig,
 	})
 	s.notifyAllPeers(ctx)
 
@@ -1936,6 +1937,16 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 			pr.Identity)
 		return false
 	}
+	// The advertised NaClPub must be authenticated by the identity that owns
+	// it.  NaClPub is derived from the private key, so only its owner can sign
+	// this binding; an unsigned or forged record (e.g. gossip binding a
+	// victim's identity to an attacker's e2e key) is rejected here — the single
+	// chokepoint every record, handshake or gossip, flows through.
+	if _, err := Verify(hashPeerBinding(pr.Identity, pr.NaClPub), pr.Identity, pr.Signature); err != nil {
+		log.Warningf("addPeer %v: unauthenticated NaClPub binding, rejected: %v",
+			pr.Identity, err)
+		return false
+	}
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -2059,13 +2070,19 @@ func (s *Server) registerSelfAsPeer() {
 		}
 	}
 
+	// Sign our own identity<->NaClPub binding just as a handshake would. We
+	// store the self record directly rather than through addPeer (whose not-self
+	// check would drop it, and whose Verify would only re-check our own
+	// signature), but it MUST still be signed: remote nodes learn it via gossip
+	// and verify it at their addPeer chokepoint like any other record.
 	s.mtx.Lock()
 	s.peers[s.secret.Identity] = &PeerRecord{
-		Identity: s.secret.Identity,
-		Address:  addr,
-		NaClPub:  naclPub,
-		Version:  ProtocolVersion,
-		LastSeen: time.Now().Unix(),
+		Identity:  s.secret.Identity,
+		Address:   addr,
+		NaClPub:   naclPub,
+		Version:   ProtocolVersion,
+		LastSeen:  time.Now().Unix(),
+		Signature: s.secret.Sign(hashPeerBinding(s.secret.Identity, naclPub)),
 	}
 	s.mtx.Unlock()
 }
@@ -2284,7 +2301,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		sendErr(ctx, errC, err)
 		return
 	}
-	them, naclPub, err := transport.Handshake(ctx, s.secret)
+	them, naclPub, naclPubSig, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		sendErr(ctx, errC, err)
 		return
@@ -2317,11 +2334,12 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	// Register the peer we connected to.  We know their listen
 	// address (c) — the listen side will learn ours via gossip.
 	s.addPeer(ctx, PeerRecord{
-		Identity: *them,
-		Address:  c,
-		NaClPub:  naclPub,
-		Version:  ProtocolVersion,
-		LastSeen: time.Now().Unix(),
+		Identity:  *them,
+		Address:   c,
+		NaClPub:   naclPub,
+		Version:   ProtocolVersion,
+		LastSeen:  time.Now().Unix(),
+		Signature: naclPubSig,
 	})
 	s.notifyAllPeers(ctx)
 
@@ -2677,7 +2695,7 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 	// Perform KX and handshake, then release the semaphore.
 	// The semaphore only gates the expensive KX phase —
 	// once complete, the slot is free for the next connection.
-	id, transport, naclPub, err := s.newTransport(ctx, conn)
+	id, transport, naclPub, naclPubSig, err := s.newTransport(ctx, conn)
 	<-s.handshakeSem // release regardless of success/failure
 	if err != nil {
 		// Warning not Error — failed KX/handshake is expected
@@ -2726,10 +2744,11 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 	// because we don't know their listen address — they'll
 	// advertise it via gossip.
 	s.addPeer(ctx, PeerRecord{
-		Identity: *id,
-		NaClPub:  naclPub,
-		Version:  ProtocolVersion,
-		LastSeen: time.Now().Unix(),
+		Identity:  *id,
+		NaClPub:   naclPub,
+		Version:   ProtocolVersion,
+		LastSeen:  time.Now().Unix(),
+		Signature: naclPubSig,
 	})
 
 	// Tell existing peers we learned about someone new so

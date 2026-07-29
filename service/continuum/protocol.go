@@ -316,11 +316,12 @@ type Header struct {
 // key exchange phase. It advertises the version the node is running and some
 // desired options. The challenge must be signed by the remote node.
 type HelloRequest struct {
-	Version   uint32            `json:"version"`           // Version number
-	Options   map[string]string `json:"options,omitempty"` // x=y
-	Identity  Identity          `json:"identity"`          // Advertise our identity
-	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
-	NaClPub   []byte            `json:"nacl_pub"`          // X25519 public key for e2e encryption
+	Version    uint32            `json:"version"`                // Version number
+	Options    map[string]string `json:"options,omitempty"`      // x=y
+	Identity   Identity          `json:"identity"`               // Advertise our identity
+	Challenge  []byte            `json:"challenge"`              // Random challenge, min 32 bytes
+	NaClPub    []byte            `json:"nacl_pub"`               // X25519 public key for e2e encryption
+	NaClPubSig []byte            `json:"nacl_pub_sig,omitempty"` // secp256k1 sig by Identity over hashPeerBinding(Identity, NaClPub)
 }
 
 // HelloResponse returns the signed challenge. The remote identity is derived
@@ -342,12 +343,13 @@ type PingResponse struct {
 
 // PeerRecord describes a known peer for gossip exchange.
 type PeerRecord struct {
-	Identity Identity   `json:"identity"`
-	Address  string     `json:"address"`            // host:port
-	NaClPub  []byte     `json:"nacl_pub,omitempty"` // X25519 public key for e2e encryption
-	Version  uint32     `json:"version"`            // ProtocolVersion at time of discovery
-	LastSeen int64      `json:"last_seen"`          // unix timestamp
-	Sessions []Identity `json:"sessions,omitempty"` // direct session neighbors (gossip topology)
+	Identity  Identity   `json:"identity"`
+	Address   string     `json:"address"`             // host:port
+	NaClPub   []byte     `json:"nacl_pub,omitempty"`  // X25519 public key for e2e encryption
+	Version   uint32     `json:"version"`             // ProtocolVersion at time of discovery
+	LastSeen  int64      `json:"last_seen"`           // unix timestamp
+	Sessions  []Identity `json:"sessions,omitempty"`  // direct session neighbors (gossip topology)
+	Signature []byte     `json:"signature,omitempty"` // secp256k1 sig by Identity over hashPeerBinding(Identity, NaClPub)
 }
 
 // PeerNotify announces that the sender has new peer information.
@@ -945,6 +947,17 @@ func Verify(hash []byte, remote Identity, sig []byte) (*secp256k1.PublicKey, err
 	return publicKey, nil
 }
 
+// hashPeerBinding returns the digest a node signs to authenticate the X25519
+// (NaClPub) e2e key it advertises for its own secp256k1 identity. Because
+// NaClPub is derived from the private key it cannot be recomputed from a peer's
+// public identity; this signature is what lets any recipient of a gossiped
+// PeerRecord verify -- via the owner's key -- that the advertised NaClPub
+// genuinely belongs to the identity it is attached to, so an unsigned or forged
+// record cannot bind a victim's identity to an attacker's e2e key.
+func hashPeerBinding(id Identity, naclPub []byte) []byte {
+	return Hash256([]byte("continuum-peer-binding-v1"), id[:], naclPub)
+}
+
 // NewSecretFromPrivate returns a secret type for the provided private key.
 func NewSecretFromPrivate(privateKey *secp256k1.PrivateKey) *Secret {
 	return &Secret{
@@ -1461,18 +1474,18 @@ func (t *Transport) decryptFrameHeader(header []byte) (uint32, error) {
 // transport wishes to use. It is also used to verify that the derived Identity
 // did indeed sign the challenge. Returns the remote identity and their X25519
 // public key for e2e encryption.
-func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, []byte, error) {
+func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, []byte, []byte, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
 	// untested: rand.Read fails only on OS entropy exhaustion
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	naclPub, err := secret.NaClPublicKey()
 	// untested: NaClPublicKey wraps NaClPrivateKey; cannot fail with valid secret
 	if err != nil {
-		return nil, nil, fmt.Errorf("nacl public key: %w", err)
+		return nil, nil, nil, fmt.Errorf("nacl public key: %w", err)
 	}
 
 	opts := map[string]string{
@@ -1480,40 +1493,43 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 		"compression": "none",
 	}
 
-	// Write HelloRequest
+	// Write HelloRequest.  We sign our own identity<->NaClPub binding so the
+	// peer (and anyone it later gossips this record to) can verify the e2e key
+	// genuinely belongs to us.
 	err = t.Write(secret.Identity, HelloRequest{
-		Version:   ProtocolVersion,
-		Identity:  secret.Identity,
-		Challenge: ourChallenge[:],
-		Options:   opts,
-		NaClPub:   naclPub,
+		Version:    ProtocolVersion,
+		Identity:   secret.Identity,
+		Challenge:  ourChallenge[:],
+		Options:    opts,
+		NaClPub:    naclPub,
+		NaClPubSig: secret.Sign(hashPeerBinding(secret.Identity, naclPub)),
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Read Hello
 	_, cmd, _, err := t.read(readTimeout)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	helloRequest, ok := cmd.(*HelloRequest)
 	if !ok {
-		return nil, nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
+		return nil, nil, nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
 	}
 	// Validate HelloRequest
 	if helloRequest.Version != ProtocolVersion {
-		return nil, nil, ErrUnsupportedVersion
+		return nil, nil, nil, ErrUnsupportedVersion
 	}
 	if len(helloRequest.Challenge) != ChallengeSize {
-		return nil, nil, ErrInvalidChallenge
+		return nil, nil, nil, ErrInvalidChallenge
 	}
 	if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
-		return nil, nil, ErrInvalidChallenge
+		return nil, nil, nil, ErrInvalidChallenge
 	}
 	// Validate NaCl public key length when present.
 	if len(helloRequest.NaClPub) > 0 && len(helloRequest.NaClPub) != NaClPubSize {
-		return nil, nil, fmt.Errorf("%w: len %d", ErrInvalidNaClPub, len(helloRequest.NaClPub))
+		return nil, nil, nil, fmt.Errorf("%w: len %d", ErrInvalidNaClPub, len(helloRequest.NaClPub))
 	}
 
 	// Sign combined challenge that is represented by the sha256 hash of
@@ -1522,18 +1538,18 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Read HelloResponse
 	header2, cmd2, _, err := t.read(readTimeout)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	_ = header2
 	helloResponse, ok := cmd2.(*HelloResponse)
 	if !ok {
-		return nil, nil, fmt.Errorf("unexpected command: %T", cmd2)
+		return nil, nil, nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
 	// Verify signature over sha256(our challenge + our transport public key)
@@ -1541,11 +1557,11 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	themID := NewIdentityFromPub(themPub)
-	return &themID, helloRequest.NaClPub, nil
+	return &themID, helloRequest.NaClPub, helloRequest.NaClPubSig, nil
 }
 
 // readExact reads exactly n bytes from conn, handling partial reads.
