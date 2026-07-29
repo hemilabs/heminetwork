@@ -1321,9 +1321,14 @@ func TestHandshakeErrors(t *testing.T) {
 				if err != nil {
 					return err
 				}
+				naclPub, err := s.NaClPublicKey()
+				if err != nil {
+					return err
+				}
 				if err := tr.Write(s.Identity, HelloRequest{
 					Version:   ProtocolVersion,
 					Challenge: ourChallenge[:],
+					NaClPub:   naclPub,
 					Options: map[string]string{
 						"encoding":    "json",
 						"compression": "none",
@@ -1334,6 +1339,119 @@ func TestHandshakeErrors(t *testing.T) {
 				sig := ecdsa.SignCompact(s.privateKey, []byte("test"), false)
 				return tr.Write(s.Identity, HelloResponse{
 					Signature: sig,
+				})
+			},
+		},
+		{
+			// E2e encryption is mandatory: a peer that announces
+			// no X25519 key is rejected before any signature work.
+			name:          "missing nacl public key",
+			curve:         ecdh.P256(),
+			expectedError: ErrInvalidNaClPub,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				return tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ourChallenge[:],
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				})
+			},
+		},
+		{
+			name:          "short nacl public key",
+			curve:         ecdh.P256(),
+			expectedError: ErrInvalidNaClPub,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				return tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ourChallenge[:],
+					NaClPub:   make([]byte, NaClPubSize-1),
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				})
+			},
+		},
+		{
+			// All-zeros collides with the BroadcastDestination
+			// sentinel and is cryptographically useless.
+			name:          "all-zeros nacl public key",
+			curve:         ecdh.P256(),
+			expectedError: ErrInvalidNaClPub,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				return tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ourChallenge[:],
+					NaClPub:   make([]byte, NaClPubSize),
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				})
+			},
+		},
+		{
+			// The challenge signature covers the announced
+			// NaClPub, so signing the v1 preimage (challenge and
+			// transport key only) no longer verifies.  This pins
+			// the fold-in: a peer that does not attest its e2e
+			// key cannot complete a handshake.
+			name:          "signature omits nacl public key",
+			curve:         ecdh.P256(),
+			expectedError: ErrIdentityMismatch,
+			handshake: func(ctx context.Context, tr *Transport, s *Secret) error {
+				var ourChallenge [32]byte
+				_, err := rand.Read(ourChallenge[:])
+				if err != nil {
+					return err
+				}
+				naclPub, err := s.NaClPublicKey()
+				if err != nil {
+					return err
+				}
+				if err := tr.Write(s.Identity, HelloRequest{
+					Version:   ProtocolVersion,
+					Challenge: ourChallenge[:],
+					Identity:  s.Identity,
+					NaClPub:   naclPub,
+					Options: map[string]string{
+						"encoding":    "json",
+						"compression": "none",
+					},
+				}); err != nil {
+					return err
+				}
+				_, cmd, _, err := tr.read(readTimeout)
+				if err != nil {
+					return err
+				}
+				helloRequest, ok := cmd.(*HelloRequest)
+				if !ok {
+					return fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
+				}
+				// v1 preimage: no NaClPub bound in.
+				legacy := Hash256([]byte("continuum-challenge-v1"),
+					helloRequest.Challenge, tr.them.Bytes())
+				return tr.Write(s.Identity, HelloResponse{
+					Signature: s.Sign(legacy),
 				})
 			},
 		},
@@ -1371,10 +1489,15 @@ func TestHandshakeErrors(t *testing.T) {
 				if err != nil {
 					return err
 				}
+				naclPub, err := s.NaClPublicKey()
+				if err != nil {
+					return err
+				}
 				if err := tr.Write(s.Identity, HelloRequest{
 					Version:   ProtocolVersion,
 					Challenge: ourChallenge[:],
 					Identity:  s.Identity,
+					NaClPub:   naclPub,
 					Options: map[string]string{
 						"encoding":    "json",
 						"compression": "none",
@@ -1402,10 +1525,15 @@ func TestHandshakeErrors(t *testing.T) {
 				if err != nil {
 					return err
 				}
+				naclPub, err := s.NaClPublicKey()
+				if err != nil {
+					return err
+				}
 				if err := tr.Write(s.Identity, HelloRequest{
 					Version:   ProtocolVersion,
 					Challenge: ourChallenge[:],
 					Identity:  fakeSecret.Identity,
+					NaClPub:   naclPub,
 					Options: map[string]string{
 						"encoding":    "json",
 						"compression": "none",

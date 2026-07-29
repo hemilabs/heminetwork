@@ -4,46 +4,47 @@
 
 package continuum
 
-// Regression suite: the end-to-end (X25519) peer key is unauthenticated.
+// Regression suite: unsigned gossip must never establish or alter a peer's
+// end-to-end (X25519) key.
 //
 // A node's NaClPub is derived from its PRIVATE key (X25519 of
 // SHA256("continuum-x25519-v1" || secp256k1 privkey)), so it cannot be
 // recomputed from a peer's public identity -- nothing lets a recipient verify
-// that a gossiped NaClPub actually belongs to the identity it is attached to.
-// PeerRecord carries no signature and addPeer stores s.peers[pr.Identity] = &pr
-// after only structural checks (version, NaClPub length, non-zero, not-self), so
-// an unsigned gossiped record can install -- or overwrite -- the key a node uses
-// to seal point-to-point traffic in SendEncrypted (SealBox to s.peers[dest].NaClPub).
+// that a gossiped NaClPub belongs to the identity it is attached to. Gossip
+// therefore has nothing truthful to say about key material.
 //
-// Consequence: one connected peer can gossip a PeerListResponse binding a
-// victim's identity to the ATTACKER's X25519 key; every recipient then encrypts
-// the victim's confidential ceremony share material to a key the attacker holds
-// (and can OpenBox), while the victim cannot.
+// The defect these tests were written against: addPeer stored
+// s.peers[pr.Identity] = &pr after only structural checks, so one connected
+// peer could gossip a PeerListResponse binding a victim's identity to the
+// ATTACKER's X25519 key; every recipient then sealed the victim's confidential
+// ceremony share material to a key the attacker holds (and can OpenBox), while
+// the victim cannot.
 //
-// This file is the tight unit anchor: it drives addPeer -- the exact sink both
-// the gossip handler and the authenticated handshake feed every record into --
-// with the byte-for-byte record an attacker gossips. The companion
-// gossip_e2e_key_integration_test.go proves the same defect through the real
-// handlePeerListResponse dispatch handler.
+// The fix: gossip carries discovery metadata only, addPeer never writes
+// NaClPub, and a key is learned exclusively from its holder -- by handshake
+// (whose challenge signature covers the key) or by the routed
+// NaClKeyRequest/NaClKeyResponse exchange. bindPeerKey is the sole writer and
+// enforces immutability, since the derivation is deterministic and a
+// conflicting key is therefore always an attack or a broken peer.
 //
-// Fix-consistency (why the legit key is installed directly, not via addPeer):
-// the correct remediation is a SIGNED PeerRecord that addPeer verifies with
-// the sender's secp256k1 key. Under that fix, feeding the victim's LEGITIMATE
-// bootstrap record through addPeer would be rejected too (it is unsigned), and
-// this committed test cannot sign it -- the Signature field does not exist yet.
-// So the already-authenticated key is installed DIRECTLY into the peer table
-// (installPeerFromHandshake) -- modeling the state a completed handshake or a
-// correctly signed record leaves behind -- and ONLY the attacker's gossip poison
-// exercises addPeer. That keeps the suite green under the correct signed-record
-// fix AND under a weaker refuse-overwrite fix, while first-binding still fails
-// under refuse-overwrite alone, pinning the stronger remediation.
+// This file is the tight unit anchor: it drives addPeer -- the sink the gossip
+// handler feeds every record into -- with the byte-for-byte record an attacker
+// gossips. The companion gossip_e2e_key_integration_test.go proves the same
+// invariant through the real handlePeerListResponse dispatch handler; the
+// exchange itself is covered in nacl_keyxchg_test.go.
+//
+// The legitimate key is installed directly (installPeerFromHandshake) rather
+// than through addPeer, because addPeer is the untrusted sink under test and no
+// longer binds keys at all: routing the bootstrap through it would assert
+// nothing. Installing directly models the state a completed handshake leaves
+// behind, so ONLY the attacker's poison exercises the sink.
 //
 // Cases:
 //   - overwrite-handshake-key: target already holds the victim's REAL key (from
-//     a completed authenticated handshake); unsigned gossip then tries to rebind
-//     that identity to the attacker's key. A correct fix must retain the real key.
-//   - first-binding: no prior handshake; the poison is the FIRST thing the target
-//     learns for the victim. Passes only under the signed-record fix.
+//     a completed authenticated handshake); gossip then tries to rebind that
+//     identity to the attacker's key. The real key must survive.
+//   - first-binding: no prior handshake; the poison is the FIRST thing the
+//     target learns for the victim. No key may be installed at all.
 
 import (
 	"bytes"
@@ -99,10 +100,9 @@ func naclIdentity(t *testing.T) (Identity, []byte, *ecdh.PrivateKey) {
 	return s.Identity, pub, priv
 }
 
-// peerRec builds a well-formed, current-version PeerRecord binding id to naclPub.
-// It sets only fields that exist today; this is precisely the attacker's gossiped
-// record, and once a signed-record fix adds a Signature field its signature is
-// the zero value -- which addPeer's verification then rejects.
+// peerRec builds a well-formed, current-version PeerRecord binding id to
+// naclPub. This is precisely the record an attacker gossips: structurally
+// valid in every respect, carrying key material it has no authority to assert.
 func peerRec(id Identity, naclPub []byte, addr string) PeerRecord {
 	return PeerRecord{
 		Identity: id,
@@ -114,12 +114,10 @@ func peerRec(id Identity, naclPub []byte, addr string) PeerRecord {
 
 // installPeerFromHandshake writes a peer record straight into the table under
 // s.mtx, WITHOUT routing it through addPeer. It models the record a completed,
-// authenticated handshake (or a correctly signed gossip record) leaves behind.
-// addPeer is the unauthenticated sink under test; sending the legitimate
-// bootstrap through it would make the suite depend on addPeer accepting an
-// UNSIGNED record, which the correct signed-record fix stops doing. Installing
-// directly keeps the legitimate key out of the sink so only the attacker's
-// gossip exercises it.
+// authenticated handshake leaves behind. addPeer is the unauthenticated sink
+// under test and no longer binds keys at all, so routing the legitimate
+// bootstrap through it would assert nothing; installing directly keeps the
+// legitimate key out of the sink so only the attacker's gossip exercises it.
 func installPeerFromHandshake(s *Server, pr PeerRecord) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -128,16 +126,18 @@ func installPeerFromHandshake(s *Server, pr PeerRecord) {
 }
 
 // storedPeerNaClPub returns the X25519 key the server currently holds for id --
-// exactly the key SendEncrypted would seal to -- and whether any record is held.
-// It does NOT fail on absence: a correct fix that rejects an unauthenticated
-// first binding legitimately leaves no record, which the caller treats as the
-// invariant being satisfied.
+// exactly the key SendEncrypted would seal to -- and whether a key is bound at
+// all.  It does NOT fail on absence: a correct fix leaves the identity with no
+// usable key, either by holding no record or (as the committed fix does) by
+// holding a discovery-only record whose NaClPub was never bound.  Both are the
+// same fact to every caller here -- there is nothing to seal to -- so an empty
+// key reports held=false.
 func storedPeerNaClPub(t *testing.T, s *Server, id Identity) ([]byte, bool) {
 	t.Helper()
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	pr, ok := s.peers[id]
-	if !ok {
+	if !ok || len(pr.NaClPub) == 0 {
 		return nil, false
 	}
 	return pr.NaClPub, true
@@ -199,8 +199,6 @@ func assertPeerKeyUnhijacked(t *testing.T, s *Server, id Identity, attackerPub, 
 }
 
 func TestGossipCannotHijackPeerE2EKey(t *testing.T) {
-	t.Skip("no fix committed: PeerRecord requires signed e2e key binding")
-
 	const peerAddr = "10.0.0.1:9000"
 
 	tests := []struct {

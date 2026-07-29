@@ -34,8 +34,6 @@ func gossipPeerList(t *testing.T, s *Server, from Identity, recs ...PeerRecord) 
 }
 
 func TestGossipHandlerCannotHijackPeerE2EKey(t *testing.T) {
-	t.Skip("no fix committed: PeerRecord requires signed e2e key binding")
-
 	const peerAddr = "10.0.0.1:9000"
 
 	tests := []struct {

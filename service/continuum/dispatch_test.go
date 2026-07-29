@@ -31,6 +31,8 @@ func TestDispatchMapCompleteness(t *testing.T) {
 		reflect.TypeFor[*ReshareRequest](),
 		reflect.TypeFor[*TSSMessage](),
 		reflect.TypeFor[*EncryptedPayload](),
+		reflect.TypeFor[*NaClKeyRequest](),
+		reflect.TypeFor[*NaClKeyResponse](),
 		reflect.TypeFor[*CeremonyResult](),
 		reflect.TypeFor[*PeerListAdminRequest](),
 		reflect.TypeFor[*CeremonyStatusRequest](),

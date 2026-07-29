@@ -9,6 +9,7 @@ package continuum
 // by reflect.Type and mapped to a handler function.
 
 import (
+	"bytes"
 	"context"
 	"reflect"
 	"time"
@@ -45,6 +46,8 @@ func init() {
 		reflect.TypeFor[*ReshareRequest]():        handleReshareRequest,
 		reflect.TypeFor[*TSSMessage]():            handleTSSMessage,
 		reflect.TypeFor[*EncryptedPayload]():      handleEncryptedPayload,
+		reflect.TypeFor[*NaClKeyRequest]():        handleNaClKeyRequest,
+		reflect.TypeFor[*NaClKeyResponse]():       handleNaClKeyResponse,
 		reflect.TypeFor[*CeremonyResult]():        handleCeremonyResult,
 		reflect.TypeFor[*PeerListAdminRequest]():  handlePeerListAdmin,
 		reflect.TypeFor[*CeremonyStatusRequest](): handleCeremonyStatusReq,
@@ -130,8 +133,7 @@ func handlePeerListResponse(dc *dispatchCtx, payload any) bool {
 		}
 		// Validate address only if present.  Peers learned
 		// from the listen path may not know their own
-		// address yet — they still carry useful fields
-		// like NaClPub for e2e encryption.
+		// address yet.
 		if pr.Address != "" {
 			if err := validatePeerAddress(pr.Address); err != nil {
 				log.Warningf("peer %v bad address %q: %v",
@@ -139,6 +141,10 @@ func handlePeerListResponse(dc *dispatchCtx, payload any) bool {
 				continue
 			}
 		}
+		// Gossip is discovery metadata only.  addPeer discards
+		// key material anyway; strip it here too so no future
+		// addPeer refactor can be reached with gossip keys.
+		pr.NaClPub = nil
 		if dc.s.addPeer(dc.ctx, pr) {
 			learned++
 		}
@@ -242,6 +248,114 @@ func handleEncryptedPayload(dc *dispatchCtx, payload any) bool {
 	// Re-dispatch the decrypted inner payload through the
 	// same dispatch map.
 	return dispatchPayload(dc, inner)
+}
+
+// handleNaClKeyRequest answers a routed e2e key attestation request:
+// sign our X25519 public key bound to the caller's challenge and route
+// the response back.  The request is unauthenticated; answering only
+// produces a true, domain-separated statement about our own key, so
+// the sole abuse potential is making us sign — bounded by the
+// per-requester rate limiter.
+func handleNaClKeyRequest(dc *dispatchCtx, payload any) bool {
+	v := payload.(*NaClKeyRequest)
+	s := dc.s
+
+	if len(v.Challenge) != ChallengeSize {
+		s.naclXchgDrops.Add(1)
+		log.Debugf("nacl key request %v: bad challenge length %d",
+			dc.id, len(v.Challenge))
+		return false
+	}
+	if bytes.Equal(ZeroChallenge[:], v.Challenge) {
+		s.naclXchgDrops.Add(1)
+		log.Debugf("nacl key request %v: zero challenge", dc.id)
+		return false
+	}
+	// A request "from" ourselves is a reflection or a spoof;
+	// either way there is nothing to answer.
+	if v.Requester == s.secret.Identity {
+		s.naclXchgDrops.Add(1)
+		log.Debugf("nacl key request %v: self requester", dc.id)
+		return false
+	}
+	// One signature per requester per window.  Honest retries run
+	// at naclXchgRetry which clears the window; floods get dropped.
+	// Nil guard for hand-built test servers; NewServer always sets it.
+	if s.naclXchgRates != nil {
+		if _, _, err := s.naclXchgRates.Get(v.Requester); err == nil {
+			s.naclXchgDrops.Add(1)
+			log.Debugf("nacl key request %v: rate limited", v.Requester)
+			return false
+		}
+		s.naclXchgRates.Put(dc.ctx, naclXchgRateTTL, v.Requester,
+			struct{}{}, nil, nil)
+	}
+
+	naclPub, err := s.secret.NaClPublicKey()
+	// untested: NaClPublicKey cannot fail with a valid secret
+	if err != nil {
+		log.Errorf("nacl key request %v: own key: %v", v.Requester, err)
+		return false
+	}
+	resp := NaClKeyResponse{
+		Challenge: v.Challenge,
+		NaClPub:   naclPub,
+		Signature: s.secret.Sign(hashNaClKeyBinding(v.Challenge, naclPub)),
+	}
+	if err := s.sendTo(v.Requester, resp); err != nil {
+		log.Debugf("nacl key response to %v: %v", v.Requester, err)
+	}
+	return false
+}
+
+// handleNaClKeyResponse verifies an e2e key attestation and binds the
+// key.  The challenge is only a lookup key into our pending exchange
+// state: the hash is recomputed locally and the signature must recover
+// to the exact identity the challenge was issued for, so nothing an
+// on-path node can alter survives verification.
+func handleNaClKeyResponse(dc *dispatchCtx, payload any) bool {
+	v := payload.(*NaClKeyResponse)
+	s := dc.s
+
+	if len(v.Challenge) != ChallengeSize || len(v.NaClPub) != NaClPubSize {
+		s.naclXchgDrops.Add(1)
+		log.Debugf("nacl key response %v: malformed", dc.id)
+		return false
+	}
+	// Nil guard for hand-built test servers; NewServer always sets it.
+	if s.naclXchg == nil {
+		s.naclXchgDrops.Add(1)
+		return false
+	}
+	val, _, err := s.naclXchg.Get(string(v.Challenge))
+	if err != nil {
+		// Expired, already consumed, or never ours.
+		s.naclXchgDrops.Add(1)
+		log.Debugf("nacl key response %v: no pending challenge", dc.id)
+		return false
+	}
+	id, ok := val.(Identity)
+	// untested: only Identity values are ever stored in naclXchg
+	if !ok {
+		return false
+	}
+	if _, err := Verify(hashNaClKeyBinding(v.Challenge, v.NaClPub),
+		id, v.Signature); err != nil {
+		s.naclXchgDrops.Add(1)
+		log.Warningf("nacl key response for %v: bad signature: %v", id, err)
+		return false
+	}
+	// Consume the challenge only after verification succeeds so a
+	// garbage response cannot burn a pending exchange.
+	// untested: only reachable if the entry expires between the Get
+	// above and this Delete
+	if _, err := s.naclXchg.Delete(string(v.Challenge)); err != nil {
+		log.Debugf("nacl key response %v: delete pending: %v", id, err)
+	}
+	if err := s.bindPeerKey(dc.ctx, id, v.NaClPub); err != nil {
+		log.Warningf("nacl key response %v: %v", id, err)
+	}
+	return false
 }
 
 func handleCeremonyResult(dc *dispatchCtx, payload any) bool {
