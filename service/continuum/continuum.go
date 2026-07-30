@@ -81,46 +81,75 @@ const (
 	// window, the theoretical max is ~53K unique hashes.
 	seenCapacity = 1 << 16 // 65536
 
-	// messageRate is the sustained per-session message rate
-	// limit.  Excess messages are dropped after transport
-	// decrypt (to keep the stream in sync) but before dispatch.
+	// messageRate is the sustained PER-IDENTITY message rate
+	// limit; the budget follows the peer across sessions rather
+	// than being rebuilt per connection.  Excess messages are
+	// refused after transport decrypt (to keep the stream in sync)
+	// but before dispatch.
 	messageRate  = 97  // msgs/sec
 	messageBurst = 199 // burst allowance
 
-	// messageDropLimit is how many consecutive rate-limited
-	// messages a peer may send before the session is closed.
+	// messageDropRate and messageDropBurst bound the rate at which
+	// a session may have messages REFUSED before it is closed.
 	// Dropping alone is not a defence: the message has already
 	// cost a transport decrypt by the time the limiter sees it, so
 	// a peer that ignores the limit imposes that cost forever.
-	// Disconnecting ends it and forces the peer back through the
-	// per-IP handshake limiter.
 	//
-	// Only CONSECUTIVE drops count, so a peer that briefly
-	// overshoots and then backs off is never disconnected; the
-	// counter is cleared by the next accepted message.
-	messageDropLimit = 128
+	// This is a rate, not a count of consecutive drops.  A
+	// consecutive counter is defeated by pacing: the token bucket
+	// accepts messageRate messages per second no matter how fast
+	// they arrive, so one accepted message lands every 1/messageRate
+	// and resets the run.  Reaching N consecutive drops then
+	// requires more than (N+1)*messageRate msgs/sec, and anything
+	// under that sustains the full decrypt cost indefinitely.
+	// Budgeting drops over time has no such hole — any sustained
+	// excess converges on the limit regardless of interleaving.
+	//
+	// The burst absorbs a peer that briefly overshoots and backs
+	// off; the sustained rate is well under what an honest peer
+	// hitting a transient spike produces.
+	messageDropRate  = 10 // refusals/sec
+	messageDropBurst = 256
+
+	// limiterTTL is how long a peer's message bucket survives
+	// without that peer connecting, and limiterCap bounds the
+	// table.  Identities are free to mint, so the table must expire
+	// on its own rather than follow the peer record: an identity
+	// addPeer rejects never creates a peer record and would
+	// otherwise leak an entry for the life of the process.
+	// limiterTTL is far longer than the bucket needs to refill, so
+	// expiry forgives nothing time had not already restored.
+	limiterTTL = 11 * time.Minute
+	limiterCap = 1 << 13 // 8192
 
 	// connCooldownTTL is the per-IP cooldown after a
 	// BusyResponse.  Prevents rapid reconnection cycling
 	// that monopolizes the handshake semaphore.
 	connCooldownTTL = 31 * time.Second
 
-	// handshakeRate and handshakeBurst bound how fast ONE IP may
-	// start handshakes.  handshakeSem caps concurrency but not
-	// arrival rate, and a slot is held for up to handshakeTimeout,
-	// so without this an IP that never completes KX can keep every
-	// slot occupied.  The burst covers a node legitimately
-	// reconnecting a few times (restart, flapping link) while the
-	// sustained rate is far below what starvation needs.
-	handshakeRate  = 2 // attempts/sec
-	handshakeBurst = 8
-
-	// handshakeRateCap bounds the per-IP limiter map so the table
-	// itself cannot be used for memory exhaustion.  When full the
-	// oldest entries are dropped; a dropped entry only means the
-	// next attempt from that IP starts with a fresh burst, which is
-	// the pre-existing behaviour.
-	handshakeRateCap = 4096
+	// maxHandshakesPerIP caps how many handshakes ONE source may
+	// have IN FLIGHT at once.  handshakeSem bounds total
+	// concurrency, but a slot is held for the whole key exchange —
+	// up to handshakeTimeout — so without a per-source cap one
+	// address opening connections it never completes occupies every
+	// slot and starves legitimate peers.
+	//
+	// An arrival-RATE limit cannot do this job: occupancy is
+	// rate x hold-time, so any rate R holds R*handshakeTimeout
+	// slots in steady state, and bounding that below PeersWanted
+	// requires a rate so low it locks out honest peers.  Capping
+	// in-flight work bounds occupancy directly and is indifferent
+	// to how fast connections arrive.
+	//
+	// It also cannot lock anyone out: a source with fewer than this
+	// many handshakes actually in progress is never refused, so a
+	// NAT gateway or a fleet behind one egress is unaffected while
+	// a single flooder is still bounded to this many slots.
+	//
+	// The tracking map is bounded by construction: an entry exists
+	// only while a handshake is in flight, and total in-flight work
+	// is capped by handshakeSem.
+	maxHandshakesPerIP = 2
 
 	// envelopeRateLimit caps the number of EncryptedPayload
 	// messages accepted from a single sender identity per
@@ -279,16 +308,17 @@ type Server struct {
 
 	// Per-identity message rate limiters, keyed by peer Identity.
 	// Held across sessions so a reconnect does not hand the peer a
-	// fresh burst budget.  Guarded by limiterMtx.
-	limiters   map[Identity]*rate.Limiter
+	// fresh burst budget, and expired on idleness so the table
+	// cannot be grown without bound.  Guarded by limiterMtx.
+	limiters   *ttl.TTL
 	limiterMtx sync.Mutex
 
-	// Per-IP handshake attempt limiters, keyed by remote IP.
-	// Applied in the accept loop before handshakeSem so a flood of
-	// unauthenticated connections cannot occupy every slot.
-	// Guarded by handshakeRateMtx.
-	handshakeRates   map[string]*rate.Limiter
-	handshakeRateMtx sync.Mutex
+	// In-flight handshakes per source prefix.  Checked in the
+	// accept loop so one source cannot occupy every handshakeSem
+	// slot.  Entries live only while a handshake is running, so the
+	// map is bounded by handshakeSem.  Guarded by handshakeIPMtx.
+	handshakesInFlight map[string]int
+	handshakeIPMtx     sync.Mutex
 
 	// Per-sender envelope rate counter — limits how many
 	// EncryptedPayload messages are accepted from one sender
@@ -374,20 +404,25 @@ func NewServer(cfg *Config) (*Server, error) {
 		// wired in.
 		init = &noopInitiator{}
 	}
+	limiters, err := ttl.New(limiterCap, true)
+	if err != nil {
+		return nil, fmt.Errorf("limiter ttl: %w", err)
+	}
+
 	return &Server{
-		cfg:            cfg,
-		listenConfig:   &net.ListenConfig{},
-		sessions:       make(map[Identity]*Transport, cfg.PeersWanted),
-		ponged:         make(map[Identity]struct{}, cfg.PeersWanted),
-		peers:          make(map[Identity]*PeerRecord),
-		limiters:       make(map[Identity]*rate.Limiter),
-		handshakeRates: make(map[string]*rate.Limiter),
-		ceremonies:     make(map[CeremonyID]*CeremonyInfo),
-		handshakeSem:   make(chan struct{}, cfg.PeersWanted),
-		initiator:      init,
-		debugInit:      di,
-		routeTable:     make(map[Identity]Identity),
-		tssCtx:         context.Background(), // replaced by Run() with lifecycle context
+		limiters:           limiters,
+		cfg:                cfg,
+		listenConfig:       &net.ListenConfig{},
+		sessions:           make(map[Identity]*Transport, cfg.PeersWanted),
+		ponged:             make(map[Identity]struct{}, cfg.PeersWanted),
+		peers:              make(map[Identity]*PeerRecord),
+		handshakesInFlight: make(map[string]int),
+		ceremonies:         make(map[CeremonyID]*CeremonyInfo),
+		handshakeSem:       make(chan struct{}, cfg.PeersWanted),
+		initiator:          init,
+		debugInit:          di,
+		routeTable:         make(map[Identity]Identity),
+		tssCtx:             context.Background(), // replaced by Run() with lifecycle context
 	}, nil
 }
 
@@ -763,8 +798,12 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 		limiter = s.peerLimiter(*id)
 	}
 
-	// Consecutive rate-limited messages; reset by any accepted one.
-	var consecutiveDrops int
+	// Budget for REFUSED messages.  Independent of limiter so that
+	// pacing cannot erase accumulated evidence of abuse.
+	var dropLimiter *rate.Limiter
+	if !admin {
+		dropLimiter = rate.NewLimiter(messageDropRate, messageDropBurst)
+	}
 
 	for {
 		header, payload, _, err := t.ReadEnvelope()
@@ -777,23 +816,20 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 
 		if limiter != nil && !limiter.Allow() {
 			s.rateDropped.Add(1)
-			consecutiveDrops++
-			if consecutiveDrops > messageDropLimit {
-				// Persistent abuse: dropping is not enough,
-				// the decrypt cost has already been paid and
-				// will be paid again for every message this
-				// peer sends.  Close the session so the peer
-				// has to come back through the per-IP
-				// handshake limiter.
+			if dropLimiter != nil && !dropLimiter.Allow() {
+				// Sustained abuse: the decrypt cost has
+				// already been paid and will be paid again for
+				// every message this peer sends.  Close the
+				// session so the peer has to reconnect.
 				s.rateDisconnects.Add(1)
-				log.Warningf("rate limited %v: %d consecutive "+
-					"drops, disconnecting", id, consecutiveDrops)
+				log.Warningf("rate limited %v: sustained refusal "+
+					"rate above %d/s, disconnecting",
+					id, messageDropRate)
 				return
 			}
 			log.Debugf("rate limited %v: dropping message", id)
 			continue
 		}
-		consecutiveDrops = 0
 
 		// Dedup: drop messages we have already seen.
 		// Only applied to routed messages (those with a
@@ -1429,7 +1465,7 @@ func (s *Server) Collectors() []prometheus.Collector {
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: ns,
 				Name:      "messages_rate_dropped_total",
-				Help:      "Messages dropped by per-session rate limiter",
+				Help:      "Messages dropped by per-peer-identity rate limiter",
 			}, s.promRateDropped),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: ns,
@@ -1979,7 +2015,6 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 	s.mtx.Lock()
 	delete(s.peers, id)
 	s.mtx.Unlock()
-	s.deleteLimiter(id)
 	log.Debugf("peer expired: %v", id)
 }
 
@@ -2046,80 +2081,102 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 // reconnecting does not refill the burst budget.  A per-session
 // limiter let a peer spend its full burst, drop the connection, and
 // immediately reconnect for another one, which makes the sustained
-// rate unbounded in practice.  Identity is proven by the handshake
-// before handle() runs, so it cannot be spoofed to dodge an exhausted
-// bucket.
+// rate unbounded in practice.
 //
-// Entries are evicted when the peer record expires (peerExpired), so
-// the map is bounded by the peer table rather than by connection
-// attempts.
+// Identity does NOT bound the table: minting one is free, so an
+// attacker can present a fresh identity per connection.  The table is
+// therefore self-bounding on time — every lookup refreshes an idle
+// expiry of limiterTTL, so an identity that stops connecting is
+// reclaimed whether or not it ever became a tracked peer.  Tying
+// eviction to the peer record instead leaked permanently for any
+// identity addPeer rejects.
 func (s *Server) peerLimiter(id Identity) *rate.Limiter {
 	s.limiterMtx.Lock()
 	defer s.limiterMtx.Unlock()
 
-	// Lazily created: servers built by hand rather than through
-	// NewServer (tests) have no map.
-	if s.limiters == nil {
-		s.limiters = make(map[Identity]*rate.Limiter)
+	var l *rate.Limiter
+	if v, _, err := s.limiters.Get(id); err == nil {
+		l, _ = v.(*rate.Limiter)
 	}
-	l, ok := s.limiters[id]
-	if !ok {
+	if l == nil {
 		l = rate.NewLimiter(messageRate, messageBurst)
-		s.limiters[id] = l
 	}
+	// context.Background is intentional, matching dnsRateLimited:
+	// the entry must OUTLIVE the session.  Passing the session
+	// context would cancel the entry on disconnect and hand the
+	// peer a fresh bucket on reconnect, which is the exact hole
+	// this limiter closes.
+	//
+	// Put refreshes the expiry, so an active peer keeps its bucket
+	// and an idle one is reclaimed.
+	s.limiters.Put(context.Background(), limiterTTL, id, l, nil, nil)
 	return l
 }
 
-// handshakeAllowed reports whether a new inbound connection from addr
-// may proceed to the handshake.
+// handshakeIP returns the map key for a remote address: the source
+// address aggregated to its allocation prefix.
 //
-// It rate limits per remote IP, ahead of handshakeSem.  The semaphore
-// bounds how many handshakes run at once but says nothing about how
-// fast they may be started, and each slot is held for up to
-// handshakeTimeout while KX runs.  One IP opening connections it never
-// completes could therefore keep every slot busy indefinitely and
-// starve legitimate peers, at almost no cost to itself.
+// IPv6 is masked to /64.  A routed /64 is the standard host
+// allocation, so keying on the full /128 would let one machine mint an
+// unlimited number of distinct keys and bypass any per-source limit
+// entirely.  IPv4 is used whole.
 //
-// A non-TCP address (only reachable through injected listeners in
-// tests) is allowed: there is no IP to key on, and the semaphore still
-// bounds concurrency.
-func (s *Server) handshakeAllowed(addr net.Addr) bool {
+// The bool reports whether a key could be derived; a non-TCP address
+// has no IP to key on.
+func handshakeIP(addr net.Addr) (string, bool) {
 	ta, ok := addr.(*net.TCPAddr)
 	if !ok {
-		return true
+		return "", false
 	}
-	ip := ta.IP.String()
-
-	s.handshakeRateMtx.Lock()
-	defer s.handshakeRateMtx.Unlock()
-
-	// Lazily created: servers built by hand rather than through
-	// NewServer (tests) have no map.
-	if s.handshakeRates == nil {
-		s.handshakeRates = make(map[string]*rate.Limiter)
+	if v4 := ta.IP.To4(); v4 != nil {
+		return v4.String(), true
 	}
-	l, ok := s.handshakeRates[ip]
-	if !ok {
-		// Bound the table so it cannot itself be used for memory
-		// exhaustion.  Dropping an entry only restores a fresh
-		// burst for that IP, which is the pre-existing behaviour.
-		if len(s.handshakeRates) >= handshakeRateCap {
-			clear(s.handshakeRates)
-		}
-		l = rate.NewLimiter(handshakeRate, handshakeBurst)
-		s.handshakeRates[ip] = l
-	}
-	return l.Allow()
+	return ta.IP.Mask(net.CIDRMask(64, 128)).String(), true
 }
 
-// deleteLimiter drops a peer's rate limiter.  Called when the peer
-// record expires: by then the peer has been silent for peerTTL, which
-// is far longer than the bucket takes to refill, so nothing is
-// forgiven that time had not already restored.
-func (s *Server) deleteLimiter(id Identity) {
-	s.limiterMtx.Lock()
-	delete(s.limiters, id)
-	s.limiterMtx.Unlock()
+// acquireHandshake reserves an in-flight handshake slot for a source
+// address.  It reports whether the slot was granted; on success the
+// caller MUST call releaseHandshake with the same key when the
+// handshake finishes, success or failure.
+//
+// A non-TCP address cannot be keyed and is admitted: handshakeSem
+// still bounds total concurrency.
+func (s *Server) acquireHandshake(addr net.Addr) (string, bool) {
+	key, ok := handshakeIP(addr)
+	if !ok {
+		return "", true
+	}
+
+	s.handshakeIPMtx.Lock()
+	defer s.handshakeIPMtx.Unlock()
+
+	if s.handshakesInFlight == nil {
+		s.handshakesInFlight = make(map[string]int)
+	}
+	if s.handshakesInFlight[key] >= maxHandshakesPerIP {
+		return key, false
+	}
+	s.handshakesInFlight[key]++
+	return key, true
+}
+
+// releaseHandshake frees a slot taken by acquireHandshake.  The entry
+// is removed at zero so the map stays bounded by work actually in
+// flight rather than by addresses ever seen.
+func (s *Server) releaseHandshake(key string) {
+	if key == "" {
+		return
+	}
+
+	s.handshakeIPMtx.Lock()
+	defer s.handshakeIPMtx.Unlock()
+
+	n := s.handshakesInFlight[key] - 1
+	if n <= 0 {
+		delete(s.handshakesInFlight, key)
+		return
+	}
+	s.handshakesInFlight[key] = n
 }
 
 // knownPeerList returns peer records suitable for gossip, excluding
@@ -2557,30 +2614,39 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 			}
 		}
 
-		// Per-IP handshake attempt rate limit.  handshakeSem
-		// below bounds CONCURRENCY, not arrival rate, and a slot
-		// stays occupied for up to handshakeTimeout while KX
-		// runs.  Without this, one IP opening connections it
-		// never completes keeps every slot busy and starves
-		// legitimate peers, at almost no cost to the attacker.
-		// Applied before the semaphore so a flood is refused
-		// without ever taking a slot.
-		if !s.handshakeAllowed(conn.RemoteAddr()) {
+		// Cap in-flight handshakes per source.  handshakeSem
+		// below bounds total concurrency, but a slot is held for
+		// the whole key exchange, so without this one source that
+		// never completes KX occupies every slot and starves
+		// legitimate peers.
+		hsKey, ok := s.acquireHandshake(conn.RemoteAddr())
+		if !ok {
+			log.Debugf("handshake in-flight cap reached for %v: "+
+				"dropping connection", conn.RemoteAddr())
 			conn.Close()
 			s.hsRateDrops.Add(1)
 			continue
 		}
 
-		// Limit concurrent handshakes to PeersWanted.  If the
-		// semaphore is full, block until a slot opens or ctx
-		// cancels.  This prevents goroutine exhaustion from
-		// connection floods — the attacker must wait for existing
-		// handshakes to complete before new ones start.
+		// Limit concurrent handshakes to PeersWanted.  Acquire
+		// WITHOUT blocking: blocking here stalls the accept loop,
+		// so during a flood no further connection is ever
+		// examined and the per-source cap above stops being
+		// consulted at all.  A full semaphore means the node is
+		// saturated; refuse and keep accepting.
 		select {
 		case <-ctx.Done():
+			s.releaseHandshake(hsKey)
 			conn.Close() // best-effort: shutting down
 			return
 		case s.handshakeSem <- struct{}{}:
+		default:
+			s.releaseHandshake(hsKey)
+			log.Debugf("handshake slots full: dropping %v",
+				conn.RemoteAddr())
+			conn.Close()
+			s.hsRateDrops.Add(1)
+			continue
 		}
 
 		// Handle handshake and session setup in goroutine.
@@ -2588,7 +2654,7 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 		// handleIncomingConnection (BusyResponse).
 		tcpKeepAlive(conn, tcpKeepAlivePeriod)
 		s.wg.Add(1)
-		go s.handleIncomingConnection(ctx, conn)
+		go s.handleIncomingConnection(ctx, conn, hsKey)
 	}
 }
 
@@ -2843,7 +2909,7 @@ func (s *Server) Run(pctx context.Context) error {
 // handleIncomingConnection processes an incoming connection in a separate
 // goroutine to prevent blocking the accept loop. This protects against
 // DDoS attacks where an attacker opens many slow connections.
-func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
+func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn, hsKey string) {
 	var success bool
 	defer func() {
 		if !success {
@@ -2858,7 +2924,8 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn) {
 	// The semaphore only gates the expensive KX phase —
 	// once complete, the slot is free for the next connection.
 	id, transport, naclPub, err := s.newTransport(ctx, conn)
-	<-s.handshakeSem // release regardless of success/failure
+	<-s.handshakeSem          // release regardless of success/failure
+	s.releaseHandshake(hsKey) // free the per-source in-flight slot
 	if err != nil {
 		// Warning not Error — failed KX/handshake is expected
 		// from port scanners and misconfigured peers.
