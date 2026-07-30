@@ -87,6 +87,19 @@ const (
 	messageRate  = 97  // msgs/sec
 	messageBurst = 199 // burst allowance
 
+	// messageDropLimit is how many consecutive rate-limited
+	// messages a peer may send before the session is closed.
+	// Dropping alone is not a defence: the message has already
+	// cost a transport decrypt by the time the limiter sees it, so
+	// a peer that ignores the limit imposes that cost forever.
+	// Disconnecting ends it and forces the peer back through the
+	// per-IP handshake limiter.
+	//
+	// Only CONSECUTIVE drops count, so a peer that briefly
+	// overshoots and then backs off is never disconnected; the
+	// counter is cleared by the next accepted message.
+	messageDropLimit = 128
+
 	// connCooldownTTL is the per-IP cooldown after a
 	// BusyResponse.  Prevents rapid reconnection cycling
 	// that monopolizes the handshake semaphore.
@@ -287,15 +300,16 @@ type Server struct {
 	seen *ttl.TTL
 
 	// Routing counters for observability and testing.
-	routedReceived atomic.Int64 // messages received at final destination
-	forwarded      atomic.Int64 // messages forwarded to next hop
-	dedupDropped   atomic.Int64 // messages dropped by dedup cache
-	broadcastsSent atomic.Int64 // broadcast originations (not forwards)
-	rateDropped    atomic.Int64 // messages dropped by rate limiter
-	cooldownDrops  atomic.Int64 // connections dropped by IP cooldown
-	hsRateDrops    atomic.Int64 // connections dropped by per-IP handshake rate
-	envRateDrops   atomic.Int64 // envelopes dropped by sender rate limit
-	startedAt      time.Time    // set in Run() for uptime gauge
+	routedReceived  atomic.Int64 // messages received at final destination
+	forwarded       atomic.Int64 // messages forwarded to next hop
+	dedupDropped    atomic.Int64 // messages dropped by dedup cache
+	broadcastsSent  atomic.Int64 // broadcast originations (not forwards)
+	rateDropped     atomic.Int64 // messages dropped by rate limiter
+	cooldownDrops   atomic.Int64 // connections dropped by IP cooldown
+	hsRateDrops     atomic.Int64 // connections dropped by per-IP handshake rate
+	rateDisconnects atomic.Int64 // sessions closed for sustained rate abuse
+	envRateDrops    atomic.Int64 // envelopes dropped by sender rate limit
+	startedAt       time.Time    // set in Run() for uptime gauge
 
 	// Ceremony counters — updated every promPoll tick so prom
 	// callbacks never iterate the ceremonies map on scrape.
@@ -749,6 +763,9 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 		limiter = s.peerLimiter(*id)
 	}
 
+	// Consecutive rate-limited messages; reset by any accepted one.
+	var consecutiveDrops int
+
 	for {
 		header, payload, _, err := t.ReadEnvelope()
 		if err != nil {
@@ -760,9 +777,23 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 
 		if limiter != nil && !limiter.Allow() {
 			s.rateDropped.Add(1)
+			consecutiveDrops++
+			if consecutiveDrops > messageDropLimit {
+				// Persistent abuse: dropping is not enough,
+				// the decrypt cost has already been paid and
+				// will be paid again for every message this
+				// peer sends.  Close the session so the peer
+				// has to come back through the per-IP
+				// handshake limiter.
+				s.rateDisconnects.Add(1)
+				log.Warningf("rate limited %v: %d consecutive "+
+					"drops, disconnecting", id, consecutiveDrops)
+				return
+			}
 			log.Debugf("rate limited %v: dropping message", id)
 			continue
 		}
+		consecutiveDrops = 0
 
 		// Dedup: drop messages we have already seen.
 		// Only applied to routed messages (those with a
@@ -1412,6 +1443,11 @@ func (s *Server) Collectors() []prometheus.Collector {
 			}, s.promHSRateDrops),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: ns,
+				Name:      "sessions_rate_disconnected_total",
+				Help:      "Sessions closed for sustained rate limit abuse",
+			}, s.promRateDisconnects),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
 				Name:      "envelopes_rate_dropped_total",
 				Help:      "Envelopes dropped by per-sender rate gate",
 			}, s.promEnvRateDrops),
@@ -2021,6 +2057,11 @@ func (s *Server) peerLimiter(id Identity) *rate.Limiter {
 	s.limiterMtx.Lock()
 	defer s.limiterMtx.Unlock()
 
+	// Lazily created: servers built by hand rather than through
+	// NewServer (tests) have no map.
+	if s.limiters == nil {
+		s.limiters = make(map[Identity]*rate.Limiter)
+	}
 	l, ok := s.limiters[id]
 	if !ok {
 		l = rate.NewLimiter(messageRate, messageBurst)
@@ -2052,6 +2093,11 @@ func (s *Server) handshakeAllowed(addr net.Addr) bool {
 	s.handshakeRateMtx.Lock()
 	defer s.handshakeRateMtx.Unlock()
 
+	// Lazily created: servers built by hand rather than through
+	// NewServer (tests) have no map.
+	if s.handshakeRates == nil {
+		s.handshakeRates = make(map[string]*rate.Limiter)
+	}
 	l, ok := s.handshakeRates[ip]
 	if !ok {
 		// Bound the table so it cannot itself be used for memory
@@ -2313,6 +2359,10 @@ func (s *Server) promCooldownDrops() float64 {
 
 func (s *Server) promHSRateDrops() float64 {
 	return float64(s.hsRateDrops.Load())
+}
+
+func (s *Server) promRateDisconnects() float64 {
+	return float64(s.rateDisconnects.Load())
 }
 
 func (s *Server) promEnvRateDrops() float64 {

@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/hemilabs/heminetwork/v2/ttl"
 )
 
 // limiterServer builds a Server through the production constructor so
@@ -301,5 +303,163 @@ func TestAcceptLoopEnforcesHandshakeRate(t *testing.T) {
 	case <-errCh:
 	case <-time.After(30 * time.Second):
 		t.Fatal("server did not shut down")
+	}
+}
+
+// --- disconnect on sustained rate abuse ---
+//
+// Dropping a rate-limited message is not by itself a defence: by the
+// time the limiter sees it, ReadEnvelope has already paid the
+// transport decrypt.  A peer that ignores the limit imposes that cost
+// on every message, forever, for free.  handle() therefore closes the
+// session after messageDropLimit CONSECUTIVE drops, which also forces
+// the peer back through the per-IP handshake limiter.
+
+// blockedSession drives handle() against a peer whose limiter refuses
+// everything, then writes msgs messages.  It reports whether handle()
+// closed the session.
+//
+// The limiter is pinned to refuse rather than being outrun in real
+// time: a test that floods and hopes to beat the refill rate is a race
+// against machine speed and fails under load.  Pinning it makes the
+// drop count exactly the message count, so the threshold behaviour is
+// deterministic.
+func blockedSession(t *testing.T, s *Server, peer *Secret, msgs int) bool {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// rate 0, burst 0: Allow() is always false.
+	s.limiterMtx.Lock()
+	if s.limiters == nil {
+		s.limiters = make(map[Identity]*rate.Limiter)
+	}
+	s.limiters[peer.Identity] = rate.NewLimiter(0, 0)
+	s.limiterMtx.Unlock()
+
+	// Real TCP, not net.Pipe: the pipe is unbuffered, so every
+	// write blocks for a reader and nothing can be staged.
+	srv, cli := localhostTransports(t)
+	if err := s.newSession(&peer.Identity, srv); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+
+	done := make(chan struct{})
+	s.wg.Add(1)
+	go func() {
+		defer close(done)
+		s.handle(ctx, &peer.Identity, srv, false)
+	}()
+
+	// Drain whatever handle() sends (initial gossip, pings) so its
+	// writes cannot block and stall the read loop under test.
+	go func() {
+		for {
+			if _, _, _, err := cli.read(readTimeout); err != nil {
+				return
+			}
+		}
+	}()
+
+	for range msgs {
+		select {
+		case <-done:
+			return true
+		default:
+		}
+		if err := cli.Write(peer.Identity, PingResponse{}); err != nil {
+			break
+		}
+	}
+
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer waitCancel()
+	select {
+	case <-done:
+		return true
+	case <-waitCtx.Done():
+		cancel()
+		<-done
+		return false
+	}
+}
+
+// rateTestServer is a limiterServer with the TTLs handle() touches.
+func rateTestServer(t *testing.T) *Server {
+	t.Helper()
+	s := limiterServer(t)
+	peersTTL, err := ttl.New(16, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pings, err := ttl.New(16, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.peersTTL, s.pings = peersTTL, pings
+	return s
+}
+
+func TestSustainedRateAbuseDisconnects(t *testing.T) {
+	s := rateTestServer(t)
+
+	// Every message is refused, so this is comfortably past the
+	// consecutive-drop threshold.
+	if !blockedSession(t, s, mustSecret(t), messageDropLimit*2) {
+		t.Fatal("a peer that ignored the rate limit was never " +
+			"disconnected: every message it sends costs a transport " +
+			"decrypt, so dropping alone lets it waste resources forever")
+	}
+	if s.rateDisconnects.Load() == 0 {
+		t.Fatal("disconnect was not counted")
+	}
+}
+
+// TestDisconnectRespectsThreshold proves a session is not closed on the
+// first refusal: a peer must sustain more than messageDropLimit
+// consecutive drops, so a brief overshoot is tolerated.
+func TestDisconnectRespectsThreshold(t *testing.T) {
+	s := rateTestServer(t)
+
+	// Exactly at the limit, never past it: the session must survive.
+	if blockedSession(t, s, mustSecret(t), messageDropLimit) {
+		t.Fatalf("session closed after %d drops; the threshold is "+
+			"more than %d, so a brief overshoot must be tolerated",
+			messageDropLimit, messageDropLimit)
+	}
+	if got := s.rateDisconnects.Load(); got != 0 {
+		t.Fatalf("rate disconnects = %d, want 0", got)
+	}
+}
+
+func TestPromRateDisconnects(t *testing.T) {
+	s := limiterServer(t)
+	if got := s.promRateDisconnects(); got != 0 {
+		t.Fatalf("initial = %v, want 0", got)
+	}
+	s.rateDisconnects.Add(2)
+	if got := s.promRateDisconnects(); got != 2 {
+		t.Fatalf("= %v, want 2", got)
+	}
+}
+
+// TestLimitersLazyInit covers servers built by hand rather than
+// through NewServer, which have no limiter maps.  handle() calls
+// peerLimiter on every session, so a nil map there is a panic in the
+// hot path.
+func TestLimitersLazyInit(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{secret: secret}
+
+	if l := s.peerLimiter(mustSecret(t).Identity); l == nil {
+		t.Fatal("peerLimiter returned nil on a hand-built server")
+	}
+	if !s.handshakeAllowed(tcpAddr(t, "10.0.0.9", 40000)) {
+		t.Fatal("handshakeAllowed refused the first attempt on a " +
+			"hand-built server")
 	}
 }
