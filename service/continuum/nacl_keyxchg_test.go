@@ -18,6 +18,7 @@ package continuum
 import (
 	"bytes"
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -274,45 +275,89 @@ func TestHandleNaClKeyRequestRejects(t *testing.T) {
 	}
 }
 
-// TestHandleNaClKeyRequestRateLimited proves the responder signs at
-// most once per requester per window, bounding the signing work an
-// unauthenticated flood can extract.
-func TestHandleNaClKeyRequestRateLimited(t *testing.T) {
+// TestHandleNaClKeyRequestRateLimitedPerSession proves the signing
+// bound is keyed on the AUTHENTICATED session peer.  Keying it on the
+// request's Requester field would be no bound at all: that field is
+// unauthenticated wire data a flooder varies per message, so this test
+// drives exactly that flood and requires it to be capped.
+func TestHandleNaClKeyRequestRateLimitedPerSession(t *testing.T) {
 	s := keyXchgServer(t)
-	requester := mustSecret(t).Identity
-	k := newKeyXchgCtx(t, s, requester)
+	sessionPeer := mustSecret(t).Identity
+	k := newKeyXchgCtx(t, s, sessionPeer)
 
-	// First request is answered.  sendTo fails (no session) but
-	// that is after the rate window is claimed, which is what we
-	// are asserting on.
-	handleNaClKeyRequest(k.dc, &NaClKeyRequest{
-		Requester: requester,
-		Challenge: freshChallenge(1),
-	})
-	before := s.naclXchgDrops.Load()
-
-	// Second request inside the window is dropped.
-	handleNaClKeyRequest(k.dc, &NaClKeyRequest{
-		Requester: requester,
-		Challenge: freshChallenge(2),
-	})
-	if got := s.naclXchgDrops.Load(); got != before+1 {
-		t.Fatalf("second request was not rate limited: drops %d, want %d",
-			got, before+1)
+	// Flood over one session, rotating Requester every time so a
+	// per-Requester window would never fire.
+	const flood = naclXchgRateLimit * 3
+	for i := range flood {
+		handleNaClKeyRequest(k.dc, &NaClKeyRequest{
+			Requester: mustSecret(t).Identity,
+			Challenge: freshChallenge(byte(i % 200)),
+		})
+	}
+	// Everything past the limit must be dropped by the limiter.
+	// Answered requests also fail to send (no route), which counts a
+	// drop too, so assert the limiter fired at all and that the
+	// answered count never exceeded the cap.
+	answered := flood - int(s.naclXchgDrops.Load())
+	if answered > naclXchgRateLimit {
+		t.Fatalf("answered %d requests over one session, cap is %d: "+
+			"a rotating Requester defeated the limiter",
+			answered, naclXchgRateLimit)
 	}
 
-	// A different requester is unaffected — the limit is per
-	// requester, not global.
-	other := mustSecret(t).Identity
-	ok := newKeyXchgCtx(t, s, other)
-	before = s.naclXchgDrops.Load()
-	handleNaClKeyRequest(ok.dc, &NaClKeyRequest{
-		Requester: other,
-		Challenge: freshChallenge(3),
+	// A different SESSION is unaffected — the bound is per session,
+	// and sessions are capped by PeersWanted, so the total is bounded.
+	other := newKeyXchgCtx(t, s, mustSecret(t).Identity)
+	before := s.naclXchgDrops.Load()
+	handleNaClKeyRequest(other.dc, &NaClKeyRequest{
+		Requester: mustSecret(t).Identity,
+		Challenge: freshChallenge(7),
 	})
-	if got := s.naclXchgDrops.Load(); got != before {
-		t.Fatalf("a distinct requester was rate limited: drops %d, want %d",
-			got, before)
+	// The send still fails (no route), so exactly one drop — from the
+	// send, not the limiter.  Two would mean the limiter rejected it.
+	if got := s.naclXchgDrops.Load(); got > before+1 {
+		t.Fatalf("a distinct session was rate limited: drops %d, want %d",
+			got, before+1)
+	}
+}
+
+// TestNaClKeyRequestNeverFloods proves a request naming an unroutable
+// Requester never fans the reply out across the mesh.
+//
+// This is the amplification guard. Routing the reply through sendTo
+// would flood it to every session when the attacker-chosen Requester
+// has no route, turning one small unauthenticated message into one
+// transmission per mesh edge. The reply may only take a path we
+// already have, or the reverse path back to the requesting session.
+//
+// The unrelated sessions hold nil transports, so ANY write to them
+// panics: if the reply ever floods, this test fails loudly rather than
+// silently passing.
+func TestNaClKeyRequestNeverFloods(t *testing.T) {
+	s := keyXchgServer(t)
+
+	for range 3 {
+		s.mtx.Lock()
+		s.sessions[mustSecret(t).Identity] = nil
+		s.mtx.Unlock()
+	}
+
+	// dc.t is nil here, so the reverse path is unavailable too and
+	// the reply has nowhere legitimate to go.
+	k := newKeyXchgCtx(t, s, mustSecret(t).Identity)
+	before := s.naclXchgDrops.Load()
+
+	// Requester is a fresh identity: no session, no route.
+	handleNaClKeyRequest(k.dc, &NaClKeyRequest{
+		Requester: mustSecret(t).Identity,
+		Challenge: freshChallenge(9),
+	})
+
+	// Refused and counted — and, critically, no write was attempted
+	// against the unrelated sessions.
+	if got := s.naclXchgDrops.Load(); got != before+1 {
+		t.Fatalf("drop counter %d, want %d (an unroutable reply must "+
+			"be refused, never flooded)", got, before+1)
 	}
 }
 
@@ -504,6 +549,59 @@ func TestNaClKeyResponseCannotRebind(t *testing.T) {
 	got, _ := s.peerNaClPub(peer.Identity)
 	if !bytes.Equal(got, peerPub) {
 		t.Fatalf("key changed after re-exchange: got %x want %x", got, peerPub)
+	}
+}
+
+// TestSendEncryptedRacesBindPeerKey pins the memory-safety rule that
+// bindPeerKey's in-place write forces on every reader of NaClPub: the
+// field must be read under mtx.  SendEncrypted once copied the
+// *PeerRecord out, dropped the lock, and read the field afterwards,
+// which races the bind.  Meaningful under -race (CI runs Test (race)).
+func TestSendEncryptedRacesBindPeerKey(t *testing.T) {
+	s := keyXchgServer(t)
+	ctx := t.Context()
+
+	const peers = 16
+	ids := make([]Identity, 0, peers)
+	pubs := make([][]byte, 0, peers)
+	for range peers {
+		p := mustSecret(t)
+		ids = append(ids, p.Identity)
+		pubs = append(pubs, mustNaClPub(t, p))
+		// Discovery metadata only: no key yet, so SendEncrypted
+		// and bindPeerKey contend over the same record.
+		s.addPeer(ctx, PeerRecord{
+			Identity: p.Identity,
+			Version:  ProtocolVersion,
+			LastSeen: time.Now().Unix(),
+		})
+	}
+
+	var wg sync.WaitGroup
+	for i := range peers {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			// Errors are expected and irrelevant; the read of
+			// NaClPub is what must not race.
+			_ = s.SendEncrypted(ids[i], PingRequest{})
+		}()
+		go func() {
+			defer wg.Done()
+			_ = s.bindPeerKey(ctx, ids[i], pubs[i])
+		}()
+	}
+	wg.Wait()
+
+	// Every bind landed exactly as issued.
+	for i := range peers {
+		got, ok := s.peerNaClPub(ids[i])
+		if !ok {
+			t.Fatalf("peer %d has no key after bind", i)
+		}
+		if !bytes.Equal(got, pubs[i]) {
+			t.Fatalf("peer %d bound %x, want %x", i, got, pubs[i])
+		}
 	}
 }
 
@@ -720,9 +818,10 @@ func TestPeerKeyPromCounters(t *testing.T) {
 	}
 }
 
-// TestEnsurePeerKeyObservesConcurrentBind proves the poll path: a key
-// bound by any other route (an inbound handshake, a concurrent
-// exchange) satisfies a waiter.
+// TestEnsurePeerKeyObservesConcurrentBind proves a key bound by any
+// other route (an inbound handshake, a concurrent exchange) wakes a
+// waiter, and does so on the bindPeerKey signal rather than a poll:
+// the wait must finish far faster than the retry tick.
 func TestEnsurePeerKeyObservesConcurrentBind(t *testing.T) {
 	s := keyXchgServer(t)
 	peer := mustSecret(t)
@@ -734,8 +833,12 @@ func TestEnsurePeerKeyObservesConcurrentBind(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- s.ensurePeerKey(ctx, peer.Identity) }()
 
-	// Bind out from under the waiter, as a handshake would.
-	time.Sleep(naclXchgPoll)
+	// Let the waiter reach its select, then bind as a handshake would.
+	waitForCondition(t, "ensurePeerKey never issued its initial request",
+		5*time.Second, func() bool {
+			return s.naclXchg.Len() >= 1
+		})
+	start := time.Now()
 	if err := s.bindPeerKey(ctx, peer.Identity, peerPub); err != nil {
 		t.Fatalf("bindPeerKey: %v", err)
 	}
@@ -745,8 +848,61 @@ func TestEnsurePeerKeyObservesConcurrentBind(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ensurePeerKey did not observe the binding: %v", err)
 		}
+		if waited := time.Since(start); waited >= naclXchgRetry/10 {
+			t.Fatalf("ensurePeerKey took %v to observe the bind; the "+
+				"bindPeerKey signal should wake it well before the "+
+				"%v retry tick", waited, naclXchgRetry)
+		}
 	case <-ctx.Done():
 		t.Fatal("ensurePeerKey did not return after the key was bound")
+	}
+}
+
+// TestKeyBoundSignalWakesAllWaiters proves the broadcast reaches every
+// concurrent waiter, not just one, and that a bind for an unrelated
+// identity does not falsely satisfy a waiter.
+func TestKeyBoundSignalWakesAllWaiters(t *testing.T) {
+	s := keyXchgServer(t)
+	peer := mustSecret(t)
+	other := mustSecret(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	const waiters = 4
+	done := make(chan error, waiters)
+	for range waiters {
+		go func() { done <- s.ensurePeerKey(ctx, peer.Identity) }()
+	}
+	// A bind for a DIFFERENT identity wakes the waiters but must
+	// not satisfy them.
+	if err := s.bindPeerKey(ctx, other.Identity, mustNaClPub(t, other)); err != nil {
+		t.Fatalf("bindPeerKey(other): %v", err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("a waiter returned (%v) on an unrelated bind", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	start := time.Now()
+	if err := s.bindPeerKey(ctx, peer.Identity, mustNaClPub(t, peer)); err != nil {
+		t.Fatalf("bindPeerKey(peer): %v", err)
+	}
+	for range waiters {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("waiter did not observe the binding: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("not every waiter woke on the bind broadcast")
+		}
+	}
+	if waited := time.Since(start); waited >= naclXchgRetry/10 {
+		t.Fatalf("waiters took %v to observe the bind; the broadcast "+
+			"should wake them well before the %v retry tick",
+			waited, naclXchgRetry)
 	}
 }
 
@@ -848,10 +1004,11 @@ func TestHandleNaClKeyRequestUninitializedRates(t *testing.T) {
 	}) {
 		t.Fatal("handler asked to close the session")
 	}
-	// Reached the send (which fails, no route) rather than being
-	// dropped by a nil map dereference.
-	if got := s.naclXchgDrops.Load(); got != before {
-		t.Fatalf("request was dropped: drops %d, want %d", got, before)
+	// The handler ran to completion rather than dereferencing the
+	// nil limiter, reaching the send — which refuses for want of a
+	// known path to the requester, counting exactly one drop.
+	if got := s.naclXchgDrops.Load(); got != before+1 {
+		t.Fatalf("drops %d, want %d", got, before+1)
 	}
 }
 

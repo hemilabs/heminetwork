@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"sync/atomic"
 	"time"
 )
 
@@ -251,11 +252,17 @@ func handleEncryptedPayload(dc *dispatchCtx, payload any) bool {
 }
 
 // handleNaClKeyRequest answers a routed e2e key attestation request:
-// sign our X25519 public key bound to the caller's challenge and route
-// the response back.  The request is unauthenticated; answering only
-// produces a true, domain-separated statement about our own key, so
-// the sole abuse potential is making us sign — bounded by the
-// per-requester rate limiter.
+// sign our X25519 public key bound to the caller's challenge and send
+// the response back toward the requester.
+//
+// The request itself is unauthenticated, so both costs it can impose
+// are bounded explicitly.  The signing work is capped per AUTHENTICATED
+// SESSION PEER — not per Requester, which is attacker-chosen wire data
+// a flooder varies per message — and sessions are capped by
+// PeersWanted.  The reply goes out over a known path only: Requester
+// names its own reply destination, so routing it through sendTo's flood
+// fallback would let one small unauthenticated message be amplified
+// across every edge of the mesh.
 func handleNaClKeyRequest(dc *dispatchCtx, payload any) bool {
 	v := payload.(*NaClKeyRequest)
 	s := dc.s
@@ -278,17 +285,27 @@ func handleNaClKeyRequest(dc *dispatchCtx, payload any) bool {
 		log.Debugf("nacl key request %v: self requester", dc.id)
 		return false
 	}
-	// One signature per requester per window.  Honest retries run
-	// at naclXchgRetry which clears the window; floods get dropped.
+	// Bound the signing work per authenticated session peer.
 	// Nil guard for hand-built test servers; NewServer always sets it.
-	if s.naclXchgRates != nil {
-		if _, _, err := s.naclXchgRates.Get(v.Requester); err == nil {
-			s.naclXchgDrops.Add(1)
-			log.Debugf("nacl key request %v: rate limited", v.Requester)
-			return false
+	if s.naclXchgRates != nil && dc.id != nil {
+		key := dc.id.String()
+		if val, _, err := s.naclXchgRates.Get(key); err == nil {
+			count, ok := val.(*atomic.Int64)
+			// untested: only *atomic.Int64 is ever stored here
+			if !ok {
+				return false
+			}
+			if count.Add(1) > int64(naclXchgRateLimit) {
+				s.naclXchgDrops.Add(1)
+				log.Debugf("nacl key request %v: rate limited", dc.id)
+				return false
+			}
+		} else {
+			counter := new(atomic.Int64)
+			counter.Store(1)
+			s.naclXchgRates.Put(dc.ctx, naclXchgRateTTL, key,
+				counter, nil, nil)
 		}
-		s.naclXchgRates.Put(dc.ctx, naclXchgRateTTL, v.Requester,
-			struct{}{}, nil, nil)
 	}
 
 	naclPub, err := s.secret.NaClPublicKey()
@@ -302,7 +319,23 @@ func handleNaClKeyRequest(dc *dispatchCtx, payload any) bool {
 		NaClPub:   naclPub,
 		Signature: s.secret.Sign(hashNaClKeyBinding(v.Challenge, naclPub)),
 	}
-	if err := s.sendTo(v.Requester, resp); err != nil {
+	// Reply over a path we already have, never by flooding.  Prefer a
+	// direct session or a known route; otherwise send it back down
+	// the REVERSE PATH — the session the request arrived on — with
+	// Requester as the routing destination, so the hops that relayed
+	// the request relay the answer.
+	//
+	// The reverse path is what keeps this from being an amplifier: we
+	// emit exactly one message to exactly one peer, the one that
+	// handed us the request.  A forged Requester therefore costs the
+	// sender its own bandwidth and gains it nothing it could not
+	// already do by sending any routed message itself.
+	err = s.sendKnownPath(v.Requester, resp)
+	if err != nil && dc.t != nil {
+		err = dc.t.WriteTo(s.secret.Identity, v.Requester, defaultTTL, resp)
+	}
+	if err != nil {
+		s.naclXchgDrops.Add(1)
 		log.Debugf("nacl key response to %v: %v", v.Requester, err)
 	}
 	return false

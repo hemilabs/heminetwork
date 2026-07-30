@@ -164,20 +164,22 @@ const (
 	// round trip with retries.
 	naclXchgTTL = 59 * time.Second
 
-	// naclXchgRateTTL is the per-requester window for answering
-	// NaClKeyRequests.  One signature per requester per window
-	// bounds the signing work a flood can extract; honest
-	// requesters retry at naclXchgRetry which clears the window.
-	naclXchgRateTTL = 1 * time.Second
+	// naclXchgRateLimit caps how many NaClKeyRequests we answer
+	// from one AUTHENTICATED SESSION PEER per window.  Keying on
+	// the session rather than the request's Requester field is what
+	// makes the bound real: Requester is unauthenticated wire data a
+	// flooder can vary per message, whereas sessions are capped by
+	// PeersWanted, so total signing work is bounded.  Sized well
+	// above legitimate traffic — a relay neighbour forwards requests
+	// on behalf of a whole committee — while still bounding the
+	// secp256k1 signing an attacker can extract.
+	naclXchgRateLimit = 64
+	naclXchgRateTTL   = 1 * time.Second
 
 	// naclXchgRetry is how often ensurePeerKeys re-sends a key
 	// request while waiting.  Each retry carries a fresh
 	// challenge so the dedup cache does not swallow it.
 	naclXchgRetry = 2 * time.Second
-
-	// naclXchgPoll is how often ensurePeerKeys re-checks the peer
-	// table for a bound key while waiting for a response.
-	naclXchgPoll = 100 * time.Millisecond
 
 	// naclXchgCapacity bounds the pending-challenge and
 	// rate-limiter maps.
@@ -1682,13 +1684,20 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 	// bindPeerKey writes this field, and only after a handshake or
 	// NaClKeyRequest exchange proved the binding.  Callers that may
 	// race key discovery use ensurePeerKey/ensurePeerKeys first.
-	s.mtx.RLock()
-	pr, ok := s.peers[dest]
-	s.mtx.RUnlock()
+	//
+	// Read through peerNaClPub so the slice header is copied under
+	// s.mtx: bindPeerKey mutates the published record in place, so
+	// an unlocked field read would race it.  The backing array is
+	// safe to use after the lock is dropped because a bound key is
+	// immutable — a conflicting rebind is rejected, never applied.
+	naclPub, ok := s.peerNaClPub(dest)
 	if !ok {
-		return fmt.Errorf("unknown peer: %v", dest)
-	}
-	if len(pr.NaClPub) == 0 {
+		s.mtx.RLock()
+		_, known := s.peers[dest]
+		s.mtx.RUnlock()
+		if !known {
+			return fmt.Errorf("unknown peer: %v", dest)
+		}
 		return fmt.Errorf("peer %v has no authenticated e2e key", dest)
 	}
 
@@ -1700,7 +1709,7 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 	}
 
 	// Encrypt with ephemeral sender key.
-	ep, err := SealBox(plaintext, pr.NaClPub, s.secret, innerType)
+	ep, err := SealBox(plaintext, naclPub, s.secret, innerType)
 	// untested: SealBox wraps rand.Read + box.Seal; fails only on OS entropy exhaustion
 	if err != nil {
 		return fmt.Errorf("seal: %w", err)
@@ -2313,7 +2322,28 @@ func (s *Server) bindPeerKey(ctx context.Context, id Identity, naclPub []byte) e
 		return fmt.Errorf("bindPeerKey %v: conflicting e2e key", id)
 	}
 	pr.NaClPub = append([]byte(nil), naclPub...)
+	s.signalKeyBoundLocked()
 	return nil
+}
+
+// signalKeyBoundLocked wakes every ensurePeerKey waiter.  Callers must
+// hold mtx.  Waiters re-check the peer table, so one broadcast for all
+// identities is enough and costs nothing per waiter.
+func (s *Server) signalKeyBoundLocked() {
+	if s.keyBound == nil {
+		return
+	}
+	close(s.keyBound)
+	s.keyBound = make(chan struct{})
+}
+
+// keyBoundWaiter returns the channel closed by the next successful
+// bind.  Snapshot it BEFORE checking the peer table so a bind landing
+// between the check and the wait still wakes the waiter.
+func (s *Server) keyBoundWaiter() <-chan struct{} {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return s.keyBound
 }
 
 // peerNaClPub returns the authenticated e2e key held for id, or false
@@ -2326,6 +2356,37 @@ func (s *Server) peerNaClPub(id Identity) ([]byte, bool) {
 		return nil, false
 	}
 	return pr.NaClPub, true
+}
+
+// sendKnownPath delivers cmd to dest over a KNOWN path only: a direct
+// session, or the next hop the routing table already has for dest.  It
+// never falls back to flooding.
+//
+// Use this, not sendTo, whenever a REMOTE party chose the destination.
+// sendTo's flood fallback is correct for traffic a node originates for
+// its own reasons — the destination is one it picked, and the flood is
+// bounded by dedup and TTL like any other originated message.  It is
+// not correct when the destination arrives on the wire: NaClKeyRequest
+// names its own reply target, so flooding would let one small
+// unauthenticated message be amplified across every edge of the mesh.
+// Refusing is the right answer there, since a reply nobody has a path
+// to is a reply nobody asked for.
+func (s *Server) sendKnownPath(dest Identity, cmd any) error {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	if t, ok := s.sessions[dest]; ok {
+		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+	}
+	hop, ok := s.routeNextHop(dest)
+	if !ok {
+		return fmt.Errorf("no known path to %v", dest)
+	}
+	t, ok := s.sessions[hop]
+	if !ok {
+		return fmt.Errorf("no session with next hop %v for %v", hop, dest)
+	}
+	return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
 }
 
 // sendNaClKeyRequest issues one key exchange round trip: register a
@@ -2344,6 +2405,12 @@ func (s *Server) sendNaClKeyRequest(ctx context.Context, id Identity) error {
 		return fmt.Errorf("key exchange challenge: %w", err)
 	}
 	s.naclXchg.Put(ctx, naclXchgTTL, string(challenge[:]), id, nil, nil)
+	// sendTo, not sendKnownPath: WE chose this destination — a peer
+	// we are about to run a ceremony with — so its flood fallback is
+	// as legitimate here as for any other originated traffic, and it
+	// is what reaches a committee member before gossip has populated
+	// a route to them.  Only the REPLY, whose destination an attacker
+	// names, is restricted to known paths.
 	return s.sendTo(id, NaClKeyRequest{
 		Requester: s.secret.Identity,
 		Challenge: challenge[:],
@@ -2353,9 +2420,13 @@ func (s *Server) sendNaClKeyRequest(ctx context.Context, id Identity) error {
 // ensurePeerKey blocks until an authenticated e2e key for id is bound
 // or ctx expires, driving NaClKeyRequest exchanges through the mesh.
 // Requests are re-sent every naclXchgRetry with a fresh challenge (so
-// the dedup cache does not swallow the retry); the peer table is
-// polled at naclXchgPoll because any exchange — including one started
-// by a concurrent caller or an inbound handshake — may satisfy us.
+// the dedup cache does not swallow the retry).
+//
+// Waking is signal-driven, not polled: every path that can satisfy us
+// — this exchange, one started by a concurrent caller, an inbound
+// handshake — funnels through bindPeerKey, which broadcasts.  The
+// waiter channel is snapshotted before each table check so a bind
+// landing in between cannot be missed.
 func (s *Server) ensurePeerKey(ctx context.Context, id Identity) error {
 	log.Tracef("ensurePeerKey %v", id)
 
@@ -2366,22 +2437,21 @@ func (s *Server) ensurePeerKey(ctx context.Context, id Identity) error {
 		return nil
 	}
 	if err := s.sendNaClKeyRequest(ctx, id); err != nil {
-		// No route yet is not fatal — sessions may appear;
-		// the retry ticker below re-attempts until ctx expires.
+		// No known path yet is not fatal — routes fill in as
+		// gossip propagates; the retry ticker re-attempts.
 		log.Debugf("ensurePeerKey %v: initial request: %v", id, err)
 	}
-	poll := time.NewTicker(naclXchgPoll)
-	defer poll.Stop()
 	retry := time.NewTicker(naclXchgRetry)
 	defer retry.Stop()
 	for {
+		bound := s.keyBoundWaiter()
+		if _, ok := s.peerNaClPub(id); ok {
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("key exchange with %v: %w", id, ctx.Err())
-		case <-poll.C:
-			if _, ok := s.peerNaClPub(id); ok {
-				return nil
-			}
+		case <-bound:
 		case <-retry.C:
 			if err := s.sendNaClKeyRequest(ctx, id); err != nil {
 				log.Debugf("ensurePeerKey %v: retry: %v", id, err)

@@ -235,15 +235,8 @@ func (s *Server) dispatchSign(req CeremonyRequest) {
 		defer s.wg.Done()
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
-		// Bind authenticated e2e keys for the whole committee
-		// before rounds start so the encrypted fallback path
-		// never lacks a key mid-ceremony.
-		err := s.ensureCommitteeKeys(req.Committee)
-		var r, sigS []byte
-		if err == nil {
-			r, sigS, err = s.tss.Sign(s.tssCtx, req.CeremonyID,
-				req.KeyID, req.Committee, req.Threshold, data)
-		}
+		r, sigS, err := s.tss.Sign(s.tssCtx, req.CeremonyID,
+			req.KeyID, req.Committee, req.Threshold, data)
 		if err != nil {
 			log.Errorf("sign %s: %v", req.CeremonyID, err)
 			s.failCeremony(req.CeremonyID, err.Error())
@@ -286,15 +279,9 @@ func (s *Server) dispatchReshare(req CeremonyRequest) {
 		defer s.wg.Done()
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
-		// Bind authenticated e2e keys for the union of both
-		// committees before rounds start so the encrypted
-		// fallback path never lacks a key mid-ceremony.
-		err := s.ensureCommitteeKeys(allParties)
-		if err == nil {
-			err = s.tss.Reshare(s.tssCtx, req.CeremonyID, req.KeyID,
-				req.OldCommittee, req.NewCommittee,
-				req.OldThreshold, req.NewThreshold)
-		}
+		err := s.tss.Reshare(s.tssCtx, req.CeremonyID, req.KeyID,
+			req.OldCommittee, req.NewCommittee,
+			req.OldThreshold, req.NewThreshold)
 		if err != nil {
 			log.Errorf("reshare %s: %v",
 				req.CeremonyID, err)
