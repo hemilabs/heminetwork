@@ -92,6 +92,23 @@ const (
 	// that monopolizes the handshake semaphore.
 	connCooldownTTL = 31 * time.Second
 
+	// handshakeRate and handshakeBurst bound how fast ONE IP may
+	// start handshakes.  handshakeSem caps concurrency but not
+	// arrival rate, and a slot is held for up to handshakeTimeout,
+	// so without this an IP that never completes KX can keep every
+	// slot occupied.  The burst covers a node legitimately
+	// reconnecting a few times (restart, flapping link) while the
+	// sustained rate is far below what starvation needs.
+	handshakeRate  = 2 // attempts/sec
+	handshakeBurst = 8
+
+	// handshakeRateCap bounds the per-IP limiter map so the table
+	// itself cannot be used for memory exhaustion.  When full the
+	// oldest entries are dropped; a dropped entry only means the
+	// next attempt from that IP starts with a fresh burst, which is
+	// the pre-existing behaviour.
+	handshakeRateCap = 4096
+
 	// envelopeRateLimit caps the number of EncryptedPayload
 	// messages accepted from a single sender identity per
 	// minute.  Prevents signature verification amplification
@@ -253,6 +270,13 @@ type Server struct {
 	limiters   map[Identity]*rate.Limiter
 	limiterMtx sync.Mutex
 
+	// Per-IP handshake attempt limiters, keyed by remote IP.
+	// Applied in the accept loop before handshakeSem so a flood of
+	// unauthenticated connections cannot occupy every slot.
+	// Guarded by handshakeRateMtx.
+	handshakeRates   map[string]*rate.Limiter
+	handshakeRateMtx sync.Mutex
+
 	// Per-sender envelope rate counter — limits how many
 	// EncryptedPayload messages are accepted from one sender
 	// before signature verification is skipped.
@@ -269,6 +293,7 @@ type Server struct {
 	broadcastsSent atomic.Int64 // broadcast originations (not forwards)
 	rateDropped    atomic.Int64 // messages dropped by rate limiter
 	cooldownDrops  atomic.Int64 // connections dropped by IP cooldown
+	hsRateDrops    atomic.Int64 // connections dropped by per-IP handshake rate
 	envRateDrops   atomic.Int64 // envelopes dropped by sender rate limit
 	startedAt      time.Time    // set in Run() for uptime gauge
 
@@ -336,18 +361,19 @@ func NewServer(cfg *Config) (*Server, error) {
 		init = &noopInitiator{}
 	}
 	return &Server{
-		cfg:          cfg,
-		listenConfig: &net.ListenConfig{},
-		sessions:     make(map[Identity]*Transport, cfg.PeersWanted),
-		ponged:       make(map[Identity]struct{}, cfg.PeersWanted),
-		peers:        make(map[Identity]*PeerRecord),
-		limiters:     make(map[Identity]*rate.Limiter),
-		ceremonies:   make(map[CeremonyID]*CeremonyInfo),
-		handshakeSem: make(chan struct{}, cfg.PeersWanted),
-		initiator:    init,
-		debugInit:    di,
-		routeTable:   make(map[Identity]Identity),
-		tssCtx:       context.Background(), // replaced by Run() with lifecycle context
+		cfg:            cfg,
+		listenConfig:   &net.ListenConfig{},
+		sessions:       make(map[Identity]*Transport, cfg.PeersWanted),
+		ponged:         make(map[Identity]struct{}, cfg.PeersWanted),
+		peers:          make(map[Identity]*PeerRecord),
+		limiters:       make(map[Identity]*rate.Limiter),
+		handshakeRates: make(map[string]*rate.Limiter),
+		ceremonies:     make(map[CeremonyID]*CeremonyInfo),
+		handshakeSem:   make(chan struct{}, cfg.PeersWanted),
+		initiator:      init,
+		debugInit:      di,
+		routeTable:     make(map[Identity]Identity),
+		tssCtx:         context.Background(), // replaced by Run() with lifecycle context
 	}, nil
 }
 
@@ -1381,6 +1407,11 @@ func (s *Server) Collectors() []prometheus.Collector {
 			}, s.promCooldownDrops),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: ns,
+				Name:      "handshakes_rate_dropped_total",
+				Help:      "Connections rejected by per-IP handshake rate limit",
+			}, s.promHSRateDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
 				Name:      "envelopes_rate_dropped_total",
 				Help:      "Envelopes dropped by per-sender rate gate",
 			}, s.promEnvRateDrops),
@@ -1998,6 +2029,43 @@ func (s *Server) peerLimiter(id Identity) *rate.Limiter {
 	return l
 }
 
+// handshakeAllowed reports whether a new inbound connection from addr
+// may proceed to the handshake.
+//
+// It rate limits per remote IP, ahead of handshakeSem.  The semaphore
+// bounds how many handshakes run at once but says nothing about how
+// fast they may be started, and each slot is held for up to
+// handshakeTimeout while KX runs.  One IP opening connections it never
+// completes could therefore keep every slot busy indefinitely and
+// starve legitimate peers, at almost no cost to itself.
+//
+// A non-TCP address (only reachable through injected listeners in
+// tests) is allowed: there is no IP to key on, and the semaphore still
+// bounds concurrency.
+func (s *Server) handshakeAllowed(addr net.Addr) bool {
+	ta, ok := addr.(*net.TCPAddr)
+	if !ok {
+		return true
+	}
+	ip := ta.IP.String()
+
+	s.handshakeRateMtx.Lock()
+	defer s.handshakeRateMtx.Unlock()
+
+	l, ok := s.handshakeRates[ip]
+	if !ok {
+		// Bound the table so it cannot itself be used for memory
+		// exhaustion.  Dropping an entry only restores a fresh
+		// burst for that IP, which is the pre-existing behaviour.
+		if len(s.handshakeRates) >= handshakeRateCap {
+			clear(s.handshakeRates)
+		}
+		l = rate.NewLimiter(handshakeRate, handshakeBurst)
+		s.handshakeRates[ip] = l
+	}
+	return l.Allow()
+}
+
 // deleteLimiter drops a peer's rate limiter.  Called when the peer
 // record expires: by then the peer has been silent for peerTTL, which
 // is far longer than the bucket takes to refill, so nothing is
@@ -2243,6 +2311,10 @@ func (s *Server) promCooldownDrops() float64 {
 	return float64(s.cooldownDrops.Load())
 }
 
+func (s *Server) promHSRateDrops() float64 {
+	return float64(s.hsRateDrops.Load())
+}
+
 func (s *Server) promEnvRateDrops() float64 {
 	return float64(s.envRateDrops.Load())
 }
@@ -2433,6 +2505,20 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 					continue
 				}
 			}
+		}
+
+		// Per-IP handshake attempt rate limit.  handshakeSem
+		// below bounds CONCURRENCY, not arrival rate, and a slot
+		// stays occupied for up to handshakeTimeout while KX
+		// runs.  Without this, one IP opening connections it
+		// never completes keeps every slot busy and starves
+		// legitimate peers, at almost no cost to the attacker.
+		// Applied before the semaphore so a flood is refused
+		// without ever taking a slot.
+		if !s.handshakeAllowed(conn.RemoteAddr()) {
+			conn.Close()
+			s.hsRateDrops.Add(1)
+			continue
 		}
 
 		// Limit concurrent handshakes to PeersWanted.  If the
