@@ -153,10 +153,27 @@ func handlePeerListResponse(dc *dispatchCtx, payload any) bool {
 	return false
 }
 
+// errNoDebugInitiator is returned to a peer that wire-initiates a
+// ceremony against a production build.  Ceremonies are driven by the
+// blockchain there; wire initiation exists only in debug builds.
+// Answering explicitly keeps the caller from waiting for a reply that
+// is never coming.
+const errNoDebugInitiator = "wire-initiated ceremonies are not enabled on this node"
+
 func handleKeygenRequest(dc *dispatchCtx, payload any) bool {
 	v := payload.(*KeygenRequest)
 	if dc.s.debugInit == nil {
-		log.Warningf("handle %v: KeygenRequest ignored (no debug initiator)", dc.id)
+		log.Warningf("handle %v: KeygenRequest rejected (no debug initiator)", dc.id)
+		if dc.t == nil {
+			return false
+		}
+		if err := dc.t.Write(dc.s.secret.Identity, KeygenResponse{
+			CeremonyID: v.CeremonyID,
+			Success:    false,
+			Error:      errNoDebugInitiator,
+		}); err != nil {
+			log.Warningf("handle %v: keygen reject: %v", dc.id, err)
+		}
 		return false
 	}
 	if cr := ceremonyFromKeygen(*v); cr != nil {
@@ -168,7 +185,17 @@ func handleKeygenRequest(dc *dispatchCtx, payload any) bool {
 func handleSignRequest(dc *dispatchCtx, payload any) bool {
 	v := payload.(*SignRequest)
 	if dc.s.debugInit == nil {
-		log.Warningf("handle %v: SignRequest ignored (no debug initiator)", dc.id)
+		log.Warningf("handle %v: SignRequest rejected (no debug initiator)", dc.id)
+		if dc.t == nil {
+			return false
+		}
+		if err := dc.t.Write(dc.s.secret.Identity, SignResponse{
+			CeremonyID: v.CeremonyID,
+			Success:    false,
+			Error:      errNoDebugInitiator,
+		}); err != nil {
+			log.Warningf("handle %v: sign reject: %v", dc.id, err)
+		}
 		return false
 	}
 	if cr := ceremonyFromSign(*v); cr != nil {
@@ -180,7 +207,17 @@ func handleSignRequest(dc *dispatchCtx, payload any) bool {
 func handleReshareRequest(dc *dispatchCtx, payload any) bool {
 	v := payload.(*ReshareRequest)
 	if dc.s.debugInit == nil {
-		log.Warningf("handle %v: ReshareRequest ignored (no debug initiator)", dc.id)
+		log.Warningf("handle %v: ReshareRequest rejected (no debug initiator)", dc.id)
+		if dc.t == nil {
+			return false
+		}
+		if err := dc.t.Write(dc.s.secret.Identity, ReshareResponse{
+			CeremonyID: v.CeremonyID,
+			Success:    false,
+			Error:      errNoDebugInitiator,
+		}); err != nil {
+			log.Warningf("handle %v: reshare reject: %v", dc.id, err)
+		}
 		return false
 	}
 	if cr := ceremonyFromReshare(*v); cr != nil {

@@ -142,6 +142,117 @@ func TestHandleReshareNoDebugInitiator(t *testing.T) {
 	}
 }
 
+// TestCeremonyRejectedResponses proves a production node ANSWERS a
+// wire-initiated ceremony instead of dropping it.  Silently ignoring
+// left the caller waiting for a reply that never came.
+func TestCeremonyRejectedResponses(t *testing.T) {
+	cid := NewCeremonyID()
+
+	tests := []struct {
+		name string
+		call func(dc *dispatchCtx)
+		want func(cmd any) (ok bool, cerr string, rcid CeremonyID)
+	}{
+		{
+			name: "keygen",
+			call: func(dc *dispatchCtx) {
+				handleKeygenRequest(dc, &KeygenRequest{CeremonyID: cid})
+			},
+			want: func(cmd any) (bool, string, CeremonyID) {
+				r, ok := cmd.(*KeygenResponse)
+				if !ok {
+					return false, "", CeremonyID{}
+				}
+				return r.Success, r.Error, r.CeremonyID
+			},
+		},
+		{
+			name: "sign",
+			call: func(dc *dispatchCtx) {
+				handleSignRequest(dc, &SignRequest{CeremonyID: cid})
+			},
+			want: func(cmd any) (bool, string, CeremonyID) {
+				r, ok := cmd.(*SignResponse)
+				if !ok {
+					return false, "", CeremonyID{}
+				}
+				return r.Success, r.Error, r.CeremonyID
+			},
+		},
+		{
+			name: "reshare",
+			call: func(dc *dispatchCtx) {
+				handleReshareRequest(dc, &ReshareRequest{CeremonyID: cid})
+			},
+			want: func(cmd any) (bool, string, CeremonyID) {
+				r, ok := cmd.(*ReshareResponse)
+				if !ok {
+					return false, "", CeremonyID{}
+				}
+				return r.Success, r.Error, r.CeremonyID
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := NewServer(testConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			secret, err := NewSecret()
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.secret = secret
+			s.debugInit = nil // production build
+
+			srv, cli := connectedTransports(t)
+			dc := &dispatchCtx{s: s, id: &Identity{0x01}, t: srv}
+
+			// Drain concurrently: the transport write can block
+			// until the peer reads.
+			type readResult struct {
+				cmd any
+				err error
+			}
+			rc := make(chan readResult, 1)
+			go func() {
+				_, cmd, _, err := cli.read(readTimeout)
+				rc <- readResult{cmd, err}
+			}()
+
+			tt.call(dc)
+
+			ctx, cancel := context.WithTimeout(t.Context(), readTimeout)
+			defer cancel()
+			var res readResult
+			select {
+			case res = <-rc:
+			case <-ctx.Done():
+				t.Fatal("timed out waiting for the rejection")
+			}
+			if res.err != nil {
+				t.Fatalf("no rejection sent: %v", res.err)
+			}
+			cmd := res.cmd
+			success, cerr, rcid := tt.want(cmd)
+			if cerr == "" && !success {
+				t.Fatalf("unexpected response type %T", cmd)
+			}
+			if success {
+				t.Fatal("rejection reported success")
+			}
+			if cerr != errNoDebugInitiator {
+				t.Fatalf("error = %q, want %q", cerr, errNoDebugInitiator)
+			}
+			if rcid != cid {
+				t.Fatalf("ceremony id = %x, want %x", rcid, cid)
+			}
+		})
+	}
+}
+
 // --- non-admin rejection (pipe transport, not localhost) ---
 
 func TestHandleCeremonyStatusNonAdmin(t *testing.T) {
