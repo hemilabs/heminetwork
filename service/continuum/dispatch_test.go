@@ -210,6 +210,9 @@ func TestCeremonyRejectedResponses(t *testing.T) {
 			srv, cli := connectedTransports(t)
 			dc := &dispatchCtx{s: s, id: &Identity{0x01}, t: srv}
 
+			ctx, cancel := context.WithTimeout(t.Context(), readTimeout)
+			defer cancel()
+
 			// Drain concurrently: the transport write can block
 			// until the peer reads.
 			type readResult struct {
@@ -219,13 +222,14 @@ func TestCeremonyRejectedResponses(t *testing.T) {
 			rc := make(chan readResult, 1)
 			go func() {
 				_, cmd, _, err := cli.read(readTimeout)
-				rc <- readResult{cmd, err}
+				select {
+				case rc <- readResult{cmd, err}:
+				case <-ctx.Done():
+				}
 			}()
 
 			tt.call(dc)
 
-			ctx, cancel := context.WithTimeout(t.Context(), readTimeout)
-			defer cancel()
 			var res readResult
 			select {
 			case res = <-rc:
