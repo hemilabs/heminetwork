@@ -14,7 +14,10 @@ package continuum
 // it cannot be spoofed to dodge an exhausted bucket.
 
 import (
+	"context"
+	"net"
 	"testing"
+	"time"
 
 	"golang.org/x/time/rate"
 )
@@ -143,5 +146,160 @@ func TestPeerExpiredBadKeyType(t *testing.T) {
 	s.limiterMtx.Unlock()
 	if n != 0 {
 		t.Fatalf("limiters = %d, want 0", n)
+	}
+}
+
+// --- per-IP handshake attempt limiting ---
+//
+// handshakeSem caps how many handshakes run CONCURRENTLY but says
+// nothing about how fast they may be started, and a slot is held for
+// up to handshakeTimeout while KX runs.  One IP opening connections it
+// never completes could therefore keep every slot occupied and starve
+// legitimate peers.  handshakeAllowed refuses that flood in the accept
+// loop, before a slot is ever taken.
+
+// tcpAddr builds a *net.TCPAddr for an IP literal.
+func tcpAddr(t *testing.T, ip string, port int) *net.TCPAddr {
+	t.Helper()
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		t.Fatalf("bad test ip %q", ip)
+	}
+	return &net.TCPAddr{IP: parsed, Port: port}
+}
+
+func TestHandshakeAllowedThrottlesOneIP(t *testing.T) {
+	s := limiterServer(t)
+	addr := tcpAddr(t, "10.0.0.1", 40000)
+
+	// The burst is what a legitimate peer may use for reconnects.
+	for i := range handshakeBurst {
+		if !s.handshakeAllowed(addr) {
+			t.Fatalf("attempt %d refused inside the burst", i)
+		}
+	}
+	// Past it the flood is refused, without ever taking a
+	// handshakeSem slot.
+	if s.handshakeAllowed(addr) {
+		t.Fatal("an IP exceeded its handshake burst without being " +
+			"refused: it can hold every semaphore slot and starve " +
+			"legitimate peers")
+	}
+}
+
+func TestHandshakeAllowedIsPerIP(t *testing.T) {
+	s := limiterServer(t)
+	flooder := tcpAddr(t, "10.0.0.1", 40000)
+	honest := tcpAddr(t, "10.0.0.2", 40000)
+
+	for range handshakeBurst {
+		s.handshakeAllowed(flooder)
+	}
+	if s.handshakeAllowed(flooder) {
+		t.Fatal("flooder was not throttled")
+	}
+
+	// A different IP is unaffected: this is the starvation the fix
+	// exists to prevent.
+	if !s.handshakeAllowed(honest) {
+		t.Fatal("an unrelated IP was starved by the flooder")
+	}
+
+	// Source port must not matter — an attacker gets a new one per
+	// connection for free.
+	if s.handshakeAllowed(tcpAddr(t, "10.0.0.1", 40001)) {
+		t.Fatal("changing source port reset the limit")
+	}
+}
+
+// TestHandshakeAllowedNonTCPAddr covers the guard for listeners that
+// do not yield TCP addresses (test injection): there is no IP to key
+// on, and handshakeSem still bounds concurrency.
+func TestHandshakeAllowedNonTCPAddr(t *testing.T) {
+	s := limiterServer(t)
+	addr := &net.UnixAddr{Name: "/tmp/test.sock", Net: "unix"}
+	for range handshakeBurst * 2 {
+		if !s.handshakeAllowed(addr) {
+			t.Fatal("non-TCP address was rate limited")
+		}
+	}
+}
+
+// TestHandshakeRateTableBounded proves the limiter table cannot itself
+// be grown without bound by connections from fresh IPs.
+func TestHandshakeRateTableBounded(t *testing.T) {
+	s := limiterServer(t)
+
+	// Walk past the cap using distinct IPs.
+	for i := range handshakeRateCap + 16 {
+		//nolint:gosec // deterministic test octets, no overflow concern
+		ip := net.IPv4(10, byte(i>>16), byte(i>>8), byte(i))
+		s.handshakeAllowed(&net.TCPAddr{IP: ip, Port: 40000})
+	}
+
+	s.handshakeRateMtx.Lock()
+	n := len(s.handshakeRates)
+	s.handshakeRateMtx.Unlock()
+	if n > handshakeRateCap {
+		t.Fatalf("handshake limiter table = %d entries, cap is %d",
+			n, handshakeRateCap)
+	}
+}
+
+func TestPromHandshakeRateDrops(t *testing.T) {
+	s := limiterServer(t)
+	if got := s.promHSRateDrops(); got != 0 {
+		t.Fatalf("initial = %v, want 0", got)
+	}
+	s.hsRateDrops.Add(3)
+	if got := s.promHSRateDrops(); got != 3 {
+		t.Fatalf("= %v, want 3", got)
+	}
+}
+
+// TestAcceptLoopEnforcesHandshakeRate proves the accept loop actually
+// applies handshakeAllowed.  The unit tests above exercise the helper
+// directly and pass even if nothing calls it, so this drives the real
+// listener: a burst of raw TCP connections from one IP that never
+// complete KX must start being refused.
+func TestAcceptLoopEnforcesHandshakeRate(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	errCh := make(chan error, 1)
+	go func() { errCh <- s.Run(ctx) }()
+	addr := waitForListenAddress(t, s, 5*time.Second)
+
+	// Open well past the burst without ever speaking the protocol,
+	// which is exactly the starvation attack: every one of these
+	// would otherwise hold a handshakeSem slot for handshakeTimeout.
+	var conns []net.Conn
+	t.Cleanup(func() {
+		for _, c := range conns {
+			c.Close()
+		}
+	})
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	for range handshakeBurst * 3 {
+		c, err := dialer.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			break // refused at the OS level is also a rejection
+		}
+		conns = append(conns, c)
+	}
+
+	waitForCondition(t, "accept loop never rate limited a flood of "+
+		"unauthenticated connections from one IP",
+		10*time.Second, func() bool {
+			return s.hsRateDrops.Load() > 0
+		})
+
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(30 * time.Second):
+		t.Fatal("server did not shut down")
 	}
 }
