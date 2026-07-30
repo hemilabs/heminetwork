@@ -247,6 +247,12 @@ type Server struct {
 	peersTTL *ttl.TTL                 // expiry for known peers
 	pings    *ttl.TTL                 // unanswered ping timeout
 
+	// Per-identity message rate limiters, keyed by peer Identity.
+	// Held across sessions so a reconnect does not hand the peer a
+	// fresh burst budget.  Guarded by limiterMtx.
+	limiters   map[Identity]*rate.Limiter
+	limiterMtx sync.Mutex
+
 	// Per-sender envelope rate counter — limits how many
 	// EncryptedPayload messages are accepted from one sender
 	// before signature verification is skipped.
@@ -335,6 +341,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		sessions:     make(map[Identity]*Transport, cfg.PeersWanted),
 		ponged:       make(map[Identity]struct{}, cfg.PeersWanted),
 		peers:        make(map[Identity]*PeerRecord),
+		limiters:     make(map[Identity]*rate.Limiter),
 		ceremonies:   make(map[CeremonyID]*CeremonyInfo),
 		handshakeSem: make(chan struct{}, cfg.PeersWanted),
 		initiator:    init,
@@ -713,7 +720,7 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 			s.pings.Put(sessionCtx, ipt, *id, t, s.pingExpired, nil)
 		}
 
-		limiter = rate.NewLimiter(messageRate, messageBurst)
+		limiter = s.peerLimiter(*id)
 	}
 
 	for {
@@ -1905,6 +1912,7 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 	s.mtx.Lock()
 	delete(s.peers, id)
 	s.mtx.Unlock()
+	s.deleteLimiter(id)
 	log.Debugf("peer expired: %v", id)
 }
 
@@ -1962,6 +1970,42 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 		log.Debugf("new peer: %v at %s", pr.Identity, pr.Address)
 	}
 	return !existed
+}
+
+// peerLimiter returns the message rate limiter for a peer identity,
+// creating it on first use.
+//
+// The limiter is keyed on identity and outlives the session so that
+// reconnecting does not refill the burst budget.  A per-session
+// limiter let a peer spend its full burst, drop the connection, and
+// immediately reconnect for another one, which makes the sustained
+// rate unbounded in practice.  Identity is proven by the handshake
+// before handle() runs, so it cannot be spoofed to dodge an exhausted
+// bucket.
+//
+// Entries are evicted when the peer record expires (peerExpired), so
+// the map is bounded by the peer table rather than by connection
+// attempts.
+func (s *Server) peerLimiter(id Identity) *rate.Limiter {
+	s.limiterMtx.Lock()
+	defer s.limiterMtx.Unlock()
+
+	l, ok := s.limiters[id]
+	if !ok {
+		l = rate.NewLimiter(messageRate, messageBurst)
+		s.limiters[id] = l
+	}
+	return l
+}
+
+// deleteLimiter drops a peer's rate limiter.  Called when the peer
+// record expires: by then the peer has been silent for peerTTL, which
+// is far longer than the bucket takes to refill, so nothing is
+// forgiven that time had not already restored.
+func (s *Server) deleteLimiter(id Identity) {
+	s.limiterMtx.Lock()
+	delete(s.limiters, id)
+	s.limiterMtx.Unlock()
 }
 
 // knownPeerList returns peer records suitable for gossip, excluding
