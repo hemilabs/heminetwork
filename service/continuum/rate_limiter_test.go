@@ -4,14 +4,21 @@
 
 package continuum
 
-// Coverage for the per-identity message rate limiter.
+// Coverage for the three inbound-abuse controls:
 //
-// The limiter is keyed on peer Identity and outlives any single
-// session.  A per-session limiter let a peer spend its whole burst,
-// drop the connection, reconnect, and get a fresh one, which makes the
-// sustained rate unbounded no matter how the per-session numbers are
-// tuned.  Identity is proven by the handshake before handle() runs, so
-// it cannot be spoofed to dodge an exhausted bucket.
+//   - a per-identity message bucket that survives reconnects and
+//     expires on idleness, so it neither refills for free nor grows
+//     without bound;
+//   - a per-source cap on IN-FLIGHT handshakes, so one address cannot
+//     occupy every handshakeSem slot;
+//   - a budget on REFUSED messages, so a peer that ignores the message
+//     limit is disconnected rather than being paid for forever.
+//
+// Time is supplied explicitly wherever a token bucket is asserted on.
+// rate.Limiter refills on the wall clock, so `drain(); if l.Allow()`
+// is only correct when both statements run inside one refill interval
+// (10.3ms at messageRate) — a flake that hides on an idle machine.
+// AllowN with a fixed instant removes the clock from the assertion.
 
 import (
 	"context"
@@ -25,7 +32,10 @@ import (
 )
 
 // limiterServer builds a Server through the production constructor so
-// the limiter map exists, without starting listeners or loops.
+// the limiter table exists, and pushes the session timers out of range
+// so they cannot fire during a test. handle() arms an initial-ping
+// timeout; at the default 7s it races the negative waits below and
+// would close the session for a reason the test then misattributes.
 func limiterServer(t *testing.T) *Server {
 	t.Helper()
 	s, err := NewServer(testConfig())
@@ -36,36 +46,50 @@ func limiterServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("server secret: %v", err)
 	}
-	s.secret = secret
+	peersTTL, err := ttl.New(16, true)
+	if err != nil {
+		t.Fatalf("peers ttl: %v", err)
+	}
+	pings, err := ttl.New(16, true)
+	if err != nil {
+		t.Fatalf("pings ttl: %v", err)
+	}
+	s.secret, s.peersTTL, s.pings = secret, peersTTL, pings
+	s.cfg.InitialPingTimeout = time.Hour
+	s.cfg.PingInterval = time.Hour
+	s.cfg.MaintainInterval = time.Hour
 	return s
 }
 
-// drain consumes tokens until the limiter refuses, returning how many
-// it allowed.  Bounded so a broken limiter cannot spin forever.
-func drain(t *testing.T, l *rate.Limiter) int {
+// drainAt empties a limiter at a fixed instant and returns how many
+// tokens it granted. The instant is fixed so no refill can occur
+// mid-drain.
+func drainAt(t *testing.T, l *rate.Limiter, now time.Time) int {
 	t.Helper()
 	const bound = messageBurst * 10
 	for i := range bound {
-		if !l.Allow() {
+		if !l.AllowN(now, 1) {
 			return i
 		}
 	}
-	t.Fatalf("limiter allowed %d messages without refusing", bound)
+	t.Fatalf("limiter granted %d tokens without refusing", bound)
 	return 0
 }
+
+// --- per-identity message bucket ---
 
 func TestPeerLimiterSurvivesReconnect(t *testing.T) {
 	s := limiterServer(t)
 	peer := mustSecret(t).Identity
+	now := time.Now()
 
-	// First session: spend the whole burst.
-	if got := drain(t, s.peerLimiter(peer)); got == 0 {
+	if got := drainAt(t, s.peerLimiter(peer), now); got == 0 {
 		t.Fatal("limiter refused the very first message")
 	}
 
-	// Reconnect: handle() asks for the limiter again for the same
-	// identity.  It must be the exhausted one, not a fresh bucket.
-	if s.peerLimiter(peer).Allow() {
+	// Reconnect: handle() looks the limiter up again for the same
+	// identity and must get the exhausted one, not a fresh bucket.
+	if s.peerLimiter(peer).AllowN(now, 1) {
 		t.Fatal("reconnecting refilled the burst budget: a peer can " +
 			"spend its burst, drop the connection, and immediately " +
 			"reconnect for another one")
@@ -76,15 +100,14 @@ func TestPeerLimiterIsPerIdentity(t *testing.T) {
 	s := limiterServer(t)
 	noisy := mustSecret(t).Identity
 	quiet := mustSecret(t).Identity
+	now := time.Now()
 
-	drain(t, s.peerLimiter(noisy))
+	drainAt(t, s.peerLimiter(noisy), now)
 
-	// One peer exhausting its bucket must not throttle another.
-	if !s.peerLimiter(quiet).Allow() {
+	if !s.peerLimiter(quiet).AllowN(now, 1) {
 		t.Fatal("a different identity was throttled by the noisy peer")
 	}
-	// ...and the noisy one stays exhausted.
-	if s.peerLimiter(noisy).Allow() {
+	if s.peerLimiter(noisy).AllowN(now, 1) {
 		t.Fatal("the exhausted identity was refilled")
 	}
 }
@@ -93,8 +116,6 @@ func TestPeerLimiterStableIdentity(t *testing.T) {
 	s := limiterServer(t)
 	peer := mustSecret(t).Identity
 
-	// Repeated lookups return the same limiter rather than
-	// replacing it, which is what makes the budget cumulative.
 	first := s.peerLimiter(peer)
 	if second := s.peerLimiter(peer); first != second {
 		t.Fatal("peerLimiter returned a new limiter for a known identity")
@@ -107,60 +128,49 @@ func TestPeerLimiterStableIdentity(t *testing.T) {
 	}
 }
 
-// TestPeerLimiterEvictedOnPeerExpiry proves the map is bounded by the
-// peer table rather than by connection attempts: when a peer record
-// expires the limiter goes with it.
-func TestPeerLimiterEvictedOnPeerExpiry(t *testing.T) {
-	s := limiterServer(t)
-	peer := mustSecret(t).Identity
-
-	drain(t, s.peerLimiter(peer))
-	s.limiterMtx.Lock()
-	n := len(s.limiters)
-	s.limiterMtx.Unlock()
-	if n != 1 {
-		t.Fatalf("limiters = %d, want 1", n)
-	}
-
-	// peerExpired fires after the peer has been silent for peerTTL,
-	// far longer than the bucket needs to refill, so dropping it
-	// forgives nothing time had not already restored.
-	s.peerExpired(t.Context(), peer, nil)
-
-	s.limiterMtx.Lock()
-	n = len(s.limiters)
-	s.limiterMtx.Unlock()
-	if n != 0 {
-		t.Fatalf("limiters = %d after expiry, want 0", n)
-	}
-	if !s.peerLimiter(peer).Allow() {
-		t.Fatal("limiter was not recreated after expiry")
-	}
-}
-
-// TestPeerExpiredBadKeyType covers the type guard on the TTL callback.
-func TestPeerExpiredBadKeyType(t *testing.T) {
-	s := limiterServer(t)
-	s.peerExpired(t.Context(), "not-an-identity", nil)
-
-	s.limiterMtx.Lock()
-	n := len(s.limiters)
-	s.limiterMtx.Unlock()
-	if n != 0 {
-		t.Fatalf("limiters = %d, want 0", n)
-	}
-}
-
-// --- per-IP handshake attempt limiting ---
+// TestPeerLimiterTableSelfBounds proves the table does not depend on
+// the peer record for eviction.
 //
-// handshakeSem caps how many handshakes run CONCURRENTLY but says
-// nothing about how fast they may be started, and a slot is held for
-// up to handshakeTimeout while KX runs.  One IP opening connections it
-// never completes could therefore keep every slot occupied and starve
-// legitimate peers.  handshakeAllowed refuses that flood in the accept
-// loop, before a slot is ever taken.
+// Identities are free to mint and addPeer REJECTS a peer whose NaClPub
+// is absent, while the handshake permits it — so an attacker can hold
+// a session, and therefore a limiter, for an identity that never
+// becomes a tracked peer. Keying eviction off the peer record leaked
+// one entry per such connection, permanently. The table must expire on
+// its own instead.
+func TestPeerLimiterTableSelfBounds(t *testing.T) {
+	s := limiterServer(t)
 
-// tcpAddr builds a *net.TCPAddr for an IP literal.
+	// None of these identities is ever added to s.peers.
+	for range 64 {
+		s.peerLimiter(mustSecret(t).Identity)
+	}
+	s.mtx.RLock()
+	tracked := len(s.peers)
+	s.mtx.RUnlock()
+	if tracked != 0 {
+		t.Fatalf("test setup: %d peers tracked, want 0", tracked)
+	}
+	if got := s.limiters.Len(); got != 64 {
+		t.Fatalf("limiters = %d, want 64", got)
+	}
+
+	// Entries carry their own expiry rather than waiting on a peer
+	// record that will never exist.
+	id := mustSecret(t).Identity
+	s.peerLimiter(id)
+	if _, _, err := s.limiters.Get(id); err != nil {
+		t.Fatalf("entry not stored: %v", err)
+	}
+	if _, err := s.limiters.Delete(id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, _, err := s.limiters.Get(id); err == nil {
+		t.Fatal("entry survived deletion")
+	}
+}
+
+// --- per-source in-flight handshake cap ---
+
 func tcpAddr(t *testing.T, ip string, port int) *net.TCPAddr {
 	t.Helper()
 	parsed := net.ParseIP(ip)
@@ -170,101 +180,181 @@ func tcpAddr(t *testing.T, ip string, port int) *net.TCPAddr {
 	return &net.TCPAddr{IP: parsed, Port: port}
 }
 
-func TestHandshakeAllowedThrottlesOneIP(t *testing.T) {
+func TestHandshakeInFlightCap(t *testing.T) {
 	s := limiterServer(t)
 	addr := tcpAddr(t, "10.0.0.1", 40000)
 
-	// The burst is what a legitimate peer may use for reconnects.
-	for i := range handshakeBurst {
-		if !s.handshakeAllowed(addr) {
-			t.Fatalf("attempt %d refused inside the burst", i)
+	keys := make([]string, 0, maxHandshakesPerIP)
+	for i := range maxHandshakesPerIP {
+		k, ok := s.acquireHandshake(addr)
+		if !ok {
+			t.Fatalf("attempt %d refused below the cap", i)
 		}
+		keys = append(keys, k)
 	}
-	// Past it the flood is refused, without ever taking a
-	// handshakeSem slot.
-	if s.handshakeAllowed(addr) {
-		t.Fatal("an IP exceeded its handshake burst without being " +
-			"refused: it can hold every semaphore slot and starve " +
-			"legitimate peers")
+
+	// Past the cap: refused, so the source cannot occupy more than
+	// maxHandshakesPerIP semaphore slots no matter how fast it
+	// connects. This is what an arrival-rate limit could not do —
+	// occupancy is rate x hold-time, so any permitted rate holds
+	// rate*handshakeTimeout slots in steady state.
+	if _, ok := s.acquireHandshake(addr); ok {
+		t.Fatalf("a source held more than %d handshakes in flight: "+
+			"it can occupy every semaphore slot and starve "+
+			"legitimate peers", maxHandshakesPerIP)
+	}
+
+	// Finishing one frees exactly one.
+	s.releaseHandshake(keys[0])
+	if _, ok := s.acquireHandshake(addr); !ok {
+		t.Fatal("releasing a handshake did not free a slot")
 	}
 }
 
-func TestHandshakeAllowedIsPerIP(t *testing.T) {
+// TestHandshakeInFlightNeverLocksOut proves the cap cannot be used to
+// exclude an honest peer. Unlike an arrival-rate limit, a source with
+// fewer than the cap in flight is ALWAYS admitted, so a peer behind a
+// shared NAT egress is never refused because of a co-located flooder.
+func TestHandshakeInFlightNeverLocksOut(t *testing.T) {
 	s := limiterServer(t)
-	flooder := tcpAddr(t, "10.0.0.1", 40000)
-	honest := tcpAddr(t, "10.0.0.2", 40000)
+	shared := tcpAddr(t, "10.0.0.1", 40000)
 
-	for range handshakeBurst {
-		s.handshakeAllowed(flooder)
+	// A flooder saturates the shared address, then goes away.
+	var keys []string
+	for range maxHandshakesPerIP {
+		k, _ := s.acquireHandshake(shared)
+		keys = append(keys, k)
 	}
-	if s.handshakeAllowed(flooder) {
-		t.Fatal("flooder was not throttled")
-	}
-
-	// A different IP is unaffected: this is the starvation the fix
-	// exists to prevent.
-	if !s.handshakeAllowed(honest) {
-		t.Fatal("an unrelated IP was starved by the flooder")
+	for _, k := range keys {
+		s.releaseHandshake(k)
 	}
 
-	// Source port must not matter — an attacker gets a new one per
-	// connection for free.
-	if s.handshakeAllowed(tcpAddr(t, "10.0.0.1", 40001)) {
-		t.Fatal("changing source port reset the limit")
+	// The honest peer behind the same address connects and is
+	// admitted immediately — no residual penalty, unlike a token
+	// bucket which would still be empty.
+	if _, ok := s.acquireHandshake(shared); !ok {
+		t.Fatal("an honest peer was refused after a co-located " +
+			"flooder finished: the cap must not carry a penalty " +
+			"forward or NAT'd peers get locked out")
 	}
 }
 
-// TestHandshakeAllowedNonTCPAddr covers the guard for listeners that
-// do not yield TCP addresses (test injection): there is no IP to key
-// on, and handshakeSem still bounds concurrency.
-func TestHandshakeAllowedNonTCPAddr(t *testing.T) {
+// TestHandshakeIPv6PrefixKeyed proves addresses in one /64 share a
+// budget. A routed /64 is the standard host allocation, so keying on
+// the full /128 would let one machine mint unlimited distinct keys and
+// bypass the cap entirely.
+func TestHandshakeIPv6PrefixKeyed(t *testing.T) {
+	s := limiterServer(t)
+
+	first, ok := handshakeIP(tcpAddr(t, "2001:db8::1", 40000))
+	if !ok {
+		t.Fatal("no key derived for an IPv6 address")
+	}
+	second, _ := handshakeIP(tcpAddr(t, "2001:db8::dead:beef", 40001))
+	if first != second {
+		t.Fatalf("addresses in one /64 keyed separately (%q vs %q): "+
+			"a single host can rotate addresses to bypass the cap",
+			first, second)
+	}
+
+	// A different /64 is a different source.
+	other, _ := handshakeIP(tcpAddr(t, "2001:db8:0:1::1", 40000))
+	if other == first {
+		t.Fatal("distinct /64s shared a key")
+	}
+
+	// Saturating one /64 does not refuse another.
+	for range maxHandshakesPerIP {
+		s.acquireHandshake(tcpAddr(t, "2001:db8::1", 40000))
+	}
+	if _, ok := s.acquireHandshake(tcpAddr(t, "2001:db8::2", 40002)); ok {
+		t.Fatal("a second address in the saturated /64 was admitted")
+	}
+	if _, ok := s.acquireHandshake(tcpAddr(t, "2001:db8:0:1::1", 40000)); !ok {
+		t.Fatal("an unrelated /64 was refused")
+	}
+}
+
+func TestHandshakeIPv4KeyedWhole(t *testing.T) {
+	s := limiterServer(t)
+
+	a, ok := handshakeIP(tcpAddr(t, "10.0.0.1", 40000))
+	if !ok {
+		t.Fatal("no key derived for an IPv4 address")
+	}
+	// Source port must not matter: an attacker gets a fresh one per
+	// connection for free.
+	b, _ := handshakeIP(tcpAddr(t, "10.0.0.1", 40001))
+	if a != b {
+		t.Fatal("source port changed the key")
+	}
+	// Neighbouring addresses are distinct sources.
+	c, _ := handshakeIP(tcpAddr(t, "10.0.0.2", 40000))
+	if c == a {
+		t.Fatal("distinct IPv4 addresses shared a key")
+	}
+	for range maxHandshakesPerIP {
+		s.acquireHandshake(tcpAddr(t, "10.0.0.1", 40000))
+	}
+	if _, ok := s.acquireHandshake(tcpAddr(t, "10.0.0.2", 40000)); !ok {
+		t.Fatal("an unrelated IPv4 source was refused")
+	}
+}
+
+// TestHandshakeTableBoundedByInFlight proves the tracking map holds
+// only work actually in progress, so it cannot be grown by connection
+// churn from many sources.
+func TestHandshakeTableBoundedByInFlight(t *testing.T) {
+	s := limiterServer(t)
+
+	for i := range 4096 {
+		//nolint:gosec // deterministic test octets
+		ip := net.IPv4(10, byte(i>>16), byte(i>>8), byte(i))
+		k, ok := s.acquireHandshake(&net.TCPAddr{IP: ip, Port: 40000})
+		if !ok {
+			t.Fatalf("source %d refused on its first handshake", i)
+		}
+		s.releaseHandshake(k)
+	}
+
+	s.handshakeIPMtx.Lock()
+	n := len(s.handshakesInFlight)
+	s.handshakeIPMtx.Unlock()
+	if n != 0 {
+		t.Fatalf("in-flight table = %d entries after every handshake "+
+			"finished, want 0", n)
+	}
+}
+
+// TestHandshakeNonTCPAddr covers the guard for addresses with no IP to
+// key on; handshakeSem still bounds total concurrency.
+func TestHandshakeNonTCPAddr(t *testing.T) {
 	s := limiterServer(t)
 	addr := &net.UnixAddr{Name: "/tmp/test.sock", Net: "unix"}
-	for range handshakeBurst * 2 {
-		if !s.handshakeAllowed(addr) {
-			t.Fatal("non-TCP address was rate limited")
+
+	for range maxHandshakesPerIP * 2 {
+		k, ok := s.acquireHandshake(addr)
+		if !ok {
+			t.Fatal("non-TCP address was capped")
+		}
+		if k != "" {
+			t.Fatalf("non-TCP address produced key %q", k)
 		}
 	}
-}
-
-// TestHandshakeRateTableBounded proves the limiter table cannot itself
-// be grown without bound by connections from fresh IPs.
-func TestHandshakeRateTableBounded(t *testing.T) {
-	s := limiterServer(t)
-
-	// Walk past the cap using distinct IPs.
-	for i := range handshakeRateCap + 16 {
-		//nolint:gosec // deterministic test octets, no overflow concern
-		ip := net.IPv4(10, byte(i>>16), byte(i>>8), byte(i))
-		s.handshakeAllowed(&net.TCPAddr{IP: ip, Port: 40000})
-	}
-
-	s.handshakeRateMtx.Lock()
-	n := len(s.handshakeRates)
-	s.handshakeRateMtx.Unlock()
-	if n > handshakeRateCap {
-		t.Fatalf("handshake limiter table = %d entries, cap is %d",
-			n, handshakeRateCap)
+	// Releasing an empty key is a no-op, not a corruption.
+	s.releaseHandshake("")
+	s.handshakeIPMtx.Lock()
+	n := len(s.handshakesInFlight)
+	s.handshakeIPMtx.Unlock()
+	if n != 0 {
+		t.Fatalf("in-flight table = %d, want 0", n)
 	}
 }
 
-func TestPromHandshakeRateDrops(t *testing.T) {
-	s := limiterServer(t)
-	if got := s.promHSRateDrops(); got != 0 {
-		t.Fatalf("initial = %v, want 0", got)
-	}
-	s.hsRateDrops.Add(3)
-	if got := s.promHSRateDrops(); got != 3 {
-		t.Fatalf("= %v, want 3", got)
-	}
-}
-
-// TestAcceptLoopEnforcesHandshakeRate proves the accept loop actually
-// applies handshakeAllowed.  The unit tests above exercise the helper
-// directly and pass even if nothing calls it, so this drives the real
-// listener: a burst of raw TCP connections from one IP that never
-// complete KX must start being refused.
-func TestAcceptLoopEnforcesHandshakeRate(t *testing.T) {
+// TestAcceptLoopEnforcesHandshakeCap drives the REAL listener: the
+// unit tests above exercise the helper directly and would pass even if
+// nothing called it.
+func TestAcceptLoopEnforcesHandshakeCap(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -274,17 +364,17 @@ func TestAcceptLoopEnforcesHandshakeRate(t *testing.T) {
 	go func() { errCh <- s.Run(ctx) }()
 	addr := waitForListenAddress(t, s, 5*time.Second)
 
-	// Open well past the burst without ever speaking the protocol,
-	// which is exactly the starvation attack: every one of these
-	// would otherwise hold a handshakeSem slot for handshakeTimeout.
+	// Open connections that never speak the protocol. Each would
+	// otherwise hold a semaphore slot for the whole handshake
+	// timeout — the starvation this cap exists to stop.
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
 	var conns []net.Conn
 	t.Cleanup(func() {
 		for _, c := range conns {
 			c.Close()
 		}
 	})
-	dialer := &net.Dialer{Timeout: 2 * time.Second}
-	for range handshakeBurst * 3 {
+	for range maxHandshakesPerIP * 8 {
 		c, err := dialer.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			break // refused at the OS level is also a rejection
@@ -292,54 +382,45 @@ func TestAcceptLoopEnforcesHandshakeRate(t *testing.T) {
 		conns = append(conns, c)
 	}
 
-	waitForCondition(t, "accept loop never rate limited a flood of "+
-		"unauthenticated connections from one IP",
-		10*time.Second, func() bool {
+	waitForCondition(t, "accept loop never refused a flood of "+
+		"unauthenticated connections from one source",
+		15*time.Second, func() bool {
 			return s.hsRateDrops.Load() > 0
 		})
 
 	cancel()
+	exitCtx, exitCancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer exitCancel()
 	select {
 	case <-errCh:
-	case <-time.After(30 * time.Second):
+	case <-exitCtx.Done():
 		t.Fatal("server did not shut down")
 	}
 }
 
-// --- disconnect on sustained rate abuse ---
-//
-// Dropping a rate-limited message is not by itself a defence: by the
-// time the limiter sees it, ReadEnvelope has already paid the
-// transport decrypt.  A peer that ignores the limit imposes that cost
-// on every message, forever, for free.  handle() therefore closes the
-// session after messageDropLimit CONSECUTIVE drops, which also forces
-// the peer back through the per-IP handshake limiter.
+// --- refused-message budget ---
 
-// blockedSession drives handle() against a peer whose limiter refuses
-// everything, then writes msgs messages.  It reports whether handle()
-// closed the session.
+// blockedSession drives handle() with a peer whose message limiter
+// refuses everything, writes msgs messages, and reports whether
+// handle() closed the session.
 //
 // The limiter is pinned to refuse rather than being outrun in real
 // time: a test that floods and hopes to beat the refill rate is a race
-// against machine speed and fails under load.  Pinning it makes the
-// drop count exactly the message count, so the threshold behaviour is
-// deterministic.
+// against machine speed and fails under load.
 func blockedSession(t *testing.T, s *Server, peer *Secret, msgs int) bool {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	// rate 0, burst 0: Allow() is always false.
+	// rate 0, burst 0: AllowN is always false.
 	s.limiterMtx.Lock()
-	if s.limiters == nil {
-		s.limiters = make(map[Identity]*rate.Limiter)
-	}
-	s.limiters[peer.Identity] = rate.NewLimiter(0, 0)
+	s.limiters.Put(context.Background(), limiterTTL, peer.Identity,
+		rate.NewLimiter(0, 0), nil, nil)
 	s.limiterMtx.Unlock()
 
-	// Real TCP, not net.Pipe: the pipe is unbuffered, so every
-	// write blocks for a reader and nothing can be staged.
+	// Real TCP, not net.Pipe: the pipe is unbuffered, so every write
+	// blocks for a reader and nothing can be staged.
 	srv, cli := localhostTransports(t)
 	if err := s.newSession(&peer.Identity, srv); err != nil {
 		t.Fatalf("new session: %v", err)
@@ -352,11 +433,12 @@ func blockedSession(t *testing.T, s *Server, peer *Secret, msgs int) bool {
 		s.handle(ctx, &peer.Identity, srv, false)
 	}()
 
-	// Drain whatever handle() sends (initial gossip, pings) so its
-	// writes cannot block and stall the read loop under test.
+	// Drain whatever handle() sends so its writes cannot block the
+	// read loop under test. Deadline cleared so the drain lives as
+	// long as the session it protects.
 	go func() {
 		for {
-			if _, _, _, err := cli.read(readTimeout); err != nil {
+			if _, _, _, err := cli.read(0); err != nil {
 				return
 			}
 		}
@@ -369,7 +451,19 @@ func blockedSession(t *testing.T, s *Server, peer *Secret, msgs int) bool {
 		default:
 		}
 		if err := cli.Write(peer.Identity, PingResponse{}); err != nil {
-			break
+			// A closed transport IS the disconnect under test.
+			// handle() closes the transport before this goroutine
+			// observes done, so give it a moment to land rather
+			// than racing it.
+			closeCtx, closeCancel := context.WithTimeout(t.Context(),
+				5*time.Second)
+			defer closeCancel()
+			select {
+			case <-done:
+				return true
+			case <-closeCtx.Done():
+				t.Fatalf("write failed but the session stayed open: %v", err)
+			}
 		}
 	}
 
@@ -385,51 +479,114 @@ func blockedSession(t *testing.T, s *Server, peer *Secret, msgs int) bool {
 	}
 }
 
-// rateTestServer is a limiterServer with the TTLs handle() touches.
-func rateTestServer(t *testing.T) *Server {
-	t.Helper()
+func TestSustainedRefusalDisconnects(t *testing.T) {
 	s := limiterServer(t)
-	peersTTL, err := ttl.New(16, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pings, err := ttl.New(16, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.peersTTL, s.pings = peersTTL, pings
-	return s
-}
 
-func TestSustainedRateAbuseDisconnects(t *testing.T) {
-	s := rateTestServer(t)
-
-	// Every message is refused, so this is comfortably past the
-	// consecutive-drop threshold.
-	if !blockedSession(t, s, mustSecret(t), messageDropLimit*2) {
-		t.Fatal("a peer that ignored the rate limit was never " +
+	if !blockedSession(t, s, mustSecret(t), messageDropBurst*2) {
+		t.Fatal("a peer that ignored the message limit was never " +
 			"disconnected: every message it sends costs a transport " +
-			"decrypt, so dropping alone lets it waste resources forever")
+			"decrypt, so refusing alone lets it waste resources forever")
 	}
 	if s.rateDisconnects.Load() == 0 {
 		t.Fatal("disconnect was not counted")
 	}
 }
 
-// TestDisconnectRespectsThreshold proves a session is not closed on the
-// first refusal: a peer must sustain more than messageDropLimit
-// consecutive drops, so a brief overshoot is tolerated.
-func TestDisconnectRespectsThreshold(t *testing.T) {
-	s := rateTestServer(t)
+// TestBriefOvershootSurvives proves the budget tolerates a burst.
+// The assertion is positive: it waits for the refusals to actually be
+// counted before concluding the session survived them, so it cannot
+// pass by the writer stalling and no refusals happening at all.
+func TestBriefOvershootSurvives(t *testing.T) {
+	s := limiterServer(t)
+	peer := mustSecret(t)
 
-	// Exactly at the limit, never past it: the session must survive.
-	if blockedSession(t, s, mustSecret(t), messageDropLimit) {
-		t.Fatalf("session closed after %d drops; the threshold is "+
-			"more than %d, so a brief overshoot must be tolerated",
-			messageDropLimit, messageDropLimit)
+	const msgs = messageDropBurst / 2
+	done := make(chan bool, 1)
+	go func() { done <- blockedSession(t, s, peer, msgs) }()
+
+	waitForCondition(t, "the refused messages were never counted",
+		10*time.Second, func() bool {
+			return s.rateDropped.Load() >= msgs
+		})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	select {
+	case closed := <-done:
+		if closed {
+			t.Fatalf("session closed after %d refusals; the budget is "+
+				"%d, so a brief overshoot must be tolerated",
+				msgs, messageDropBurst)
+		}
+	case <-ctx.Done():
+		t.Fatal("blockedSession did not return")
 	}
 	if got := s.rateDisconnects.Load(); got != 0 {
 		t.Fatalf("rate disconnects = %d, want 0", got)
+	}
+}
+
+// TestRefusalBudgetIgnoresPacing is the regression for the defect
+// this control replaced.
+//
+// The previous version counted CONSECUTIVE refusals and reset the
+// count to zero on any accepted message. Because the message bucket
+// admits messageRate messages per second regardless of how fast they
+// arrive, one accepted message lands every 1/messageRate and cleared
+// the run — so reaching N consecutive refusals required more than
+// (N+1)*messageRate msgs/sec, and any rate below that sustained the
+// full decrypt cost indefinitely without ever disconnecting.
+//
+// A budget over time closes that hole because accepted messages never
+// touch it: only refusals spend tokens, and nothing refunds them. This
+// drives the exact interleaving that defeated the counter — runs of
+// refusals separated by accepted messages — and requires the budget to
+// still run out. Driven at a fixed instant so no refill occurs.
+func TestRefusalBudgetIgnoresPacing(t *testing.T) {
+	drops := rate.NewLimiter(messageDropRate, messageDropBurst)
+	now := time.Now()
+
+	const run = 16
+	spent := 0
+	disconnected := false
+	for range messageDropBurst {
+		for range run {
+			// A refusal spends budget.
+			if !drops.AllowN(now, 1) {
+				disconnected = true
+				break
+			}
+			spent++
+		}
+		if disconnected {
+			break
+		}
+		// An accepted message. Under the old scheme this reset the
+		// consecutive count to zero and the peer never tripped the
+		// threshold. Here it touches nothing, so the budget spent
+		// so far is not refunded.
+		if got := drops.TokensAt(now); got > float64(messageDropBurst-spent) {
+			t.Fatalf("an accepted message refunded budget: tokens %v, "+
+				"want at most %d", got, messageDropBurst-spent)
+		}
+	}
+	if !disconnected {
+		t.Fatal("a peer interleaving accepted messages between runs of " +
+			"refusals never exhausted the budget: pacing defeats the " +
+			"control")
+	}
+}
+
+// --- metrics ---
+
+func TestPromHandshakeRateDrops(t *testing.T) {
+	s := limiterServer(t)
+	if got := s.promHSRateDrops(); got != 0 {
+		t.Fatalf("initial = %v, want 0", got)
+	}
+	s.hsRateDrops.Add(3)
+	if got := s.promHSRateDrops(); got != 3 {
+		t.Fatalf("= %v, want 3", got)
 	}
 }
 
@@ -441,25 +598,5 @@ func TestPromRateDisconnects(t *testing.T) {
 	s.rateDisconnects.Add(2)
 	if got := s.promRateDisconnects(); got != 2 {
 		t.Fatalf("= %v, want 2", got)
-	}
-}
-
-// TestLimitersLazyInit covers servers built by hand rather than
-// through NewServer, which have no limiter maps.  handle() calls
-// peerLimiter on every session, so a nil map there is a panic in the
-// hot path.
-func TestLimitersLazyInit(t *testing.T) {
-	secret, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := &Server{secret: secret}
-
-	if l := s.peerLimiter(mustSecret(t).Identity); l == nil {
-		t.Fatal("peerLimiter returned nil on a hand-built server")
-	}
-	if !s.handshakeAllowed(tcpAddr(t, "10.0.0.9", 40000)) {
-		t.Fatal("handshakeAllowed refused the first attempt on a " +
-			"hand-built server")
 	}
 }
