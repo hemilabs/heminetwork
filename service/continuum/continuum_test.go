@@ -3002,6 +3002,10 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 	if err != nil {
 		t.Fatal(err)
 	}
+	limiters, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -3015,6 +3019,7 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 		seen:       seen,
 		peersTTL:   peersTTL,
 		pings:      pings,
+		limiters:   limiters,
 		secret:     secret,
 		sessions:   map[Identity]*Transport{peerID: srvTr},
 		peers:      make(map[Identity]*PeerRecord),
@@ -5982,6 +5987,10 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 	if err != nil {
 		t.Fatal(err)
 	}
+	limiters, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -6000,6 +6009,7 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 		seen:     seen,
 		peersTTL: peersTTL,
 		pings:    pings,
+		limiters: limiters,
 		secret:   secret,
 		sessions: map[Identity]*Transport{peerID: srvTr},
 		peers: map[Identity]*PeerRecord{
@@ -6412,6 +6422,10 @@ func TestDecryptPayloadWrongRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	limiters, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	secret, err := NewSecret()
 	if err != nil {
 		t.Fatal(err)
@@ -6424,6 +6438,7 @@ func TestDecryptPayloadWrongRecipient(t *testing.T) {
 		seen:     seen,
 		peersTTL: peersTTL,
 		pings:    pings,
+		limiters: limiters,
 		secret:   secret,
 		sessions: map[Identity]*Transport{peerID: srvTr},
 		peers: map[Identity]*PeerRecord{
@@ -6729,6 +6744,10 @@ func TestSendEncryptedRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	limiters, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	recvTr, peerTr := connectedTransports(t)
 
@@ -6743,6 +6762,7 @@ func TestSendEncryptedRoundTrip(t *testing.T) {
 		seen:     seen,
 		peersTTL: peersTTL,
 		pings:    pings,
+		limiters: limiters,
 		secret:   receiverSecret,
 		sessions: map[Identity]*Transport{peerID: recvTr},
 		peers: map[Identity]*PeerRecord{
@@ -7752,12 +7772,17 @@ func TestHandleInitialWriteErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	limiters, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	peerID := Identity{0xDD}
 	s := &Server{
 		seen:     seen,
 		peersTTL: peersTTL,
 		pings:    pings,
+		limiters: limiters,
 		secret:   secret,
 		sessions: map[Identity]*Transport{peerID: srvTr},
 		peers:    make(map[Identity]*PeerRecord),
