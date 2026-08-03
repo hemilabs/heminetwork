@@ -114,6 +114,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refactor internal structure of `hemictl` to facilitate future development,
+dividing each command into a group that is registered into the tool at runtime
+([#1213](https://github.com/hemilabs/heminetwork/pull/1213)).
+
 - All leveldb databases now share one managed 512 MiB block cache and
   one 4096-handle table file pool (previously 8 MiB and 500 handles
   private per database); write-heavy databases get larger write buffers
@@ -142,7 +146,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through a full ordinal wind against a read-only database for
   controlled measurement of slow blocks
   ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
-
 
 - `BlockTxUpdate` uses stack-allocated reusable buffers instead of slicing
   loop variables, avoiding potential data integrity issues
@@ -360,7 +363,7 @@ Thank you to everyone who contributed to this release!
 
 ---
 
-_Looking for the changelog for an older version? Check <https://github.com/hemilabs/heminetwork/releases>_
+*Looking for the changelog for an older version? Check <https://github.com/hemilabs/heminetwork/releases>*
 
 [Unreleased]: https://github.com/hemilabs/heminetwork/compare/v2.0.0...HEAD
 [v2.0.0]: https://github.com/hemilabs/heminetwork/releases/tag/v2.0.0
