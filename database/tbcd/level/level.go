@@ -104,6 +104,34 @@ type ldb struct {
 
 var _ tbcd.Database = (*ldb)(nil)
 
+// BIP30: two coinbase transactions on mainnet are byte-identical across two
+// blocks each. Map each txid to the later (spendable) block hash.
+var bip30DuplicateBlocks map[chainhash.Hash]chainhash.Hash
+
+func init() {
+	bip30DuplicateBlocks = make(map[chainhash.Hash]chainhash.Hash, 2)
+	for _, pair := range [][2]string{
+		{
+			"e3bf3d07d4b0375638d5f1db5255fe07ba2c4cb067cd81b84ee974b6585fb468",
+			"00000000000271a2dc26e7667f8419f2e15416dc6955e5a6c6cdf3f2574dd08e",
+		},
+		{
+			"d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599",
+			"00000000000a4d0a398161ffc163c503763b1f4360639393e0e4c8e300e0caec",
+		},
+	} {
+		txId, err := chainhash.NewHashFromStr(pair[0])
+		if err != nil {
+			panic(err)
+		}
+		blockHash, err := chainhash.NewHashFromStr(pair[1])
+		if err != nil {
+			panic(err)
+		}
+		bip30DuplicateBlocks[*txId] = *blockHash
+	}
+}
+
 func h2b(wbh *wire.BlockHeader) [80]byte {
 	var b bytes.Buffer
 	err := wbh.Serialize(&b)
@@ -1649,7 +1677,13 @@ func (l *ldb) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainh
 	var locp *wire.TxLoc
 	for it.Next() {
 		if found {
-			panic(fmt.Sprintf("multiple blocks for tx %v", txId))
+			bh, ok := bip30DuplicateBlocks[txId]
+			if !ok {
+				panic(fmt.Sprintf("multiple blocks for tx %v", txId))
+			}
+			log.Debugf("multiple blocks for tx %v", txId)
+			correctBlock := bh
+			return &correctBlock, nil, nil
 		}
 		copy(blockHash[:], it.Key()[33:])
 		if v := it.Value(); len(v) >= 8 {

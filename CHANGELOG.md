@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix `BlockHashByTxId` panic on BIP30 duplicate coinbase txids. Two
+  mainnet Bitcoin transactions exist in two blocks each; querying either
+  txid via RPC crashed `tbcd`.
+
 ### Security
 
 - Fix a remote crash vulnerability in `tbc` caused by the first element
