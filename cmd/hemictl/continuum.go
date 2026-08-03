@@ -72,41 +72,57 @@ func continuumDial(ctx context.Context, addr string) (*continuum.Transport, *con
 	return transport, secret, nil
 }
 
-// continuumctl implements the `hemictl continuum` subcommand.
-func continuumctl(pctx context.Context, flags []string) error {
-	flagSet := flag.NewFlagSet("continuum commands", flag.ExitOnError)
-	var (
-		helpFlag     = flagSet.Bool("h", false, "displays help information")
-		helpLongFlag = flagSet.Bool("help", false, "displays help information")
-	)
+func init() {
+	registerCommand("continuum", "transfunctionerd admin RPCs", continuumHandler)
+}
 
-	flagSet.Usage = func() {
-		fmt.Fprintf(os.Stderr, "%v\n", welcome)
-		fmt.Fprintf(os.Stderr, "Usage: %v continuum [OPTION]... [ACTION]\n\n", os.Args[0])
-		fmt.Println("COMMAND OVERVIEW:")
-		fmt.Println("\tThe 'continuum' command issues admin RPCs to a running transfunctionerd.")
-		fmt.Println("")
-		fmt.Println("OPTIONS:")
-		fmt.Println("\t-h, -help\tDisplay help information")
-		fmt.Println("")
-		fmt.Println("ACTIONS:")
-		fmt.Println("\tpeers\t\tList all known peers with session status")
-		fmt.Println("\tstatus\t\tQuery ceremony status (ceremony_id=<hex>)")
-		fmt.Println("\tlist\t\tList all known ceremonies")
-		for _, h := range continuumActionHelp {
-			fmt.Println(h)
-		}
-		fmt.Println("")
-		fmt.Println("ENVIRONMENT:")
+// continuumCommands holds the continuum actions.  The continuum_debug
+// build tag adds ceremony commands (keygen, sign, reshare, suggest) from
+// init().  Production builds only carry the read-only actions below —
+// ceremony initiation comes from the blockchain, not from hemictl.
+var continuumCommands = map[string]command{
+	"peers": {
+		help: "List all known peers with session status.",
+		run: func(ctx context.Context, _ map[string]string) error {
+			return continuumPeers(ctx)
+		},
+	},
+	"status": {
+		help: "Query ceremony status.",
+		args: map[string]argument{
+			"ceremony_id": {required: true, help: "ceremony id (hex)"},
+		},
+		run: func(ctx context.Context, args map[string]string) error {
+			return continuumStatus(ctx, args["ceremony_id"])
+		},
+	},
+	"list": {
+		help: "List all known ceremonies.",
+		run: func(ctx context.Context, _ map[string]string) error {
+			return continuumList(ctx)
+		},
+	},
+}
+
+func continuumHandler(pctx context.Context, flags []string) error {
+	grp := commandGroup{
+		help:     "Issue admin RPCs to a running transfunctionerd.",
+		commands: continuumCommands,
+	}
+
+	fs := flag.NewFlagSet("continuum", flag.ExitOnError)
+	helpShort := fs.Bool("h", false, "display help")
+	helpLong := fs.Bool("help", false, "display help")
+	fs.Usage = func() {
+		printGroupHelp("continuum", grp)
+		fmt.Fprintf(os.Stderr, "\nENVIRONMENT:\n")
 		config.Help(os.Stderr, continuumCM)
 	}
-
-	if err := flagSet.Parse(flags); err != nil {
+	if err := fs.Parse(flags); err != nil {
 		return err
 	}
-
-	if len(flagSet.Args()) < 1 || *helpFlag || *helpLongFlag {
-		flagSet.Usage()
+	if len(flags) == 0 || *helpShort || *helpLong {
+		fs.Usage()
 		return nil
 	}
 
@@ -114,41 +130,11 @@ func continuumctl(pctx context.Context, flags []string) error {
 		return err
 	}
 
-	action, args, err := parseArgs(flagSet.Args())
-	if err != nil {
-		return err
-	}
-
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	switch action {
-	case "peers":
-		return continuumPeers(ctx)
-	case "status":
-		cidHex := args["ceremony_id"]
-		if cidHex == "" {
-			return errors.New("ceremony_id required")
-		}
-		return continuumStatus(ctx, cidHex)
-	case "list":
-		return continuumList(ctx)
-	default:
-		if fn, ok := continuumActions[action]; ok {
-			return fn(ctx, args)
-		}
-		return fmt.Errorf("unknown continuum action: %v", action)
-	}
+	return dispatchGroup(ctx, grp, "continuum", fs.Args())
 }
-
-// continuumActions is populated by init() in build-tagged files.
-// The continuum_debug build tag registers ceremony commands (keygen,
-// sign, reshare).  Production builds leave this empty — ceremony
-// initiation comes from the blockchain, not from hemictl.
-var continuumActions = map[string]func(context.Context, map[string]string) error{}
-
-// continuumActionHelp is populated alongside continuumActions.
-var continuumActionHelp []string
 
 // continuumReadResponse reads from the transport, discarding gossip
 // messages (PeerNotify, PeerListRequest, PingRequest) until we get a
