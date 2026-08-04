@@ -24,6 +24,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/service/tbc"
 )
 
 const (
@@ -139,7 +140,7 @@ func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.
 
 	res, err := t.callTBC(ctx, DefaultRequestTimeout, bur)
 	if err != nil {
-		return nil, err
+		return nil, gozer.TxBroadcastErr{Hash: tx.TxHash()}
 	}
 
 	buResp, ok := res.(*tbcapi.TxBroadcastResponse)
@@ -148,6 +149,9 @@ func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.
 	}
 
 	if buResp.Error != nil {
+		if buResp.AlreadyBroadcast {
+			return nil, tbc.ErrTxAlreadyBroadcast
+		}
 		return nil, buResp.Error
 	}
 

@@ -398,8 +398,9 @@ type TxBroadcastRequest struct {
 }
 
 type TxBroadcastResponse struct {
-	TxID  *chainhash.Hash `json:"tx_id"`
-	Error *protocol.Error `json:"error,omitempty"`
+	TxID             *chainhash.Hash `json:"tx_id"`
+	AlreadyBroadcast bool            `json:"already_broadcast,omitempty"`
+	Error            *protocol.Error `json:"error,omitempty"`
 }
 
 type TxBroadcastRawRequest struct {
