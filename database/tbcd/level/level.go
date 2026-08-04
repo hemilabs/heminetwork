@@ -122,11 +122,11 @@ func init() {
 	} {
 		txId, err := chainhash.NewHashFromStr(pair[0])
 		if err != nil {
-			panic(err)
+			panic(fmt.Errorf("database/tbcd/level: invalid bip30 duplicate block txID: %q", pair[0]))
 		}
 		blockHash, err := chainhash.NewHashFromStr(pair[1])
 		if err != nil {
-			panic(err)
+			panic(fmt.Errorf("database/tbcd/level: invalid bip30 duplicate block hash: %q", pair[1]))
 		}
 		bip30DuplicateBlocks[*txId] = *blockHash
 	}
@@ -1679,7 +1679,7 @@ func (l *ldb) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainh
 		if found {
 			bh, ok := bip30DuplicateBlocks[txId]
 			if !ok {
-				panic(fmt.Sprintf("multiple blocks for tx %v", txId))
+				panic(fmt.Errorf("multiple blocks for tx: %v", txId))
 			}
 			log.Debugf("multiple blocks for tx %v", txId)
 			correctBlock := bh

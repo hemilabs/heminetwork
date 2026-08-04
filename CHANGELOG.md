@@ -7,12 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Fix `BlockHashByTxId` panic on BIP30 duplicate coinbase txids. Two
-  mainnet Bitcoin transactions exist in two blocks each; querying either
-  txid via RPC crashed `tbcd`.
-
 ### Security
 
 - Fix a remote crash vulnerability in `tbc` caused by the first element
@@ -134,6 +128,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix `BlockHashByTxId` panic on BIP30 duplicate coinbase txids. Two
+  mainnet Bitcoin transactions exist in two blocks each; querying either
+  txid via RPC crashed `tbcd`.
 - Fix `BlockHeadersInsert` marking blocks as missing even when their
   bodies already exist on disk; the existence check used the wrong key
   format (41-byte height+hash instead of 32-byte hash)
