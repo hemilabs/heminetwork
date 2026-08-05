@@ -43,6 +43,7 @@ type Gozer interface {
 
 type TxBroadcastError struct {
 	chainhash.Hash
+	AlreadyBroadcast bool
 }
 
 func (tbe TxBroadcastError) Error() string {

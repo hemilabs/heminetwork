@@ -56,10 +56,12 @@ func TestCreateAndBroadcastKeystoneRetry(t *testing.T) {
 			wantNilTx:    false,
 		},
 		{
-			name:         "already broadcast",
-			broadcastErr: tbc.ErrTxAlreadyBroadcast,
-			wantErr:      nil,
-			wantNilTx:    true,
+			name: "already broadcast",
+			broadcastErr: gozer.TxBroadcastError{
+				AlreadyBroadcast: true,
+			},
+			wantErr:   nil,
+			wantNilTx: true,
 		},
 		{
 			name:         "other error",

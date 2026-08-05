@@ -40,7 +40,6 @@ import (
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
-	"github.com/hemilabs/heminetwork/v2/service/tbc"
 )
 
 const (
@@ -382,11 +381,10 @@ func (s *Server) createAndBroadcastKeystone(ctx context.Context, ks *keystone) e
 	}
 
 	err := s.broadcastKeystone(ctx, ks.popTx)
-	if !errors.Is(err, gozer.TxBroadcastError{}) {
-		ks.popTx = nil
-	}
-	if errors.Is(err, tbc.ErrTxAlreadyBroadcast) {
-		return nil
+	if gErr, ok := errors.AsType[gozer.TxBroadcastError](err); !ok {
+		ks.popTx = nil // not a broadcast error, create new popTx
+	} else if gErr.AlreadyBroadcast {
+		return nil // successfully broadcast
 	}
 	return err
 }
