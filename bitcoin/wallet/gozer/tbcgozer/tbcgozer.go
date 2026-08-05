@@ -140,7 +140,7 @@ func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.
 
 	res, err := t.callTBC(ctx, DefaultRequestTimeout, bur)
 	if err != nil {
-		return nil, gozer.TxBroadcastErr{Hash: tx.TxHash()}
+		return nil, gozer.TxBroadcastError{Hash: tx.TxHash()}
 	}
 
 	buResp, ok := res.(*tbcapi.TxBroadcastResponse)

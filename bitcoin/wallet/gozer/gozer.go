@@ -41,16 +41,16 @@ type Gozer interface {
 	Connected() bool // ready to use
 }
 
-type TxBroadcastErr struct {
+type TxBroadcastError struct {
 	chainhash.Hash
 }
 
-func (tbe TxBroadcastErr) Error() string {
+func (tbe TxBroadcastError) Error() string {
 	return fmt.Sprintf("failed to broadcast tx: %v", tbe.Hash)
 }
 
-func (tbe TxBroadcastErr) Is(target error) bool {
-	_, ok := target.(TxBroadcastErr)
+func (tbe TxBroadcastError) Is(target error) bool {
+	_, ok := target.(TxBroadcastError)
 	return ok
 }
 

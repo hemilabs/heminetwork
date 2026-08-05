@@ -382,7 +382,7 @@ func (s *Server) createAndBroadcastKeystone(ctx context.Context, ks *keystone) e
 	}
 
 	err := s.broadcastKeystone(ctx, ks.popTx)
-	if !errors.Is(err, gozer.TxBroadcastErr{}) {
+	if !errors.Is(err, gozer.TxBroadcastError{}) {
 		ks.popTx = nil
 	}
 	if errors.Is(err, tbc.ErrTxAlreadyBroadcast) {

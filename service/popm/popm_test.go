@@ -18,9 +18,8 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/juju/loggo/v2"
-
 	"github.com/btcsuite/btcd/wire"
+	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin"
@@ -52,8 +51,8 @@ func TestCreateAndBroadcastKeystoneRetry(t *testing.T) {
 	}{
 		{
 			name:         "connection failure",
-			broadcastErr: gozer.TxBroadcastErr{},
-			wantErr:      gozer.TxBroadcastErr{},
+			broadcastErr: gozer.TxBroadcastError{},
+			wantErr:      gozer.TxBroadcastError{},
 			wantNilTx:    false,
 		},
 		{
