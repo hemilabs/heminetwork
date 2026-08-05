@@ -223,8 +223,11 @@ func TestTBCGozerAlreadyBroadcast(t *testing.T) {
 	}
 
 	// second attempt fails with already broadcast
-	if _, err := b.BroadcastTx(ctx, tx); !errors.Is(err, tbc.ErrTxAlreadyBroadcast) {
-		t.Fatalf("expected error %v, got %v", tbc.ErrTxAlreadyBroadcast, err)
+	_, err = b.BroadcastTx(ctx, tx)
+	if gErr, ok := errors.AsType[gozer.TxBroadcastError](err); !ok {
+		t.Fatalf("expected error %v, got %v", gozer.TxBroadcastError{}, err)
+	} else if !gErr.AlreadyBroadcast {
+		t.Fatal("expected error to include 'already broadcast' flag")
 	}
 }
 
