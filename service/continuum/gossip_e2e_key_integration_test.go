@@ -12,7 +12,6 @@ package continuum
 
 import (
 	"bytes"
-	"context"
 	"testing"
 )
 
@@ -22,8 +21,7 @@ import (
 // handler (it neither reads nor writes the transport), so nil is safe.
 func gossipPeerList(t *testing.T, s *Server, from Identity, recs ...PeerRecord) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel) // reap addPeer's per-record TTL goroutines
+	ctx := t.Context()
 	dc := &dispatchCtx{
 		ctx:        ctx,
 		sessionCtx: ctx,
