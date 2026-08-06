@@ -36,18 +36,20 @@ import (
 	"github.com/hemilabs/heminetwork/v2/ttl"
 )
 
+// DNS verification modes for Config.DNS.
+const (
+	DNSOff     = "off"     // No DNS verification.
+	DNSForward = "forward" // Forward TXT verify hostname peers; reject IP-only.
+	DNSReverse = "reverse" // Reverse DNS verify IP peers.
+	DNSAll     = "all"     // Forward on hostnames, reverse on IPs.
+)
+
 const (
 	logLevel = "INFO"
 	appName  = "continuum"
 
 	defaultListenAddress = "localhost:45067"
 	defaultPeersWanted   = 8
-
-	// DNS verification modes for Config.DNS.
-	DNSOff     = "off"     // No DNS verification.
-	DNSForward = "forward" // Forward TXT verify hostname peers; reject IP-only.
-	DNSReverse = "reverse" // Reverse DNS verify IP peers.
-	DNSAll     = "all"     // Forward on hostnames, reverse on IPs.
 
 	// peerTTL is the duration a peer record stays alive without
 	// refresh.  Prime to avoid resonance with other timers.
@@ -354,7 +356,7 @@ type Server struct {
 }
 
 // Info reports the current status of the server.  Returned as the
-// body of the Prometheus /health endpoint.
+// body of the /health endpoint.
 type Info struct {
 	Online    bool   `json:"online"`
 	Healthy   bool   `json:"healthy"`
@@ -395,14 +397,9 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	di := serverDebugInit()
-	var init CeremonyInitiator
+	var init CeremonyInitiator = &noopInitiator{}
 	if di != nil {
 		init = di
-	} else {
-		// Production: no debug initiator.  ceremonyLoop blocks
-		// on the nil channel until the blockchain watcher is
-		// wired in.
-		init = &noopInitiator{}
 	}
 	limiters, err := ttl.New(limiterCap, true)
 	if err != nil {

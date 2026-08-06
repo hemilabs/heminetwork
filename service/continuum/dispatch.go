@@ -239,8 +239,10 @@ func handleEncryptedPayload(dc *dispatchCtx, payload any) bool {
 		log.Warningf("handle %v: decrypt: %v", dc.id, err)
 		return false
 	}
-	// Re-dispatch the decrypted inner payload through the
-	// same dispatch map.
+	if _, nested := inner.(*EncryptedPayload); nested {
+		log.Warningf("handle %v: rejecting nested EncryptedPayload", dc.id)
+		return false
+	}
 	return dispatchPayload(dc, inner)
 }
 
