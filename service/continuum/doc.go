@@ -25,10 +25,18 @@
 //     PeerListResponse.  These travel only between directly connected
 //     peers over the transport-encrypted link.
 //
-//   - Routed: TSSMessage, KeygenRequest, SignRequest, ReshareRequest.
-//     These carry a Destination identity and are forwarded hop-by-hop
-//     through the mesh until they reach the target.  Messages with
-//     NaCl e2e encryption are wrapped in EncryptedPayload envelopes.
+//   - Routed: TSSMessage.  These carry a Destination identity and
+//     are forwarded hop-by-hop through the mesh until they reach the
+//     target.  TSSMessages between non-adjacent peers are sealed in
+//     NaCl box EncryptedPayload envelopes for end-to-end
+//     confidentiality.
+//
+//   - Routed (debug only): KeygenRequest, SignRequest, ReshareRequest.
+//     These are admin-initiated ceremony triggers used for testing
+//     without a blockchain.  They travel unencrypted because they
+//     originate from the localhost admin listener and carry no secret
+//     material.  In production, ceremonies are initiated by the
+//     CeremonyInitiator (smart contract watcher), not by wire messages.
 //
 //   - Broadcast: CeremonyResult.  These are flooded to all peers with
 //     TTL-based propagation and deduplication via a time-bounded cache.
