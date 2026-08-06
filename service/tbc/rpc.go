@@ -698,7 +698,8 @@ func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBro
 		if errors.Is(err, ErrTxAlreadyBroadcast) ||
 			errors.Is(err, ErrTxBroadcastNoPeers) {
 			return &tbcapi.TxBroadcastResponse{
-				Error: protocol.RequestError(err),
+				AlreadyBroadcast: errors.Is(err, ErrTxAlreadyBroadcast),
+				Error:            protocol.RequestError(err),
 			}, err
 		}
 		e := protocol.NewInternalError(err)
@@ -724,7 +725,8 @@ func (s *Server) handleTxBroadcastRawRequest(ctx context.Context, req *tbcapi.Tx
 		if errors.Is(err, ErrTxAlreadyBroadcast) ||
 			errors.Is(err, ErrTxBroadcastNoPeers) {
 			return &tbcapi.TxBroadcastResponse{
-				Error: protocol.RequestError(err),
+				AlreadyBroadcast: errors.Is(err, ErrTxAlreadyBroadcast),
+				Error:            protocol.RequestError(err),
 			}, err
 		}
 		e := protocol.NewInternalError(err)

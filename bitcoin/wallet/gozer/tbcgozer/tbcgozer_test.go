@@ -127,6 +127,110 @@ func TestTBCGozerConnection(t *testing.T) {
 	}
 }
 
+func TestTBCGozerAlreadyBroadcast(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+
+	tbcCfg := &tbc.Config{
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		HeaderCacheSize:         "1mb",
+		LevelDBHome:             t.TempDir(),
+		MaxCachedTxs:            1000,
+		Network:                 "localnet",
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{"127.0.0.1:18444"},
+		ListenAddress:           "127.0.0.1:0",
+		NotificationBlocking:    true,
+	}
+	s, err := tbc.NewServer(tbcCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// Wait for http service to start up
+	var tbcURL string
+	for {
+		msg, err := l.Listen(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Log(msg)
+		if msg.Error != nil {
+			t.Fatal(msg.Error)
+		}
+		// TBC sends a notification when the http service has started.
+		if !msg.Is(tbc.NotificationService("", "")) {
+			continue
+		}
+
+		if msg.ID != "tbc_http_server" || msg.Msg != "ready" {
+			continue
+		}
+
+		if addr := s.HTTPAddress(); addr != nil {
+			tbcURL = addr.String()
+			break
+		}
+	}
+	l.Unsubscribe()
+
+	connChan := make(chan struct{})
+	connFunc := func() {
+		connChan <- struct{}{}
+	}
+
+	DefaultRequestTimeout = 10 * time.Second
+	b := New(fmt.Sprintf("http://%s/v1/ws", tbcURL))
+	if err = b.Run(ctx, connFunc); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-connChan:
+	}
+
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: wire.OutPoint{
+			Hash:  chainhash.HashH([]byte("test")),
+			Index: 0,
+		},
+	})
+	tx.AddTxOut(wire.NewTxOut(50000, []byte{0x51}))
+
+	// first attempt fails with no peers, but is marked as broadcast by TBC
+	if _, err := b.BroadcastTx(ctx, tx); err == nil ||
+		!strings.Contains(err.Error(), tbc.ErrTxBroadcastNoPeers.Error()) {
+		t.Fatalf("expected error %v, got %v", tbc.ErrTxBroadcastNoPeers, err)
+	}
+
+	// second attempt fails with already broadcast
+	_, err = b.BroadcastTx(ctx, tx)
+	if gErr, ok := errors.AsType[gozer.TxBroadcastError](err); !ok {
+		t.Fatalf("expected error %v, got %v", gozer.TxBroadcastError{}, err)
+	} else if !gErr.AlreadyBroadcast {
+		t.Fatal("expected error to include 'already broadcast' flag")
+	}
+}
+
 func TestTBCGozerCalls(t *testing.T) {
 	testAddrString := "n2BosBT7DvxWk1tZprk1tR1kyQmXwcv8M8"
 

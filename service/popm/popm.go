@@ -151,6 +151,7 @@ type keystone struct {
 	// comes from opgeth
 	keystone *hemi.L2Keystone
 	hash     *chainhash.Hash // map key
+	popTx    *wire.MsgTx
 
 	retry   *time.Time // Used to delay mining if fees are high
 	expires *time.Time // Used to age out of cache
@@ -370,12 +371,22 @@ func (s *Server) broadcastKeystone(pctx context.Context, popTx *wire.MsgTx) erro
 	return nil
 }
 
-func (s *Server) createAndBroadcastKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
-	popTx, err := s.createKeystoneTx(ctx, ks)
-	if err != nil {
-		return err
+func (s *Server) createAndBroadcastKeystone(ctx context.Context, ks *keystone) error {
+	if ks.popTx == nil {
+		var err error
+		ks.popTx, err = s.createKeystoneTx(ctx, ks.keystone)
+		if err != nil {
+			return err
+		}
 	}
-	return s.broadcastKeystone(ctx, popTx)
+
+	err := s.broadcastKeystone(ctx, ks.popTx)
+	if gErr, ok := errors.AsType[gozer.TxBroadcastError](err); !ok {
+		ks.popTx = nil // not a broadcast error, create new popTx
+	} else if gErr.AlreadyBroadcast {
+		return nil // successfully broadcast
+	}
+	return err
 }
 
 func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2KeystoneLatestResponse, error) {
@@ -705,7 +716,7 @@ func (s *Server) mine(ctx context.Context) error {
 				}
 				continue
 			}
-			err := s.createAndBroadcastKeystone(ctx, ks.keystone)
+			err := s.createAndBroadcastKeystone(ctx, ks)
 			if err != nil {
 				log.Errorf("new keystone: %v", err)
 				ks.state = keystoneStateError

@@ -167,6 +167,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix bug in `popm` that led to a panic when prometheus called geth before
  the client was set ([#1030](https://github.com/hemilabs/heminetwork/pull/1030)).
 
+- Fix bug in `popm` that led to attempting to remine keystones that were
+ successfully broadcasted by `tbc` ([#1156](https://github.com/hemilabs/heminetwork/pull/1156/changes))
+
 ## [v2.0.0]
 
 ### Breaking Changes

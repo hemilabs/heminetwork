@@ -18,15 +18,78 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
 	"github.com/hemilabs/heminetwork/v2/service/tbc"
 )
+
+type broadcastTxGozer struct {
+	gozer.Gozer
+	broadcastErr error
+}
+
+func (g *broadcastTxGozer) BroadcastTx(_ context.Context, _ *wire.MsgTx) (*chainhash.Hash, error) {
+	if g.broadcastErr != nil {
+		return nil, g.broadcastErr
+	}
+	return &chainhash.Hash{}, nil
+}
+
+func TestCreateAndBroadcastKeystoneRetry(t *testing.T) {
+	tests := []struct {
+		name         string
+		broadcastErr error
+		wantErr      error
+		wantNilTx    bool
+	}{
+		{
+			name:         "connection failure",
+			broadcastErr: gozer.TxBroadcastError{},
+			wantErr:      gozer.TxBroadcastError{},
+			wantNilTx:    false,
+		},
+		{
+			name: "already broadcast",
+			broadcastErr: gozer.TxBroadcastError{
+				AlreadyBroadcast: true,
+			},
+			wantErr:   nil,
+			wantNilTx: true,
+		},
+		{
+			name:         "other error",
+			broadcastErr: tbc.ErrJobNotFound,
+			wantErr:      tbc.ErrJobNotFound,
+			wantNilTx:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				gozer:  &broadcastTxGozer{broadcastErr: tt.broadcastErr},
+				params: &chaincfg.RegressionNetParams,
+			}
+
+			ks := &keystone{popTx: wire.NewMsgTx(wire.TxVersion)}
+
+			err := s.createAndBroadcastKeystone(t.Context(), ks)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
+			}
+			if ks.popTx == nil && !tt.wantNilTx {
+				t.Fatal("tx unexpectedly cleared")
+			}
+		})
+	}
+}
 
 const wantedKeystones = 20
 

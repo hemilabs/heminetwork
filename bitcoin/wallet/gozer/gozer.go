@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -38,6 +39,20 @@ type Gozer interface {
 	Run(ctx context.Context, connected func()) error
 
 	Connected() bool // ready to use
+}
+
+type TxBroadcastError struct {
+	chainhash.Hash
+	AlreadyBroadcast bool
+}
+
+func (tbe TxBroadcastError) Error() string {
+	return fmt.Sprintf("failed to broadcast tx: %v", tbe.Hash)
+}
+
+func (tbe TxBroadcastError) Is(target error) bool {
+	_, ok := target.(TxBroadcastError)
+	return ok
 }
 
 // FeeByConfirmations picks a suitable fee by matching the exact number of
