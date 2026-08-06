@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Block nested `EncryptedPayload` envelopes in `continuum` mesh. A
+  crafted multi-layer envelope could bypass the per-type rate limiter
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+
 - Fix a remote crash vulnerability in `tbc` caused by the first element
   of an inventory message list being accessed before ensuring the slice
   isn't empty ([#1039](https://github.com/hemilabs/heminetwork/pull/1039)).
