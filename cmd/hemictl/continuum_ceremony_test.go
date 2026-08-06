@@ -7,7 +7,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -147,42 +146,42 @@ func TestParseMembers(t *testing.T) {
 
 func TestResolveCommitteePrefixExclusiveOr(t *testing.T) {
 	// Both set → error.
-	_, err := resolveCommitteePrefix(context.TODO(), nil, nil,
+	_, err := resolveCommitteePrefix(t.Context(), nil, nil,
 		map[string]string{"members": "x", "auto": "3"}, "")
 	if err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Fatalf("expected 'not both' error, got: %v", err)
 	}
 
 	// Neither set → error.
-	_, err = resolveCommitteePrefix(context.TODO(), nil, nil,
+	_, err = resolveCommitteePrefix(t.Context(), nil, nil,
 		map[string]string{}, "")
 	if err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("expected 'required' error, got: %v", err)
 	}
 
 	// Prefixed: both set → error.
-	_, err = resolveCommitteePrefix(context.TODO(), nil, nil,
+	_, err = resolveCommitteePrefix(t.Context(), nil, nil,
 		map[string]string{"old_members": "x", "old_auto": "3"}, "old_")
 	if err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Fatalf("expected 'not both' error, got: %v", err)
 	}
 
 	// Prefixed: neither set → error.
-	_, err = resolveCommitteePrefix(context.TODO(), nil, nil,
+	_, err = resolveCommitteePrefix(t.Context(), nil, nil,
 		map[string]string{}, "old_")
 	if err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("expected 'required' error, got: %v", err)
 	}
 
 	// auto=0 → error.
-	_, err = resolveCommitteePrefix(context.TODO(), nil, nil,
+	_, err = resolveCommitteePrefix(t.Context(), nil, nil,
 		map[string]string{"auto": "0"}, "")
 	if err == nil || !strings.Contains(err.Error(), ">= 1") {
 		t.Fatalf("expected '>= 1' error, got: %v", err)
 	}
 
 	// auto=abc → error.
-	_, err = resolveCommitteePrefix(context.TODO(), nil, nil,
+	_, err = resolveCommitteePrefix(t.Context(), nil, nil,
 		map[string]string{"auto": "abc"}, "")
 	if err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("expected 'invalid' error, got: %v", err)
