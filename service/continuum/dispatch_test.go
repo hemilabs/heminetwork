@@ -7,6 +7,7 @@ package continuum
 import (
 	"context"
 	"crypto/ecdh"
+	"encoding/json"
 	"net"
 	"reflect"
 	"testing"
@@ -50,6 +51,38 @@ func TestDispatchMapCompleteness(t *testing.T) {
 		if !expected[rt] {
 			t.Errorf("payloadDispatch has unexpected entry: %v", rt)
 		}
+	}
+}
+
+func TestHandleEncryptedPayloadRejectsNested(t *testing.T) {
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = secret
+
+	recipientPub, err := secret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inner := EncryptedPayload{Ciphertext: []byte("fake")}
+	plaintext, err := json.Marshal(inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, err := SealBox(plaintext, recipientPub, secret, PEncryptedPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dc := &dispatchCtx{s: s, id: &Identity{0x01}}
+	if handleEncryptedPayload(dc, ep) {
+		t.Fatal("expected false (reject), got true")
 	}
 }
 
