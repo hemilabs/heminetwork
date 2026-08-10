@@ -293,6 +293,27 @@ func TestGetLogsFromDockerContainers(t *testing.T) {
 	}
 }
 
+func TestDockerLogsLimit(t *testing.T) {
+	redisC, err := testcontainers.Run(
+		t.Context(), "redis:8.2.4-alpine3.22@sha256:a308ca111032fa8f306a2dc7be7ba5deb8b777ed5d258c733cddba48a1fd7904",
+		testcontainers.WithCmd("sh", "-c",
+			fmt.Sprintf("echo '%s'; echo test-print-done; sleep 1", testBlock1),
+		),
+		testcontainers.WithWaitStrategy(wait.ForLog("test-print-done")),
+		testcontainers.WithName("op-node"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testcontainers.CleanupContainer(t, redisC)
+
+	logs := getLogsFromDocker(t.Context())
+
+	if len(logs) > maxByteRead+100 {
+		t.Fatalf("unexpected log size %d > %d", len(logs), maxByteRead+100)
+	}
+}
+
 func setupServers(t *testing.T, useSlack bool, delaySeconds uint, useValidOtherBlock bool, syncInfo tbc.SyncInfo, useDocker bool, tbcErrors uint) func() {
 	lastRequestMtx.Lock()
 	defer lastRequestMtx.Unlock()

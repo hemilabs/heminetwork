@@ -452,7 +452,9 @@ func l2TipsMatch(ctx context.Context, c *config, lastl2BlockNumber *uint64) (boo
 	return false, nil
 }
 
-// this portion is untested for now
+// Max size of docker logs to retrieve
+const maxByteRead = 1000
+
 func getLogsFromDocker(ctx context.Context) string {
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
@@ -504,25 +506,22 @@ func getLogsFromDocker(ctx context.Context) string {
 		reader, err := dockerClient.ContainerLogs(ctx, c.ID, container.LogsOptions{
 			ShowStdout: true,
 			ShowStderr: true,
+			Tail:       "12",
 		})
 		if err != nil {
 			log.Warningf("could not get logs from running container %s: %s", c.ID, err)
 			return ""
 		}
 
-		b, err := io.ReadAll(reader)
+		r := io.LimitReader(reader, maxByteRead)
+		b, err := io.ReadAll(r)
 		if err != nil {
 			log.Warningf("could not read logs: %s", err)
 			return ""
 		}
-
 		reader.Close()
 
-		const byteCount = 1000
-		if len(b) >= byteCount {
-			b = b[len(b)-byteCount:]
-		}
-		logs = fmt.Sprintf("%s\n%s", logs, string(b))
+		logs = fmt.Sprintf("%s\n\n%s", logs, string(b))
 	}
 	return logs
 }
