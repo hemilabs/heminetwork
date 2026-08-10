@@ -170,6 +170,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix bug in `popm` that led to attempting to remine keystones that were
  successfully broadcasted by `tbc` ([#1156](https://github.com/hemilabs/heminetwork/pull/1156/changes))
 
+- Fix bug in `synctester` where unbounded reads of the docker logs could lead
+to an OOM crash ([#1159](https://github.com/hemilabs/heminetwork/pull/1159)).
+
 ## [v2.0.0]
 
 ### Breaking Changes
