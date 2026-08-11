@@ -129,7 +129,7 @@ func (a *rpcTransportAdapter) Send(to Identity, ceremonyID CeremonyID, data []by
 		wireData = data[1:]
 	}
 
-	hash := HashTSSMessage(ceremonyID, wireData)
+	hash := HashTSSMessage(ceremonyID, ctype, flags, wireData)
 	sig := a.node.secret.Sign(hash)
 
 	tssMsg := TSSMessage{
@@ -243,7 +243,7 @@ func (n *rpcTSSNode) startReadLoop(tr *Transport, remoteID Identity) {
 // Retries on ErrUnknownCeremony (message arrives before ceremony
 // registration — normal race in distributed mesh).
 func (n *rpcTSSNode) dispatchTSSMsg(msg TSSMessage) {
-	hash := HashTSSMessage(msg.CeremonyID, msg.Data)
+	hash := HashTSSMessage(msg.CeremonyID, msg.Type, msg.Flags, msg.Data)
 	if _, err := Verify(hash, msg.From, msg.Signature); err != nil {
 		n.t.Logf("node %s: bad sig from %s: %v",
 			n.id, msg.From, err)
@@ -1029,7 +1029,7 @@ func TestRPCTSSKeygenCorruptResigned(t *testing.T) {
 	corruptNode.corruptFn = func(msg *TSSMessage) {
 		if len(msg.Data) > 0 {
 			msg.Data[0] ^= 0xff
-			hash := HashTSSMessage(msg.CeremonyID, msg.Data)
+			hash := HashTSSMessage(msg.CeremonyID, msg.Type, msg.Flags, msg.Data)
 			msg.Signature = corruptNode.secret.Sign(hash)
 		}
 	}
@@ -1305,7 +1305,7 @@ func TestRPCTSSMITMMessageInjection(t *testing.T) {
 	// Attacker forges a TSSMessage claiming to be node 1.
 	attacker, _ := NewSecret()
 	fakeData := []byte("malicious-round-data")
-	hash := HashTSSMessage(cid, fakeData)
+	hash := HashTSSMessage(cid, 0, TSSFlagBroadcast, fakeData)
 	fakeSig := attacker.Sign(hash)
 
 	fakeMsg := TSSMessage{
@@ -1350,7 +1350,7 @@ func FuzzTSSMessageSignature(f *testing.F) {
 			return
 		}
 
-		hash := HashTSSMessage(cid, data)
+		hash := HashTSSMessage(cid, CeremonyKeygen, 0, data)
 		sig := secret.Sign(hash)
 
 		if _, err = Verify(hash, secret.Identity, sig); err != nil {
@@ -1362,7 +1362,7 @@ func FuzzTSSMessageSignature(f *testing.F) {
 			copy(tampered, data)
 			tampered[0] ^= 0xFF
 
-			tamperedHash := HashTSSMessage(cid, tampered)
+			tamperedHash := HashTSSMessage(cid, CeremonyKeygen, 0, tampered)
 			if _, err = Verify(tamperedHash, secret.Identity, sig); err == nil {
 				t.Error("Tampered data should fail verification")
 			}
