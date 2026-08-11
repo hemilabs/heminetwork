@@ -60,7 +60,7 @@ func (s *Server) handleAdminConnection(ctx context.Context, conn net.Conn) {
 		}
 	}()
 
-	id, transport, _, err := s.newTransport(ctx, conn)
+	id, transport, _, _, err := s.newTransport(ctx, conn)
 	if err != nil {
 		log.Warningf("admin transport %v: %v", conn.RemoteAddr(), err)
 		return

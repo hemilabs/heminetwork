@@ -1561,7 +1561,7 @@ func TestHandshakeErrors(t *testing.T) {
 				}
 			}()
 
-			_, _, err = serverTransport.Handshake(ctx, serverSecret)
+			_, _, _, err = serverTransport.Handshake(ctx, serverSecret)
 			if err != nil {
 				if errors.Is(err, tti.expectedError) ||
 					errors.Is(tti.expectedError, ErrNoType) {
@@ -1668,7 +1668,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 
 			wg.Go(func() {
 				var err error // prevent data race
-				derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret)
+				derivedClient, _, _, err = serverTransport.Handshake(ctx, serverSecret)
 				if err != nil {
 					panic(err)
 				}
@@ -1693,7 +1693,7 @@ func TestTestConnHandshakeDNS(t *testing.T) {
 				}()
 
 				var err error // prevent data race
-				derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret)
+				derivedServer, _, _, err = clientTransport.Handshake(ctx, clientSecret)
 				if err != nil {
 					panic(err)
 				}
@@ -1807,7 +1807,7 @@ func TestConnHandshake(t *testing.T) {
 			wg.Go(func() {
 				var err error
 
-				derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret)
+				derivedClient, _, _, err = serverTransport.Handshake(ctx, serverSecret)
 				if err != nil {
 					panic(err)
 				}
@@ -1822,7 +1822,7 @@ func TestConnHandshake(t *testing.T) {
 					}
 				}()
 
-				derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret)
+				derivedServer, _, _, err = clientTransport.Handshake(ctx, clientSecret)
 				if err != nil {
 					panic(err)
 				}
@@ -2166,7 +2166,7 @@ func TestPayloadHashVerification(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		var err error
-		derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret)
+		derivedClient, _, _, err = serverTransport.Handshake(ctx, serverSecret)
 		if err != nil {
 			panic(err)
 		}
@@ -2175,7 +2175,7 @@ func TestPayloadHashVerification(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret)
+		derivedServer, _, _, err = clientTransport.Handshake(ctx, clientSecret)
 		if err != nil {
 			panic(err)
 		}
