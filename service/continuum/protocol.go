@@ -321,6 +321,7 @@ type HelloRequest struct {
 	Identity  Identity          `json:"identity"`          // Advertise our identity
 	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
 	NaClPub   []byte            `json:"nacl_pub"`          // X25519 public key for e2e encryption
+	NaClSig   []byte            `json:"naclsig,omitempty"` // secp256k1 sig binding NaClPub to Identity
 }
 
 // HelloResponse returns the signed challenge. The remote identity is derived
@@ -345,9 +346,20 @@ type PeerRecord struct {
 	Identity Identity   `json:"identity"`
 	Address  string     `json:"address"`            // host:port
 	NaClPub  []byte     `json:"nacl_pub,omitempty"` // X25519 public key for e2e encryption
+	NaClSig  []byte     `json:"naclsig,omitempty"`  // secp256k1 sig binding NaClPub to Identity
 	Version  uint32     `json:"version"`            // ProtocolVersion at time of discovery
 	LastSeen int64      `json:"last_seen"`          // unix timestamp
 	Sessions []Identity `json:"sessions,omitempty"` // direct session neighbors (gossip topology)
+}
+
+// HashPeerNaCl computes the domain-separated hash that binds a NaClPub
+// to an Identity for signature verification.
+func HashPeerNaCl(id Identity, naclPub []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte("continuum-nacl-bind-v1"))
+	h.Write(id[:])
+	h.Write(naclPub)
+	return h.Sum(nil)
 }
 
 // PeerNotify announces that the sender has new peer information.
@@ -1500,19 +1512,23 @@ func (t *Transport) decryptFrameHeader(header []byte) (uint32, error) {
 // transport wishes to use. It is also used to verify that the derived Identity
 // did indeed sign the challenge. Returns the remote identity and their X25519
 // public key for e2e encryption.
-func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, []byte, error) {
+func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, []byte, []byte, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
 	// untested: rand.Read fails only on OS entropy exhaustion
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	naclPub, err := secret.NaClPublicKey()
 	// untested: NaClPublicKey wraps NaClPrivateKey; cannot fail with valid secret
 	if err != nil {
-		return nil, nil, fmt.Errorf("nacl public key: %w", err)
+		return nil, nil, nil, fmt.Errorf("nacl public key: %w", err)
 	}
+
+	// Sign our NaClPub binding so peers can verify it via gossip.
+	naclHash := HashPeerNaCl(secret.Identity, naclPub)
+	naclSig := secret.Sign(naclHash)
 
 	opts := map[string]string{
 		"encoding":    "json",
@@ -1526,33 +1542,34 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 		Challenge: ourChallenge[:],
 		Options:   opts,
 		NaClPub:   naclPub,
+		NaClSig:   naclSig,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Read Hello
 	_, cmd, _, err := t.read(readTimeout)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	helloRequest, ok := cmd.(*HelloRequest)
 	if !ok {
-		return nil, nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
+		return nil, nil, nil, fmt.Errorf("unexpected command: %T, wanted HelloRequest", cmd)
 	}
 	// Validate HelloRequest
 	if helloRequest.Version != ProtocolVersion {
-		return nil, nil, ErrUnsupportedVersion
+		return nil, nil, nil, ErrUnsupportedVersion
 	}
 	if len(helloRequest.Challenge) != ChallengeSize {
-		return nil, nil, ErrInvalidChallenge
+		return nil, nil, nil, ErrInvalidChallenge
 	}
 	if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
-		return nil, nil, ErrInvalidChallenge
+		return nil, nil, nil, ErrInvalidChallenge
 	}
 	// Validate NaCl public key length when present.
 	if len(helloRequest.NaClPub) > 0 && len(helloRequest.NaClPub) != NaClPubSize {
-		return nil, nil, fmt.Errorf("%w: len %d", ErrInvalidNaClPub, len(helloRequest.NaClPub))
+		return nil, nil, nil, fmt.Errorf("%w: len %d", ErrInvalidNaClPub, len(helloRequest.NaClPub))
 	}
 
 	// Sign combined challenge that is represented by the sha256 hash of
@@ -1562,18 +1579,18 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Read HelloResponse
 	header2, cmd2, _, err := t.read(readTimeout)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	_ = header2
 	helloResponse, ok := cmd2.(*HelloResponse)
 	if !ok {
-		return nil, nil, fmt.Errorf("unexpected command: %T", cmd2)
+		return nil, nil, nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
 	// Verify signature over sha256(our challenge + our transport public key + our NaClPub)
@@ -1581,11 +1598,11 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	themID := NewIdentityFromPub(themPub)
-	return &themID, helloRequest.NaClPub, nil
+	return &themID, helloRequest.NaClPub, helloRequest.NaClSig, nil
 }
 
 // readExact reads exactly n bytes from conn, handling partial reads.
