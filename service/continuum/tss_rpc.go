@@ -173,11 +173,14 @@ func (s *Server) dispatchKeygen(req CeremonyRequest) {
 			log.Errorf("keygen %s: %v", req.CeremonyID, err)
 			s.failCeremony(req.CeremonyID, err.Error())
 			if isCoordinator {
-				if berr := s.Broadcast(CeremonyResult{
+				result := CeremonyResult{
 					CeremonyID: req.CeremonyID,
 					Success:    false,
 					Error:      err.Error(),
-				}); berr != nil {
+					Signer:     s.secret.Identity,
+				}
+				result.Signature = s.secret.Sign(HashCeremonyResult(result))
+				if berr := s.Broadcast(result); berr != nil {
 					log.Errorf("keygen %s: broadcast failure: %v",
 						req.CeremonyID, berr)
 				}
@@ -193,10 +196,13 @@ func (s *Server) dispatchKeygen(req CeremonyRequest) {
 		s.mtx.Unlock()
 		s.completeCeremony(req.CeremonyID)
 		if isCoordinator {
-			if berr := s.Broadcast(CeremonyResult{
+			result := CeremonyResult{
 				CeremonyID: req.CeremonyID,
 				Success:    true,
-			}); berr != nil {
+				Signer:     s.secret.Identity,
+			}
+			result.Signature = s.secret.Sign(HashCeremonyResult(result))
+			if berr := s.Broadcast(result); berr != nil {
 				log.Errorf("keygen %s: broadcast result: %v",
 					req.CeremonyID, berr)
 			}

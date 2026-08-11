@@ -674,11 +674,18 @@ func TestCeremonyResultJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Success case
 	result := CeremonyResult{
 		CeremonyID: cid,
 		Success:    true,
+		Signer:     secret.Identity,
 	}
+	result.Signature = secret.Sign(HashCeremonyResult(result))
 
 	data, err := json.Marshal(result)
 	if err != nil {
@@ -696,13 +703,27 @@ func TestCeremonyResultJSON(t *testing.T) {
 	if got.Success != result.Success {
 		t.Fatal("Success mismatch")
 	}
+	if got.Signer != result.Signer {
+		t.Fatal("Signer mismatch")
+	}
+	if !bytes.Equal(got.Signature, result.Signature) {
+		t.Fatal("Signature mismatch")
+	}
+
+	// Verify round-tripped signature.
+	hash := HashCeremonyResult(got)
+	if _, err := Verify(hash, got.Signer, got.Signature); err != nil {
+		t.Fatalf("signature verification failed after round-trip: %v", err)
+	}
 
 	// Error case
 	result2 := CeremonyResult{
 		CeremonyID: cid,
 		Success:    false,
 		Error:      "timeout waiting for round 2",
+		Signer:     secret.Identity,
 	}
+	result2.Signature = secret.Sign(HashCeremonyResult(result2))
 
 	data2, err := json.Marshal(result2)
 	if err != nil {
@@ -717,6 +738,11 @@ func TestCeremonyResultJSON(t *testing.T) {
 	if got2.Error != result2.Error {
 		t.Fatalf("Error = %q, want %q", got2.Error, result2.Error)
 	}
+
+	hash2 := HashCeremonyResult(got2)
+	if _, err := Verify(hash2, got2.Signer, got2.Signature); err != nil {
+		t.Fatalf("error case signature verification failed: %v", err)
+	}
 }
 
 func TestCeremonyAbortJSON(t *testing.T) {
@@ -726,10 +752,17 @@ func TestCeremonyAbortJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	abort := CeremonyAbort{
 		CeremonyID: cid,
 		Reason:     "party went offline",
+		Signer:     secret.Identity,
 	}
+	abort.Signature = secret.Sign(HashCeremonyAbort(abort))
 
 	data, err := json.Marshal(abort)
 	if err != nil {
@@ -746,6 +779,17 @@ func TestCeremonyAbortJSON(t *testing.T) {
 	}
 	if got.Reason != abort.Reason {
 		t.Fatalf("Reason = %q, want %q", got.Reason, abort.Reason)
+	}
+	if got.Signer != abort.Signer {
+		t.Fatal("Signer mismatch")
+	}
+	if !bytes.Equal(got.Signature, abort.Signature) {
+		t.Fatal("Signature mismatch")
+	}
+
+	hash := HashCeremonyAbort(got)
+	if _, err := Verify(hash, got.Signer, got.Signature); err != nil {
+		t.Fatalf("abort signature verification failed: %v", err)
 	}
 }
 
