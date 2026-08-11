@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Sign `CeremonyResult` and `CeremonyAbort` broadcasts with the
+  coordinator's secp256k1 key. Unsigned broadcast messages could
+  previously be forged by any authenticated peer
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+- Sign `PeerRecord` NaClPub binding to prevent gossip-based e2e key
+  poisoning. Peers verify the secp256k1 signature before accepting
+  a NaClPub via gossip
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+- Include `Type` and `Flags` in `TSSMessage` hash (domain bumped to
+  `continuum-tss-msg-v2`). Prevents downgrade and re-routing attacks
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+- Include `InnerType` in `EncryptedPayload` hash (domain bumped to
+  `continuum-e2e-sig-v2`). Prevents type-confusion replay
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+- Bind `NaClPub` in handshake challenge (domain bumped to
+  `continuum-challenge-v2`). Prevents MITM e2e key substitution
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 - Block nested `EncryptedPayload` envelopes in `continuum` mesh. A
   crafted multi-layer envelope could bypass the per-type rate limiter
   ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
@@ -32,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+- `continuum` wire protocol: domain separators bumped to v2 for
+  `TSSMessage`, `EncryptedPayload`, and handshake challenge hashes.
+  `PeerRecord` and `HelloRequest` now carry a `nacl_sig` field.
+  All cluster nodes must upgrade together; mixed v1/v2 nodes cannot
+  handshake or verify each other's signatures
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 - `BlockHashByTxId` now returns `(*chainhash.Hash, wire.TxLoc, error)`;
   callers that only need the hash use `bh, _, err :=`
   ([#1052](https://github.com/hemilabs/heminetwork/pull/1052)).
