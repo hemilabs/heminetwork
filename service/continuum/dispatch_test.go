@@ -491,3 +491,93 @@ func TestHandleCeremonyAbortBadSignature(t *testing.T) {
 		t.Fatalf("ceremony status = %s, want %s", ci.Status, CeremonyRunning)
 	}
 }
+
+// TestHandleCeremonyAbortNonCoordinator verifies that a validly-signed
+// CeremonyAbort from a non-coordinator peer is rejected.
+func TestHandleCeremonyAbortNonCoordinator(t *testing.T) {
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = coordinator
+
+	imposter, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cid := NewCeremonyID()
+	s.registerCeremony(cid, CeremonyKeygen, coordinator.Identity,
+		[]Identity{coordinator.Identity, imposter.Identity})
+
+	// Imposter signs a valid abort but is not the coordinator.
+	abort := &CeremonyAbort{
+		CeremonyID: cid,
+		Reason:     "imposter abort",
+		Signer:     imposter.Identity,
+	}
+	abort.Signature = imposter.Sign(HashCeremonyAbort(*abort))
+
+	dc := &dispatchCtx{s: s, id: &imposter.Identity}
+	if handleCeremonyAbort(dc, abort) {
+		t.Fatal("expected false (continue), got true")
+	}
+	// Ceremony must still be running.
+	s.mtx.Lock()
+	ci, found := s.ceremonies[cid]
+	s.mtx.Unlock()
+	if !found {
+		t.Fatal("ceremony removed despite non-coordinator abort")
+	}
+	if ci.Status != CeremonyRunning {
+		t.Fatalf("ceremony status = %s, want %s", ci.Status, CeremonyRunning)
+	}
+}
+
+// TestAddPeerWrongKeyNaClSig verifies that a PeerRecord with a NaClSig
+// signed by a different key than the claimed Identity is rejected.
+func TestAddPeerWrongKeyNaClSig(t *testing.T) {
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srvSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = srvSecret
+
+	// Peer whose NaClPub we want to register.
+	peer, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	naclPub, err := peer.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var naclArr [32]byte
+	copy(naclArr[:], naclPub)
+
+	// Attacker signs the binding with their own key, not the peer's.
+	attacker, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongSig := attacker.Sign(HashPeerNaCl(peer.Identity, naclPub))
+
+	pr := PeerRecord{
+		Identity: peer.Identity,
+		Address:  "10.0.0.1:9090",
+		NaClPub:  naclPub,
+		NaClSig:  wrongSig,
+		Version:  ProtocolVersion,
+	}
+	if s.addPeer(t.Context(), pr) {
+		t.Fatal("addPeer accepted PeerRecord with wrong-key NaClSig")
+	}
+}

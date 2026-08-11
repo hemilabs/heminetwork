@@ -255,6 +255,15 @@ func handleCeremonyResult(dc *dispatchCtx, payload any) bool {
 			v.Signer, err)
 		return false
 	}
+	// Only the coordinator may broadcast a ceremony result.
+	dc.s.mtx.RLock()
+	ci, known := dc.s.ceremonies[v.CeremonyID]
+	dc.s.mtx.RUnlock()
+	if known && ci.Coordinator != (Identity{}) && ci.Coordinator != v.Signer {
+		log.Warningf("ceremony result %s from %v: not coordinator %v",
+			v.CeremonyID, v.Signer, ci.Coordinator)
+		return false
+	}
 	dc.s.handleCeremonyResult(*v)
 	return false
 }
@@ -265,6 +274,15 @@ func handleCeremonyAbort(dc *dispatchCtx, payload any) bool {
 	if _, err := Verify(hash, v.Signer, v.Signature); err != nil {
 		log.Warningf("ceremony abort from %v: bad signature: %v",
 			v.Signer, err)
+		return false
+	}
+	// Only the coordinator may abort a ceremony.
+	dc.s.mtx.RLock()
+	ci, known := dc.s.ceremonies[v.CeremonyID]
+	dc.s.mtx.RUnlock()
+	if known && ci.Coordinator != (Identity{}) && ci.Coordinator != v.Signer {
+		log.Warningf("ceremony abort %s from %v: not coordinator %v",
+			v.CeremonyID, v.Signer, ci.Coordinator)
 		return false
 	}
 	log.Infof("ceremony abort %s from %v: %s", v.CeremonyID, dc.id, v.Reason)
