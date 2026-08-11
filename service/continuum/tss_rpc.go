@@ -117,7 +117,7 @@ func (st *serverTSSTransport) Send(to Identity, ceremonyID CeremonyID, data []by
 		wireData = data[1:]
 	}
 
-	hash := HashTSSMessage(ceremonyID, wireData)
+	hash := HashTSSMessage(ceremonyID, ctype, flags, wireData)
 	sig := st.server.secret.Sign(hash)
 
 	msg := TSSMessage{
@@ -301,7 +301,7 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 		return
 	}
 
-	hash := HashTSSMessage(msg.CeremonyID, msg.Data)
+	hash := HashTSSMessage(msg.CeremonyID, msg.Type, msg.Flags, msg.Data)
 	if _, err := Verify(hash, msg.From, msg.Signature); err != nil {
 		log.Errorf("tss msg from %s: bad signature: %v",
 			msg.From, err)

@@ -176,7 +176,7 @@ func (r *MockRouter) RouteTSSMessage(msg TSSMessage) error {
 	}
 
 	// Verify signature
-	hash := HashTSSMessage(msg.CeremonyID, msg.Data)
+	hash := HashTSSMessage(msg.CeremonyID, msg.Type, msg.Flags, msg.Data)
 	_, err := Verify(hash, msg.From, msg.Signature)
 	if err != nil {
 		return errors.New("invalid signature: " + err.Error())
@@ -389,7 +389,7 @@ func TestRPCTSSMessageRouting(t *testing.T) {
 
 	// Party 0 broadcasts a TSS message with valid signature
 	data := []byte("round1-data")
-	hash := HashTSSMessage(cid, data)
+	hash := HashTSSMessage(cid, CeremonyKeygen, TSSFlagBroadcast, data)
 	sig := secrets[0].Sign(hash)
 
 	msg := TSSMessage{
@@ -462,7 +462,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 
 	// Test 1: Valid signature passes
 	data := []byte("valid-data")
-	hash := HashTSSMessage(cid, data)
+	hash := HashTSSMessage(cid, CeremonyKeygen, TSSFlagBroadcast, data)
 	sig := secrets[0].Sign(hash)
 
 	msg := TSSMessage{
@@ -526,7 +526,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 	router.mu.Unlock()
 
 	// Sign for different ceremony
-	wrongHash := HashTSSMessage(otherCID, data)
+	wrongHash := HashTSSMessage(otherCID, CeremonyKeygen, TSSFlagBroadcast, data)
 	wrongCIDSig := secrets[0].Sign(wrongHash)
 
 	msgWrongCID := TSSMessage{
@@ -717,7 +717,7 @@ func TestRPCTSSMessageUnknownCeremony(t *testing.T) {
 	_, _ = rand.Read(fakeCID[:])
 
 	data := []byte("data")
-	hash := HashTSSMessage(fakeCID, data)
+	hash := HashTSSMessage(fakeCID, 0, TSSFlagBroadcast, data)
 	sig := secret.Sign(hash)
 
 	msg := TSSMessage{
@@ -754,7 +754,7 @@ func TestRPCTSSMessageUnauthorizedSender(t *testing.T) {
 	router.AddPartyWithSecret(outsider)
 
 	data := []byte("malicious")
-	hash := HashTSSMessage(cid, data)
+	hash := HashTSSMessage(cid, 0, TSSFlagBroadcast, data)
 	sig := outsider.Sign(hash)
 
 	msg := TSSMessage{
@@ -950,7 +950,7 @@ func TestCriticalMITMPrevention(t *testing.T) {
 	attackerSecret, _ := NewSecret() // Attacker's own key
 
 	forgedData := []byte("malicious-round1-data")
-	hash := HashTSSMessage(cid, forgedData)
+	hash := HashTSSMessage(cid, CeremonyKeygen, TSSFlagBroadcast, forgedData)
 
 	// Attacker signs with their own key but claims From=Alice
 	attackerSig := attackerSecret.Sign(hash)
@@ -1002,7 +1002,7 @@ func TestCriticalReplayPrevention(t *testing.T) {
 
 	// Alice sends valid message in ceremony A
 	data := []byte("round1-data")
-	hashA := HashTSSMessage(cidA, data)
+	hashA := HashTSSMessage(cidA, CeremonyKeygen, TSSFlagBroadcast, data)
 	sigA := alice.Sign(hashA)
 
 	validMsg := TSSMessage{
@@ -1060,7 +1060,7 @@ func TestCriticalDataIntegrity(t *testing.T) {
 
 	// Alice sends valid message
 	originalData := []byte("honest-round1-data")
-	hash := HashTSSMessage(cid, originalData)
+	hash := HashTSSMessage(cid, CeremonyKeygen, TSSFlagBroadcast, originalData)
 	sig := alice.Sign(hash)
 
 	// ATTACK: Router modifies the data in transit
