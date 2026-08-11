@@ -33,6 +33,7 @@ func TestDispatchMapCompleteness(t *testing.T) {
 		reflect.TypeFor[*TSSMessage](),
 		reflect.TypeFor[*EncryptedPayload](),
 		reflect.TypeFor[*CeremonyResult](),
+		reflect.TypeFor[*CeremonyAbort](),
 		reflect.TypeFor[*PeerListAdminRequest](),
 		reflect.TypeFor[*CeremonyStatusRequest](),
 		reflect.TypeFor[*CeremonyListRequest](),

@@ -1750,9 +1750,19 @@ func requireAdmin(t *Transport, id *Identity) bool {
 // registerCeremony records a new ceremony in the tracking map.
 // The ceremony context derives from s.tssCtx so server shutdown
 // propagates cancellation to all waiting callers.
+//
+// If a ceremony with the same ID is already running, registration
+// is skipped to prevent re-delivery or reorg from clobbering the
+// in-flight state.
 func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity, committee []Identity) {
 	ctx, cancel := context.WithCancel(s.tssCtx) //nolint:gosec // cancel stored in CeremonyInfo, called on ceremony completion
 	s.mtx.Lock()
+	if existing, ok := s.ceremonies[cid]; ok && existing.Status == CeremonyRunning {
+		s.mtx.Unlock()
+		cancel() // release context; we won't use it
+		log.Warningf("registerCeremony %s: already running, skipping duplicate", cid)
+		return
+	}
 	s.ceremonies[cid] = &CeremonyInfo{
 		Type:        ct,
 		StartTime:   time.Now().Unix(),
