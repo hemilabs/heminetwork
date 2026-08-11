@@ -479,16 +479,16 @@ func (s *Server) deleteAllSessions() {
 	}
 }
 
-func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, error) {
+func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, []byte, error) {
 	transport, err := NewTransportFromCurve(ecdh.X25519()) // Only supported curve.
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("new transport: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("new transport: %w", err)
 	}
 
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
 		// Expected from port scanners, TLS probes, wrong protocol.
-		return nil, nil, nil, fmt.Errorf("key exchange: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("key exchange: %w", err)
 	}
 
 	// After KX, transport owns conn.  Ensure cleanup on failure so
@@ -500,10 +500,10 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 		}
 	}()
 
-	id, naclPub, err := transport.Handshake(ctx, s.secret)
+	id, naclPub, naclSig, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		// Expected from misconfigured peers and version mismatches.
-		return nil, nil, nil, fmt.Errorf("handshake: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("handshake: %w", err)
 	}
 
 	// DNS verification for incoming connections.  Loopback is
@@ -511,11 +511,11 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 	// cannot verify (no hostname yet).  In reverse/all mode,
 	// reverse-verify the remote IP.
 	if err := s.verifyInboundDNS(ctx, conn.RemoteAddr(), *id); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	ok = true
-	return id, transport, naclPub, nil
+	return id, transport, naclPub, naclSig, nil
 }
 
 // isDuplicate returns true if the message identified by header hash
@@ -1338,7 +1338,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		log.Warningf("connectPeer kx %v: %v", addr, err)
 		return
 	}
-	them, naclPub, err := transport.Handshake(ctx, s.secret)
+	them, naclPub, naclSig, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		log.Warningf("connectPeer handshake %v: %v", addr, err)
 		return
@@ -1373,6 +1373,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		Identity: *them,
 		Address:  recordAddr,
 		NaClPub:  naclPub,
+		NaClSig:  naclSig,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
@@ -2054,6 +2055,15 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 		return false
 	}
 
+	// Verify NaClSig: the NaClPub binding must be signed by the
+	// peer's secp256k1 key.  This prevents gossip poisoning where
+	// an attacker overwrites another peer's e2e encryption key.
+	hash := HashPeerNaCl(pr.Identity, pr.NaClPub)
+	if _, err := Verify(hash, pr.Identity, pr.NaClSig); err != nil {
+		log.Warningf("addPeer %v: bad NaCl binding: %v", pr.Identity, err)
+		return false
+	}
+
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
@@ -2281,11 +2291,15 @@ func (s *Server) registerSelfAsPeer() {
 		}
 	}
 
+	hash := HashPeerNaCl(s.secret.Identity, naclPub)
+	naclSig := s.secret.Sign(hash)
+
 	s.mtx.Lock()
 	s.peers[s.secret.Identity] = &PeerRecord{
 		Identity: s.secret.Identity,
 		Address:  addr,
 		NaClPub:  naclPub,
+		NaClSig:  naclSig,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	}
@@ -2514,7 +2528,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		sendErr(ctx, errC, err)
 		return
 	}
-	them, naclPub, err := transport.Handshake(ctx, s.secret)
+	them, naclPub, naclSig, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		sendErr(ctx, errC, err)
 		return
@@ -2550,6 +2564,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		Identity: *them,
 		Address:  c,
 		NaClPub:  naclPub,
+		NaClSig:  naclSig,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
@@ -2930,7 +2945,7 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn, hs
 	// Perform KX and handshake, then release the semaphore.
 	// The semaphore only gates the expensive KX phase —
 	// once complete, the slot is free for the next connection.
-	id, transport, naclPub, err := s.newTransport(ctx, conn)
+	id, transport, naclPub, naclSig, err := s.newTransport(ctx, conn)
 	<-s.handshakeSem          // release regardless of success/failure
 	s.releaseHandshake(hsKey) // free the per-source in-flight slot
 	if err != nil {
@@ -2982,6 +2997,7 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn, hs
 	s.addPeer(ctx, PeerRecord{
 		Identity: *id,
 		NaClPub:  naclPub,
+		NaClSig:  naclSig,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
