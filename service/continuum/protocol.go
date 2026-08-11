@@ -531,13 +531,16 @@ func (m TSSMessage) IsBroadcast() bool {
 }
 
 // HashTSSMessage computes the hash that must be signed for a
-// TSSMessage. Hash = SHA256("continuum-tss-msg-v1" || CeremonyID || len(Data) || Data).
+// TSSMessage. Hash = SHA256("continuum-tss-msg-v2" || CeremonyID || Type || Flags || len(Data) || Data).
 // The domain separator prevents cross-protocol signature replay.
-// The length prefix prevents ambiguous CeremonyID/Data splits.
-func HashTSSMessage(cid CeremonyID, data []byte) []byte {
+// Type and Flags are included to prevent downgrade/re-routing attacks.
+// The length prefix prevents ambiguous Data splits.
+func HashTSSMessage(cid CeremonyID, ct CeremonyType, flags TSSMsgFlags, data []byte) []byte {
 	h := sha256.New()
-	h.Write([]byte("continuum-tss-msg-v1"))
+	h.Write([]byte("continuum-tss-msg-v2"))
 	h.Write(cid[:])
+	h.Write([]byte{byte(ct)})
+	h.Write([]byte{byte(flags)})
 	var lenBuf [4]byte
 	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
 	h.Write(lenBuf[:])
@@ -879,11 +882,14 @@ func (s Secret) NaClPublicKey() ([]byte, error) {
 
 // hashEncryptedPayload computes a domain-separated hash of the
 // encrypted envelope fields for signing/verification.
-func hashEncryptedPayload(ephPub *[32]byte, nonce *[24]byte, ciphertext []byte) []byte {
+// InnerType is included to prevent type-confusion attacks where
+// ciphertext is replayed under a different inner payload type.
+func hashEncryptedPayload(ephPub *[32]byte, nonce *[24]byte, innerType PayloadType, ciphertext []byte) []byte {
 	h := sha256.New()
-	h.Write([]byte("continuum-e2e-sig-v1"))
+	h.Write([]byte("continuum-e2e-sig-v2"))
 	h.Write(ephPub[:])
 	h.Write(nonce[:])
+	h.Write([]byte(innerType))
 	h.Write(ciphertext)
 	return h.Sum(nil)
 }
@@ -930,7 +936,7 @@ func SealBox(plaintext []byte, recipientPub []byte, sender *Secret, innerType Pa
 	copy(ephPub[:], ephemeral.PublicKey().Bytes())
 
 	// Sign the envelope.
-	hash := hashEncryptedPayload(&ephPub, &nonce, sealed)
+	hash := hashEncryptedPayload(&ephPub, &nonce, innerType, sealed)
 	sig := sender.Sign(hash)
 
 	return &EncryptedPayload{
@@ -1550,8 +1556,9 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 	}
 
 	// Sign combined challenge that is represented by the sha256 hash of
-	// their challenge plus ephemeral transport public key and reply.
-	combinedChallenge := Hash256([]byte("continuum-challenge-v1"), helloRequest.Challenge, t.them.Bytes())
+	// their challenge plus ephemeral transport public key plus their
+	// NaClPub, and reply.
+	combinedChallenge := Hash256([]byte("continuum-challenge-v2"), helloRequest.Challenge, t.them.Bytes(), helloRequest.NaClPub)
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
@@ -1569,8 +1576,8 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 		return nil, nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
-	// Verify signature over sha256(our challenge + our transport public key)
-	linkedChallenge := Hash256([]byte("continuum-challenge-v1"), ourChallenge[:], t.us.PublicKey().Bytes())
+	// Verify signature over sha256(our challenge + our transport public key + our NaClPub)
+	linkedChallenge := Hash256([]byte("continuum-challenge-v2"), ourChallenge[:], t.us.PublicKey().Bytes(), naclPub)
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
