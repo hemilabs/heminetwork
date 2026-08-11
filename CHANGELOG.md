@@ -9,13 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Harden `continuum` p2p cryptographic signing: sign
-  CeremonyResult/CeremonyAbort broadcasts, bind NaClPub in PeerRecord
-  gossip and handshake challenge, domain-separate all hash functions
-  (TSSMessage, EncryptedPayload, challenge bumped to v2), and block
-  nested EncryptedPayload envelopes
-  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
-
 - Fix a remote crash vulnerability in `tbc` caused by the first element
   of an inventory message list being accessed before ensuring the slice
   isn't empty ([#1039](https://github.com/hemilabs/heminetwork/pull/1039)).
@@ -35,12 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-- `continuum` wire protocol: domain separators bumped to v2 for
-  `TSSMessage`, `EncryptedPayload`, and handshake challenge hashes.
-  `PeerRecord` and `HelloRequest` now carry a `nacl_sig` field.
-  All cluster nodes must upgrade together; mixed v1/v2 nodes cannot
-  handshake or verify each other's signatures
-  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 - `BlockHashByTxId` now returns `(*chainhash.Hash, wire.TxLoc, error)`;
   callers that only need the hash use `bh, _, err :=`
   ([#1052](https://github.com/hemilabs/heminetwork/pull/1052)).
@@ -101,9 +88,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
 - Add multiple RPC commands to regular and authenticated TBC routes ([#1026](https://github.com/hemilabs/heminetwork/pull/1026)).
 - Add maximum fee configuration to `popmd` ([#1037](https://github.com/hemilabs/heminetwork/pull/1037)).
-- Add TSS peer mesh with keygen, signing, and resharing ceremonies,
-  encrypted peer-to-peer RPC transport, DNS seeding, coordinator election,
-  multi-hop message routing, and `hemictl` ceremony management commands
+- Add `continuum` TSS peer mesh with keygen, signing, and resharing
+  ceremonies, secp256k1-signed wire messages, NaCl-encrypted
+  peer-to-peer transport with multi-hop routing, DNS seeding,
+  coordinator election, and `hemictl` ceremony management commands
   ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 - Add external ECDSA and schnorr signature injection to `bitcoin/wallet`,
   enabling threshold signature committees, hardware wallets, and PSBT flows
