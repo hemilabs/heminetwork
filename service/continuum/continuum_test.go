@@ -7219,7 +7219,7 @@ func TestDispatchTSSMessageValidKeygen(t *testing.T) {
 	}
 	cid := CeremonyID{}
 	wireData := []byte("test-keygen-data")
-	hash := HashTSSMessage(cid, wireData)
+	hash := HashTSSMessage(cid, CeremonyKeygen, 0, wireData)
 	sig := from.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -7259,7 +7259,7 @@ func TestDispatchTSSMessageBroadcast(t *testing.T) {
 		t.Fatal(err)
 	}
 	wireData := []byte("bcast")
-	hash := HashTSSMessage(CeremonyID{}, wireData)
+	hash := HashTSSMessage(CeremonyID{}, CeremonyKeygen, TSSFlagBroadcast, wireData)
 	sig := from.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -7292,7 +7292,8 @@ func TestDispatchTSSMessageReshareFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	wireData := []byte("reshare-payload")
-	hash := HashTSSMessage(CeremonyID{}, wireData)
+	reshareFlags := TSSFlagBroadcast | TSSFlagToOld | TSSFlagToNew | TSSFlagFromNew
+	hash := HashTSSMessage(CeremonyID{}, CeremonyReshare, reshareFlags, wireData)
 	sig := from.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -7300,7 +7301,7 @@ func TestDispatchTSSMessageReshareFlags(t *testing.T) {
 		Data:      wireData,
 		Signature: sig,
 		Type:      CeremonyReshare,
-		Flags:     TSSFlagBroadcast | TSSFlagToOld | TSSFlagToNew | TSSFlagFromNew,
+		Flags:     reshareFlags,
 	})
 
 	select {
@@ -7336,7 +7337,7 @@ func TestDispatchTSSMessageHandleError(t *testing.T) {
 		t.Fatal(err)
 	}
 	wireData := []byte("err-data")
-	hash := HashTSSMessage(CeremonyID{}, wireData)
+	hash := HashTSSMessage(CeremonyID{}, CeremonyKeygen, 0, wireData)
 	sig := from.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -10560,8 +10561,11 @@ func TestDecryptPayloadBadInnerTypePath(t *testing.T) {
 	s, _ := NewServer(testConfig())
 	s.secret = recipient
 	_, err = s.decryptPayload(ep)
-	if err == nil || !strings.Contains(err.Error(), "unknown inner type") {
-		t.Fatalf("want unknown inner type, got %v", err)
+	// InnerType is now covered by the signature hash (v2), so
+	// tampering with InnerType is caught at signature verification
+	// before the inner-type decode step.
+	if err == nil || !strings.Contains(err.Error(), "envelope signature") {
+		t.Fatalf("want envelope signature error, got %v", err)
 	}
 }
 
@@ -10943,7 +10947,7 @@ func TestDispatchTSSMessageRetryThenSuccess(t *testing.T) {
 
 	cid := NewCeremonyID()
 	data := []byte("test-data")
-	hash := HashTSSMessage(cid, data)
+	hash := HashTSSMessage(cid, 0, 0, data)
 	sig := secret.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -10979,7 +10983,7 @@ func TestDispatchTSSMessageRetryContextCancel(t *testing.T) {
 
 	cid := NewCeremonyID()
 	data := []byte("test-data")
-	sig := secret.Sign(HashTSSMessage(cid, data))
+	sig := secret.Sign(HashTSSMessage(cid, 0, 0, data))
 
 	s.dispatchTSSMessage(TSSMessage{
 		CeremonyID: cid, From: secret.Identity,
@@ -11014,7 +11018,7 @@ func TestDispatchTSSMessageRetryNonCeremonyError(t *testing.T) {
 
 	cid := NewCeremonyID()
 	data := []byte("test-data")
-	sig := secret.Sign(HashTSSMessage(cid, data))
+	sig := secret.Sign(HashTSSMessage(cid, 0, 0, data))
 
 	s.dispatchTSSMessage(TSSMessage{
 		CeremonyID: cid, From: secret.Identity,

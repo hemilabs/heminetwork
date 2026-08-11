@@ -2585,24 +2585,28 @@ func TestVerifyRejectsWrongIdentity(t *testing.T) {
 }
 
 // TestHashTSSMessageDomainSeparation verifies that HashTSSMessage
-// includes the "continuum-tss-msg-v1" domain separator.  If the
-// domain separator is removed, this test fails.
+// includes the "continuum-tss-msg-v2" domain separator and covers
+// Type and Flags.  If the domain separator is removed, this test fails.
 func TestHashTSSMessageDomainSeparation(t *testing.T) {
 	var cid CeremonyID
 	copy(cid[:], bytes.Repeat([]byte{0xaa}, 32))
+	ct := CeremonyKeygen
+	flags := TSSFlagBroadcast
 	data := []byte("test data")
 
 	// Compute expected hash manually with the domain separator.
 	h := sha256.New()
-	h.Write([]byte("continuum-tss-msg-v1"))
+	h.Write([]byte("continuum-tss-msg-v2"))
 	h.Write(cid[:])
+	h.Write([]byte{byte(ct)})
+	h.Write([]byte{byte(flags)})
 	var lenBuf [4]byte
 	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(data)))
 	h.Write(lenBuf[:])
 	h.Write(data)
 	expected := h.Sum(nil)
 
-	got := HashTSSMessage(cid, data)
+	got := HashTSSMessage(cid, ct, flags, data)
 	if !bytes.Equal(expected, got) {
 		t.Fatalf("HashTSSMessage mismatch:\n  got:  %x\n  want: %x", got, expected)
 	}
@@ -2634,14 +2638,14 @@ func TestHashTSSMessageLengthPrefix(t *testing.T) {
 	data1 := []byte("short")
 	data2 := []byte("short and longer")
 
-	h1 := HashTSSMessage(cid1, data1)
-	h2 := HashTSSMessage(cid2, data2)
+	h1 := HashTSSMessage(cid1, CeremonyKeygen, 0, data1)
+	h2 := HashTSSMessage(cid2, CeremonyKeygen, 0, data2)
 	if bytes.Equal(h1, h2) {
 		t.Fatal("different data must produce different hashes")
 	}
 
 	// Same inputs must be deterministic.
-	h1b := HashTSSMessage(cid1, data1)
+	h1b := HashTSSMessage(cid1, CeremonyKeygen, 0, data1)
 	if !bytes.Equal(h1, h1b) {
 		t.Fatal("HashTSSMessage must be deterministic")
 	}
@@ -2719,10 +2723,11 @@ func TestTransportCloseZerosKeys(t *testing.T) {
 }
 
 // TestChallengeHashDomainSeparation verifies that the handshake
-// challenge hash includes the "continuum-challenge-v1" domain
-// separator.  Both sides must produce the same hash for the
-// handshake to succeed — the existing TestConnHandshake proves
-// agreement.  This test proves the domain separator is present.
+// challenge hash includes the "continuum-challenge-v2" domain
+// separator and binds NaClPub.  Both sides must produce the same
+// hash for the handshake to succeed — the existing TestConnHandshake
+// proves agreement.  This test proves the domain separator and
+// NaClPub binding are present.
 func TestChallengeHashDomainSeparation(t *testing.T) {
 	challenge := make([]byte, ChallengeSize)
 	if _, err := rand.Read(challenge); err != nil {
@@ -2735,10 +2740,15 @@ func TestChallengeHashDomainSeparation(t *testing.T) {
 	}
 	etp := priv.PublicKey().Bytes()
 
-	// Hash256 with domain separator (what the code does now).
-	got := Hash256([]byte("continuum-challenge-v1"), challenge, etp)
+	naclPub := make([]byte, NaClPubSize)
+	if _, err := rand.Read(naclPub); err != nil {
+		t.Fatal(err)
+	}
 
-	// Hash256 without domain separator (what the code used to do).
+	// Hash256 with domain separator and NaClPub (what the code does now).
+	got := Hash256([]byte("continuum-challenge-v2"), challenge, etp, naclPub)
+
+	// Hash256 without domain separator must differ.
 	old := Hash256(challenge, etp)
 
 	if bytes.Equal(got, old) {
@@ -2746,7 +2756,7 @@ func TestChallengeHashDomainSeparation(t *testing.T) {
 	}
 
 	// Must be deterministic.
-	got2 := Hash256([]byte("continuum-challenge-v1"), challenge, etp)
+	got2 := Hash256([]byte("continuum-challenge-v2"), challenge, etp, naclPub)
 	if !bytes.Equal(got, got2) {
 		t.Fatal("challenge hash must be deterministic")
 	}
@@ -2781,7 +2791,7 @@ func TestSealBoxOpenBoxRoundTrip(t *testing.T) {
 	}
 
 	// Verify sender signature.
-	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.Ciphertext)
+	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.InnerType, ep.Ciphertext)
 	_, err = Verify(hash, sender.Identity, ep.Signature)
 	if err != nil {
 		t.Fatalf("envelope signature verify failed: %v", err)
