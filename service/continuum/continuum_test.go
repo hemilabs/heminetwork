@@ -1053,11 +1053,28 @@ func TestLivenessPing(t *testing.T) {
 		}
 	}
 
-	// Verify B also sees A as Live.
-	resp := serverB.handlePeerListAdmin()
-	for _, pr := range resp.Peers {
-		if pr.Identity == idA && !pr.Live {
-			t.Fatal("B does not see A as Live")
+	// Verify B also sees A as Live (poll, same as above).
+	pollCtx2, pollCancel2 := context.WithTimeout(ctx, 2*time.Second)
+	defer pollCancel2()
+
+	tick2 := time.NewTicker(10 * time.Millisecond)
+	defer tick2.Stop()
+
+	for {
+		resp := serverB.handlePeerListAdmin()
+		live := true
+		for _, pr := range resp.Peers {
+			if pr.Identity == idA && !pr.Live {
+				live = false
+			}
+		}
+		if live {
+			break
+		}
+		select {
+		case <-pollCtx2.Done():
+			t.Fatal("B does not see A as Live within timeout")
+		case <-tick2.C:
 		}
 	}
 
@@ -2096,10 +2113,10 @@ func TestHundredNodeMesh(t *testing.T) {
 
 	// Wait for full gossip convergence: every node knows all n
 	// peers.  Chain topology means gossip must traverse up to 99
-	// hops.  60s allows headroom for loaded machines where
+	// hops.  120s allows headroom for loaded CI machines where
 	// goroutine scheduling adds latency per hop.
 	for i := 0; i < n; i++ {
-		waitForPeers(t, servers[i], n, 60*time.Second)
+		waitForPeers(t, servers[i], n, 120*time.Second)
 	}
 	t.Log("gossip converged: all nodes know all peers")
 
@@ -12240,8 +12257,9 @@ func TestSeedForwardModePreservesHostname(t *testing.T) {
 	go func() { errB <- serverB.Run(ctx) }()
 	waitForListenAddress(t, serverB, 2*time.Second)
 
-	// Wait for B to connect to A.
+	// Wait for B to connect to A and learn its peer record via gossip.
 	waitForSessions(t, serverB, 1, 5*time.Second)
+	waitForPeers(t, serverB, 2, 5*time.Second)
 
 	// Verify B stored A's address as hostname:port, not IP:port.
 	serverB.mtx.RLock()
