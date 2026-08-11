@@ -640,6 +640,7 @@ func TestAddPeerBadVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otherNaClSig := other.Sign(HashPeerNaCl(other.Identity, otherNaClPub))
 
 	tests := []struct {
 		name    string
@@ -657,6 +658,7 @@ func TestAddPeerBadVersion(t *testing.T) {
 				Address:  "10.0.0.1:9999",
 				Version:  tc.version,
 				NaClPub:  otherNaClPub,
+				NaClSig:  otherNaClSig,
 			})
 			if got != tc.want {
 				t.Fatalf("addPeer(Version=%d) = %v, want %v",
@@ -1745,25 +1747,28 @@ func TestAddPeerBadNaClPub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	validNaClSig := validSecret.Sign(HashPeerNaCl(validSecret.Identity, validNaClPub))
 
 	tests := []struct {
 		name    string
+		id      Identity
 		naclPub []byte
+		naclSig []byte
 		want    bool // expected addPeer return
 	}{
-		{"nil key (no e2e)", nil, false},
-		{"empty key (no e2e)", []byte{}, false},
-		{"all-zeros key", make([]byte, 32), false},
-		{"valid 32-byte key", validNaClPub, true},
-		{"short 16-byte key", make([]byte, 16), false},
-		{"long 64-byte key", make([]byte, 64), false},
+		{"nil key (no e2e)", Identity{10}, nil, nil, false},
+		{"empty key (no e2e)", Identity{11}, []byte{}, nil, false},
+		{"all-zeros key", Identity{12}, make([]byte, 32), nil, false},
+		{"valid 32-byte key", validSecret.Identity, validNaClPub, validNaClSig, true},
+		{"short 16-byte key", Identity{14}, make([]byte, 16), nil, false},
+		{"long 64-byte key", Identity{15}, make([]byte, 64), nil, false},
 	}
-	for i, tt := range tests {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id := Identity{byte(i + 10)} //nolint:gosec // test loop i < 10
 			got := s.addPeer(ctx, PeerRecord{
-				Identity: id,
+				Identity: tt.id,
 				NaClPub:  tt.naclPub,
+				NaClSig:  tt.naclSig,
 				Version:  ProtocolVersion,
 				LastSeen: time.Now().Unix(),
 			})
@@ -3365,11 +3370,13 @@ func TestHandlePeerListResponseLearnsPeers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	peerNaClSig := peerSecret.Sign(HashPeerNaCl(peerSecret.Identity, peerNaClPub))
 	newPeer := PeerRecord{
-		Identity: Identity{0x42},
+		Identity: peerSecret.Identity,
 		Address:  "10.0.0.1:8080",
 		Version:  ProtocolVersion,
 		NaClPub:  peerNaClPub,
+		NaClSig:  peerNaClSig,
 		LastSeen: time.Now().Unix(),
 	}
 	err = cliTr.Write(Identity{0xEE}, PeerListResponse{
@@ -3392,10 +3399,10 @@ func TestHandlePeerListResponseLearnsPeers(t *testing.T) {
 	}
 
 	s.mtx.RLock()
-	_, found := s.peers[Identity{0x42}]
+	_, found := s.peers[peerSecret.Identity]
 	s.mtx.RUnlock()
 	if !found {
-		t.Fatal("peer 0x42 not added to peer map")
+		t.Fatal("peer not added to peer map")
 	}
 	cancel()
 }
@@ -3410,10 +3417,6 @@ func TestHandlePeerListResponseTruncation(t *testing.T) {
 	// Build maxGossipPeers+10 peers with real NaCl keys.
 	peers := make([]PeerRecord, maxGossipPeers+10)
 	for i := range peers {
-		var id Identity
-		id[0] = byte(i >> 8)
-		id[1] = byte(i)
-		id[2] = 0xFF // avoid collision with server identity
 		peerSecret, err := NewSecret()
 		if err != nil {
 			t.Fatal(err)
@@ -3422,11 +3425,13 @@ func TestHandlePeerListResponseTruncation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		naclSig := peerSecret.Sign(HashPeerNaCl(peerSecret.Identity, naclPub))
 		peers[i] = PeerRecord{
-			Identity: id,
+			Identity: peerSecret.Identity,
 			Address:  fmt.Sprintf("10.0.%d.%d:8080", i>>8, i&0xFF),
 			Version:  ProtocolVersion,
 			NaClPub:  naclPub,
+			NaClSig:  naclSig,
 			LastSeen: time.Now().Unix(),
 		}
 	}
@@ -3729,7 +3734,7 @@ func TestListenFull(t *testing.T) {
 	if err := tr1.KeyExchange(kxCtx, conn1); err != nil {
 		t.Fatalf("kx 1: %v", err)
 	}
-	if _, _, err := tr1.Handshake(kxCtx, secret1); err != nil {
+	if _, _, _, err := tr1.Handshake(kxCtx, secret1); err != nil {
 		t.Logf("handshake 1: %v (may be expected)", err)
 	}
 
@@ -3772,7 +3777,7 @@ func TestListenFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("secret: %v", err)
 	}
-	if _, _, err := tr2.Handshake(kx2Ctx, secret2); err != nil {
+	if _, _, _, err := tr2.Handshake(kx2Ctx, secret2); err != nil {
 		t.Logf("handshake 2 failed (acceptable): %v", err)
 		cancel()
 		<-errC
@@ -4195,9 +4200,16 @@ func TestAddPeerRejectEmptyNaClPub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	peerID := Identity{0xAA}
-	naclPub := make([]byte, NaClPubSize)
-	naclPub[0] = 0x42
+	peerSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerID := peerSecret.Identity
+	naclPub, err := peerSecret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	naclSig := peerSecret.Sign(HashPeerNaCl(peerID, naclPub))
 
 	s := &Server{
 		secret:   secret,
@@ -4211,6 +4223,7 @@ func TestAddPeerRejectEmptyNaClPub(t *testing.T) {
 		Identity: peerID,
 		Version:  ProtocolVersion,
 		NaClPub:  naclPub,
+		NaClSig:  naclSig,
 	}) {
 		t.Fatal("first addPeer should return true")
 	}
@@ -7416,7 +7429,7 @@ func TestHandshakeVersionMismatch(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7454,7 +7467,7 @@ func TestHandshakeShortChallenge(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7487,7 +7500,7 @@ func TestHandshakeZeroChallenge(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7520,7 +7533,7 @@ func TestHandshakeBadNaClPub(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7552,7 +7565,7 @@ func TestHandshakeUnexpectedHelloType(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7579,7 +7592,7 @@ func TestHandshakeReadHelloError(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7606,7 +7619,7 @@ func TestHandshakeBadSignature(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7659,7 +7672,7 @@ func TestHandshakeUnexpectedResponseType(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -7711,7 +7724,7 @@ func TestHandshakeWriteHelloResponseError(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -8102,7 +8115,7 @@ func TestHandshakeWriteHelloRequestError(t *testing.T) {
 	tr1.conn.Close()
 	tr1.mtx.Unlock()
 
-	_, _, err := tr1.Handshake(context.Background(), secret)
+	_, _, _, err := tr1.Handshake(context.Background(), secret)
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
@@ -8121,7 +8134,7 @@ func TestHandshakeReadHelloResponseError(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -8179,7 +8192,7 @@ func TestHandshakeUnexpectedHelloResponseType(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, _, err := tr1.Handshake(context.Background(), secret)
+		_, _, _, err := tr1.Handshake(context.Background(), secret)
 		errCh <- err
 	}()
 
@@ -9236,7 +9249,7 @@ func TestAdminPeerList(t *testing.T) {
 	if err := tr.KeyExchange(kxCtx, conn); err != nil {
 		t.Fatalf("kx: %v", err)
 	}
-	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
+	if _, _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 
@@ -9288,7 +9301,7 @@ func TestAdminCeremonyStatusNotFound(t *testing.T) {
 	if err := tr.KeyExchange(kxCtx, conn); err != nil {
 		t.Fatalf("kx: %v", err)
 	}
-	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
+	if _, _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 
@@ -9351,7 +9364,7 @@ func TestAdminCeremonyList(t *testing.T) {
 	if err := tr.KeyExchange(kxCtx, conn); err != nil {
 		t.Fatalf("kx: %v", err)
 	}
-	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
+	if _, _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 
@@ -9429,7 +9442,7 @@ func TestAdminCeremonyStatusFound(t *testing.T) {
 	if err := tr.KeyExchange(kxCtx, conn); err != nil {
 		t.Fatalf("kx: %v", err)
 	}
-	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
+	if _, _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 
@@ -9692,7 +9705,7 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 	if err := adminTr.KeyExchange(ctx, conn); err != nil {
 		t.Fatalf("admin KX: %v", err)
 	}
-	if _, _, err := adminTr.Handshake(ctx, adminSecret); err != nil {
+	if _, _, _, err := adminTr.Handshake(ctx, adminSecret); err != nil {
 		t.Fatalf("admin handshake: %v", err)
 	}
 
@@ -9859,7 +9872,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 	if err := adminTr.KeyExchange(ctx, conn); err != nil {
 		t.Fatalf("admin KX: %v", err)
 	}
-	if _, _, err := adminTr.Handshake(ctx, adminSecret); err != nil {
+	if _, _, _, err := adminTr.Handshake(ctx, adminSecret); err != nil {
 		t.Fatalf("admin handshake: %v", err)
 	}
 
@@ -10357,9 +10370,10 @@ func TestRefreshPeerLastSeenUpdates(t *testing.T) {
 
 	secret1, _ := NewSecret()
 	naclPub, _ := secret1.NaClPublicKey()
+	naclSig := secret1.Sign(HashPeerNaCl(secret1.Identity, naclPub))
 	s.addPeer(ctx, PeerRecord{
 		Identity: secret1.Identity, Address: "127.0.0.1:9999",
-		NaClPub: naclPub, Version: ProtocolVersion, LastSeen: 1000,
+		NaClPub: naclPub, NaClSig: naclSig, Version: ProtocolVersion, LastSeen: 1000,
 	})
 	s.refreshPeerLastSeen(ctx, secret1.Identity)
 	s.mtx.RLock()
@@ -10507,9 +10521,10 @@ func TestConnectRandomPicksPeer(t *testing.T) {
 
 	secret1, _ := NewSecret()
 	naclPub, _ := secret1.NaClPublicKey()
+	naclSig := secret1.Sign(HashPeerNaCl(secret1.Identity, naclPub))
 	s.addPeer(ctx, PeerRecord{
 		Identity: secret1.Identity, Address: "127.0.0.1:1",
-		NaClPub: naclPub, Version: ProtocolVersion, LastSeen: time.Now().Unix(),
+		NaClPub: naclPub, NaClSig: naclSig, Version: ProtocolVersion, LastSeen: time.Now().Unix(),
 	})
 	s.connectRandom(ctx)
 	// connectPeer goroutine dials 127.0.0.1:1 (ECONNREFUSED
@@ -11323,7 +11338,7 @@ func adminConnect(t *testing.T, ctx context.Context, addr string) (*Secret, *Tra
 	if err := tr.KeyExchange(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := tr.Handshake(ctx, secret); err != nil {
+	if _, _, _, err := tr.Handshake(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { tr.Close() })
@@ -12008,7 +12023,7 @@ func TestNewTransportKXError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err = s.newTransport(t.Context(), conn)
+	_, _, _, _, err = s.newTransport(t.Context(), conn)
 	if err == nil {
 		t.Fatal("expected KX error")
 	}
@@ -12042,7 +12057,7 @@ func TestNewTransportHandshakeError(t *testing.T) {
 		cliConn.Close() // handshake read will fail
 	}()
 
-	_, _, _, err = s.newTransport(ctx, srvConn)
+	_, _, _, _, err = s.newTransport(ctx, srvConn)
 	if err == nil {
 		t.Fatal("expected handshake error")
 	}
@@ -12139,7 +12154,7 @@ func TestNewTransportLoopbackSkipsDNS(t *testing.T) {
 			errCh <- err
 			return
 		}
-		_, _, err = tr.Handshake(ctx, cliSecret)
+		_, _, _, err = tr.Handshake(ctx, cliSecret)
 		tr.Close()
 		errCh <- err
 	}()
@@ -12150,7 +12165,7 @@ func TestNewTransportLoopbackSkipsDNS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	id, transport, _, err := s.newTransport(ctx, conn)
+	id, transport, _, _, err := s.newTransport(ctx, conn)
 	if err != nil {
 		t.Fatalf("newTransport on loopback should succeed, got: %v", err)
 	}
