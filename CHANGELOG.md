@@ -9,25 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Sign `CeremonyResult` and `CeremonyAbort` broadcasts with the
-  coordinator's secp256k1 key. Unsigned broadcast messages could
-  previously be forged by any authenticated peer
-  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
-- Sign `PeerRecord` NaClPub binding to prevent gossip-based e2e key
-  poisoning. Peers verify the secp256k1 signature before accepting
-  a NaClPub via gossip
-  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
-- Include `Type` and `Flags` in `TSSMessage` hash (domain bumped to
-  `continuum-tss-msg-v2`). Prevents downgrade and re-routing attacks
-  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
-- Include `InnerType` in `EncryptedPayload` hash (domain bumped to
-  `continuum-e2e-sig-v2`). Prevents type-confusion replay
-  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
-- Bind `NaClPub` in handshake challenge (domain bumped to
-  `continuum-challenge-v2`). Prevents MITM e2e key substitution
-  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
-- Block nested `EncryptedPayload` envelopes in `continuum` mesh. A
-  crafted multi-layer envelope could bypass the per-type rate limiter
+- Harden `continuum` p2p cryptographic signing: sign
+  CeremonyResult/CeremonyAbort broadcasts, bind NaClPub in PeerRecord
+  gossip and handshake challenge, domain-separate all hash functions
+  (TSSMessage, EncryptedPayload, challenge bumped to v2), and block
+  nested EncryptedPayload envelopes
   ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 
 - Fix a remote crash vulnerability in `tbc` caused by the first element
