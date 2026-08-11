@@ -409,3 +409,85 @@ func TestHandlePeerAddReqHappyPath(t *testing.T) {
 	}
 	s.wg.Wait()
 }
+
+// --- signature rejection tests for broadcast handlers ---
+
+// TestHandleCeremonyResultBadSignature verifies that a CeremonyResult
+// with a forged signature is silently rejected by the dispatch handler.
+func TestHandleCeremonyResultBadSignature(t *testing.T) {
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = secret
+
+	cid := NewCeremonyID()
+
+	// Build a validly-signed result, then corrupt the signature.
+	result := &CeremonyResult{
+		CeremonyID: cid,
+		Success:    true,
+		Signer:     secret.Identity,
+	}
+	result.Signature = secret.Sign(HashCeremonyResult(*result))
+	result.Signature[0] ^= 0xff // corrupt
+
+	dc := &dispatchCtx{s: s, id: &secret.Identity}
+	if handleCeremonyResult(dc, result) {
+		t.Fatal("expected false (continue), got true")
+	}
+	// The corrupted result must NOT register a ceremony outcome.
+	s.mtx.Lock()
+	_, found := s.ceremonies[cid]
+	s.mtx.Unlock()
+	if found {
+		t.Fatal("ceremony registered despite bad signature")
+	}
+}
+
+// TestHandleCeremonyAbortBadSignature verifies that a CeremonyAbort
+// with a forged signature is silently rejected by the dispatch handler.
+func TestHandleCeremonyAbortBadSignature(t *testing.T) {
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = secret
+
+	cid := NewCeremonyID()
+
+	// Register a ceremony so we can verify failCeremony was NOT called.
+	s.registerCeremony(cid, CeremonyKeygen, secret.Identity,
+		[]Identity{secret.Identity})
+
+	abort := &CeremonyAbort{
+		CeremonyID: cid,
+		Reason:     "forged abort",
+		Signer:     secret.Identity,
+	}
+	abort.Signature = secret.Sign(HashCeremonyAbort(*abort))
+	abort.Signature[0] ^= 0xff // corrupt
+
+	dc := &dispatchCtx{s: s, id: &secret.Identity}
+	if handleCeremonyAbort(dc, abort) {
+		t.Fatal("expected false (continue), got true")
+	}
+	// The ceremony must still be active (not failed).
+	s.mtx.Lock()
+	ci, found := s.ceremonies[cid]
+	s.mtx.Unlock()
+	if !found {
+		t.Fatal("ceremony removed despite bad signature")
+	}
+	if ci.Status != CeremonyRunning {
+		t.Fatalf("ceremony status = %s, want %s", ci.Status, CeremonyRunning)
+	}
+}

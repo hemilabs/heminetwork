@@ -316,12 +316,12 @@ type Header struct {
 // key exchange phase. It advertises the version the node is running and some
 // desired options. The challenge must be signed by the remote node.
 type HelloRequest struct {
-	Version   uint32            `json:"version"`           // Version number
-	Options   map[string]string `json:"options,omitempty"` // x=y
-	Identity  Identity          `json:"identity"`          // Advertise our identity
-	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
-	NaClPub   []byte            `json:"nacl_pub"`          // X25519 public key for e2e encryption
-	NaClSig   []byte            `json:"naclsig,omitempty"` // secp256k1 sig binding NaClPub to Identity
+	Version   uint32            `json:"version"`            // Version number
+	Options   map[string]string `json:"options,omitempty"`  // x=y
+	Identity  Identity          `json:"identity"`           // Advertise our identity
+	Challenge []byte            `json:"challenge"`          // Random challenge, min 32 bytes
+	NaClPub   []byte            `json:"nacl_pub"`           // X25519 public key for e2e encryption
+	NaClSig   []byte            `json:"nacl_sig,omitempty"` // secp256k1 sig binding NaClPub to Identity
 }
 
 // HelloResponse returns the signed challenge. The remote identity is derived
@@ -346,7 +346,7 @@ type PeerRecord struct {
 	Identity Identity   `json:"identity"`
 	Address  string     `json:"address"`            // host:port
 	NaClPub  []byte     `json:"nacl_pub,omitempty"` // X25519 public key for e2e encryption
-	NaClSig  []byte     `json:"naclsig,omitempty"`  // secp256k1 sig binding NaClPub to Identity
+	NaClSig  []byte     `json:"nacl_sig,omitempty"` // secp256k1 sig binding NaClPub to Identity
 	Version  uint32     `json:"version"`            // ProtocolVersion at time of discovery
 	LastSeen int64      `json:"last_seen"`          // unix timestamp
 	Sessions []Identity `json:"sessions,omitempty"` // direct session neighbors (gossip topology)
@@ -534,7 +534,7 @@ type TSSMessage struct {
 	From       Identity     `json:"from"`       // Originating party (for sig verification)
 	Flags      TSSMsgFlags  `json:"flags"`      // Broadcast + committee routing
 	Data       []byte       `json:"data"`       // serialized TSS message content
-	Signature  []byte       `json:"signature"`  // Sign(Hash(CeremonyID || Data))
+	Signature  []byte       `json:"signature"`  // Sign(Hash(CeremonyID || Type || Flags || Data))
 }
 
 // IsBroadcast reports whether the message is broadcast to all parties.
@@ -1510,8 +1510,8 @@ func (t *Transport) decryptFrameHeader(header []byte) (uint32, error) {
 
 // Handshake advertises to the other side what version and options this
 // transport wishes to use. It is also used to verify that the derived Identity
-// did indeed sign the challenge. Returns the remote identity and their X25519
-// public key for e2e encryption.
+// did indeed sign the challenge. Returns the remote identity, their X25519
+// public key for e2e encryption, and the NaClSig binding the key to the identity.
 func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, []byte, []byte, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
