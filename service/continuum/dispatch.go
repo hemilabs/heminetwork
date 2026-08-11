@@ -46,6 +46,7 @@ func init() {
 		reflect.TypeFor[*TSSMessage]():            handleTSSMessage,
 		reflect.TypeFor[*EncryptedPayload]():      handleEncryptedPayload,
 		reflect.TypeFor[*CeremonyResult]():        handleCeremonyResult,
+		reflect.TypeFor[*CeremonyAbort]():         handleCeremonyAbort,
 		reflect.TypeFor[*PeerListAdminRequest]():  handlePeerListAdmin,
 		reflect.TypeFor[*CeremonyStatusRequest](): handleCeremonyStatusReq,
 		reflect.TypeFor[*CeremonyListRequest]():   handleCeremonyListReq,
@@ -249,6 +250,13 @@ func handleEncryptedPayload(dc *dispatchCtx, payload any) bool {
 func handleCeremonyResult(dc *dispatchCtx, payload any) bool {
 	v := payload.(*CeremonyResult)
 	dc.s.handleCeremonyResult(*v)
+	return false
+}
+
+func handleCeremonyAbort(dc *dispatchCtx, payload any) bool {
+	v := payload.(*CeremonyAbort)
+	log.Infof("ceremony abort %s from %v: %s", v.CeremonyID, dc.id, v.Reason)
+	dc.s.failCeremony(v.CeremonyID, v.Reason)
 	return false
 }
 
