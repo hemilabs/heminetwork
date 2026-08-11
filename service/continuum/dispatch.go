@@ -249,12 +249,24 @@ func handleEncryptedPayload(dc *dispatchCtx, payload any) bool {
 
 func handleCeremonyResult(dc *dispatchCtx, payload any) bool {
 	v := payload.(*CeremonyResult)
+	hash := HashCeremonyResult(*v)
+	if _, err := Verify(hash, v.Signer, v.Signature); err != nil {
+		log.Warningf("ceremony result from %v: bad signature: %v",
+			v.Signer, err)
+		return false
+	}
 	dc.s.handleCeremonyResult(*v)
 	return false
 }
 
 func handleCeremonyAbort(dc *dispatchCtx, payload any) bool {
 	v := payload.(*CeremonyAbort)
+	hash := HashCeremonyAbort(*v)
+	if _, err := Verify(hash, v.Signer, v.Signature); err != nil {
+		log.Warningf("ceremony abort from %v: bad signature: %v",
+			v.Signer, err)
+		return false
+	}
 	log.Infof("ceremony abort %s from %v: %s", v.CeremonyID, dc.id, v.Reason)
 	dc.s.failCeremony(v.CeremonyID, v.Reason)
 	return false

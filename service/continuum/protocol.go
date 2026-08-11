@@ -559,6 +559,8 @@ type CeremonyResult struct {
 	CeremonyID CeremonyID `json:"ceremonyid"`
 	Success    bool       `json:"success"`
 	Error      string     `json:"error,omitempty"`
+	Signer     Identity   `json:"signer"`
+	Signature  []byte     `json:"signature,omitempty"`
 }
 
 // CeremonyAbort signals ceremony termination.
@@ -566,6 +568,37 @@ type CeremonyResult struct {
 type CeremonyAbort struct {
 	CeremonyID CeremonyID `json:"ceremonyid"`
 	Reason     string     `json:"reason"`
+	Signer     Identity   `json:"signer"`
+	Signature  []byte     `json:"signature,omitempty"`
+}
+
+// HashCeremonyResult computes the hash that must be signed for a
+// CeremonyResult.  Hash = SHA256("continuum-ceremony-result-v1" ||
+// CeremonyID || success_byte || Error).  The domain separator prevents
+// cross-protocol signature replay.
+func HashCeremonyResult(r CeremonyResult) []byte {
+	h := sha256.New()
+	h.Write([]byte("continuum-ceremony-result-v1"))
+	h.Write(r.CeremonyID[:])
+	if r.Success {
+		h.Write([]byte{1})
+	} else {
+		h.Write([]byte{0})
+	}
+	h.Write([]byte(r.Error))
+	return h.Sum(nil)
+}
+
+// HashCeremonyAbort computes the hash that must be signed for a
+// CeremonyAbort.  Hash = SHA256("continuum-ceremony-abort-v1" ||
+// CeremonyID || Reason).  The domain separator prevents cross-protocol
+// signature replay.
+func HashCeremonyAbort(a CeremonyAbort) []byte {
+	h := sha256.New()
+	h.Write([]byte("continuum-ceremony-abort-v1"))
+	h.Write(a.CeremonyID[:])
+	h.Write([]byte(a.Reason))
+	return h.Sum(nil)
 }
 
 // =============================================================================
