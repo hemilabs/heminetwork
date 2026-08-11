@@ -8776,7 +8776,9 @@ func TestThreeNodeBroadcast(t *testing.T) {
 	result := CeremonyResult{
 		CeremonyID: cid,
 		Success:    true,
+		Signer:     servers[0].secret.Identity,
 	}
+	result.Signature = servers[0].secret.Sign(HashCeremonyResult(result))
 	if err := servers[0].Broadcast(result); err != nil {
 		t.Fatalf("Broadcast: %v", err)
 	}
@@ -8856,7 +8858,9 @@ func TestBroadcastDedup(t *testing.T) {
 	result := CeremonyResult{
 		CeremonyID: cid,
 		Success:    true,
+		Signer:     servers[0].secret.Identity,
 	}
+	result.Signature = servers[0].secret.Sign(HashCeremonyResult(result))
 	if err := servers[0].Broadcast(result); err != nil {
 		t.Fatalf("Broadcast 1: %v", err)
 	}
@@ -8962,7 +8966,9 @@ func TestBroadcastTTLExpiry(t *testing.T) {
 	result := CeremonyResult{
 		CeremonyID: cid,
 		Success:    true,
+		Signer:     servers[0].secret.Identity,
 	}
+	result.Signature = servers[0].secret.Sign(HashCeremonyResult(result))
 	if err := servers[0].broadcastWithTTL(result, 1); err != nil {
 		t.Fatalf("broadcastWithTTL: %v", err)
 	}
