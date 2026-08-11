@@ -589,12 +589,14 @@ type CeremonyAbort struct {
 
 // HashCeremonyResult computes the hash that must be signed for a
 // CeremonyResult.  Hash = SHA256("continuum-ceremony-result-v1" ||
-// CeremonyID || success_byte || Error).  The domain separator prevents
-// cross-protocol signature replay.
+// CeremonyID || Signer || success_byte || Error).  The domain separator
+// prevents cross-protocol signature replay.  Signer is included as
+// defense-in-depth against RIPEMD160 identity collisions.
 func HashCeremonyResult(r CeremonyResult) []byte {
 	h := sha256.New()
 	h.Write([]byte("continuum-ceremony-result-v1"))
 	h.Write(r.CeremonyID[:])
+	h.Write(r.Signer[:])
 	if r.Success {
 		h.Write([]byte{1})
 	} else {
@@ -606,12 +608,14 @@ func HashCeremonyResult(r CeremonyResult) []byte {
 
 // HashCeremonyAbort computes the hash that must be signed for a
 // CeremonyAbort.  Hash = SHA256("continuum-ceremony-abort-v1" ||
-// CeremonyID || Reason).  The domain separator prevents cross-protocol
-// signature replay.
+// CeremonyID || Signer || Reason).  The domain separator prevents
+// cross-protocol signature replay.  Signer is included as
+// defense-in-depth against RIPEMD160 identity collisions.
 func HashCeremonyAbort(a CeremonyAbort) []byte {
 	h := sha256.New()
 	h.Write([]byte("continuum-ceremony-abort-v1"))
 	h.Write(a.CeremonyID[:])
+	h.Write(a.Signer[:])
 	h.Write([]byte(a.Reason))
 	return h.Sum(nil)
 }
@@ -901,6 +905,9 @@ func hashEncryptedPayload(ephPub *[32]byte, nonce *[24]byte, innerType PayloadTy
 	h.Write([]byte("continuum-e2e-sig-v2"))
 	h.Write(ephPub[:])
 	h.Write(nonce[:])
+	var itLen [4]byte
+	binary.BigEndian.PutUint32(itLen[:], uint32(len(innerType)))
+	h.Write(itLen[:])
 	h.Write([]byte(innerType))
 	h.Write(ciphertext)
 	return h.Sum(nil)
