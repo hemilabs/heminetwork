@@ -25,9 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Zero timeouts allowed slowloris-style connection exhaustion and
   unbounded request bodies could cause OOM
   ([#1079](https://github.com/hemilabs/heminetwork/pull/1079)).
+- Authenticate `continuum` peer end-to-end encryption keys. A peer's
+  X25519 key was accepted from unsigned gossip, so any connected peer
+  could bind a victim's identity to an attacker-held key and read the
+  confidential ceremony traffic every node then sealed to it. Gossip no
+  longer carries key material; a key is learned only from its holder,
+  either through the handshake (whose challenge signature now covers
+  the key) or through a new routed `NaClKeyRequest`/`NaClKeyResponse`
+  challenge-response for peers without a direct session. Bindings are
+  immutable — the X25519 key is derived deterministically from the
+  secp256k1 identity key, so a conflicting binding is rejected and
+  exported as `continuum_peer_key_conflicts_total`.
 
 ### Breaking Changes
 
+- `continuum` protocol version is now 2 and does not interoperate with
+  version 1 nodes. The handshake binds the announced X25519 key into
+  the challenge signature and requires it to be present and well
+  formed, and gossip peer records no longer carry key material.
 - `BlockHashByTxId` now returns `(*chainhash.Hash, wire.TxLoc, error)`;
   callers that only need the hash use `bh, _, err :=`
   ([#1052](https://github.com/hemilabs/heminetwork/pull/1052)).
