@@ -1741,6 +1741,7 @@ func TestAddPeerBadNaClPub(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{
+		cfg:      NewDefaultConfig(),
 		seen:     seen,
 		secret:   secret,
 		peers:    make(map[Identity]*PeerRecord),
@@ -4219,7 +4220,7 @@ func TestAddPeerPreservesBoundKey(t *testing.T) {
 		secret:   secret,
 		peersTTL: peersTTL,
 		peers:    make(map[Identity]*PeerRecord),
-		cfg:      &Config{PeersWanted: 8},
+		cfg:      NewDefaultConfig(),
 	}
 
 	// Discovery record with no address — accepted, no key bound.
@@ -4254,6 +4255,74 @@ func TestAddPeerPreservesBoundKey(t *testing.T) {
 	}
 	if !bytes.Equal(pr.NaClPub, naclPub) {
 		t.Fatalf("bound NaClPub must survive gossip: got %x", pr.NaClPub)
+	}
+}
+
+// TestAddPeerTableCap verifies that addPeer rejects new peers when
+// the peer table reaches MaxPeers, but still allows updates to
+// existing peers at the cap.
+func TestAddPeerTableCap(t *testing.T) {
+	ctx := t.Context()
+	peersTTL, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := NewDefaultConfig()
+	cfg.MaxPeers = 3 // small cap for test
+	s := &Server{
+		cfg:      cfg,
+		secret:   secret,
+		peers:    make(map[Identity]*PeerRecord),
+		peersTTL: peersTTL,
+	}
+
+	// Fill the table to the cap.
+	ids := make([]Identity, cfg.MaxPeers)
+	for i := range ids {
+		ids[i] = Identity{byte(i + 1)}
+		if !s.addPeer(ctx, PeerRecord{
+			Identity: ids[i],
+			Address:  fmt.Sprintf("127.0.0.1:%d", 9000+i),
+			Version:  ProtocolVersion,
+		}) {
+			t.Fatalf("addPeer[%d] should accept", i)
+		}
+	}
+
+	// Next NEW peer must be rejected.
+	overflow := Identity{0xFF}
+	if s.addPeer(ctx, PeerRecord{
+		Identity: overflow,
+		Address:  "127.0.0.1:8888",
+		Version:  ProtocolVersion,
+	}) {
+		t.Fatal("addPeer should reject when table is full")
+	}
+	s.mtx.RLock()
+	_, exists := s.peers[overflow]
+	s.mtx.RUnlock()
+	if exists {
+		t.Fatal("overflow peer should not be in table")
+	}
+
+	// Update to an EXISTING peer must still succeed.
+	if s.addPeer(ctx, PeerRecord{
+		Identity: ids[0],
+		Address:  "10.0.0.1:7777",
+		Version:  ProtocolVersion,
+	}) {
+		t.Fatal("updating existing peer should return false (not new)")
+	}
+	s.mtx.RLock()
+	addr := s.peers[ids[0]].Address
+	s.mtx.RUnlock()
+	if addr != "10.0.0.1:7777" {
+		t.Fatalf("existing peer address not updated: got %q", addr)
 	}
 }
 
