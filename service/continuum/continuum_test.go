@@ -7302,7 +7302,7 @@ func TestDispatchTSSMessageValidKeygen(t *testing.T) {
 	}
 	cid := CeremonyID{}
 	wireData := []byte("test-keygen-data")
-	hash := HashTSSMessage(cid, CeremonyKeygen, 0, wireData)
+	hash := HashTSSMessage(cid, from.Identity, CeremonyKeygen, 0, wireData)
 	sig := from.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -7342,7 +7342,7 @@ func TestDispatchTSSMessageBroadcast(t *testing.T) {
 		t.Fatal(err)
 	}
 	wireData := []byte("bcast")
-	hash := HashTSSMessage(CeremonyID{}, CeremonyKeygen, TSSFlagBroadcast, wireData)
+	hash := HashTSSMessage(CeremonyID{}, from.Identity, CeremonyKeygen, TSSFlagBroadcast, wireData)
 	sig := from.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -7376,7 +7376,7 @@ func TestDispatchTSSMessageReshareFlags(t *testing.T) {
 	}
 	wireData := []byte("reshare-payload")
 	reshareFlags := TSSFlagBroadcast | TSSFlagToOld | TSSFlagToNew | TSSFlagFromNew
-	hash := HashTSSMessage(CeremonyID{}, CeremonyReshare, reshareFlags, wireData)
+	hash := HashTSSMessage(CeremonyID{}, from.Identity, CeremonyReshare, reshareFlags, wireData)
 	sig := from.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -7420,7 +7420,7 @@ func TestDispatchTSSMessageHandleError(t *testing.T) {
 		t.Fatal(err)
 	}
 	wireData := []byte("err-data")
-	hash := HashTSSMessage(CeremonyID{}, CeremonyKeygen, 0, wireData)
+	hash := HashTSSMessage(CeremonyID{}, from.Identity, CeremonyKeygen, 0, wireData)
 	sig := from.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -11028,7 +11028,7 @@ func TestDispatchTSSMessageRetryThenSuccess(t *testing.T) {
 
 	cid := NewCeremonyID()
 	data := []byte("test-data")
-	hash := HashTSSMessage(cid, 0, 0, data)
+	hash := HashTSSMessage(cid, secret.Identity, 0, 0, data)
 	sig := secret.Sign(hash)
 
 	s.dispatchTSSMessage(TSSMessage{
@@ -11064,7 +11064,7 @@ func TestDispatchTSSMessageRetryContextCancel(t *testing.T) {
 
 	cid := NewCeremonyID()
 	data := []byte("test-data")
-	sig := secret.Sign(HashTSSMessage(cid, 0, 0, data))
+	sig := secret.Sign(HashTSSMessage(cid, secret.Identity, 0, 0, data))
 
 	s.dispatchTSSMessage(TSSMessage{
 		CeremonyID: cid, From: secret.Identity,
@@ -11099,7 +11099,7 @@ func TestDispatchTSSMessageRetryNonCeremonyError(t *testing.T) {
 
 	cid := NewCeremonyID()
 	data := []byte("test-data")
-	sig := secret.Sign(HashTSSMessage(cid, 0, 0, data))
+	sig := secret.Sign(HashTSSMessage(cid, secret.Identity, 0, 0, data))
 
 	s.dispatchTSSMessage(TSSMessage{
 		CeremonyID: cid, From: secret.Identity,
