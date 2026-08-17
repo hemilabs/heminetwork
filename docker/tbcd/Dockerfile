@@ -20,6 +20,8 @@ RUN make go-deps
 COPY . .
 RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" tbcd
 
+RUN go clean -modcache
+
 # Run stage
 FROM cgr.dev/chainguard/static@sha256:77d8b8925dc27970ec2f48243f44c7a260d52c49cd778288e4ee97566e0cb75b
 
