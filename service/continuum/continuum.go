@@ -51,6 +51,7 @@ const (
 
 	defaultListenAddress = "localhost:45067"
 	defaultPeersWanted   = 8
+	defaultMaxPeers      = 256
 
 	// peerTTL is the duration a peer record stays alive without
 	// refresh.  Prime to avoid resonance with other timers.
@@ -254,6 +255,7 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	Seeds                   []string // DNS seed hostnames, format host:port
+	MaxPeers                int      // 0 uses default (256)
 	AdminListenAddress      string   // empty = no admin listener
 }
 
@@ -426,6 +428,7 @@ func NewDefaultConfig() *Config {
 		PrivateKey:          "",
 		ListenAddress:       defaultListenAddress,
 		PeersWanted:         defaultPeersWanted,
+		MaxPeers:            defaultMaxPeers,
 	}
 }
 
@@ -444,6 +447,10 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 	if (cfg.DNS == DNSForward || cfg.DNS == DNSAll) && cfg.Hostname == "" {
 		return nil, fmt.Errorf("DNS=%q requires Hostname to be set", cfg.DNS)
+	}
+
+	if cfg.MaxPeers <= 0 {
+		cfg.MaxPeers = defaultMaxPeers
 	}
 
 	di := serverDebugInit()
@@ -1761,8 +1768,20 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 
 	// Replay protection analysis.
 	//
-	// The routing-layer dedup cache (67s TTL) prevents immediate
-	// replay of routed messages.  Beyond that window:
+	// Two tiers protect against replay:
+	//
+	//  - Direct peers: the transport runs over a point-to-point
+	//    TCP stream.  Re-injecting a transport frame requires
+	//    TCP-level MitM, which is a separate and much harder
+	//    threat than mesh-level replay.
+	//
+	//  - Routed peers: a routing node sees the raw EncryptedPayload
+	//    between tunnels and could save/replay it.  The routing-layer
+	//    dedup cache (67s TTL) catches immediate replays.  Beyond
+	//    that window, the inner protocol state machines (below) make
+	//    replayed messages inert.
+	//
+	// Per-inner-type analysis beyond the dedup window:
 	//
 	//  - Ceremony-initiating messages (KeygenRequest, SignRequest,
 	//    ReshareRequest): in production these originate from the
@@ -2146,7 +2165,14 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 		return false
 	}
 
+	// Reject new peers when the table is full.  Updates to
+	// existing peers always pass — only new entries are capped.
 	existing, existed := s.peers[pr.Identity]
+	if !existed && s.cfg.MaxPeers > 0 && len(s.peers) >= s.cfg.MaxPeers {
+		log.Debugf("addPeer %v: peer table full (%d)",
+			pr.Identity, s.cfg.MaxPeers)
+		return false
+	}
 	if existed {
 		// Preserve Address if the caller doesn't have it.
 		// The listen path knows the session but not the peer's

@@ -27,6 +27,25 @@ package continuum
 // Complexity: BFS is O(V+E) where V = known peers and E = sum of
 // session lists.  For 100 nodes with PeersWanted=8, that is ~900
 // operations — microseconds.
+//
+// Trust model: PeerRecord.Sessions is unauthenticated gossip data.
+// A malicious node can advertise fabricated session adjacencies to
+// attract traffic through itself.  This enables traffic analysis
+// (observing Header.Destination on routed messages) and selective
+// message dropping to delay ceremonies.  It does NOT enable:
+//
+//   - Impersonation: EncryptedPayload and TSSMessage carry their own
+//     signatures verified against the inner sender identity.
+//   - Content reading: EncryptedPayload is NaCl-box encrypted to the
+//     destination's X25519 key.
+//   - Key compromise: NaCl keys are bound via challenge-response, not
+//     affected by routing.
+//
+// The flood fallback in sendTo and forward is the safety net: when the
+// routed path fails or silently drops, retry logic (ensurePeerKey,
+// ceremony timeouts) re-sends, and the flood path delivers as long as
+// the mesh has any honest path.  Routing is an optimization; security
+// does not depend on it.
 
 // invalidateRoutes bumps the routing generation counter, marking
 // the current table as stale.  Called under s.mtx.Lock by
