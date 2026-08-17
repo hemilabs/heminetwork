@@ -52,7 +52,7 @@ func TestSessionRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := tr.Handshake(ctx, secret); err != nil {
+	if _, _, err := tr.Handshake(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
 
@@ -193,7 +193,7 @@ func TestConnCooldown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := tr1.Handshake(ctx, sec1); err != nil {
+	if _, _, err := tr1.Handshake(ctx, sec1); err != nil {
 		t.Fatal(err)
 	}
 	// Drain initial messages.
@@ -224,7 +224,7 @@ func TestConnCooldown(t *testing.T) {
 		conn2.Close()
 		t.Fatal(err)
 	}
-	_, _, _, err = tr2.Handshake(ctx, sec2)
+	_, _, err = tr2.Handshake(ctx, sec2)
 	if err != nil {
 		conn2.Close()
 		t.Fatal(err)
