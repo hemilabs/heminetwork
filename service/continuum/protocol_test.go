@@ -2713,19 +2713,23 @@ func TestVerifyRejectsWrongIdentity(t *testing.T) {
 }
 
 // TestHashTSSMessageDomainSeparation verifies that HashTSSMessage
-// includes the "continuum-tss-msg-v2" domain separator and covers
-// Type and Flags.  If the domain separator is removed, this test fails.
+// includes the "continuum-tss-msg-v3" domain separator and covers
+// From, Type, and Flags.  If the domain separator is removed, this
+// test fails.
 func TestHashTSSMessageDomainSeparation(t *testing.T) {
 	var cid CeremonyID
 	copy(cid[:], bytes.Repeat([]byte{0xaa}, 32))
+	var from Identity
+	copy(from[:], bytes.Repeat([]byte{0xbb}, 20))
 	ct := CeremonyKeygen
 	flags := TSSFlagBroadcast
 	data := []byte("test data")
 
 	// Compute expected hash manually with the domain separator.
 	h := sha256.New()
-	h.Write([]byte("continuum-tss-msg-v2"))
+	h.Write([]byte("continuum-tss-msg-v3"))
 	h.Write(cid[:])
+	h.Write(from[:])
 	h.Write([]byte{byte(ct)})
 	h.Write([]byte{byte(flags)})
 	var lenBuf [4]byte
@@ -2734,7 +2738,7 @@ func TestHashTSSMessageDomainSeparation(t *testing.T) {
 	h.Write(data)
 	expected := h.Sum(nil)
 
-	got := HashTSSMessage(cid, ct, flags, data)
+	got := HashTSSMessage(cid, from, ct, flags, data)
 	if !bytes.Equal(expected, got) {
 		t.Fatalf("HashTSSMessage mismatch:\n  got:  %x\n  want: %x", got, expected)
 	}
@@ -2766,14 +2770,15 @@ func TestHashTSSMessageLengthPrefix(t *testing.T) {
 	data1 := []byte("short")
 	data2 := []byte("short and longer")
 
-	h1 := HashTSSMessage(cid1, CeremonyKeygen, 0, data1)
-	h2 := HashTSSMessage(cid2, CeremonyKeygen, 0, data2)
+	var from Identity
+	h1 := HashTSSMessage(cid1, from, CeremonyKeygen, 0, data1)
+	h2 := HashTSSMessage(cid2, from, CeremonyKeygen, 0, data2)
 	if bytes.Equal(h1, h2) {
 		t.Fatal("different data must produce different hashes")
 	}
 
 	// Same inputs must be deterministic.
-	h1b := HashTSSMessage(cid1, CeremonyKeygen, 0, data1)
+	h1b := HashTSSMessage(cid1, from, CeremonyKeygen, 0, data1)
 	if !bytes.Equal(h1, h1b) {
 		t.Fatal("HashTSSMessage must be deterministic")
 	}
@@ -2919,7 +2924,7 @@ func TestSealBoxOpenBoxRoundTrip(t *testing.T) {
 	}
 
 	// Verify sender signature.
-	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.InnerType, ep.Ciphertext)
+	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.Sender, ep.InnerType, ep.Ciphertext)
 	_, err = Verify(hash, sender.Identity, ep.Signature)
 	if err != nil {
 		t.Fatalf("envelope signature verify failed: %v", err)
