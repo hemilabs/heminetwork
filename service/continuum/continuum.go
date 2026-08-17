@@ -1743,7 +1743,7 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 	}
 
 	// Verify sender signature before touching the box.
-	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.InnerType, ep.Ciphertext)
+	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.Sender, ep.InnerType, ep.Ciphertext)
 	if _, err := Verify(hash, ep.Sender, ep.Signature); err != nil {
 		return nil, fmt.Errorf("envelope signature: %w", err)
 	}
