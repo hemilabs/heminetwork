@@ -20,6 +20,7 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -320,11 +321,11 @@ type Header struct {
 // key exchange phase. It advertises the version the node is running and some
 // desired options. The challenge must be signed by the remote node.
 type HelloRequest struct {
-	Version   uint32            `json:"version"`            // Version number
-	Options   map[string]string `json:"options,omitempty"`  // x=y
-	Identity  Identity          `json:"identity"`           // Advertise our identity
-	Challenge []byte            `json:"challenge"`          // Random challenge, min 32 bytes
-	NaClPub   []byte            `json:"nacl_pub"`           // X25519 public key for e2e encryption
+	Version   uint32            `json:"version"`           // Version number
+	Options   map[string]string `json:"options,omitempty"` // x=y
+	Identity  Identity          `json:"identity"`          // Advertise our identity
+	Challenge []byte            `json:"challenge"`         // Random challenge, min 32 bytes
+	NaClPub   []byte            `json:"nacl_pub"`          // X25519 public key for e2e encryption
 }
 
 // HelloResponse returns the signed challenge. The remote identity is derived
@@ -576,14 +577,16 @@ func (m TSSMessage) IsBroadcast() bool {
 }
 
 // HashTSSMessage computes the hash that must be signed for a
-// TSSMessage. Hash = SHA256("continuum-tss-msg-v2" || CeremonyID || Type || Flags || len(Data) || Data).
+// TSSMessage. Hash = SHA256("continuum-tss-msg-v3" || CeremonyID || From || Type || Flags || len(Data) || Data).
 // The domain separator prevents cross-protocol signature replay.
+// From is included to prevent identity malleability on the wire.
 // Type and Flags are included to prevent downgrade/re-routing attacks.
 // The length prefix prevents ambiguous Data splits.
-func HashTSSMessage(cid CeremonyID, ct CeremonyType, flags TSSMsgFlags, data []byte) []byte {
+func HashTSSMessage(cid CeremonyID, from Identity, ct CeremonyType, flags TSSMsgFlags, data []byte) []byte {
 	h := sha256.New()
-	h.Write([]byte("continuum-tss-msg-v2"))
+	h.Write([]byte("continuum-tss-msg-v3"))
 	h.Write(cid[:])
+	h.Write(from[:])
 	h.Write([]byte{byte(ct)})
 	h.Write([]byte{byte(flags)})
 	var lenBuf [4]byte
@@ -935,13 +938,16 @@ func (s Secret) NaClPublicKey() ([]byte, error) {
 
 // hashEncryptedPayload computes a domain-separated hash of the
 // encrypted envelope fields for signing/verification.
-// InnerType is included to prevent type-confusion attacks where
-// ciphertext is replayed under a different inner payload type.
-func hashEncryptedPayload(ephPub *[32]byte, nonce *[24]byte, innerType PayloadType, ciphertext []byte) []byte {
+// Sender is included so the identity claim cannot be swapped without
+// invalidating the signature.  InnerType is included to prevent
+// type-confusion attacks where ciphertext is replayed under a
+// different inner payload type.
+func hashEncryptedPayload(ephPub *[32]byte, nonce *[24]byte, sender Identity, innerType PayloadType, ciphertext []byte) []byte {
 	h := sha256.New()
-	h.Write([]byte("continuum-e2e-sig-v2"))
+	h.Write([]byte("continuum-e2e-sig-v3"))
 	h.Write(ephPub[:])
 	h.Write(nonce[:])
+	h.Write(sender[:])
 	var itLen [4]byte
 	binary.BigEndian.PutUint32(itLen[:], uint32(len(innerType)))
 	h.Write(itLen[:])
@@ -992,7 +998,7 @@ func SealBox(plaintext []byte, recipientPub []byte, sender *Secret, innerType Pa
 	copy(ephPub[:], ephemeral.PublicKey().Bytes())
 
 	// Sign the envelope.
-	hash := hashEncryptedPayload(&ephPub, &nonce, innerType, sealed)
+	hash := hashEncryptedPayload(&ephPub, &nonce, sender.Identity, innerType, sealed)
 	sig := sender.Sign(hash)
 
 	return &EncryptedPayload{
@@ -1552,10 +1558,68 @@ func (t *Transport) decryptFrameHeader(header []byte) (uint32, error) {
 	return binary.BigEndian.Uint32(lenBuf), nil
 }
 
+// canonicalOptions deterministically serializes a map[string]string as:
+//
+//	BigEndian(len(map)) || (BigEndian(len(key)) || key || BigEndian(len(val)) || val)*
+//
+// Keys are sorted lexicographically.  Fixed-size length prefixes make
+// the encoding unambiguous without delimiters.
+func canonicalOptions(opts map[string]string) []byte {
+	keys := make([]string, 0, len(opts))
+	for k := range opts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Pre-size: 4 bytes count + (4+len(k)+4+len(v)) per entry.
+	sz := 4
+	for _, k := range keys {
+		sz += 4 + len(k) + 4 + len(opts[k])
+	}
+	buf := make([]byte, 0, sz)
+
+	var tmp [4]byte
+	binary.BigEndian.PutUint32(tmp[:], uint32(len(keys)))
+	buf = append(buf, tmp[:]...)
+	for _, k := range keys {
+		binary.BigEndian.PutUint32(tmp[:], uint32(len(k)))
+		buf = append(buf, tmp[:]...)
+		buf = append(buf, k...)
+		v := opts[k]
+		binary.BigEndian.PutUint32(tmp[:], uint32(len(v)))
+		buf = append(buf, tmp[:]...)
+		buf = append(buf, v...)
+	}
+	return buf
+}
+
+// hashHandshakeChallenge computes the domain-separated hash signed
+// during the handshake.  Every HelloRequest field is covered so no
+// field is malleable:
+//
+//	SHA256("continuum-challenge-v3" || BigEndian(version) ||
+//	       canonicalOptions(options) || challenge ||
+//	       transportPub || naclPub)
+func hashHandshakeChallenge(version uint32, options map[string]string, challenge, transportPub, naclPub []byte) []byte {
+	h := sha256.New()
+	h.Write([]byte("continuum-challenge-v3"))
+	var vBuf [4]byte
+	binary.BigEndian.PutUint32(vBuf[:], version)
+	h.Write(vBuf[:])
+	h.Write(canonicalOptions(options))
+	h.Write(challenge)
+	h.Write(transportPub)
+	h.Write(naclPub)
+	return h.Sum(nil)
+}
+
 // Handshake advertises to the other side what version and options this
 // transport wishes to use. It is also used to verify that the derived Identity
-// did indeed sign the challenge. Returns the remote identity and their X25519
-// public key for e2e encryption.
+// did indeed sign the challenge.  The challenge signature covers all
+// HelloRequest fields (version, options, challenge, transport public
+// key, and X25519 e2e key) so none can be altered without detection.
+// Returns the remote identity and their X25519 public key for e2e
+// encryption.
 func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, []byte, error) {
 	var ourChallenge [32]byte
 	_, err := rand.Read(ourChallenge[:])
@@ -1616,13 +1680,11 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 		return nil, nil, fmt.Errorf("%w: all zeros", ErrInvalidNaClPub)
 	}
 
-	// Sign the combined challenge: their challenge, their ephemeral
-	// transport public key, and OUR X25519 e2e key.  Binding our
-	// NaClPub into the signature makes the handshake an explicit
-	// attestation of the identity→e2e-key binding — the same signed
-	// statement NaClKeyResponse carries — instead of relying on the
-	// key having arrived over the authenticated channel.
-	combinedChallenge := Hash256([]byte("continuum-challenge-v2"), helloRequest.Challenge, t.them.Bytes(), naclPub)
+	// Sign the combined challenge covering ALL received HelloRequest
+	// fields: their version, options, challenge, their ephemeral
+	// transport public key, and OUR X25519 e2e key.  Every field is
+	// in the hash so nothing is malleable.
+	combinedChallenge := hashHandshakeChallenge(helloRequest.Version, helloRequest.Options, helloRequest.Challenge, t.them.Bytes(), naclPub)
 	if err := t.Write(secret.Identity, HelloResponse{
 		Signature: secret.Sign(combinedChallenge),
 	}); err != nil {
@@ -1640,11 +1702,12 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, [
 		return nil, nil, fmt.Errorf("unexpected command: %T", cmd2)
 	}
 
-	// Verify their signature over our challenge, our transport
-	// public key, and THEIR X25519 e2e key as received in their
-	// HelloRequest.  Success proves the identity holder attests
-	// that NaClPub as its own.
-	linkedChallenge := Hash256([]byte("continuum-challenge-v2"), ourChallenge[:], t.us.PublicKey().Bytes(), helloRequest.NaClPub)
+	// Verify their signature over our version, options, challenge,
+	// our transport public key, and THEIR X25519 e2e key.  All
+	// fields we sent are in the hash; success proves the identity
+	// holder attests that NaClPub as its own and received exactly
+	// the HelloRequest we sent.
+	linkedChallenge := hashHandshakeChallenge(ProtocolVersion, opts, ourChallenge[:], t.us.PublicKey().Bytes(), helloRequest.NaClPub)
 	themPub, err := Verify(linkedChallenge[:], helloRequest.Identity,
 		helloResponse.Signature)
 	if err != nil {
