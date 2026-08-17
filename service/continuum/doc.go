@@ -65,6 +65,25 @@
 // peers, propagating the discovery.  PeerListResponse entries are
 // validated for protocol version and address format before acceptance.
 //
+// Gossip carries DISCOVERY metadata only: identity, address, version,
+// and session topology.  It never carries e2e key material.  A peer's
+// X25519 key is learned exclusively from the identity holder itself,
+// over one of two authenticated paths:
+//
+//  1. Direct handshake: the challenge signature covers the announced
+//     NaClPub, making the handshake an explicit attestation of the
+//     identity→key binding.
+//
+//  2. NaClKeyRequest/NaClKeyResponse: a routed challenge-response
+//     exchange for peers without a direct session.  The responder
+//     signs its key bound to the caller's fresh challenge; the
+//     receiver verifies the recovered identity before accepting.
+//
+// Both paths store the key through a single writer that enforces
+// immutability: the X25519 key is derived deterministically from the
+// secp256k1 private key, so a conflicting binding for an identity is
+// never legitimate and is rejected and counted as attack telemetry.
+//
 // Peers may also be discovered via DNS TXT records.  A node can
 // advertise its identity and address through a DNS name, which other
 // nodes verify during handshake.

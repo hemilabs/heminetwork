@@ -32,6 +32,8 @@ func TestDispatchMapCompleteness(t *testing.T) {
 		reflect.TypeFor[*ReshareRequest](),
 		reflect.TypeFor[*TSSMessage](),
 		reflect.TypeFor[*EncryptedPayload](),
+		reflect.TypeFor[*NaClKeyRequest](),
+		reflect.TypeFor[*NaClKeyResponse](),
 		reflect.TypeFor[*CeremonyResult](),
 		reflect.TypeFor[*CeremonyAbort](),
 		reflect.TypeFor[*PeerListAdminRequest](),
@@ -538,46 +540,3 @@ func TestHandleCeremonyAbortNonCoordinator(t *testing.T) {
 	}
 }
 
-// TestAddPeerWrongKeyNaClSig verifies that a PeerRecord with a NaClSig
-// signed by a different key than the claimed Identity is rejected.
-func TestAddPeerWrongKeyNaClSig(t *testing.T) {
-	s, err := NewServer(testConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	srvSecret, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.secret = srvSecret
-
-	// Peer whose NaClPub we want to register.
-	peer, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	naclPub, err := peer.NaClPublicKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var naclArr [32]byte
-	copy(naclArr[:], naclPub)
-
-	// Attacker signs the binding with their own key, not the peer's.
-	attacker, err := NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrongSig := attacker.Sign(HashPeerNaCl(peer.Identity, naclPub))
-
-	pr := PeerRecord{
-		Identity: peer.Identity,
-		Address:  "10.0.0.1:9090",
-		NaClPub:  naclPub,
-		NaClSig:  wrongSig,
-		Version:  ProtocolVersion,
-	}
-	if s.addPeer(t.Context(), pr) {
-		t.Fatal("addPeer accepted PeerRecord with wrong-key NaClSig")
-	}
-}

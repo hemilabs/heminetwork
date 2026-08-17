@@ -29,6 +29,7 @@ import (
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
@@ -159,6 +160,37 @@ const (
 	// attacks where an attacker floods unique envelopes.
 	envelopeRateLimit = 199
 	envelopeRateTTL   = 61 * time.Second
+
+	// naclXchgTTL bounds how long an outbound NaCl key exchange
+	// challenge stays valid.  Prime, comfortably above a mesh
+	// round trip with retries.
+	naclXchgTTL = 59 * time.Second
+
+	// naclXchgRateLimit caps how many NaClKeyRequests we answer
+	// from one AUTHENTICATED SESSION PEER per window.  Keying on
+	// the session rather than the request's Requester field is what
+	// makes the bound real: Requester is unauthenticated wire data a
+	// flooder can vary per message, whereas sessions are capped by
+	// PeersWanted, so total signing work is bounded.  Sized well
+	// above legitimate traffic — a relay neighbour forwards requests
+	// on behalf of a whole committee — while still bounding the
+	// secp256k1 signing an attacker can extract.
+	naclXchgRateLimit = 64
+	naclXchgRateTTL   = 1 * time.Second
+
+	// naclXchgRetry is how often ensurePeerKeys re-sends a key
+	// request while waiting.  Each retry carries a fresh
+	// challenge so the dedup cache does not swallow it.
+	naclXchgRetry = 2 * time.Second
+
+	// naclXchgCapacity bounds the pending-challenge and
+	// rate-limiter maps.
+	naclXchgCapacity = 1 << 10 // 1024
+
+	// naclXchgEnsureTimeout bounds the pre-ceremony key prefetch.
+	// A committee member whose key cannot be fetched in this window
+	// is unreachable enough that the ceremony should fail fast.
+	naclXchgEnsureTimeout = 31 * time.Second
 
 	// defaultPreParamsTimeout is the default timeout for Paillier
 	// safe prime generation.  Sufficient for modern hardware;
@@ -322,6 +354,22 @@ type Server struct {
 	handshakesInFlight map[string]int
 	handshakeIPMtx     sync.Mutex
 
+	// Pending outbound NaCl key exchanges — challenge string to
+	// the Identity the challenge was issued for.  Entries expire
+	// after naclXchgTTL; the response handler consumes them.
+	naclXchg *ttl.TTL
+
+	// Inbound NaClKeyRequest rate limiter, keyed on the
+	// AUTHENTICATED session peer that delivered the request —
+	// naclXchgRateLimit answers per naclXchgRateTTL window.
+	naclXchgRates *ttl.TTL
+
+	// keyBound is closed and replaced by bindPeerKey on every
+	// successful bind, broadcasting to ensurePeerKey waiters.
+	// Guarded by mtx; waiters snapshot it before checking the peer
+	// table so they cannot miss a bind that lands in between.
+	keyBound chan struct{}
+
 	// Per-sender envelope rate counter — limits how many
 	// EncryptedPayload messages are accepted from one sender
 	// before signature verification is skipped.
@@ -341,6 +389,8 @@ type Server struct {
 	hsRateDrops     atomic.Int64 // connections dropped by per-IP handshake rate
 	rateDisconnects atomic.Int64 // sessions closed for sustained rate abuse
 	envRateDrops    atomic.Int64 // envelopes dropped by sender rate limit
+	keyConflicts    atomic.Int64 // rejected attempts to rebind a peer e2e key
+	naclXchgDrops   atomic.Int64 // dropped NaCl key exchange messages
 	startedAt       time.Time    // set in Run() for uptime gauge
 
 	// Ceremony counters — updated every promPoll tick so prom
@@ -406,6 +456,17 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("limiter ttl: %w", err)
 	}
 
+	// NaCl key exchange state.  Created here rather than in Run()
+	// so the dispatch handlers are usable in tests that never Run().
+	naclXchg, err := ttl.New(naclXchgCapacity, true)
+	if err != nil {
+		return nil, fmt.Errorf("nacl xchg ttl: %w", err)
+	}
+	naclXchgRates, err := ttl.New(naclXchgCapacity, true)
+	if err != nil {
+		return nil, fmt.Errorf("nacl xchg rate ttl: %w", err)
+	}
+
 	return &Server{
 		limiters:           limiters,
 		cfg:                cfg,
@@ -419,6 +480,9 @@ func NewServer(cfg *Config) (*Server, error) {
 		initiator:          init,
 		debugInit:          di,
 		routeTable:         make(map[Identity]Identity),
+		naclXchg:           naclXchg,
+		naclXchgRates:      naclXchgRates,
+		keyBound:           make(chan struct{}),
 		tssCtx:             context.Background(), // replaced by Run() with lifecycle context
 	}, nil
 }
@@ -479,16 +543,16 @@ func (s *Server) deleteAllSessions() {
 	}
 }
 
-func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, []byte, error) {
+func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, error) {
 	transport, err := NewTransportFromCurve(ecdh.X25519()) // Only supported curve.
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("new transport: %w", err)
+		return nil, nil, nil, fmt.Errorf("new transport: %w", err)
 	}
 
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
 		// Expected from port scanners, TLS probes, wrong protocol.
-		return nil, nil, nil, nil, fmt.Errorf("key exchange: %w", err)
+		return nil, nil, nil, fmt.Errorf("key exchange: %w", err)
 	}
 
 	// After KX, transport owns conn.  Ensure cleanup on failure so
@@ -500,10 +564,10 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 		}
 	}()
 
-	id, naclPub, naclSig, err := transport.Handshake(ctx, s.secret)
+	id, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		// Expected from misconfigured peers and version mismatches.
-		return nil, nil, nil, nil, fmt.Errorf("handshake: %w", err)
+		return nil, nil, nil, fmt.Errorf("handshake: %w", err)
 	}
 
 	// DNS verification for incoming connections.  Loopback is
@@ -511,11 +575,11 @@ func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *T
 	// cannot verify (no hostname yet).  In reverse/all mode,
 	// reverse-verify the remote IP.
 	if err := s.verifyInboundDNS(ctx, conn.RemoteAddr(), *id); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	ok = true
-	return id, transport, naclPub, naclSig, nil
+	return id, transport, naclPub, nil
 }
 
 // isDuplicate returns true if the message identified by header hash
@@ -1338,7 +1402,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		log.Warningf("connectPeer kx %v: %v", addr, err)
 		return
 	}
-	them, naclPub, naclSig, err := transport.Handshake(ctx, s.secret)
+	them, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		log.Warningf("connectPeer handshake %v: %v", addr, err)
 		return
@@ -1372,11 +1436,13 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 	s.addPeer(ctx, PeerRecord{
 		Identity: *them,
 		Address:  recordAddr,
-		NaClPub:  naclPub,
-		NaClSig:  naclSig,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
+	// The handshake signature covered this key — bind it.
+	if err := s.bindPeerKey(ctx, *them, naclPub); err != nil {
+		log.Errorf("connectPeer %v: %v", them, err)
+	}
 	s.notifyAllPeers(ctx)
 
 	log.Infof("connectPeer connected %v: %v", conn.RemoteAddr(), them)
@@ -1485,6 +1551,16 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "envelopes_rate_dropped_total",
 				Help:      "Envelopes dropped by per-sender rate gate",
 			}, s.promEnvRateDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "peer_key_conflicts_total",
+				Help:      "Rejected attempts to rebind a peer e2e key; always an attack or broken peer",
+			}, s.promKeyConflicts),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "nacl_xchg_dropped_total",
+				Help:      "NaCl key exchange messages dropped (malformed, unsolicited, rate limited, or bad signature)",
+			}, s.promNaClXchgDrops),
 		}
 	}
 	return s.promCollectors
@@ -1601,15 +1677,25 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 		return fmt.Errorf("unknown command type: %T", cmd)
 	}
 
-	// Look up destination's NaCl public key.
-	s.mtx.RLock()
-	pr, ok := s.peers[dest]
-	s.mtx.RUnlock()
+	// Look up the destination's AUTHENTICATED e2e key.  Only
+	// bindPeerKey writes this field, and only after a handshake or
+	// NaClKeyRequest exchange proved the binding.  Callers that may
+	// race key discovery use ensurePeerKey/ensurePeerKeys first.
+	//
+	// Read through peerNaClPub so the slice header is copied under
+	// s.mtx: bindPeerKey mutates the published record in place, so
+	// an unlocked field read would race it.  The backing array is
+	// safe to use after the lock is dropped because a bound key is
+	// immutable — a conflicting rebind is rejected, never applied.
+	naclPub, ok := s.peerNaClPub(dest)
 	if !ok {
-		return fmt.Errorf("unknown peer: %v", dest)
-	}
-	if len(pr.NaClPub) == 0 {
-		return fmt.Errorf("peer %v has no NaCl public key", dest)
+		s.mtx.RLock()
+		_, known := s.peers[dest]
+		s.mtx.RUnlock()
+		if !known {
+			return fmt.Errorf("unknown peer: %v", dest)
+		}
+		return fmt.Errorf("peer %v has no authenticated e2e key", dest)
 	}
 
 	// Serialize the inner command.
@@ -1620,7 +1706,7 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 	}
 
 	// Encrypt with ephemeral sender key.
-	ep, err := SealBox(plaintext, pr.NaClPub, s.secret, innerType)
+	ep, err := SealBox(plaintext, naclPub, s.secret, innerType)
 	// untested: SealBox wraps rand.Read + box.Seal; fails only on OS entropy exhaustion
 	if err != nil {
 		return fmt.Errorf("seal: %w", err)
@@ -2026,9 +2112,18 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 	log.Debugf("peer expired: %v", id)
 }
 
-// addPeer adds or refreshes a peer record.  Returns true if the peer
-// was previously unknown.  Rejects self, version mismatches, and
-// missing or malformed NaClPub (e2e encryption is mandatory).
+// addPeer adds or refreshes a peer's DISCOVERY metadata: address,
+// version, sessions, last-seen.  Returns true if the peer was
+// previously unknown.  Rejects self and version mismatches.
+//
+// addPeer never touches the e2e key.  NaClPub on the incoming record
+// is discarded and an existing binding is always preserved: peer
+// records arrive from unauthenticated gossip, and an e2e key may only
+// be learned from the identity holder itself — via the handshake or
+// the NaClKeyRequest exchange, both of which prove the binding with a
+// secp256k1 signature and store it through bindPeerKey, the sole
+// writer of the field.
+//
 // When updating an existing peer, preserves non-empty Address from
 // the old record if the new record omits it.
 func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
@@ -2039,30 +2134,9 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 			pr.Identity, pr.Version, ProtocolVersion)
 		return false
 	}
-	// Reject peers without NaCl public keys.  E2e encryption is
-	// mandatory — every peer MUST have a valid NaClPub.
-	if len(pr.NaClPub) != NaClPubSize {
-		log.Warningf("addPeer %v: bad NaClPub length %d (want %d), rejected",
-			pr.Identity, len(pr.NaClPub), NaClPubSize)
-		return false
-	}
-	// Reject all-zeros NaClPub — cryptographically useless and
-	// collides with the BroadcastDestination sentinel.
-	var zeroKey [NaClPubSize]byte
-	if bytes.Equal(pr.NaClPub, zeroKey[:]) {
-		log.Warningf("addPeer %v: all-zeros NaClPub, rejected",
-			pr.Identity)
-		return false
-	}
 
-	// Verify NaClSig: the NaClPub binding must be signed by the
-	// peer's secp256k1 key.  This prevents gossip poisoning where
-	// an attacker overwrites another peer's e2e encryption key.
-	hash := HashPeerNaCl(pr.Identity, pr.NaClPub)
-	if _, err := Verify(hash, pr.Identity, pr.NaClSig); err != nil {
-		log.Warningf("addPeer %v: bad NaCl binding: %v", pr.Identity, err)
-		return false
-	}
+	// Never accept key material through a peer record.
+	pr.NaClPub = nil
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -2075,11 +2149,13 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 	existing, existed := s.peers[pr.Identity]
 	if existed {
 		// Preserve Address if the caller doesn't have it.
-		// The listen path learns NaClPub (from handshake) but
-		// not Address; gossip may later provide Address.
+		// The listen path knows the session but not the peer's
+		// listen address; gossip may later provide Address.
 		if pr.Address == "" && existing.Address != "" {
 			pr.Address = existing.Address
 		}
+		// Always preserve an authenticated key binding.
+		pr.NaClPub = existing.NaClPub
 	}
 
 	s.peers[pr.Identity] = &pr
@@ -2196,6 +2272,215 @@ func (s *Server) releaseHandshake(key string) {
 	s.handshakesInFlight[key] = n
 }
 
+// bindPeerKey records an AUTHENTICATED identity→X25519-key binding.
+// It is the only writer of PeerRecord.NaClPub and may only be called
+// after the binding has been proven — a completed handshake (the
+// challenge signature covers the key) or a verified NaClKeyResponse.
+//
+// The binding is immutable for the life of an identity: the X25519
+// key is derived deterministically from the secp256k1 private key
+// (NaClPrivateKey), so a conflicting key is never a rotation — it is
+// provably an attack or a broken peer.  Conflicts are rejected,
+// counted, and logged loudly.
+//
+// If the peer has no record yet (key exchange completed before any
+// gossip arrived), a minimal record is created so SendEncrypted can
+// use the key immediately.
+func (s *Server) bindPeerKey(ctx context.Context, id Identity, naclPub []byte) error {
+	log.Tracef("bindPeerKey %v", id)
+
+	if id == s.secret.Identity {
+		return errors.New("bindPeerKey: refusing to bind self")
+	}
+	if len(naclPub) != NaClPubSize {
+		return fmt.Errorf("bindPeerKey %v: bad NaClPub length %d (want %d)",
+			id, len(naclPub), NaClPubSize)
+	}
+	// Reject all-zeros — cryptographically useless and collides
+	// with the BroadcastDestination sentinel.
+	var zeroKey [NaClPubSize]byte
+	if bytes.Equal(naclPub, zeroKey[:]) {
+		return fmt.Errorf("bindPeerKey %v: all-zeros NaClPub", id)
+	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	pr, ok := s.peers[id]
+	if !ok {
+		pr = &PeerRecord{
+			Identity: id,
+			Version:  ProtocolVersion,
+			LastSeen: time.Now().Unix(),
+		}
+		s.peers[id] = pr
+		s.peersTTL.Put(ctx, peerTTL, id, pr, s.peerExpired, nil)
+	}
+	if len(pr.NaClPub) != 0 {
+		if bytes.Equal(pr.NaClPub, naclPub) {
+			return nil // idempotent re-bind of the same key
+		}
+		// The derivation is deterministic, so this is never
+		// legitimate.  True positive by construction.
+		s.keyConflicts.Add(1)
+		log.Errorf("bindPeerKey %v: CONFLICTING e2e key rejected: "+
+			"identity already bound to a different X25519 key; "+
+			"this is an attack or a broken peer", id)
+		return fmt.Errorf("bindPeerKey %v: conflicting e2e key", id)
+	}
+	pr.NaClPub = append([]byte(nil), naclPub...)
+	s.signalKeyBoundLocked()
+	return nil
+}
+
+// signalKeyBoundLocked wakes every ensurePeerKey waiter.  Callers must
+// hold mtx.  Waiters re-check the peer table, so one broadcast for all
+// identities is enough and costs nothing per waiter.
+func (s *Server) signalKeyBoundLocked() {
+	if s.keyBound == nil {
+		return
+	}
+	close(s.keyBound)
+	s.keyBound = make(chan struct{})
+}
+
+// keyBoundWaiter returns the channel closed by the next successful
+// bind.  Snapshot it BEFORE checking the peer table so a bind landing
+// between the check and the wait still wakes the waiter.
+func (s *Server) keyBoundWaiter() <-chan struct{} {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return s.keyBound
+}
+
+// peerNaClPub returns the authenticated e2e key held for id, or false
+// when none is bound.
+func (s *Server) peerNaClPub(id Identity) ([]byte, bool) {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	pr, ok := s.peers[id]
+	if !ok || len(pr.NaClPub) == 0 {
+		return nil, false
+	}
+	return pr.NaClPub, true
+}
+
+// sendKnownPath delivers cmd to dest over a KNOWN path only: a direct
+// session, or the next hop the routing table already has for dest.  It
+// never falls back to flooding.
+//
+// Use this, not sendTo, whenever a REMOTE party chose the destination.
+// sendTo's flood fallback is correct for traffic a node originates for
+// its own reasons — the destination is one it picked, and the flood is
+// bounded by dedup and TTL like any other originated message.  It is
+// not correct when the destination arrives on the wire: NaClKeyRequest
+// names its own reply target, so flooding would let one small
+// unauthenticated message be amplified across every edge of the mesh.
+// Refusing is the right answer there, since a reply nobody has a path
+// to is a reply nobody asked for.
+func (s *Server) sendKnownPath(dest Identity, cmd any) error {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	if t, ok := s.sessions[dest]; ok {
+		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+	}
+	hop, ok := s.routeNextHop(dest)
+	if !ok {
+		return fmt.Errorf("no known path to %v", dest)
+	}
+	t, ok := s.sessions[hop]
+	if !ok {
+		return fmt.Errorf("no session with next hop %v for %v", hop, dest)
+	}
+	return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+}
+
+// sendNaClKeyRequest issues one key exchange round trip: register a
+// fresh challenge as pending, then route the request toward id.  The
+// pending entry is registered BEFORE the send so a fast response
+// cannot race the bookkeeping, and expires after naclXchgTTL.
+func (s *Server) sendNaClKeyRequest(ctx context.Context, id Identity) error {
+	// Guard for hand-built test servers; NewServer always sets this.
+	if s.naclXchg == nil {
+		return errors.New("key exchange state not initialized")
+	}
+	var challenge [ChallengeSize]byte
+	_, err := rand.Read(challenge[:])
+	// untested: rand.Read fails only on OS entropy exhaustion
+	if err != nil {
+		return fmt.Errorf("key exchange challenge: %w", err)
+	}
+	s.naclXchg.Put(ctx, naclXchgTTL, string(challenge[:]), id, nil, nil)
+	// sendTo, not sendKnownPath: WE chose this destination — a peer
+	// we are about to run a ceremony with — so its flood fallback is
+	// as legitimate here as for any other originated traffic, and it
+	// is what reaches a committee member before gossip has populated
+	// a route to them.  Only the REPLY, whose destination an attacker
+	// names, is restricted to known paths.
+	return s.sendTo(id, NaClKeyRequest{
+		Requester: s.secret.Identity,
+		Challenge: challenge[:],
+	})
+}
+
+// ensurePeerKey blocks until an authenticated e2e key for id is bound
+// or ctx expires, driving NaClKeyRequest exchanges through the mesh.
+// Requests are re-sent every naclXchgRetry with a fresh challenge (so
+// the dedup cache does not swallow the retry).
+//
+// Waking is signal-driven, not polled: every path that can satisfy us
+// — this exchange, one started by a concurrent caller, an inbound
+// handshake — funnels through bindPeerKey, which broadcasts.  The
+// waiter channel is snapshotted before each table check so a bind
+// landing in between cannot be missed.
+func (s *Server) ensurePeerKey(ctx context.Context, id Identity) error {
+	log.Tracef("ensurePeerKey %v", id)
+
+	if id == s.secret.Identity {
+		return nil
+	}
+	if _, ok := s.peerNaClPub(id); ok {
+		return nil
+	}
+	if err := s.sendNaClKeyRequest(ctx, id); err != nil {
+		// No known path yet is not fatal — routes fill in as
+		// gossip propagates; the retry ticker re-attempts.
+		log.Debugf("ensurePeerKey %v: initial request: %v", id, err)
+	}
+	retry := time.NewTicker(naclXchgRetry)
+	defer retry.Stop()
+	for {
+		bound := s.keyBoundWaiter()
+		if _, ok := s.peerNaClPub(id); ok {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("key exchange with %v: %w", id, ctx.Err())
+		case <-bound:
+		case <-retry.C:
+			if err := s.sendNaClKeyRequest(ctx, id); err != nil {
+				log.Debugf("ensurePeerKey %v: retry: %v", id, err)
+			}
+		}
+	}
+}
+
+// ensurePeerKeys binds authenticated e2e keys for all ids (self
+// excluded), running the exchanges concurrently.  Returns the first
+// failure.  Ceremony dispatch calls this before starting rounds so
+// SendEncrypted never lacks a key mid-ceremony.
+func (s *Server) ensurePeerKeys(ctx context.Context, ids []Identity) error {
+	g, gctx := errgroup.WithContext(ctx)
+	for _, id := range ids {
+		g.Go(func() error {
+			return s.ensurePeerKey(gctx, id)
+		})
+	}
+	return g.Wait()
+}
+
 // knownPeerList returns peer records suitable for gossip, excluding
 // only the specified identity (typically the requester, so we don't
 // tell them about themselves).  Our own record IS included so that
@@ -2221,6 +2506,11 @@ func (s *Server) knownPeerList(exclude Identity) []PeerRecord {
 		if id == s.secret.Identity {
 			rec.Sessions = selfSessions
 		}
+		// E2e keys never travel in gossip — not even our own.
+		// A recipient can only learn a key from its holder via
+		// the handshake or the NaClKeyRequest exchange, both of
+		// which prove the binding with a signature.
+		rec.NaClPub = nil
 		records = append(records, rec)
 	}
 	return records
@@ -2291,15 +2581,11 @@ func (s *Server) registerSelfAsPeer() {
 		}
 	}
 
-	hash := HashPeerNaCl(s.secret.Identity, naclPub)
-	naclSig := s.secret.Sign(hash)
-
 	s.mtx.Lock()
 	s.peers[s.secret.Identity] = &PeerRecord{
 		Identity: s.secret.Identity,
 		Address:  addr,
 		NaClPub:  naclPub,
-		NaClSig:  naclSig,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	}
@@ -2409,6 +2695,14 @@ func (s *Server) promRoutedReceived() float64 {
 
 func (s *Server) promDedupDropped() float64 {
 	return float64(s.dedupDropped.Load())
+}
+
+func (s *Server) promKeyConflicts() float64 {
+	return float64(s.keyConflicts.Load())
+}
+
+func (s *Server) promNaClXchgDrops() float64 {
+	return float64(s.naclXchgDrops.Load())
 }
 
 func (s *Server) promBroadcastsSent() float64 {
@@ -2528,7 +2822,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		sendErr(ctx, errC, err)
 		return
 	}
-	them, naclPub, naclSig, err := transport.Handshake(ctx, s.secret)
+	them, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		sendErr(ctx, errC, err)
 		return
@@ -2563,11 +2857,13 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	s.addPeer(ctx, PeerRecord{
 		Identity: *them,
 		Address:  c,
-		NaClPub:  naclPub,
-		NaClSig:  naclSig,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
+	// The handshake signature covered this key — bind it.
+	if err := s.bindPeerKey(ctx, *them, naclPub); err != nil {
+		log.Errorf("connect %v: %v", them, err)
+	}
 	s.notifyAllPeers(ctx)
 
 	log.Infof("connected %v: %v", conn.RemoteAddr(), them)
@@ -2945,7 +3241,7 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn, hs
 	// Perform KX and handshake, then release the semaphore.
 	// The semaphore only gates the expensive KX phase —
 	// once complete, the slot is free for the next connection.
-	id, transport, naclPub, naclSig, err := s.newTransport(ctx, conn)
+	id, transport, naclPub, err := s.newTransport(ctx, conn)
 	<-s.handshakeSem          // release regardless of success/failure
 	s.releaseHandshake(hsKey) // free the per-source in-flight slot
 	if err != nil {
@@ -2991,16 +3287,17 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn, hs
 	}
 	s.rebuildRoutes()
 
-	// Register peer with NaCl public key.  Address is empty
-	// because we don't know their listen address — they'll
-	// advertise it via gossip.
+	// Register the peer.  Address is empty because we don't know
+	// their listen address — they'll advertise it via gossip.
 	s.addPeer(ctx, PeerRecord{
 		Identity: *id,
-		NaClPub:  naclPub,
-		NaClSig:  naclSig,
 		Version:  ProtocolVersion,
 		LastSeen: time.Now().Unix(),
 	})
+	// The handshake signature covered this key — bind it.
+	if err := s.bindPeerKey(ctx, *id, naclPub); err != nil {
+		log.Errorf("handleIncomingConnection %v: %v", id, err)
+	}
 
 	// Tell existing peers we learned about someone new so
 	// they can request our updated peer list.
