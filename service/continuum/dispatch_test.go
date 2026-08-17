@@ -539,4 +539,3 @@ func TestHandleCeremonyAbortNonCoordinator(t *testing.T) {
 		t.Fatalf("ceremony status = %s, want %s", ci.Status, CeremonyRunning)
 	}
 }
-
