@@ -8,8 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -29,6 +31,36 @@ const (
 	bDefaultSize    = "512mb" // ~320 blocks on mainnet
 	bhsDefaultSize  = "2mb"
 )
+
+// parseRequestTimeout parses a request timeout value. It accepts Go
+// duration strings (e.g. "120s", "2m") and, for backward compatibility,
+// bare integers which are interpreted as seconds.
+func parseRequestTimeout(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err == nil {
+		if d <= 0 {
+			return 0, fmt.Errorf("request timeout must be > 0, got %s", s)
+		}
+		return d, nil
+	}
+	// Backward compat: bare integer is seconds.
+	secs, serr := strconv.Atoi(s)
+	if serr != nil {
+		return 0, fmt.Errorf("invalid duration %q: "+
+			"use a Go duration (e.g. 120s, 2m) "+
+			"or a bare integer for seconds", s)
+	}
+	if secs <= 0 {
+		return 0, fmt.Errorf("request timeout must be > 0, got %d", secs)
+	}
+	// Guard against int64 overflow: time.Duration is nanoseconds,
+	// so secs * 1e9 must fit in int64.
+	const maxTimeoutSecs = math.MaxInt64 / int64(time.Second)
+	if int64(secs) > maxTimeoutSecs {
+		return 0, fmt.Errorf("request timeout too large: %d seconds", secs)
+	}
+	return time.Duration(secs) * time.Second, nil
+}
 
 var (
 	log     = loggo.GetLogger(daemonName)
@@ -144,7 +176,7 @@ var (
 			Help:         "RPC request timeout (e.g. 2m, 120s)",
 			Print:        config.PrintAll,
 			Parse: func(s string) (any, error) {
-				return time.ParseDuration(s)
+				return parseRequestTimeout(s)
 			},
 		},
 		"TBC_PROMETHEUS_ADDRESS": config.Config{
