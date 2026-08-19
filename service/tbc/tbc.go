@@ -164,6 +164,19 @@ func HashHeightFromBlockHeader(bh *tbcd.BlockHeader) *HashHeight {
 	}
 }
 
+// paginationNeed returns the total number of items to collect before
+// slicing [start:start+count]. When start+count would overflow uint32 the
+// result saturates to math.MaxUint32 instead of wrapping to a small value.
+func paginationNeed(start, count uint32) uint32 {
+	if count == 0 {
+		return ^uint32(0)
+	}
+	if sum := uint64(start) + uint64(count); sum <= uint64(^uint32(0)) {
+		return uint32(sum)
+	}
+	return ^uint32(0)
+}
+
 // h2b encodes a wire blockheader to the corresponding 80 bytes.
 func h2b(wbh *wire.BlockHeader) [80]byte {
 	var b bytes.Buffer
@@ -3967,13 +3980,7 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 	}
 	sh := tbcd.NewScriptHashFromScript(script)
 
-	// Saturate to prevent uint32 overflow when start + count wraps.
-	need := ^uint32(0)
-	if count > 0 {
-		if sum := uint64(start) + uint64(count); sum <= uint64(^uint32(0)) {
-			need = uint32(sum)
-		}
-	}
+	need := paginationNeed(start, count)
 
 	const utxoBatchSize = 1000
 	var (

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"sort"
@@ -2530,5 +2531,60 @@ func TestEmptyInvMessage(t *testing.T) {
 				return
 			}
 		}
+	}
+}
+
+func TestPaginationNeed(t *testing.T) {
+	tests := []struct {
+		name  string
+		start uint32
+		count uint32
+		want  uint32
+	}{
+		{
+			name:  "normal",
+			start: 10,
+			count: 5,
+			want:  15,
+		},
+		{
+			name:  "zero count returns max",
+			start: 42,
+			count: 0,
+			want:  math.MaxUint32,
+		},
+		{
+			name:  "exact max",
+			start: math.MaxUint32 - 1,
+			count: 1,
+			want:  math.MaxUint32,
+		},
+		{
+			name:  "overflow saturates",
+			start: math.MaxUint32 - 1,
+			count: 2,
+			want:  math.MaxUint32,
+		},
+		{
+			name:  "large overflow saturates",
+			start: math.MaxUint32,
+			count: math.MaxUint32,
+			want:  math.MaxUint32,
+		},
+		{
+			name:  "start zero",
+			start: 0,
+			count: 100,
+			want:  100,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := paginationNeed(tt.start, tt.count)
+			if got != tt.want {
+				t.Fatalf("paginationNeed(%d, %d) = %d, want %d",
+					tt.start, tt.count, got, tt.want)
+			}
+		})
 	}
 }
