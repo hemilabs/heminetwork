@@ -3967,9 +3967,12 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 	}
 	sh := tbcd.NewScriptHashFromScript(script)
 
-	need := start + count
-	if count == 0 {
-		need = ^uint32(0)
+	// Saturate to prevent uint32 overflow when start + count wraps.
+	need := ^uint32(0)
+	if count > 0 {
+		if sum := uint64(start) + uint64(count); sum <= uint64(^uint32(0)) {
+			need = uint32(sum)
+		}
 	}
 
 	const utxoBatchSize = 1000
