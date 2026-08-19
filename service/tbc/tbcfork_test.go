@@ -1618,7 +1618,7 @@ func TestFork(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{n.Address()},
@@ -1860,7 +1860,7 @@ func TestIndexNoFork(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{n.Address()},
@@ -2071,7 +2071,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -2395,7 +2395,7 @@ func TestIndexFork(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -2739,7 +2739,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -3326,7 +3326,7 @@ func TestForkCanonicity(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -3519,7 +3519,7 @@ func TestCacheOverflow(t *testing.T) {
 		MaxCachedTxs:            5,
 		MaxCachedKeystones:      5,
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -3686,7 +3686,7 @@ func TestZKIndexFork(t *testing.T) {
 		MaxCachedKeystones:      1000, // XXX
 		MaxCachedZK:             1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -4256,7 +4256,7 @@ func TestIndexFakeHeaders(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{n.Address()},
@@ -4424,7 +4424,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 		MaxCachedTxs:            1000,
 		MaxCachedOrdinals:       1000,
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -4822,7 +4822,7 @@ func TestOrdinalIndexForkTinyCache(t *testing.T) {
 		MaxCachedTxs:            1000,
 		MaxCachedOrdinals:       5, // tiny cache — forces multi-batch flush
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -5174,7 +5174,7 @@ func TestOrdinalShortcircuitMultiInput(t *testing.T) {
 		MaxCachedTxs:            1000,
 		MaxCachedOrdinals:       1000,
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -5403,7 +5403,7 @@ func TestOrdinalParallelFetch(t *testing.T) {
 		MaxCachedTxs:            1000,
 		MaxCachedOrdinals:       1000,
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
@@ -5633,7 +5633,7 @@ func TestOrdinalBigOLifecycle(t *testing.T) {
 		MaxCachedTxs:            1000,
 		MaxCachedOrdinals:       1000,
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,

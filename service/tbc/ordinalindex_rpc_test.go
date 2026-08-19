@@ -203,7 +203,7 @@ func TestRpcOrdinal(t *testing.T) {
 		MaxCachedTxs:      1000,
 		MaxCachedOrdinals: 1000,
 		Network:           networkLocalnet,
-		RequestTimeout:    10,
+		RequestTimeout:    10 * time.Second,
 		Seeds:             []string{"192.0.2.1:8333"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -775,7 +775,7 @@ func TestPrometheusOrdinalMetric(t *testing.T) {
 		MaxCachedTxs:            1000,
 		MaxCachedOrdinals:       1000,
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PrometheusListenAddress: promAddr,
 		Seeds:                   []string{"192.0.2.1:8333"},
 	}

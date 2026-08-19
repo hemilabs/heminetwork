@@ -135,7 +135,7 @@ func TestDbUpgradeFull(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
 		Network:                 "upgradetest",
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PrometheusListenAddress: "",
 		ListenAddress:           "",
 		PeersWanted:             0,
@@ -414,7 +414,7 @@ func TestDbUpgradeV4(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
 		Network:                 "upgradetest",
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PrometheusListenAddress: "",
 		ListenAddress:           "",
 		PeersWanted:             0,
@@ -1359,7 +1359,7 @@ func cliBlockHeaderToWire(t *testing.T, header *BtcCliBlockHeader) *wire.BlockHe
 	if err != nil {
 		t.Fatal(fmt.Errorf("convert merkleRoot to chainhash: %w", err))
 	}
-	bits, err := strconv.ParseUint(header.Bits, 16, 64)
+	bits, err := strconv.ParseUint(header.Bits, 16, 32)
 	if err != nil {
 		t.Fatal(fmt.Errorf("parse bits as uint: %w", err))
 	}
@@ -2485,7 +2485,7 @@ func TestEmptyInvMessage(t *testing.T) {
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
-		RequestTimeout:          10,
+		RequestTimeout:          10 * time.Second,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{n.Address()},
