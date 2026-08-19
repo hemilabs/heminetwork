@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/juju/loggo/v2"
 
@@ -139,9 +140,12 @@ var (
 		},
 		"TBC_REQUEST_TIMEOUT": config.Config{
 			Value:        &cfg.RequestTimeout,
-			DefaultValue: 120,
-			Help:         "RPC request timeout in seconds",
+			DefaultValue: cfg.RequestTimeout,
+			Help:         "RPC request timeout (e.g. 2m, 120s)",
 			Print:        config.PrintAll,
+			Parse: func(s string) (any, error) {
+				return time.ParseDuration(s)
+			},
 		},
 		"TBC_PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,

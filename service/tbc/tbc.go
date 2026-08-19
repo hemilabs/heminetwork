@@ -192,7 +192,7 @@ type Config struct {
 	DatabaseDebug           bool
 	Network                 string
 	PeersWanted             int
-	RequestTimeout          int // RPC request timeout in seconds
+	RequestTimeout          time.Duration // RPC request timeout
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
@@ -232,7 +232,7 @@ func NewDefaultConfig() *Config {
 		MempoolEnabled:         true,
 		NotificationBlocking:   false, // Default anyway, but dangerous so be explicit
 		PeersWanted:            defaultPeersWanted,
-		RequestTimeout:         120,
+		RequestTimeout:         120 * time.Second,
 		PrometheusNamespace:    appName,
 		ExternalHeaderMode:     false, // Default anyway, but for readability
 		DatabaseDebug:          false, // Default anyway, but dangerous so be explicit
@@ -355,7 +355,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			Help:      "The total number of successful RPC commands",
 		}),
 		sessions:        make(map[string]*tbcWs),
-		requestTimeout:  time.Duration(cfg.RequestTimeout) * time.Second,
+		requestTimeout:  cfg.RequestTimeout,
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
 		invBlocks:       make([]*chainhash.Hash, 0, 16),
 		promPollVerbose: false,
@@ -3866,9 +3866,7 @@ func (s *Server) InscriptionContent(ctx context.Context, txid chainhash.Hash, in
 
 	// Follow delegation chain.
 	const maxDelegateDepth = 10
-	for depth := range maxDelegateDepth {
-		_ = depth
-
+	for range maxDelegateDepth {
 		raw, err := s.g.db.OrdinalInscriptionByID(ctx, inscID)
 		if err != nil {
 			return "", nil, fmt.Errorf("inscription %x: %w", inscID, err)
