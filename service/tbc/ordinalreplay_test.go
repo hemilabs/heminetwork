@@ -41,10 +41,11 @@ func procIO(t *testing.T) (syscr, rchar, readBytes int64) {
 	return syscr, rchar, readBytes
 }
 
-func dbProps(pr interface {
+type levelDBPropertyReader interface {
 	LevelDBProperty(dbName, property string) (string, error)
-}, dbName string,
-) string {
+}
+
+func dbProps(pr levelDBPropertyReader, dbName string) string {
 	cached, _ := pr.LevelDBProperty(dbName, "leveldb.cachedblock")
 	opened, _ := pr.LevelDBProperty(dbName, "leveldb.openedtables")
 	return fmt.Sprintf("%s[cachedblk %s openedtbl %s]", dbName, cached, opened)
