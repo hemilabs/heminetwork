@@ -173,8 +173,12 @@ func ParseInscriptionEnvelope(witness wire.TxWitness) (*InscriptionEnvelope, err
 }
 
 // parseEnvelopeFromScript parses the ord envelope from a tapscript.
+// If multiple envelopes exist, the first is returned with
+// MultipleEnvelopes set to true.
 func parseEnvelopeFromScript(script []byte) (*InscriptionEnvelope, error) {
 	tokenizer := txscript.MakeScriptTokenizer(0, script)
+
+	var env *InscriptionEnvelope
 
 	// Search for the OP_FALSE OP_IF OP_PUSH "ord" pattern.
 	for tokenizer.Next() {
@@ -192,15 +196,26 @@ func parseEnvelopeFromScript(script []byte) (*InscriptionEnvelope, error) {
 			continue
 		}
 
-		// Found envelope. Parse tags.
-		return parseEnvelopeTags(&tokenizer)
+		if env != nil {
+			// Second envelope found.
+			env.MultipleEnvelopes = true
+			return env, nil
+		}
+
+		// Found first envelope. Parse tags.
+		var err error
+		env, err = parseEnvelopeTags(&tokenizer)
+		if err != nil {
+			return nil, err
+		}
+		// Continue scanning for additional envelopes.
 	}
 
 	if err := tokenizer.Err(); err != nil {
 		return nil, fmt.Errorf("script tokenizer: %w", err)
 	}
 
-	return nil, nil
+	return env, nil
 }
 
 // parseEnvelopeTags parses tag-value pairs from an ord envelope.
@@ -224,7 +239,7 @@ func parseEnvelopeTags(tokenizer *txscript.ScriptTokenizer) (*InscriptionEnvelop
 				if nextOp == txscript.OP_ENDIF {
 					return env, nil
 				}
-				nextTag := envelopeTag(nextOp, tokenizer.Data())
+				nextTag := envelopeBodyTag(nextOp)
 				if nextTag >= 0 {
 					if !tokenizer.Next() {
 						break
@@ -272,7 +287,7 @@ func parseEnvelopeTags(tokenizer *txscript.ScriptTokenizer) (*InscriptionEnvelop
 				if nextOp == txscript.OP_ENDIF {
 					return env, nil
 				}
-				nextTag := envelopeTag(nextOp, tokenizer.Data())
+				nextTag := envelopeBodyTag(nextOp)
 				if nextTag >= 0 {
 					if !tokenizer.Next() {
 						break
@@ -349,6 +364,17 @@ func envelopeTag(op byte, data []byte) int {
 	// Single-byte data push with the tag number.
 	if len(data) == 1 {
 		return int(data[0])
+	}
+	return -1
+}
+
+// envelopeBodyTag is a stricter tag detector used inside body content
+// streams (after OP_0 or tag 5). Only OP_1..OP_16 are recognized as
+// tags — 1-byte data pushes (OP_DATA_1) are treated as content to
+// avoid corrupting binary inscription data.
+func envelopeBodyTag(op byte) int {
+	if op >= txscript.OP_1 && op <= txscript.OP_16 {
+		return int(op - txscript.OP_1 + 1)
 	}
 	return -1
 }
