@@ -8,9 +8,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/juju/loggo/v2"
 
@@ -28,6 +31,36 @@ const (
 	bDefaultSize    = "512mb" // ~320 blocks on mainnet
 	bhsDefaultSize  = "2mb"
 )
+
+// parseRequestTimeout parses a request timeout value. It accepts Go
+// duration strings (e.g. "120s", "2m") and, for backward compatibility,
+// bare integers which are interpreted as seconds.
+func parseRequestTimeout(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err == nil {
+		if d <= 0 {
+			return 0, fmt.Errorf("request timeout must be > 0, got %s", s)
+		}
+		return d, nil
+	}
+	// Backward compat: bare integer is seconds.
+	secs, serr := strconv.Atoi(s)
+	if serr != nil {
+		return 0, fmt.Errorf("invalid duration %q: "+
+			"use a Go duration (e.g. 120s, 2m) "+
+			"or a bare integer for seconds", s)
+	}
+	if secs <= 0 {
+		return 0, fmt.Errorf("request timeout must be > 0, got %d", secs)
+	}
+	// Guard against int64 overflow: time.Duration is nanoseconds,
+	// so secs * 1e9 must fit in int64.
+	const maxTimeoutSecs = math.MaxInt64 / int64(time.Second)
+	if int64(secs) > maxTimeoutSecs {
+		return 0, fmt.Errorf("request timeout too large: %d seconds", secs)
+	}
+	return time.Duration(secs) * time.Second, nil
+}
 
 var (
 	log     = loggo.GetLogger(daemonName)
@@ -107,6 +140,18 @@ var (
 			Help:         "size of utxo read LRU cache (0 to disable)",
 			Print:        config.PrintAll,
 		},
+		"TBC_MAX_CACHED_ORDINALS": config.Config{
+			Value:        &cfg.MaxCachedOrdinals,
+			DefaultValue: 500000,
+			Help:         "maximum cached ordinal entries during indexing",
+			Print:        config.PrintAll,
+		},
+		"TBC_ORDINAL_OUTPUT_CACHE_SIZE": config.Config{
+			Value:        &cfg.OrdinalOutputCacheSize,
+			DefaultValue: "256mb",
+			Help:         "size of ordinal tx output value LRU cache (0 to disable)",
+			Print:        config.PrintAll,
+		},
 		"TBC_MEMPOOL_ENABLED": config.Config{
 			Value:        &cfg.MempoolEnabled,
 			DefaultValue: true,
@@ -124,6 +169,15 @@ var (
 			DefaultValue: 64,
 			Help:         "number of wanted p2p peers",
 			Print:        config.PrintAll,
+		},
+		"TBC_REQUEST_TIMEOUT": config.Config{
+			Value:        &cfg.RequestTimeout,
+			DefaultValue: cfg.RequestTimeout,
+			Help:         "RPC request timeout (e.g. 2m, 120s)",
+			Print:        config.PrintAll,
+			Parse: func(s string) (any, error) {
+				return parseRequestTimeout(s)
+			},
 		},
 		"TBC_PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,
@@ -147,6 +201,12 @@ var (
 			Value:        &cfg.ZKIndex,
 			DefaultValue: false,
 			Help:         "enable/disable various zk related indexes",
+			Print:        config.PrintAll,
+		},
+		"TBC_ORDINAL_INDEX": config.Config{
+			Value:        &cfg.OrdinalIndex,
+			DefaultValue: false,
+			Help:         "enable/disable ordinal (sat range + inscription) indexer",
 			Print:        config.PrintAll,
 		},
 	}

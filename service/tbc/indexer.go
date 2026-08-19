@@ -84,6 +84,7 @@ type indexer interface {
 	process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error // Process block
 	commit(ctx context.Context, direction int, hash chainhash.Hash, c indexerCache) error   // Commit index cache to disk
 	fixupCacheHook(ctx context.Context, block *btcutil.Block, c indexerCache) error         // Fixup cache
+	beforeWind(startHeight, endHeight uint64)                                               // Called before wind loop; gap = endHeight - startHeight
 	onSyncComplete()                                                                        // Called after sync reaches target
 	readCacheInfo() string                                                                  // Optional read cache stats for log line
 }
@@ -101,15 +102,30 @@ type geometryParams struct {
 	chain *chaincfg.Params
 }
 
+// flushThresholdPct is the cache fullness percentage, in whichever
+// dimension a cache reports (entry count or bytes), at which the
+// indexer flushes to disk.
+const flushThresholdPct = 95
+
 // indexerCommon is the common base for Indexer implementations.
 type indexerCommon struct {
 	name     string
 	enabled  bool
 	indexing atomic.Uint32
 
-	p       indexer        // parent indexer
-	g       geometryParams // geometry params
-	genesis *HashHeight    // genesis block override
+	p           indexer        // parent indexer
+	g           geometryParams // geometry params
+	genesis     *HashHeight    // genesis block override
+	logInterval uint64         // progress log cadence in blocks, 0 = default
+}
+
+// logIntervalBlocks returns the progress log cadence in blocks. Slow
+// indexers may set logInterval to log more often than the default.
+func (c *indexerCommon) logIntervalBlocks() uint64 {
+	if c.logInterval != 0 {
+		return c.logInterval
+	}
+	return 10000
 }
 
 func (c *indexerCommon) Enabled() bool {
@@ -299,6 +315,8 @@ func (c *indexerCommon) wind(ctx context.Context, startBH, endBH *tbcd.BlockHead
 	cache := c.p.newCache()
 	defer cache.Clear()
 
+	c.p.beforeWind(startBH.Height, endBH.Height)
+
 	log.Infof("Start indexing %vs at hash %v height %v", c, startBH, startBH.Height)
 	log.Infof("End indexing %vs at hash %v height %v", c, endBH, endBH.Height)
 	endHash := endBH.BlockHash()
@@ -429,7 +447,7 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 	}
 
-	const percentage = 95 // flush cache at >95% capacity
+	const percentage = flushThresholdPct
 	var blocksProcessed int
 	for {
 		log.Debugf("indexing %vs: %v", c, hh)
@@ -454,7 +472,7 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 
 		// Try not to overshoot the cache to prevent costly allocations
 		_, _, pct := cache.Stats()
-		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
+		if bh.Height%c.logIntervalBlocks() == 0 || pct > percentage || blocksProcessed == 1 {
 			log.Infof("%v indexer: %v cache %v%%%v", c, hh, pct,
 				c.p.readCacheInfo())
 		}
@@ -500,7 +518,7 @@ func (c *indexerCommon) parseBlocksReverse(ctx context.Context, endHash *chainha
 		return 0, last, fmt.Errorf("%v index hash: %w", c, err)
 	}
 
-	const percentage = 95 // flush cache at >95% capacity
+	const percentage = flushThresholdPct
 	var blocksProcessed int
 	hh := &HashHeight{Hash: at.Hash, Height: at.Height}
 	for {
@@ -527,7 +545,7 @@ func (c *indexerCommon) parseBlocksReverse(ctx context.Context, endHash *chainha
 
 		// Try not to overshoot the cache to prevent costly allocations
 		_, _, pct := cache.Stats()
-		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
+		if bh.Height%c.logIntervalBlocks() == 0 || pct > percentage || blocksProcessed == 1 {
 			log.Infof("%v unindexer: %v cache %v%%%v", c, hh, pct,
 				c.p.readCacheInfo())
 		}
