@@ -2421,12 +2421,20 @@ func createLocalTBCServer(ctx context.Context, t *testing.T, jwtSecret string) (
 	}
 	defer l.Unsubscribe()
 
+	runDone := make(chan struct{})
 	go func() {
+		defer close(runDone)
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
+	t.Cleanup(func() {
+		// Wait for the server (and its leveldb databases) to fully shut
+		// down before the test tears down its temp directory. Without
+		// this, a leveldb compaction goroutine can race with DB.Close().
+		<-runDone
+	})
 
 	// Wait for http service to start up
 	var tbcURL string
