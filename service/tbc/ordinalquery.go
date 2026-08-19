@@ -26,6 +26,8 @@ type satTracer struct {
 	s *Server
 }
 
+func (t *satTracer) db() tbcd.Database { return t.s.g.db }
+
 func (t *satTracer) findTx(block *btcutil.Block, txid chainhash.Hash) *btcutil.Tx {
 	for _, tx := range block.Transactions() {
 		if *tx.Hash() == txid {
@@ -37,11 +39,11 @@ func (t *satTracer) findTx(block *btcutil.Block, txid chainhash.Hash) *btcutil.T
 
 // inputValue looks up the value of a specific outpoint.
 func (t *satTracer) inputValue(ctx context.Context, txid chainhash.Hash, vout uint32) (uint64, error) {
-	blockHash, _, err := t.s.g.db.BlockHashByTxId(ctx, txid)
+	blockHash, _, err := t.db().BlockHashByTxId(ctx, txid)
 	if err != nil {
 		return 0, fmt.Errorf("tx %v: %w", txid, err)
 	}
-	block, err := t.s.g.db.BlockByHash(ctx, *blockHash)
+	block, err := t.db().BlockByHash(ctx, *blockHash)
 	if err != nil {
 		return 0, err
 	}
@@ -63,16 +65,16 @@ func (t *satTracer) traceSat(ctx context.Context, txid chainhash.Hash, vout uint
 		if err := ctx.Err(); err != nil {
 			return 0, fmt.Errorf("traceSat cancelled at depth %d: %w", depth, err)
 		}
-		blockHash, _, err := t.s.g.db.BlockHashByTxId(ctx, txid)
+		blockHash, _, err := t.db().BlockHashByTxId(ctx, txid)
 		if err != nil {
 			return 0, fmt.Errorf("tx %v: %w", txid, err)
 		}
 
-		block, err := t.s.g.db.BlockByHash(ctx, *blockHash)
+		block, err := t.db().BlockByHash(ctx, *blockHash)
 		if err != nil {
 			return 0, err
 		}
-		bh, err := t.s.g.db.BlockHeaderByHash(ctx, *blockHash)
+		bh, err := t.db().BlockHeaderByHash(ctx, *blockHash)
 		if err != nil {
 			return 0, err
 		}
@@ -250,6 +252,8 @@ type satRangeContext struct {
 	memo map[tbcd.Outpoint][]SatRange
 }
 
+func (c *satRangeContext) db() tbcd.Database { return c.s.g.db }
+
 func (c *satRangeContext) compute(ctx context.Context, txid chainhash.Hash, vout uint32) ([]SatRange, error) {
 	op := tbcd.NewOutpoint(txid, vout)
 	if cached, ok := c.memo[op]; ok {
@@ -260,16 +264,16 @@ func (c *satRangeContext) compute(ctx context.Context, txid chainhash.Hash, vout
 		return nil, errors.New("sat range computation exceeded 500k outpoints")
 	}
 
-	blockHash, _, err := c.s.g.db.BlockHashByTxId(ctx, txid)
+	blockHash, _, err := c.db().BlockHashByTxId(ctx, txid)
 	if err != nil {
 		return nil, fmt.Errorf("tx %v not found: %w", txid, err)
 	}
 
-	block, err := c.s.g.db.BlockByHash(ctx, *blockHash)
+	block, err := c.db().BlockByHash(ctx, *blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("block %v: %w", blockHash, err)
 	}
-	bh, err := c.s.g.db.BlockHeaderByHash(ctx, *blockHash)
+	bh, err := c.db().BlockHeaderByHash(ctx, *blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("header %v: %w", blockHash, err)
 	}
