@@ -2610,94 +2610,80 @@ func TestParseEnvelopeSingleEnvelopeNotMultiple(t *testing.T) {
 }
 
 func TestParseEnvelopeBodyDataPushNotTag(t *testing.T) {
-	// Inside the body content stream (after OP_0), a non-canonical
-	// OP_DATA_1 push must be treated as content, not as a tag.
-	// btcd's ScriptBuilder canonicalizes single-byte values 1-16
-	// to OP_N opcodes, so we build raw script bytes to get a true
+	// Inside the body content stream, a non-canonical OP_DATA_1
+	// push must be treated as content, not as a tag. btcd's
+	// ScriptBuilder canonicalizes single-byte values 1-16 to OP_N
+	// opcodes, so we build raw script bytes to get a true
 	// OP_DATA_1 push inside the body.
 	//
 	// envelopeTag would match OP_DATA_1 with len(data)==1 and
 	// return the byte value as a tag number. envelopeBodyTag only
 	// matches OP_1..OP_16, so the push is treated as content.
 
-	// Build the prefix with the script builder (up to body start).
-	builder := txscript.NewScriptBuilder()
-	builder.AddOp(txscript.OP_FALSE)
-	builder.AddOp(txscript.OP_IF)
-	builder.AddData([]byte("ord"))
-	builder.AddOp(txscript.OP_1) // content type
-	builder.AddData([]byte("application/octet-stream"))
-	builder.AddOp(txscript.OP_0) // body separator
-	builder.AddData([]byte{0x41, 0x42})
-	partial, err := builder.Script()
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name     string
+		bodySep  byte // OP_0 or OP_5
+		addValue bool // true = add tag-value push after bodySep
+	}{
+		{
+			name:     "OP_0 body separator",
+			bodySep:  byte(txscript.OP_0),
+			addValue: false,
+		},
+		{
+			name:     "OP_5 body separator",
+			bodySep:  byte(txscript.OP_5),
+			addValue: true, // tag 5 consumes next push as its value
+		},
 	}
 
-	// Manually append: OP_DATA_1 0x07 (non-canonical 1-byte push
-	// that envelopeTag would misinterpret as tag 7), then more
-	// content, then OP_ENDIF.
-	var script []byte
-	script = append(script, partial...)
-	script = append(script, 0x01, 0x07)       // OP_DATA_1 0x07
-	script = append(script, 0x02, 0x43, 0x44) // OP_DATA_2 {0x43, 0x44}
-	script = append(script, byte(txscript.OP_ENDIF))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := txscript.NewScriptBuilder()
+			builder.AddOp(txscript.OP_FALSE)
+			builder.AddOp(txscript.OP_IF)
+			builder.AddData([]byte("ord"))
+			builder.AddOp(txscript.OP_1) // content type
+			builder.AddData([]byte("application/octet-stream"))
+			builder.AddOp(tt.bodySep)
+			if tt.addValue {
+				builder.AddData([]byte{0x41, 0x42}) // tag value
+			} else {
+				builder.AddData([]byte{0x41, 0x42}) // first content push
+			}
+			partial, err := builder.Script()
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	env, err := ParseInscriptionEnvelope(buildWitness(script))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if env == nil {
-		t.Fatal("expected envelope")
-	}
-	// All three data pushes should be treated as content.
-	want := []byte{0x41, 0x42, 0x07, 0x43, 0x44}
-	if !bytes.Equal(env.Content, want) {
-		t.Errorf("content: got %x, want %x", env.Content, want)
-	}
-	// Metaprotocol must NOT be set — 0x07 was content, not tag 7.
-	if env.Metaprotocol != nil {
-		t.Errorf("metaprotocol: got %q, want nil (0x07 was misinterpreted as tag)",
-			env.Metaprotocol)
-	}
-}
+			// Manually append: OP_DATA_1 0x07 (non-canonical
+			// 1-byte push that envelopeTag would misinterpret
+			// as tag 7), then more content, then OP_ENDIF.
+			var script []byte
+			script = append(script, partial...)
+			script = append(script, 0x01, 0x07)       // OP_DATA_1 0x07
+			script = append(script, 0x02, 0x43, 0x44) // OP_DATA_2 {0x43, 0x44}
+			script = append(script, byte(txscript.OP_ENDIF))
 
-func TestParseEnvelopeOP5BodyDataPushNotTag(t *testing.T) {
-	// Same as TestParseEnvelopeBodyDataPushNotTag but using the
-	// tag 5 (OP_5) alternate body encoding instead of OP_0.
-
-	// Build prefix up to the tag 5 body start.
-	builder := txscript.NewScriptBuilder()
-	builder.AddOp(txscript.OP_FALSE)
-	builder.AddOp(txscript.OP_IF)
-	builder.AddData([]byte("ord"))
-	builder.AddOp(txscript.OP_1) // content type
-	builder.AddData([]byte("application/octet-stream"))
-	builder.AddOp(txscript.OP_5)        // body via tag 5
-	builder.AddData([]byte{0x41, 0x42}) // tag value (first content push)
-	partial, err := builder.Script()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Manually append: OP_DATA_1 0x07 (non-canonical), more content,
-	// OP_ENDIF.
-	var script []byte
-	script = append(script, partial...)
-	script = append(script, 0x01, 0x07)       // OP_DATA_1 0x07
-	script = append(script, 0x02, 0x43, 0x44) // OP_DATA_2 {0x43, 0x44}
-	script = append(script, byte(txscript.OP_ENDIF))
-
-	env, err := ParseInscriptionEnvelope(buildWitness(script))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if env == nil {
-		t.Fatal("expected envelope")
-	}
-	// All continuation pushes should be concatenated as content.
-	want := []byte{0x41, 0x42, 0x07, 0x43, 0x44}
-	if !bytes.Equal(env.Content, want) {
-		t.Errorf("content: got %x, want %x", env.Content, want)
+			env, err := ParseInscriptionEnvelope(buildWitness(script))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if env == nil {
+				t.Fatal("expected envelope")
+			}
+			// All data pushes should be treated as content.
+			want := []byte{0x41, 0x42, 0x07, 0x43, 0x44}
+			if !bytes.Equal(env.Content, want) {
+				t.Errorf("content: got %x, want %x", env.Content, want)
+			}
+			// Metaprotocol must NOT be set — 0x07 was content,
+			// not tag 7.
+			if env.Metaprotocol != nil {
+				t.Errorf("metaprotocol: got %q, want nil "+
+					"(0x07 was misinterpreted as tag)",
+					env.Metaprotocol)
+			}
+		})
 	}
 }
