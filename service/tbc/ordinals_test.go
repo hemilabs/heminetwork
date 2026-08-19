@@ -2541,3 +2541,163 @@ func TestRevealLandsInLost(t *testing.T) {
 			lostSatBlockHeight(offset), blockHeight)
 	}
 }
+
+func TestParseEnvelopeMultipleEnvelopes(t *testing.T) {
+	// Two complete OP_FALSE OP_IF "ord" ... OP_ENDIF sequences in
+	// the same script. The parser must return the first envelope
+	// with MultipleEnvelopes set to true.
+	builder := txscript.NewScriptBuilder()
+
+	// First envelope: text/plain "hello".
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // content type
+	builder.AddData([]byte("text/plain"))
+	builder.AddOp(txscript.OP_0) // body
+	builder.AddData([]byte("hello"))
+	builder.AddOp(txscript.OP_ENDIF)
+
+	// Second envelope: image/png "png-data".
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // content type
+	builder.AddData([]byte("image/png"))
+	builder.AddOp(txscript.OP_0) // body
+	builder.AddData([]byte("png-data"))
+	builder.AddOp(txscript.OP_ENDIF)
+
+	script, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil {
+		t.Fatal("expected envelope")
+	}
+	// Must return the first envelope's content.
+	if !bytes.Equal(env.ContentType, []byte("text/plain")) {
+		t.Errorf("content type: got %q, want %q", env.ContentType, "text/plain")
+	}
+	if !bytes.Equal(env.Content, []byte("hello")) {
+		t.Errorf("content: got %q, want %q", env.Content, "hello")
+	}
+	if !env.MultipleEnvelopes {
+		t.Error("MultipleEnvelopes: got false, want true")
+	}
+}
+
+func TestParseEnvelopeSingleEnvelopeNotMultiple(t *testing.T) {
+	// A single envelope must not have MultipleEnvelopes set.
+	witness := buildOrdEnvelope(t, map[int][]byte{
+		1: []byte("text/plain"),
+		5: []byte("single"),
+	})
+	env, err := ParseInscriptionEnvelope(witness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil {
+		t.Fatal("expected envelope")
+	}
+	if env.MultipleEnvelopes {
+		t.Error("MultipleEnvelopes: got true, want false")
+	}
+}
+
+func TestParseEnvelopeBodyDataPushNotTag(t *testing.T) {
+	// Inside the body content stream (after OP_0), a non-canonical
+	// OP_DATA_1 push must be treated as content, not as a tag.
+	// btcd's ScriptBuilder canonicalizes single-byte values 1-16
+	// to OP_N opcodes, so we build raw script bytes to get a true
+	// OP_DATA_1 push inside the body.
+	//
+	// envelopeTag would match OP_DATA_1 with len(data)==1 and
+	// return the byte value as a tag number. envelopeBodyTag only
+	// matches OP_1..OP_16, so the push is treated as content.
+
+	// Build the prefix with the script builder (up to body start).
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // content type
+	builder.AddData([]byte("application/octet-stream"))
+	builder.AddOp(txscript.OP_0) // body separator
+	builder.AddData([]byte{0x41, 0x42})
+	partial, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Manually append: OP_DATA_1 0x07 (non-canonical 1-byte push
+	// that envelopeTag would misinterpret as tag 7), then more
+	// content, then OP_ENDIF.
+	var script []byte
+	script = append(script, partial...)
+	script = append(script, 0x01, 0x07)       // OP_DATA_1 0x07
+	script = append(script, 0x02, 0x43, 0x44) // OP_DATA_2 {0x43, 0x44}
+	script = append(script, byte(txscript.OP_ENDIF))
+
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil {
+		t.Fatal("expected envelope")
+	}
+	// All three data pushes should be treated as content.
+	want := []byte{0x41, 0x42, 0x07, 0x43, 0x44}
+	if !bytes.Equal(env.Content, want) {
+		t.Errorf("content: got %x, want %x", env.Content, want)
+	}
+	// Metaprotocol must NOT be set — 0x07 was content, not tag 7.
+	if env.Metaprotocol != nil {
+		t.Errorf("metaprotocol: got %q, want nil (0x07 was misinterpreted as tag)",
+			env.Metaprotocol)
+	}
+}
+
+func TestParseEnvelopeOP5BodyDataPushNotTag(t *testing.T) {
+	// Same as TestParseEnvelopeBodyDataPushNotTag but using the
+	// tag 5 (OP_5) alternate body encoding instead of OP_0.
+
+	// Build prefix up to the tag 5 body start.
+	builder := txscript.NewScriptBuilder()
+	builder.AddOp(txscript.OP_FALSE)
+	builder.AddOp(txscript.OP_IF)
+	builder.AddData([]byte("ord"))
+	builder.AddOp(txscript.OP_1) // content type
+	builder.AddData([]byte("application/octet-stream"))
+	builder.AddOp(txscript.OP_5)        // body via tag 5
+	builder.AddData([]byte{0x41, 0x42}) // tag value (first content push)
+	partial, err := builder.Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Manually append: OP_DATA_1 0x07 (non-canonical), more content,
+	// OP_ENDIF.
+	var script []byte
+	script = append(script, partial...)
+	script = append(script, 0x01, 0x07)       // OP_DATA_1 0x07
+	script = append(script, 0x02, 0x43, 0x44) // OP_DATA_2 {0x43, 0x44}
+	script = append(script, byte(txscript.OP_ENDIF))
+
+	env, err := ParseInscriptionEnvelope(buildWitness(script))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil {
+		t.Fatal("expected envelope")
+	}
+	// All continuation pushes should be concatenated as content.
+	want := []byte{0x41, 0x42, 0x07, 0x43, 0x44}
+	if !bytes.Equal(env.Content, want) {
+		t.Errorf("content: got %x, want %x", env.Content, want)
+	}
+}
