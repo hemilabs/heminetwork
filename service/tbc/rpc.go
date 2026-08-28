@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -637,7 +638,16 @@ func (s *Server) handleBlockInsertRequest(ctx context.Context, req *tbcapi.Block
 		}, err
 	}
 
-	_, err := s.db.BlockInsert(ctx, btcutil.NewBlock(req.Block))
+	// Validate before the store through the RPC surface.
+	blk := btcutil.NewBlock(req.Block)
+	if err := blockchain.CheckBlockSanity(blk, s.chainParams.PowLimit,
+		deterministicTimeSource{}); err != nil {
+		return &tbcapi.BlockInsertResponse{
+			Error: protocol.RequestErrorf("block sanity: %v", err),
+		}, nil
+	}
+
+	_, err := s.db.BlockInsert(ctx, blk)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
@@ -659,7 +669,16 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 		}, nil
 	}
 
-	_, err = s.db.BlockInsert(ctx, btcutil.NewBlock(b))
+	// Validate before the store through the RPC surface.
+	blk := btcutil.NewBlock(b)
+	if err := blockchain.CheckBlockSanity(blk, s.chainParams.PowLimit,
+		deterministicTimeSource{}); err != nil {
+		return &tbcapi.BlockInsertResponse{
+			Error: protocol.RequestErrorf("block sanity: %v", err),
+		}, nil
+	}
+
+	_, err = s.db.BlockInsert(ctx, blk)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e

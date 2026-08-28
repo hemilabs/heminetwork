@@ -246,6 +246,23 @@ func NewServer(cfg *Config) (*Server, error) {
 		promPollVerbose: false,
 	}
 
+	// The indexer cache sizes are divisors: crawler.go computes len(x)*100/MaxCachedTxs without
+	// a guard against a 0 denominator.
+
+	// Zero means "unset" -- NewDefaultConfig supplies these, but a hand-built Config leaves them at
+	// zero.
+	if s.cfg.MaxCachedTxs == 0 {
+		s.cfg.MaxCachedTxs = defaultMaxCachedTxs
+	}
+	if s.cfg.MaxCachedKeystones == 0 {
+		s.cfg.MaxCachedKeystones = defaultMaxCachedKeystones
+	}
+	if s.cfg.MaxCachedTxs < 0 || s.cfg.MaxCachedKeystones < 0 {
+		return nil, fmt.Errorf("cache sizes must not be negative (txs %d, keystones %d): they are "+
+			"divisors in the indexers and make() size hints", s.cfg.MaxCachedTxs,
+			s.cfg.MaxCachedKeystones)
+	}
+
 	// Only set pings and blocks if not in External Header Mode
 	if !s.cfg.ExternalHeaderMode {
 		s.blocks = blocks
@@ -1389,6 +1406,51 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 	return it, cbh, lbh, n, err
 }
 
+// deterministicTimeSource neutralises the ONE wall-clock-dependent rule in btcd's header and block
+// sanity checks.
+//
+// Both CheckBlockHeaderSanity and CheckBlockSanity reject a header whose timestamp exceeds
+// timeSource.AdjustedTime()+2h. That rule must not be applied here. s.timeSource is a
+// blockchain.MedianTimeSource that is never fed as AddTimeSample has no callers.
+//
+// Returning a far-future adjusted time makes host-clock-based divergence unreachable while ensuring
+// the deterministic median-time difficulty rule is still applied as expected. btcd checks
+// proof-of-work BEFORE the timestamp, so nothing is weakened by neutralising the later check.
+//
+// The constant is deliberately larger than the maximum uint32 value.
+type deterministicTimeSource struct{}
+
+func (deterministicTimeSource) AdjustedTime() time.Time         { return time.Unix(1<<40, 0) }
+func (deterministicTimeSource) AddTimeSample(string, time.Time) {}
+func (deterministicTimeSource) Offset() time.Duration           { return 0 }
+
+// verifyHeadersPoW rejects a headers message containing any header that does not meet its own
+// claimed proof-of-work target.
+func (s *Server) verifyHeadersPoW(headers []*wire.BlockHeader) error {
+	for i, hdr := range headers {
+		err := blockchain.CheckBlockHeaderSanity(hdr, s.chainParams.PowLimit,
+			deterministicTimeSource{}, blockchain.BFNone)
+		if err != nil {
+			return fmt.Errorf("header %d of %d proof-of-work: %w", i, len(headers), err)
+		}
+	}
+	return nil
+}
+
+// verifyHeaderBatchShape rejects a headers message whose headers do not form a single chain.
+//
+// An honest headers message is a contiguous chain by protocol, so this cannot reject honest data.
+func verifyHeaderBatchShape(headers []*wire.BlockHeader) error {
+	for i := 1; i < len(headers); i++ {
+		prev := headers[i-1].BlockHash()
+		if !headers[i].PrevBlock.IsEqual(&prev) {
+			return fmt.Errorf("header %d of %d does not connect: prev block %v, expected %v",
+				i, len(headers), headers[i].PrevBlock, prev)
+		}
+	}
+	return nil
+}
+
 func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgHeaders) error {
 	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
@@ -1457,6 +1519,15 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 				msg.Headers[k].PrevBlock, k)
 		}
 		pbhHash = &msg.Headers[k].PrevBlock
+	}
+
+	// Validate before the store. ldb.BlockHeadersInsert assigns heights and cumulative work
+	// positionally and the store exposes no delete, so anything admitted here is permanent.
+	if err := s.verifyHeadersPoW(msg.Headers); err != nil {
+		return fmt.Errorf("handle headers %v: %w", p, err)
+	}
+	if err := verifyHeaderBatchShape(msg.Headers); err != nil {
+		return fmt.Errorf("handle headers %v: %w", p, err)
 	}
 
 	// When running in normal (not External Header) mode, do not set
@@ -1544,6 +1615,10 @@ func (s *Server) BlockInsert(ctx context.Context, blk *wire.MsgBlock) (int64, er
 }
 
 func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+	// Ensure that headers provided from upstream are contiguous
+	if err := verifyHeaderBatchShape(headers.Headers); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0, err
+	}
 	return s.db.BlockHeadersInsert(ctx, headers, nil)
 }
 
@@ -1563,8 +1638,10 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	}()
 
 	if s.cfg.BlockSanity {
+		// deterministicTimeSource, *not* s.timeSource, so that host clock cannot produce unexpected
+		// divergences in edge cases.
 		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
-			s.timeSource)
+			deterministicTimeSource{})
 		if err != nil {
 			return fmt.Errorf("handle block unable to validate block hash %v: %w",
 				bhs, err)

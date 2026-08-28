@@ -376,7 +376,21 @@ func (l *ldb) Version(ctx context.Context) (int, error) {
 	if err != nil {
 		return -1, fmt.Errorf("version: %w", err)
 	}
+	// A short record must be an ERROR, not a panic. binary.BigEndian.Uint64 panics on fewer than 8
+	// bytes, and this is the FIRST read the upgrade loop in New() performs -- so a torn write of
+	// this single 8-byte record turned every subsequent start into a runtime panic inside database
+	// open, naming no record. It is also the record an interrupted upgrade is most likely to tear,
+	// because it is the one that decides whether the store gets upgraded.
+	if len(value) != 8 {
+		return -1, fmt.Errorf("version: corrupt record: want 8 bytes, got %d", len(value))
+	}
 	dbVersion := binary.BigEndian.Uint64(value)
+	// int(uint64) is lossy on the way to the caller's switch: 0xffffffffffffffff arrives as -1,
+	// which is also this function's error sentinel, so a corrupt record could be mistaken for a
+	// failed read. Reject anything that cannot be a version.
+	if dbVersion > math.MaxInt32 {
+		return -1, fmt.Errorf("version: implausible value %d", dbVersion)
+	}
 
 	return int(dbVersion), nil
 }
@@ -581,7 +595,14 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 	it := hhDB.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
 	defer it.Release()
 	for it.Next() {
-		fh, hash := keyToHeightHash(it.Key())
+		fh, hash, ok := keyToHeightHash(it.Key())
+		if !ok {
+			// findCommonParent decides "all these headers share a common parent" from this
+			// function's result, so silently dropping one sibling at a fork height makes it
+			//choose an incorrect common ancestor.
+			return nil, fmt.Errorf("malformed height-index key of %d bytes at height %d; the "+
+				"store is damaged and should be reindexed", len(it.Key()), height)
+		}
 		if fh != height {
 			// all done
 			break
@@ -631,13 +652,22 @@ func heightHashToKey(height uint64, hash []byte) []byte {
 	return key
 }
 
-// keyToHeightHash reverses the process of heightHashToKey.
-func keyToHeightHash(key []byte) (uint64, *chainhash.Hash) {
+// keyToHeightHash decodes a height-index key, reporting false for a key it cannot interpret.
+
+// The two callers deliberately DIFFER on what to do with a bad key. BlocksMissing skips it -- the
+// block simply is not requested, which is benign and that function already documents that it may
+// under-report. BlockHeadersByHeight fails, because findCommonParent (service/tbc/crawler.go)
+// decides "these headers share a common parent" from its result, so silently dropping one sibling at
+// a fork height picks the wrong common ancestor and unwinds to the wrong place.
+func keyToHeightHash(key []byte) (uint64, *chainhash.Hash, bool) {
+	if len(key) != heighthashSize {
+		return 0, nil, false
+	}
 	hash, err := chainhash.NewHash(key[9:])
 	if err != nil {
-		panic(fmt.Sprintf("chain hash new: %v", len(key)))
+		return 0, nil, false
 	}
-	return binary.BigEndian.Uint64(key[0:8]), hash
+	return binary.BigEndian.Uint64(key[0:8]), hash, true
 }
 
 // encodeBlockHeader encodes a database block header as
@@ -650,9 +680,25 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 	return
 }
 
+// blockheaderDifficultyBits is the width of the cumulative-work field encodeBlockHeader writes.
+// FillBytes panics rather than truncating, so every writer must bound the value against this.
+const blockheaderDifficultyBits = (blockheaderSize - 88) * 8
+
 // decodeBlockHeader reverse the process of encodeBlockHeader.
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
+	// Every writer into BlockHeadersDB puts exactly blockheaderSize bytes, so any other length is
+	// corruption. Checking it here closes two panics at one point: a record shorter than 88 bytes
+	// slice-panics on ebh[8:88] below, and a record LONGER than blockheaderSize yields a cumulative
+	// work value wider than the 32-byte field, which then panics inside FillBytes on the next write.
+	//
+	// This is deliberately a panic and not an error: the signature has no error return and every
+	// caller treats the result as authoritative, so returning a zero value would silently substitute
+	// a wrong header. A named panic is strictly better than an opaque slice panic.
+	if len(ebh) != blockheaderSize {
+		panic(fmt.Sprintf("decode block header: record is %d bytes, want %d; store is corrupt",
+			len(ebh), blockheaderSize))
+	}
 	bh := &tbcd.BlockHeader{
 		Hash:   *headerHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
@@ -725,6 +771,15 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	if diff != nil && diff.Cmp(big.NewInt(0)) > 0 {
 		cdiff = diff
 	}
+	// Same bound as BlockHeadersInsert, and for the same reason: encodeBlockHeader writes cdiff
+	// into a fixed 32-byte field with FillBytes, which panics rather than truncating. Here the
+	// value comes from the embedder via Config.GenesisDifficultyOffset with nothing bounding it,
+	// so a misconfigured offset was a panic during startup rather than a diagnosable error.
+	if cdiff.BitLen() > blockheaderDifficultyBits {
+		return fmt.Errorf("effective genesis cumulative difficulty overflow: %v bits exceeds %v",
+			cdiff.BitLen(), blockheaderDifficultyBits)
+	}
+
 	ebh := encodeBlockHeader(height, h2b(&wbh), cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
@@ -1300,6 +1355,13 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		height++
 		cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
 
+		// Extra sanity check for cumulative difficulty
+		if cdiff.BitLen() > blockheaderDifficultyBits {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("cumulative difficulty overflow at height %v: %v bits exceeds %v",
+					height, cdiff.BitLen(), blockheaderDifficultyBits)
+		}
+
 		// Store height_hash for future reference
 		hhKey := heightHashToKey(height, bhash[:])
 		ok, err := hhTx.Has(hhKey, nil)
@@ -1457,7 +1519,13 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 	defer it.Release()
 	for it.Next() {
 		bh := tbcd.BlockIdentifier{}
-		bh.Height, bh.Hash = keyToHeightHash(it.Key())
+		var ok bool
+		bh.Height, bh.Hash, ok = keyToHeightHash(it.Key())
+		if !ok {
+			log.Errorf("skipping malformed blocks-missing key of %v bytes; the store has debris "+
+				"and should be reindexed", len(it.Key()))
+			continue
+		}
 		bis = append(bis, bh)
 
 		x++
