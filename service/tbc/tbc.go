@@ -252,9 +252,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	// Zero means "unset" -- NewDefaultConfig supplies these, but a hand-built Config leaves them at
 	// zero.
 	if s.cfg.MaxCachedTxs == 0 {
+		log.Warningf("MaxCachedTxs value of 0 is invalid, setting to default")
 		s.cfg.MaxCachedTxs = defaultMaxCachedTxs
 	}
 	if s.cfg.MaxCachedKeystones == 0 {
+		log.Warningf("MaxCachedKeystones value of 0 is invalid, setting to default")
 		s.cfg.MaxCachedKeystones = defaultMaxCachedKeystones
 	}
 	if s.cfg.MaxCachedTxs < 0 || s.cfg.MaxCachedKeystones < 0 {
