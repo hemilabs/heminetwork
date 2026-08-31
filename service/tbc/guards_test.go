@@ -391,8 +391,14 @@ func TestUnprocessUtxosDuplicateOutpoint(t *testing.T) {
 	// case: blockchain.CheckTransactionSanity rejects duplicate inputs within a single transaction,
 	// so with --tbc.blocksanity=true -- the configuration op-geth intends to ship -- such a body
 	// never reaches the store, let alone the unwind. A duplicate spread ACROSS two transactions is
-	// invisible to CheckBlockSanity (it checks duplicates only within a tx) and is the case E7
-	// actually has to survive.
+	// invisible to CheckBlockSanity (it checks duplicates only within a tx), so it is the
+	// shape that can actually reach the unwind.
+	//
+	// THE UNWIND MUST FAIL LOUDLY HERE, NOT CONTINUE. Reaching this state means the store has already
+	// accepted a consensus-invalid block as canonical. That is a data-integrity failure no local
+	// recovery repairs: BlocksDB has no delete, so the block stays and every restart re-walks it.
+	// Refusing to run is deliberate. Continuing would yield a correct unwind set for THIS operation
+	// while saying nothing about the rest of the store, which is the weaker guarantee.
 	op := wire.OutPoint{Hash: *prevTxHash, Index: 0}
 
 	dupA := wire.NewMsgTx(wire.TxVersion)
@@ -412,11 +418,13 @@ func TestUnprocessUtxosDuplicateOutpoint(t *testing.T) {
 
 	txs := []*btcutil.Tx{btcutil.NewTx(coinbase), btcutil.NewTx(dupA), btcutil.NewTx(dupB)}
 	utxos := make(map[tbcd.Outpoint]tbcd.CacheOutput)
-	if err := s.unprocessUtxos(t.Context(), txs, utxos); err != nil {
-		t.Fatalf("duplicate outpoint aborted the unwind: %v", err)
+	err := s.unprocessUtxos(t.Context(), txs, utxos)
+	if err == nil {
+		t.Fatal("duplicate outpoint was accepted; the unwind must refuse to continue on a store that " +
+			"has already admitted a consensus-invalid canonical block")
 	}
-	if _, ok := utxos[tbcd.NewOutpoint(*prevTxHash, 0)]; !ok {
-		t.Fatal("the spent outpoint was not recorded in the unwind set")
+	if !strings.Contains(err.Error(), "impossible collision") {
+		t.Fatalf("expected an impossible-collision error, got: %v", err)
 	}
 }
 

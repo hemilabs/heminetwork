@@ -260,8 +260,9 @@ func (s *Server) handleRequest(ctx context.Context, ws *tbcWs, id string, cmd pr
 		return
 	}
 
-	// XXX: spew.Sdump should only be called when the log level is enabled.
-	log.Debugf("Responding to %s request with %v", cmd, spew.Sdump(res))
+	if log.IsDebugEnabled() {
+		log.Debugf("Responding to %s request with %v", cmd, spew.Sdump(res))
+	}
 
 	if err = tbcapi.Write(ctx, ws.conn, id, res); err != nil {
 		log.Errorf("Failed to handle %s request for %s: protocol write failed: %v",
@@ -1095,7 +1096,9 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now().Unix(),
 	}
 
-	log.Tracef("Responding with %v", spew.Sdump(ping))
+	if log.IsTraceEnabled() {
+		log.Tracef("Responding with %v", spew.Sdump(ping))
+	}
 	if err = tbcapi.Write(r.Context(), ws.conn, "0", ping); err != nil {
 		log.Errorf("Write ping: %v", err)
 	}
