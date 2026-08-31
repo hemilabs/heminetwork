@@ -58,7 +58,6 @@ linters:
         - "XXX"
         - "TODO"
         - "FIXME"
-    gomoddirectives: {}
     nolintlint:
       # Require an explanation after each nolint directive.
       # Explanation format example: '//nolint:ineffassign // Explanation goes here.'
