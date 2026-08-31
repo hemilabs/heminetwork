@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -7072,21 +7073,53 @@ type mockTSS struct {
 	reshareCalled chan struct{}
 	handleCalled  chan struct{}
 
+	// block, when non-nil, holds Keygen/Sign/Reshare until it is
+	// closed or the driver context is cancelled (returning
+	// ctx.Err()), so a test can act on a ceremony mid-flight.
+	block chan struct{}
+
+	// Driver invocation counts, for tests that assert a call did
+	// NOT repeat (the *Called channels can only be closed once).
+	keygenCalls  atomic.Int32
+	signCalls    atomic.Int32
+	reshareCalls atomic.Int32
+
 	// Capture HandleMessage args for verification.
 	handleData []byte
 	handleFrom Identity
 }
 
-func (m *mockTSS) Keygen(_ context.Context, _ CeremonyID, _ []Identity, _ int) ([]byte, error) {
+// wait implements block for the ceremony drivers.
+func (m *mockTSS) wait(ctx context.Context) error {
+	if m.block == nil {
+		return nil
+	}
+	select {
+	case <-m.block:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *mockTSS) Keygen(ctx context.Context, _ CeremonyID, _ []Identity, _ int) ([]byte, error) {
+	m.keygenCalls.Add(1)
 	if m.keygenCalled != nil {
 		close(m.keygenCalled)
+	}
+	if err := m.wait(ctx); err != nil {
+		return nil, err
 	}
 	return []byte{0x01}, m.keygenErr
 }
 
-func (m *mockTSS) Sign(_ context.Context, _ CeremonyID, _ []byte, _ []Identity, _ int, _ [32]byte) ([]byte, []byte, error) {
+func (m *mockTSS) Sign(ctx context.Context, _ CeremonyID, _ []byte, _ []Identity, _ int, _ [32]byte) ([]byte, []byte, error) {
+	m.signCalls.Add(1)
 	if m.signCalled != nil {
 		close(m.signCalled)
+	}
+	if err := m.wait(ctx); err != nil {
+		return nil, nil, err
 	}
 	// Return 32 bytes each — the log line slices [:8].
 	r := make([]byte, 32)
@@ -7096,9 +7129,13 @@ func (m *mockTSS) Sign(_ context.Context, _ CeremonyID, _ []byte, _ []Identity, 
 	return r, s, m.signErr
 }
 
-func (m *mockTSS) Reshare(_ context.Context, _ CeremonyID, _ []byte, _, _ []Identity, _, _ int) error {
+func (m *mockTSS) Reshare(ctx context.Context, _ CeremonyID, _ []byte, _, _ []Identity, _, _ int) error {
+	m.reshareCalls.Add(1)
 	if m.reshareCalled != nil {
 		close(m.reshareCalled)
+	}
+	if err := m.wait(ctx); err != nil {
+		return err
 	}
 	return m.reshareErr
 }
@@ -7354,6 +7391,216 @@ func TestDispatchReshareError(t *testing.T) {
 		t.Fatal("tss.Reshare not called")
 	}
 	s.wg.Wait()
+}
+
+// TestDispatchDuplicateCeremonyIgnored proves a re-delivered request
+// for a ceremony that is still running starts no second driver:
+// registerCeremony refuses the ID and dispatch stops there, so the
+// engine runs one set of rounds and the in-flight state survives.
+func TestDispatchDuplicateCeremonyIgnored(t *testing.T) {
+	var data [32]byte
+	tests := []struct {
+		name     string
+		dispatch func(s *Server, req CeremonyRequest)
+		calls    func(m *mockTSS) int32
+	}{
+		{"keygen", (*Server).dispatchKeygen, func(m *mockTSS) int32 { return m.keygenCalls.Load() }},
+		{"sign", (*Server).dispatchSign, func(m *mockTSS) int32 { return m.signCalls.Load() }},
+		{"reshare", (*Server).dispatchReshare, func(m *mockTSS) int32 { return m.reshareCalls.Load() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockTSS{block: make(chan struct{})}
+			s := dispatchTestServer(t, mock)
+			committee := boundIdentities(t, s, 1)
+			req := CeremonyRequest{
+				CeremonyID:   NewCeremonyID(),
+				Committee:    committee,
+				Threshold:    1,
+				Data:         data[:],
+				OldCommittee: committee,
+				NewCommittee: committee,
+				OldThreshold: 1,
+				NewThreshold: 1,
+			}
+
+			tt.dispatch(s, req)
+			tt.dispatch(s, req) // re-delivery while running
+			close(mock.block)
+			s.wg.Wait()
+
+			if n := tt.calls(mock); n != 1 {
+				t.Fatalf("driver ran %d times, want 1", n)
+			}
+			ci := s.CeremonyStatus(req.CeremonyID)
+			if ci == nil || ci.Status != CeremonyComplete {
+				t.Fatalf("ceremony status = %+v, want complete", ci)
+			}
+		})
+	}
+}
+
+// TestDispatchAbortCancelsRounds proves the driver runs under the
+// registered ceremony context: a verified CeremonyAbort cancels the
+// rounds mid-flight instead of only relabelling the status, and the
+// abort reason is the terminal state — neither the driver's context
+// error nor a late completion overrides it.
+func TestDispatchAbortCancelsRounds(t *testing.T) {
+	mock := &mockTSS{
+		block:        make(chan struct{}),
+		keygenCalled: make(chan struct{}),
+	}
+	s := dispatchTestServer(t, mock)
+	cid := NewCeremonyID()
+	s.dispatchKeygen(CeremonyRequest{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		Committee:  boundIdentities(t, s, 1),
+		Threshold:  1,
+	})
+	select {
+	case <-mock.keygenCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tss.Keygen not called")
+	}
+
+	abort := CeremonyAbort{
+		CeremonyID: cid,
+		Reason:     "abort",
+		Signer:     s.secret.Identity,
+	}
+	abort.Signature = s.secret.Sign(HashCeremonyAbort(abort))
+	handleCeremonyAbort(&dispatchCtx{s: s, id: &s.secret.Identity}, &abort)
+
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Keygen kept running after the ceremony was aborted")
+	}
+
+	ci := s.CeremonyStatus(cid)
+	if ci.Status != CeremonyFailed || ci.Error != "abort" {
+		t.Fatalf("status=%q error=%q, want failed with abort reason",
+			ci.Status, ci.Error)
+	}
+	// A driver that finishes anyway must not revive the ceremony.
+	s.completeCeremony(cid)
+	if ci := s.CeremonyStatus(cid); ci.Status != CeremonyFailed {
+		t.Fatalf("status = %q after late completion, want failed", ci.Status)
+	}
+}
+
+// TestDispatchSignPublishesSignature proves a completed signing
+// ceremony hands its R||S signature to the status API — CeremonyStatus
+// and the admin status/list responses — so the caller that requested
+// the signature can collect it rather than only learn that it exists.
+func TestDispatchSignPublishesSignature(t *testing.T) {
+	mock := &mockTSS{}
+	s := dispatchTestServer(t, mock)
+	cid := NewCeremonyID()
+	var data [32]byte
+	s.dispatchSign(CeremonyRequest{
+		CeremonyID: cid,
+		Type:       CeremonySign,
+		Committee:  boundIdentities(t, s, 1),
+		Threshold:  1,
+		Data:       data[:],
+	})
+	s.wg.Wait()
+
+	want := make([]byte, 64)
+	want[0], want[32] = 0x01, 0x02 // mock R and S
+	ci := s.CeremonyStatus(cid)
+	if ci.Status != CeremonyComplete {
+		t.Fatalf("status = %q, want complete", ci.Status)
+	}
+	if !bytes.Equal(ci.Signature, want) {
+		t.Fatalf("CeremonyStatus signature = %x, want %x", ci.Signature, want)
+	}
+	// The returned copy must not alias the tracked ceremony.
+	ci.Signature[0] ^= 0xff
+	if got := s.CeremonyStatus(cid).Signature; !bytes.Equal(got, want) {
+		t.Fatal("CeremonyStatus returned an aliased signature")
+	}
+	if got := s.handleCeremonyStatus(cid).Signature; !bytes.Equal(got, want) {
+		t.Fatalf("status response signature = %x, want %x", got, want)
+	}
+	list := s.handleCeremonyList()
+	if len(list.Ceremonies) != 1 || !bytes.Equal(list.Ceremonies[0].Signature, want) {
+		t.Fatalf("list response = %+v, want signature %x", list, want)
+	}
+}
+
+// TestDispatchSignReshareUnreachableKey extends the keygen prefetch
+// guarantee to sign and reshare: a participant whose e2e key cannot
+// be bound — a signer whose peer record expired, or a member joining
+// in the new committee who was never in the old one — fails the
+// ceremony before the rounds start instead of stalling inside them.
+func TestDispatchSignReshareUnreachableKey(t *testing.T) {
+	var data [32]byte
+	tests := []struct {
+		name     string
+		dispatch func(s *Server, cid CeremonyID, bound, unbound []Identity)
+		calls    func(m *mockTSS) int32
+	}{
+		{
+			name: "sign",
+			dispatch: func(s *Server, cid CeremonyID, _, unbound []Identity) {
+				s.dispatchSign(CeremonyRequest{
+					CeremonyID: cid,
+					Type:       CeremonySign,
+					Committee:  unbound,
+					Threshold:  1,
+					Data:       data[:],
+				})
+			},
+			calls: func(m *mockTSS) int32 { return m.signCalls.Load() },
+		},
+		{
+			name: "reshare",
+			dispatch: func(s *Server, cid CeremonyID, bound, unbound []Identity) {
+				s.dispatchReshare(CeremonyRequest{
+					CeremonyID:   cid,
+					Type:         CeremonyReshare,
+					OldCommittee: bound,
+					NewCommittee: unbound,
+					OldThreshold: 1,
+					NewThreshold: 1,
+				})
+			},
+			calls: func(m *mockTSS) int32 { return m.reshareCalls.Load() },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockTSS{}
+			s := dispatchTestServer(t, mock)
+
+			// Shorten the prefetch bound: this member never answers.
+			ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+			defer cancel()
+			s.tssCtx = ctx
+
+			cid := NewCeremonyID()
+			tt.dispatch(s, cid,
+				boundIdentities(t, s, 1),
+				[]Identity{mustSecret(t).Identity})
+			s.wg.Wait()
+
+			if n := tt.calls(mock); n != 0 {
+				t.Fatalf("driver ran without an authenticated committee key")
+			}
+			ci := s.CeremonyStatus(cid)
+			if ci == nil || ci.Status != CeremonyFailed {
+				t.Fatalf("ceremony status = %+v, want failed", ci)
+			}
+		})
+	}
 }
 
 // TestDispatchTSSMessageValidKeygen covers dispatchTSSMessage with a
