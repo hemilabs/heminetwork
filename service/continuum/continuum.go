@@ -267,6 +267,7 @@ type CeremonyInfo struct {
 	Error       string          `json:"error,omitempty"`
 	Coordinator Identity        `json:"coordinator"` // node responsible for broadcasting result
 	KeyID       []byte          `json:"key_id,omitempty"`
+	Signature   []byte          `json:"signature,omitempty"` // sign: R||S, 32 bytes each
 	Committee   []Identity      `json:"committee,omitempty"`
 	ctx         context.Context // canceled on terminal state
 	cancel      context.CancelFunc
@@ -1853,21 +1854,25 @@ func requireAdmin(t *Transport, id *Identity) bool {
 	return false
 }
 
-// registerCeremony records a new ceremony in the tracking map.
-// The ceremony context derives from s.tssCtx so server shutdown
-// propagates cancellation to all waiting callers.
+// registerCeremony records a new ceremony in the tracking map and
+// returns the context its driver must run under.  The context derives
+// from s.tssCtx so server shutdown propagates cancellation, and it is
+// cancelled by failCeremony — including a verified CeremonyAbort — so
+// an abort stops the rounds rather than only relabelling the status.
 //
-// If a ceremony with the same ID is already running, registration
-// is skipped to prevent re-delivery or reorg from clobbering the
-// in-flight state.
-func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity, committee []Identity) {
+// If a ceremony with the same ID is already running, registration is
+// refused and false is returned: the caller must not start another
+// driver.  This keeps re-delivery or a reorg from clobbering the
+// in-flight state or running two sets of rounds under one ID.  A
+// terminal (complete or failed) entry is replaced.
+func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity, committee []Identity) (context.Context, bool) {
 	ctx, cancel := context.WithCancel(s.tssCtx) //nolint:gosec // cancel stored in CeremonyInfo, called on ceremony completion
 	s.mtx.Lock()
 	if existing, ok := s.ceremonies[cid]; ok && existing.Status == CeremonyRunning {
 		s.mtx.Unlock()
 		cancel() // release context; we won't use it
 		log.Warningf("registerCeremony %s: already running, skipping duplicate", cid)
-		return
+		return nil, false
 	}
 	s.ceremonies[cid] = &CeremonyInfo{
 		Type:        ct,
@@ -1879,14 +1884,20 @@ func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator I
 		cancel:      cancel,
 	}
 	s.mtx.Unlock()
+	return ctx, true
 }
 
-// completeCeremony marks a tracked ceremony as complete.
+// completeCeremony marks a tracked ceremony as complete.  Only a
+// running ceremony transitions: the first terminal state wins, so a
+// driver that finishes after a CeremonyAbort already failed the
+// ceremony does not flip it back to complete.
+//
 // Cancel is called outside the lock to avoid potential deadlock
 // if a ci.ctx.Done() waiter touches s.mtx.
 func (s *Server) completeCeremony(cid CeremonyID) {
 	s.mtx.Lock()
 	ci, ok := s.ceremonies[cid]
+	ok = ok && ci.Status == CeremonyRunning
 	if ok {
 		ci.Status = CeremonyComplete
 	}
@@ -1896,10 +1907,14 @@ func (s *Server) completeCeremony(cid CeremonyID) {
 	}
 }
 
-// failCeremony marks a tracked ceremony as failed with an error.
+// failCeremony marks a tracked ceremony as failed with an error and
+// cancels its context, which stops the driver's rounds.  Only a
+// running ceremony transitions, so the driver's own context-cancelled
+// error that follows an abort does not overwrite the abort reason.
 func (s *Server) failCeremony(cid CeremonyID, reason string) {
 	s.mtx.Lock()
 	ci, ok := s.ceremonies[cid]
+	ok = ok && ci.Status == CeremonyRunning
 	if ok {
 		ci.Status = CeremonyFailed
 		ci.Error = reason
@@ -1991,6 +2006,7 @@ func (s *Server) handleCeremonyStatus(cid CeremonyID) CeremonyStatusResponse {
 		Status:     ci.Status,
 		StartTime:  ci.StartTime,
 		KeyID:      ci.KeyID,
+		Signature:  ci.Signature,
 		Committee:  ci.Committee,
 		Error:      ci.Error,
 	}
@@ -2012,6 +2028,7 @@ func (s *Server) handleCeremonyList() CeremonyListResponse {
 			Status:     ci.Status,
 			StartTime:  ci.StartTime,
 			KeyID:      ci.KeyID,
+			Signature:  ci.Signature,
 			Committee:  ci.Committee,
 			Error:      ci.Error,
 		})
@@ -2179,6 +2196,7 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 			pr.Identity, s.cfg.MaxPeers)
 		return false
 	}
+	var oldSessions []Identity
 	if existed {
 		// Preserve Address if the caller doesn't have it.
 		// The listen path knows the session but not the peer's
@@ -3371,6 +3389,10 @@ func (s *Server) CeremonyStatus(cid CeremonyID) *CeremonyInfo {
 	if ci.KeyID != nil {
 		cp.KeyID = make([]byte, len(ci.KeyID))
 		copy(cp.KeyID, ci.KeyID)
+	}
+	if ci.Signature != nil {
+		cp.Signature = make([]byte, len(ci.Signature))
+		copy(cp.Signature, ci.Signature)
 	}
 	return &cp
 }
