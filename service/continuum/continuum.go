@@ -2127,6 +2127,8 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 	}
 	s.mtx.Lock()
 	delete(s.peers, id)
+	// Its advertised edges leave the routing graph with it.
+	s.invalidateRoutes()
 	s.mtx.Unlock()
 	log.Debugf("peer expired: %v", id)
 }
@@ -2145,6 +2147,10 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 //
 // When updating an existing peer, preserves non-empty Address from
 // the old record if the new record omits it.
+//
+// Sessions are the peer's edges in the routing graph, so a changed
+// session list marks the routing table stale (invalidateRoutes); the
+// caller rebuilds after releasing s.mtx.
 func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 	log.Tracef("addPeer %v", pr.Identity)
 
@@ -2182,6 +2188,14 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 		}
 		// Always preserve an authenticated key binding.
 		pr.NaClPub = existing.NaClPub
+		oldSessions = existing.Sessions
+	}
+
+	// A changed session advertisement changes the routing graph.
+	// Unchanged gossip leaves the generation alone so the caller's
+	// rebuildRoutes stays a no-op.
+	if !sameIdentitySet(oldSessions, pr.Sessions) {
+		s.invalidateRoutes()
 	}
 
 	s.peers[pr.Identity] = &pr
