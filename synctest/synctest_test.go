@@ -66,7 +66,7 @@ func TestWaitForSyncInvalidParameters(t *testing.T) {
 			}
 
 			if !errors.Is(err, testCase.expectedError) {
-				t.Fatalf("unexpcted error: %s", err)
+				t.Fatalf("unexpected error: %s", err)
 			}
 		})
 	}
