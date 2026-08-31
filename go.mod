@@ -10,7 +10,7 @@ require (
 	github.com/btcsuite/btcd/btcec/v2 v2.5.0
 	github.com/btcsuite/btcd/btcutil v1.2.0
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.2.0
-	github.com/btcsuite/btcwallet/wallet/txsizes v1.2.5
+	github.com/btcsuite/btcwallet/wallet/txsizes v1.3.0
 	github.com/coder/websocket v1.8.15
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/crypto/ripemd160 v1.0.2
