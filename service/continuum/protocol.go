@@ -689,6 +689,7 @@ type CeremonyStatusResponse struct {
 	Status     string     `json:"status,omitempty"`     // "running", "complete", "failed"
 	StartTime  int64      `json:"start_time,omitempty"` // unix timestamp
 	KeyID      []byte     `json:"key_id,omitempty"`     // set after keygen completes
+	Signature  []byte     `json:"signature,omitempty"`  // set after sign completes: R||S, 32 bytes each
 	Committee  []Identity `json:"committee,omitempty"`  // ceremony participants
 	Error      string     `json:"error,omitempty"`
 }

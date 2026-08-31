@@ -149,17 +149,22 @@ func (st *serverTSSTransport) Send(to Identity, ceremonyID CeremonyID, data []by
 // =============================================================================
 
 // dispatchKeygen handles a keygen CeremonyRequest.  The ceremony
-// runs asynchronously; the result is logged on completion.
-// If this node is the coordinator, it broadcasts CeremonyResult
-// to all peers on success or failure.
+// runs asynchronously under the context registerCeremony hands out,
+// so a verified CeremonyAbort cancels the rounds; the result is
+// logged on completion.  If this node is the coordinator, it
+// broadcasts CeremonyResult to all peers on success or failure.
 func (s *Server) dispatchKeygen(req CeremonyRequest) {
 	if len(req.Committee) == 0 {
 		log.Errorf("keygen %s: empty committee", req.CeremonyID)
 		return
 	}
 
+	ctx, registered := s.registerCeremony(req.CeremonyID, CeremonyKeygen,
+		req.Coordinator, req.Committee)
+	if !registered {
+		return // duplicate of a running ceremony
+	}
 	s.stt.registerCeremony(req.CeremonyID, CeremonyKeygen)
-	s.registerCeremony(req.CeremonyID, CeremonyKeygen, req.Coordinator, req.Committee)
 
 	isCoordinator := req.Coordinator == s.secret.Identity
 
@@ -171,10 +176,10 @@ func (s *Server) dispatchKeygen(req CeremonyRequest) {
 		// Bind authenticated e2e keys for the whole committee
 		// before rounds start so the encrypted fallback path
 		// never lacks a key mid-ceremony.
-		err := s.ensureCommitteeKeys(req.Committee)
+		err := s.ensureCommitteeKeys(ctx, req.Committee)
 		var keyID []byte
 		if err == nil {
-			keyID, err = s.tss.Keygen(s.tssCtx, req.CeremonyID,
+			keyID, err = s.tss.Keygen(ctx, req.CeremonyID,
 				req.Committee, req.Threshold)
 		}
 		if err != nil {
@@ -218,7 +223,10 @@ func (s *Server) dispatchKeygen(req CeremonyRequest) {
 	}()
 }
 
-// dispatchSign handles a sign CeremonyRequest.
+// dispatchSign handles a sign CeremonyRequest.  The completed
+// signature is published through CeremonyInfo.Signature, which the
+// ceremony status and list RPCs return, so the caller that requested
+// the signature can collect it.
 func (s *Server) dispatchSign(req CeremonyRequest) {
 	if len(req.Committee) == 0 {
 		log.Errorf("sign %s: empty committee", req.CeremonyID)
@@ -230,8 +238,12 @@ func (s *Server) dispatchSign(req CeremonyRequest) {
 		return
 	}
 
+	ctx, registered := s.registerCeremony(req.CeremonyID, CeremonySign,
+		Identity{}, req.Committee)
+	if !registered {
+		return // duplicate of a running ceremony
+	}
 	s.stt.registerCeremony(req.CeremonyID, CeremonySign)
-	s.registerCeremony(req.CeremonyID, CeremonySign, Identity{}, req.Committee)
 
 	var data [32]byte
 	copy(data[:], req.Data)
@@ -241,8 +253,15 @@ func (s *Server) dispatchSign(req CeremonyRequest) {
 		defer s.wg.Done()
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
-		r, sigS, err := s.tss.Sign(s.tssCtx, req.CeremonyID,
-			req.KeyID, req.Committee, req.Threshold, data)
+		// The signers' keys were bound during keygen, but a peer
+		// record — and the key binding it holds — may have
+		// expired since.
+		err := s.ensureCommitteeKeys(ctx, req.Committee)
+		var r, sigS []byte
+		if err == nil {
+			r, sigS, err = s.tss.Sign(ctx, req.CeremonyID,
+				req.KeyID, req.Committee, req.Threshold, data)
+		}
 		if err != nil {
 			log.Errorf("sign %s: %v", req.CeremonyID, err)
 			s.failCeremony(req.CeremonyID, err.Error())
@@ -250,6 +269,13 @@ func (s *Server) dispatchSign(req CeremonyRequest) {
 		}
 		log.Infof("sign %s complete: r=%x.. s=%x..",
 			req.CeremonyID, r[:8], sigS[:8])
+		s.mtx.Lock()
+		if ci, ok := s.ceremonies[req.CeremonyID]; ok {
+			ci.Signature = make([]byte, 0, len(r)+len(sigS))
+			ci.Signature = append(ci.Signature, r...)
+			ci.Signature = append(ci.Signature, sigS...)
+		}
+		s.mtx.Unlock()
 		s.completeCeremony(req.CeremonyID)
 	}()
 }
@@ -262,7 +288,6 @@ func (s *Server) dispatchReshare(req CeremonyRequest) {
 		return
 	}
 
-	s.stt.registerCeremony(req.CeremonyID, CeremonyReshare)
 	// Track union of old and new committees as participants.
 	allParties := make([]Identity, 0, len(req.OldCommittee)+len(req.NewCommittee))
 	allParties = append(allParties, req.OldCommittee...)
@@ -278,16 +303,26 @@ func (s *Server) dispatchReshare(req CeremonyRequest) {
 			allParties = append(allParties, np)
 		}
 	}
-	s.registerCeremony(req.CeremonyID, CeremonyReshare, Identity{}, allParties)
+	ctx, registered := s.registerCeremony(req.CeremonyID, CeremonyReshare,
+		Identity{}, allParties)
+	if !registered {
+		return // duplicate of a running ceremony
+	}
+	s.stt.registerCeremony(req.CeremonyID, CeremonyReshare)
 
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
-		err := s.tss.Reshare(s.tssCtx, req.CeremonyID, req.KeyID,
-			req.OldCommittee, req.NewCommittee,
-			req.OldThreshold, req.NewThreshold)
+		// Members joining in the new committee have no key bound
+		// from keygen; fetch the whole union before rounds start.
+		err := s.ensureCommitteeKeys(ctx, allParties)
+		if err == nil {
+			err = s.tss.Reshare(ctx, req.CeremonyID, req.KeyID,
+				req.OldCommittee, req.NewCommittee,
+				req.OldThreshold, req.NewThreshold)
+		}
 		if err != nil {
 			log.Errorf("reshare %s: %v",
 				req.CeremonyID, err)
@@ -300,11 +335,12 @@ func (s *Server) dispatchReshare(req CeremonyRequest) {
 }
 
 // ensureCommitteeKeys binds authenticated e2e keys for all ceremony
-// participants, bounded by naclXchgEnsureTimeout.  A participant whose
-// key cannot be fetched is unreachable enough that the ceremony should
-// fail fast rather than stall in a round.
-func (s *Server) ensureCommitteeKeys(parties []Identity) error {
-	ctx, cancel := context.WithTimeout(s.tssCtx, naclXchgEnsureTimeout)
+// participants, bounded by naclXchgEnsureTimeout and by the ceremony
+// context.  A participant whose key cannot be fetched is unreachable
+// enough that the ceremony should fail fast rather than stall in a
+// round.
+func (s *Server) ensureCommitteeKeys(ctx context.Context, parties []Identity) error {
+	ctx, cancel := context.WithTimeout(ctx, naclXchgEnsureTimeout)
 	defer cancel()
 	return s.ensurePeerKeys(ctx, parties)
 }
