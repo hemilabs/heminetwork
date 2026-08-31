@@ -10,13 +10,15 @@ package continuum
 // identity on the shortest path from the local node.  It is derived
 // from gossip topology data: each node advertises its direct session
 // neighbors in PeerRecord.Sessions, and every receiver stores that
-// data in its peer map.
+// data in its peer map.  The local node's own edges come from its
+// session map — its own peer record never carries Sessions.
 //
-// Rebuild is generation-gated: topology changes (session add/remove,
-// gossip update) bump routeGen.  rebuildRoutes compares routeGen to
-// routeBuiltGen and skips the BFS if already current.  This avoids
-// redundant rebuilds when multiple gossip messages arrive in quick
-// succession.
+// Rebuild is generation-gated: topology changes bump routeGen — a
+// local session add/remove (newSession, deleteSession), a gossip
+// record whose session list changed (addPeer), or a peer expiring
+// (peerExpired).  rebuildRoutes compares routeGen to routeBuiltGen
+// and skips the BFS if already current, so gossip that repeats what
+// is already known costs no rebuild.
 //
 // Staleness: the table reflects the last rebuild.  A dropped session
 // on a remote node takes up to one gossip round (~67s) to propagate.
@@ -70,12 +72,22 @@ func (s *Server) rebuildRoutes() {
 
 	s.mtx.RLock()
 	self := s.secret.Identity
-	adj := make(map[Identity][]Identity, len(s.peers))
+	adj := make(map[Identity][]Identity, len(s.peers)+1)
 	for id, pr := range s.peers {
 		if len(pr.Sessions) > 0 {
 			adj[id] = pr.Sessions
 		}
 	}
+	// Seed the BFS root from the live session map.  Our own peer
+	// record has no Sessions (knownPeerList overlays them only on
+	// the gossip copy), so without this the root has no edges, the
+	// table comes out empty, and every non-direct message takes the
+	// flood path.
+	selfAdj := make([]Identity, 0, len(s.sessions))
+	for id := range s.sessions {
+		selfAdj = append(selfAdj, id)
+	}
+	adj[self] = selfAdj
 	s.mtx.RUnlock()
 
 	table := bfsRoutes(self, adj)
@@ -139,4 +151,24 @@ func (s *Server) routeNextHop(dest Identity) (Identity, bool) {
 	hop, ok := s.routeTable[dest]
 	s.routeMtx.RUnlock()
 	return hop, ok
+}
+
+// sameIdentitySet reports whether a and b hold the same identities,
+// ignoring order.  Gossip emits session lists in map order, so a
+// positional comparison would see a topology change on every round.
+func sameIdentitySet(a, b []Identity) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[Identity]int, len(a))
+	for _, id := range a {
+		seen[id]++
+	}
+	for _, id := range b {
+		if seen[id] == 0 {
+			return false
+		}
+		seen[id]--
+	}
+	return true
 }
