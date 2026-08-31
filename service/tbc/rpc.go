@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -259,8 +260,9 @@ func (s *Server) handleRequest(ctx context.Context, ws *tbcWs, id string, cmd pr
 		return
 	}
 
-	// XXX: spew.Sdump should only be called when the log level is enabled.
-	log.Debugf("Responding to %s request with %v", cmd, spew.Sdump(res))
+	if log.IsDebugEnabled() {
+		log.Debugf("Responding to %s request with %v", cmd, spew.Sdump(res))
+	}
 
 	if err = tbcapi.Write(ctx, ws.conn, id, res); err != nil {
 		log.Errorf("Failed to handle %s request for %s: protocol write failed: %v",
@@ -285,8 +287,9 @@ func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, 
 		Timestamp:       time.Now().Unix(),
 	}
 
-	// XXX: spew.Sdump should only be called when the log level is enabled.
-	log.Tracef("responding with %v", spew.Sdump(res))
+	if log.IsTraceEnabled() {
+		log.Tracef("responding with %v", spew.Sdump(res))
+	}
 
 	if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
 		return fmt.Errorf("handlePingRequest write: %v %w", ws.addr, err)
@@ -439,6 +442,13 @@ func (s *Server) handleBalanceByAddressRequest(ctx context.Context, req *tbcapi.
 
 	balance, err := s.BalanceByAddress(ctx, req.Address)
 	if err != nil {
+		// An over-length address is a CLIENT mistake, so answer it as one: a nil transport error
+		// keeps it out of handleRequest's unthrottled log.Errorf.
+		if errors.Is(err, ErrAddressTooLong) {
+			return &tbcapi.BalanceByAddressResponse{
+				Error: protocol.RequestError(err),
+			}, nil
+		}
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BalanceByAddressResponse{
 			Error: e.ProtocolError(),
@@ -579,14 +589,29 @@ func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBro
 	defer log.Tracef("handleTxBroadcastRequest exit")
 
 	if req.Tx == nil {
-		err := errors.New("no tx provided")
+		// nil transport error: this is a CLIENT error and handleRequest logs every non-nil one with
+		// an unthrottled log.Errorf. `{"tx":null}` / `{"block":null}` is a STRICTLY CHEAPER
+		// unauthenticated message than the nil-element shapes below, so leaving these two arms
+		// returning err kept the whole log-amplification vector open by the simpler route while the
+		// ErrNilElement machinery closed only the harder one. See ErrNilElement.
 		return &tbcapi.TxBroadcastResponse{
-			Error: protocol.RequestError(err),
-		}, err
+			Error: protocol.RequestError(errors.New("no tx provided")),
+		}, nil
 	}
 
 	txid, err := s.TxBroadcast(ctx, req.Tx, req.Force)
 	if err != nil {
+		// ErrNilElement gets its OWN arm, returning a nil transport error.
+		//
+		// handleRequest does `if err != nil { log.Errorf(...) }` -- unthrottled, once per message --
+		// so returning a non-nil error is what drives the log, regardless of how the response body is
+		// built. The existing client-error arm below returns err, so ErrTxAlreadyBroadcast and
+		// ErrTxBroadcastNoPeers log too.
+		if errors.Is(err, ErrNilElement) {
+			return &tbcapi.TxBroadcastResponse{
+				Error: protocol.RequestError(err),
+			}, nil
+		}
 		if errors.Is(err, ErrTxAlreadyBroadcast) ||
 			errors.Is(err, ErrTxBroadcastNoPeers) {
 			return &tbcapi.TxBroadcastResponse{
@@ -600,27 +625,48 @@ func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBro
 	return &tbcapi.TxBroadcastResponse{TxID: txid}, nil
 }
 
+// Every return below must be a *tbcapi.TxBroadcastRawResponse, including the failure paths; see
+// handleBlockInsertRawRequest for the mechanism.
 func (s *Server) handleTxBroadcastRawRequest(ctx context.Context, req *tbcapi.TxBroadcastRawRequest) (any, error) {
 	log.Tracef("handleTxBroadcastRawRequest")
 	defer log.Tracef("handleTxBroadcastRawRequest exit")
 
+	// Bound the declared counts BEFORE decoding. btcd sizes []TxIn from the count varint before
+	// reading any input body.
+	if err := boundRawTxCounts(req.Tx); err != nil {
+		return &tbcapi.TxBroadcastRawResponse{
+			Error: protocol.RequestError(err),
+		}, nil
+	}
+
 	tx := wire.NewMsgTx(0)
 	err := tx.Deserialize(bytes.NewBuffer(req.Tx))
 	if err != nil {
-		return &tbcapi.TxBroadcastResponse{
+		return &tbcapi.TxBroadcastRawResponse{
 			Error: protocol.RequestError(err),
 		}, nil
 	}
 	txid, err := s.TxBroadcast(ctx, tx, req.Force)
 	if err != nil {
+		// ErrNilElement gets its OWN arm, returning a nil transport error.
+		//
+		// handleRequest does `if err != nil { log.Errorf(...) }` -- unthrottled, once per message --
+		// so returning a non-nil error is what drives the log, regardless of how the response body is
+		// built. The existing client-error arm below returns err, so ErrTxAlreadyBroadcast and
+		// ErrTxBroadcastNoPeers log too.
+		if errors.Is(err, ErrNilElement) {
+			return &tbcapi.TxBroadcastRawResponse{
+				Error: protocol.RequestError(err),
+			}, nil
+		}
 		if errors.Is(err, ErrTxAlreadyBroadcast) ||
 			errors.Is(err, ErrTxBroadcastNoPeers) {
-			return &tbcapi.TxBroadcastResponse{
+			return &tbcapi.TxBroadcastRawResponse{
 				Error: protocol.RequestError(err),
 			}, err
 		}
 		e := protocol.NewInternalError(err)
-		return &tbcapi.TxBroadcastResponse{Error: e.ProtocolError()}, e
+		return &tbcapi.TxBroadcastRawResponse{Error: e.ProtocolError()}, e
 	}
 
 	return &tbcapi.TxBroadcastRawResponse{TxID: txid}, nil
@@ -631,13 +677,51 @@ func (s *Server) handleBlockInsertRequest(ctx context.Context, req *tbcapi.Block
 	defer log.Tracef("handleBlockInsertRequest exit")
 
 	if req.Block == nil {
-		err := errors.New("no block provided")
+		// nil transport error: this is a CLIENT error and handleRequest logs every non-nil one with
+		// an unthrottled log.Errorf. `{"tx":null}` / `{"block":null}` is a STRICTLY CHEAPER
+		// unauthenticated message than the nil-element shapes below, so leaving these two arms
+		// returning err kept the whole log-amplification vector open by the simpler route while the
+		// ErrNilElement machinery closed only the harder one. See ErrNilElement.
 		return &tbcapi.BlockInsertResponse{
-			Error: protocol.RequestError(err),
-		}, err
+			Error: protocol.RequestError(errors.New("no block provided")),
+		}, nil
 	}
 
-	_, err := s.db.BlockInsert(ctx, btcutil.NewBlock(req.Block))
+	// Reject nil elements BEFORE anything touches the block.
+	//
+	// A *wire.MsgBlock arrives here from json.Unmarshal rather than from btcd's wire decoder, and
+	// JSON can express shapes the wire format cannot: "Transactions":[null], "TxIn":[null] and
+	// "TxOut":[null]. btcd dereferences all three without a nil check --
+	// MsgBlock.SerializeSizeStripped, reached from blockchain.CheckBlockSanity, is the first to do it.
+	// The handler runs as `go s.handleRequest(...)` and there is no recover anywhere on that path, so
+	// a nil element is process death from an unauthenticated caller.
+	if err := rejectNilBlockElements(req.Block); err != nil {
+		return &tbcapi.BlockInsertResponse{
+			Error: protocol.RequestError(err),
+		}, nil
+	}
+
+	// Validate before the store through the RPC surface. Strip witness first -- CheckBlockSanity is
+	// witness-blind (it sizes with SerializeSizeStripped and checks the txid merkle root), so it
+	// cannot reject a witness-bearing body, and its verdict is unchanged by the strip.
+	//
+	// Deferring the line until after sanity does not weaken the signal: a body that fails sanity is
+	// not stored, so there is nothing to report. It does make the line cost a valid block, which on
+	// mainnet means real mining.
+	stripped := StripBlockWitness(req.Block)
+	blk := btcutil.NewBlock(req.Block)
+	if err := blockchain.CheckBlockSanity(blk, s.chainParams.PowLimit,
+		deterministicTimeSource{}); err != nil {
+		return &tbcapi.BlockInsertResponse{
+			Error: protocol.RequestErrorf("block sanity: %v", err),
+		}, nil
+	}
+	if stripped != 0 {
+		log.Infof("BlockInsert RPC: stripped segwit witness from %v transaction(s) of block %v",
+			stripped, req.Block.BlockHash())
+	}
+
+	_, err := s.db.BlockInsert(ctx, blk)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
@@ -647,22 +731,60 @@ func (s *Server) handleBlockInsertRequest(ctx context.Context, req *tbcapi.Block
 	return &tbcapi.BlockInsertResponse{BlockHash: &hash}, nil
 }
 
+// This handler and handleTxBroadcastRawRequest hand caller-supplied bytes straight to Deserialize
+// with no length precondition, on a `go s.handleRequest(...)` goroutine with no recover() anywhere in
+// service/tbc or api/. btcd's block decode borrows a 4,194,304-byte scriptSlab per transaction and
+// slices it by sender-declared script lengths, so a large enough payload panics rather than erroring.
+
+// It is unreachable today only because handleWebsocket calls websocket.Accept WITHOUT SetReadLimit,
+// so the hemilabs/websocket default of 32,768 bytes applies -- and that limit sits above the
+// inflater (mr.limitReader.r = mr.flateReader), so compression cannot bomb past it. 32 KiB is far
+// below the ~194 KB minimum for the slab vector.
+//
+// handleWebsocketRead does `go s.handleRequest(...)` per message without waiting, so roughly fifty
+// such messages -- about 5 KB on the wire -- hold about 4 GB live. That is an unauthenticated remote
+// OOM kill of tbcd and of every embedded hVM node, and no recover() exists to contain it.
+//
+// THAT PRECONDITION NOW EXISTS: boundRawTxCounts / boundRawBlockCounts (rawbounds.go) run ahead of
+// both Deserialize calls below and bound the declared counts against the bytes supplied, the same way
+// checkBTCBlockDecodeBounds does on the op-geth side. They also carry the MaxBlockPayload cap that
+// keeps btcd's shared scriptSlab from overrunning.
 func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.BlockInsertRawRequest) (any, error) {
 	log.Tracef("handleBlockInsertRawRequest")
 	defer log.Tracef("handleBlockInsertRawRequest exit")
 
-	b := wire.NewMsgBlock(nil)
-	err := b.Deserialize(bytes.NewBuffer(req.Block))
-	if err != nil {
-		return &tbcapi.BlockInsertResponse{
+	if err := boundRawBlockCounts(req.Block); err != nil {
+		return &tbcapi.BlockInsertRawResponse{
 			Error: protocol.RequestError(err),
 		}, nil
 	}
 
-	_, err = s.db.BlockInsert(ctx, btcutil.NewBlock(b))
+	b := &wire.MsgBlock{}
+	err := b.Deserialize(bytes.NewBuffer(req.Block))
+	if err != nil {
+		return &tbcapi.BlockInsertRawResponse{
+			Error: protocol.RequestError(err),
+		}, nil
+	}
+
+	// Validate before the store through the RPC surface, and strip first / log after sanity
+	stripped := StripBlockWitness(b)
+	blk := btcutil.NewBlock(b)
+	if err := blockchain.CheckBlockSanity(blk, s.chainParams.PowLimit,
+		deterministicTimeSource{}); err != nil {
+		return &tbcapi.BlockInsertRawResponse{
+			Error: protocol.RequestErrorf("block sanity: %v", err),
+		}, nil
+	}
+	if stripped != 0 {
+		log.Infof("BlockInsertRaw RPC: stripped segwit witness from %v transaction(s) of block %v",
+			stripped, b.BlockHash())
+	}
+
+	_, err = s.db.BlockInsert(ctx, blk)
 	if err != nil {
 		e := protocol.NewInternalError(err)
-		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
+		return &tbcapi.BlockInsertRawResponse{Error: e.ProtocolError()}, e
 	}
 
 	hash := b.Header.BlockHash()
@@ -902,7 +1024,7 @@ func (s *Server) handleBlockDownloadAsyncRequest(ctx context.Context, req *tbcap
 	blk, err := s.DownloadBlockFromRandomPeers(ctx, req.Hash, req.Peers)
 	if err != nil {
 		e := protocol.NewInternalError(err)
-		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
+		return &tbcapi.BlockDownloadAsyncResponse{Error: e.ProtocolError()}, e
 	}
 	if blk == nil {
 		// Block will be downloaded in the background, asynchronously.
@@ -974,7 +1096,9 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now().Unix(),
 	}
 
-	log.Tracef("Responding with %v", spew.Sdump(ping))
+	if log.IsTraceEnabled() {
+		log.Tracef("Responding with %v", spew.Sdump(ping))
+	}
 	if err = tbcapi.Write(r.Context(), ws.conn, "0", ping); err != nil {
 		log.Errorf("Write ping: %v", err)
 	}

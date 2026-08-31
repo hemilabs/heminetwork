@@ -74,6 +74,22 @@ var (
 
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
+	// ErrNilElement reports a caller-supplied block or transaction containing a nil element.
+	//
+	// It is a SENTINEL so the RPC layer can classify it as a CLIENT error. Without it the rejection
+	// fell through to protocol.NewInternalError, which handleRequest logs with an unthrottled
+	// log.Errorf per message -- so a ~60-byte unauthenticated tbcapi message carrying "TxIn":[null]
+	// bought one Error line each, with no rate limit.
+	ErrNilElement = errors.New("nil element")
+
+	// ErrBlockMerkleMismatch reports a block body that is not the body of the header it arrived under.
+	// It covers THREE conditions, so do not read errors.Is(err, ErrBlockMerkleMismatch) as "the root
+	// did not match": zero transactions, a non-coinbase first transaction, and a root mismatch all
+	// return it. ErrBlockDuplicateTx reports the CVE-2012-2459 shape described on
+	// checkBlockMerkleRoot.
+	ErrBlockMerkleMismatch = errors.New("block merkle root mismatch")
+	ErrBlockDuplicateTx    = errors.New("block contains a duplicate transaction")
+
 	ErrTxAlreadyBroadcast = errors.New("tx already broadcast")
 	ErrTxBroadcastNoPeers = errors.New("can't broadcast tx, no peers")
 	ErrNotInDebugMode     = errors.New("debug flag not set")
@@ -244,6 +260,25 @@ func NewServer(cfg *Config) (*Server, error) {
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
 		invBlocks:       make([]*chainhash.Hash, 0, 16),
 		promPollVerbose: false,
+	}
+
+	// The indexer cache sizes are divisors: crawler.go computes len(x)*100/MaxCachedTxs without
+	// a guard against a 0 denominator.
+
+	// Zero means "unset" -- NewDefaultConfig supplies these, but a hand-built Config leaves them at
+	// zero.
+	if s.cfg.MaxCachedTxs == 0 {
+		log.Warningf("MaxCachedTxs value of 0 is invalid, setting to default")
+		s.cfg.MaxCachedTxs = defaultMaxCachedTxs
+	}
+	if s.cfg.MaxCachedKeystones == 0 {
+		log.Warningf("MaxCachedKeystones value of 0 is invalid, setting to default")
+		s.cfg.MaxCachedKeystones = defaultMaxCachedKeystones
+	}
+	if s.cfg.MaxCachedTxs < 0 || s.cfg.MaxCachedKeystones < 0 {
+		return nil, fmt.Errorf("cache sizes must not be negative (txs %d, keystones %d): they are "+
+			"divisors in the indexers and make() size hints", s.cfg.MaxCachedTxs,
+			s.cfg.MaxCachedKeystones)
 	}
 
 	// Only set pings and blocks if not in External Header Mode
@@ -1389,6 +1424,116 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 	return it, cbh, lbh, n, err
 }
 
+// deterministicTimeSource neutralises the ONE wall-clock-dependent rule in btcd's header and block
+// sanity checks.
+//
+// Both CheckBlockHeaderSanity and CheckBlockSanity reject a header whose timestamp exceeds
+// timeSource.AdjustedTime()+2h. That rule must not be applied here. s.timeSource is a
+// blockchain.MedianTimeSource that is never fed as AddTimeSample has no callers.
+//
+// Returning a far-future adjusted time makes host-clock-based divergence unreachable while ensuring
+// the deterministic median-time difficulty rule is still applied as expected. btcd checks
+// proof-of-work BEFORE the timestamp, so nothing is weakened by neutralising the later check.
+//
+// The constant is deliberately larger than the maximum uint32 value.
+type deterministicTimeSource struct{}
+
+func (deterministicTimeSource) AdjustedTime() time.Time         { return time.Unix(1<<40, 0) }
+func (deterministicTimeSource) AddTimeSample(string, time.Time) {}
+func (deterministicTimeSource) Offset() time.Duration           { return 0 }
+
+// stripLogLimiter throttles the witness-strip INFO lines.
+//
+// The event is not lost: it is a normal condition on the Bitcoin P2P path (TBC never requests witness,
+// but a BIP144 peer may serve it anyway), and the per-transaction count is what an operator needs, not
+// the per-block line.
+// Deliberately hand-rolled rather than golang.org/x/time/rate: that would add a module dependency to
+// heminetwork purely to throttle one log line.
+var stripLogLast atomic.Int64
+
+func stripLogAllow() bool {
+	const every = int64(5 * time.Second)
+	now := time.Now().UnixNano()
+	for {
+		last := stripLogLast.Load()
+		if now-last < every {
+			return false
+		}
+		if stripLogLast.CompareAndSwap(last, now) {
+			return true
+		}
+	}
+}
+
+// StripBlockWitness clears segwit witness data from every transaction of a Bitcoin block, in place,
+// and returns the number of transactions that carried any.
+//
+// Note that witness handling has been added in upstream TBC, so these changes can be removed with
+// a coordinated op-geth activation timestamp for returning valid witness data.
+func StripBlockWitness(blk *wire.MsgBlock) int {
+	if blk == nil {
+		return 0
+	}
+	n := 0
+	for _, tx := range blk.Transactions {
+		if tx == nil {
+			continue
+		}
+		carried := false
+		for _, in := range tx.TxIn {
+			// A nil *TxIn cannot come off the wire -- btcd's decoder never produces one -- but a
+			// JSON-decoded block can carry one, and this function is on that path.
+			//
+			// THIS GUARD PROTECTS THIS LOOP AND NOTHING ELSE. It does not make the tbcapi insert
+			// handler safe: btcd dereferences the same nils a few lines later, in
+			// MsgBlock.SerializeSizeStripped under blockchain.CheckBlockSanity. The check that
+			// actually closes it is rejectNilBlockElements in rpc.go, which runs ahead of every
+			// consumer.
+			if in == nil {
+				continue
+			}
+			// len(), not != nil: btcd decodes a witness field as make([][]byte, count), so under
+			// BIP144 every input of a witness-serialized body has a NON-NIL slice, including inputs
+			// carrying no witness bytes at all. Testing != nil would report honest bodies as stripped.
+			if len(in.Witness) != 0 {
+				in.Witness = nil
+				carried = true
+			}
+		}
+		if carried {
+			n++
+		}
+	}
+	return n
+}
+
+// verifyHeadersPoW rejects a headers message containing any header that does not meet its own
+// claimed proof-of-work target.
+func (s *Server) verifyHeadersPoW(headers []*wire.BlockHeader) error {
+	for i, hdr := range headers {
+		err := blockchain.CheckBlockHeaderSanity(hdr, s.chainParams.PowLimit,
+			deterministicTimeSource{}, blockchain.BFNone)
+		if err != nil {
+			return fmt.Errorf("header %d of %d proof-of-work: %w", i, len(headers), err)
+		}
+	}
+	return nil
+}
+
+// verifyHeaderBatchShape rejects a headers message whose headers do not form a single chain.
+//
+// An honest headers message is a contiguous chain by protocol, so this cannot reject honest data.
+func verifyHeaderBatchShape(headers []*wire.BlockHeader) error {
+	for i := 1; i < len(headers); i++ {
+		prev := headers[i-1].BlockHash()
+		if !headers[i].PrevBlock.IsEqual(&prev) {
+			return fmt.Errorf("header %d of %d does not connect: prev block %v, expected %v",
+				i, len(headers), headers[i].PrevBlock, prev)
+		}
+	}
+	return nil
+}
+
 func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgHeaders) error {
 	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
@@ -1457,6 +1602,15 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 				msg.Headers[k].PrevBlock, k)
 		}
 		pbhHash = &msg.Headers[k].PrevBlock
+	}
+
+	// Validate before the store. ldb.BlockHeadersInsert assigns heights and cumulative work
+	// positionally and the store exposes no delete, so anything admitted here is permanent.
+	if err := s.verifyHeadersPoW(msg.Headers); err != nil {
+		return fmt.Errorf("handle headers %v: %w", p, err)
+	}
+	if err := verifyHeaderBatchShape(msg.Headers); err != nil {
+		return fmt.Errorf("handle headers %v: %w", p, err)
 	}
 
 	// When running in normal (not External Header) mode, do not set
@@ -1539,11 +1693,37 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	return nil
 }
 
+// BlockInsert stores a Bitcoin block body.
+//
+// IT MUTATES blk IN PLACE: segwit witness is stripped from every transaction before the write (see
+// StripBlockWitness for why). Callers must not share a *wire.MsgBlock across goroutines while
+// calling this -- two concurrent callers on one block is a genuine data race, reproduced under
+// -race. Every in-tree caller passes a block it owns exclusively.
+//
+// Note this is NOT the path tbcapi's block-insert handlers take; they write through s.db.BlockInsert
+// directly and carry their own nil-element guard. See rejectNilTxElements.
 func (s *Server) BlockInsert(ctx context.Context, blk *wire.MsgBlock) (int64, error) {
+	// Reject nil elements before anything dereferences them. Embedders can hand us a block from any
+	// source, including a JSON decoder; see rejectNilTxElements.
+	if err := rejectNilBlockElements(blk); err != nil {
+		return 0, err
+	}
+	// Embedders reach the block store through here, with bodies they obtained however they like --
+	// for example the L2 Bitcoin block back-channel. This is the least-validated of the write paths (it
+	// deliberately applies no sanity check, leaving that to the embedder), which makes it the one that
+	// most needs the witness strip. See StripBlockWitness.
+	if stripped := StripBlockWitness(blk); stripped != 0 && stripLogAllow() {
+		log.Infof("BlockInsert: stripped segwit witness from %v transaction(s) of block %v; "+
+			"TBC never requests witness data", stripped, blk.BlockHash())
+	}
 	return s.db.BlockInsert(ctx, btcutil.NewBlock(blk))
 }
 
 func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+	// Ensure that headers provided from upstream are contiguous
+	if err := verifyHeaderBatchShape(headers.Headers); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0, err
+	}
 	return s.db.BlockHeadersInsert(ctx, headers, nil)
 }
 
@@ -1551,6 +1731,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	log.Tracef("handleBlock (%v)", p)
 	defer log.Tracef("handleBlock exit (%v)", p)
 
+	stripped := StripBlockWitness(msg)
 	block := btcutil.NewBlock(msg)
 	bhs := block.Hash().String()
 	// Not an error due to normal racing conditions.
@@ -1562,9 +1743,23 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 		go s.syncBlocks(ctx)
 	}()
 
+	// Bind the body to the header before it can reach the store.
+	if err := checkBlockMerkleRoot(block); err != nil {
+		return fmt.Errorf("handle block %v: %w", bhs, err)
+	}
+
+	// Log only after the body is bound to the header, so that a malicious peer cannot
+	// cause logging spam with invalid blocks.
+	if stripped != 0 && stripLogAllow() {
+		log.Infof("handleBlock (%v): stripped segwit witness from %v transaction(s) of block %v; "+
+			"this peer sent witness data that was never requested", p, stripped, bhs)
+	}
+
 	if s.cfg.BlockSanity {
+		// deterministicTimeSource, *not* s.timeSource, so that host clock cannot produce unexpected
+		// divergences in edge cases.
 		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
-			s.timeSource)
+			deterministicTimeSource{})
 		if err != nil {
 			return fmt.Errorf("handle block unable to validate block hash %v: %w",
 				bhs, err)
@@ -1594,7 +1789,16 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	}
 
 	// Reap broadcast messages.
-	txHashes, _ := block.MsgBlock().TxHashes()
+	//
+	// USE btcutil's cached hashes, NOT wire's TxHashes(). checkBlockMerkleRoot above already walked
+	// every transaction through btcutil.Tx.Hash(), which memoises the txid on the Tx. wire's
+	// MsgBlock.TxHashes() shares nothing with that cache and recomputes every double-SHA256 from
+	// scratch.
+	txs := block.Transactions()
+	txHashes := make([]chainhash.Hash, 0, len(txs))
+	for _, tx := range txs {
+		txHashes = append(txHashes, *tx.Hash())
+	}
 	s.mtx.Lock()
 	for _, v := range txHashes {
 		if _, ok := s.broadcast[v]; ok {
@@ -1657,6 +1861,13 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 }
 
 func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgInv, raw []byte) error {
+	// An empty inv is *legal* on the wire, but should not reach the indexing below.
+	// Returning nil rather than an error is deliberate: an empty inv is not misbehaviour worth
+	// dropping a peer over, and the loop below is already a no-op for zero items.
+	if len(msg.InvList) == 0 {
+		return nil
+	}
+
 	switch msg.InvList[0].Type {
 	case wire.InvTypeTx:
 	case wire.InvTypeBlock:
@@ -1904,12 +2115,39 @@ func (s *Server) BlockHeaderBest(ctx context.Context) (uint64, *wire.BlockHeader
 	return blockHeader.Height, wbh, err
 }
 
+// MaxAddressLength bounds the encoded Bitcoin address accepted by the address-taking Server methods.
+//
+// 200 CANNOT REJECT A DECODABLE ADDRESS. btcutil.DecodeAddress has exactly three paths to success:
+// bech32 (bech32.DecodeGeneric refuses len > 90 as its first statement), a hex pubkey (gated on
+// length 66 or 130 exactly), and base58 at a 20-byte decoded payload -- and a base58 string of n
+// characters decodes to at least ~0.732*(n-1) bytes, so a 25-byte payload is encodable only by
+// strings of 25 to 35 characters. The longest address form in existence is 64 characters, a regtest
+// bcrt1 P2WSH/P2TR (62 is the bc1/tb1 figure).
+//
+// DO NOT LOWER THIS BELOW 130, as it would make a valid 130-character uncompressed-pubkey address fail to
+// decode.
+const MaxAddressLength = 200
+
+// ErrAddressTooLong is returned when an encoded address exceeds MaxAddressLength.
+//
+// It exists so the RPC layer can answer a CLIENT error instead of an internal one. Without it the cap
+// returned a plain error, handleBalanceByAddressRequest wrapped it in protocol.NewInternalError, and
+// that returns a NON-NIL transport error -- which handleRequest logs with an UNTHROTTLED log.Errorf,
+// one line per message.
+var ErrAddressTooLong = errors.New("address too long")
+
 func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (uint64, error) {
 	log.Tracef("BalanceByAddress")
 	defer log.Tracef("BalanceByAddress exit")
 
 	if s.cfg.ExternalHeaderMode {
 		return 0, errors.New("cannot call BalanceByAddress on TBC running in External Header mode")
+	}
+
+	// Bound before the expensive decoder. See MaxAddressLength.
+	if len(encodedAddress) > MaxAddressLength {
+		return 0, fmt.Errorf("%w: %v bytes, maximum %v",
+			ErrAddressTooLong, len(encodedAddress), MaxAddressLength)
 	}
 
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
@@ -1953,6 +2191,12 @@ func (s *Server) UtxosByAddress(ctx context.Context, filterMempool bool, encoded
 
 	if s.cfg.ExternalHeaderMode {
 		return nil, errors.New("cannot call UtxosByAddress on TBC running in External Header mode")
+	}
+
+	// Bound before the expensive decoder. See MaxAddressLength.
+	if len(encodedAddress) > MaxAddressLength {
+		return nil, fmt.Errorf("%w: %v bytes, maximum %v",
+			ErrAddressTooLong, len(encodedAddress), MaxAddressLength)
 	}
 
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
@@ -2150,6 +2394,106 @@ func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *rawpeer.RawPeer) e
 	return nil
 }
 
+// rejectNilTxElements refuses a transaction containing a nil input or output.
+//
+// WHY THIS EXISTS AND WHY IT IS AT THE SERVER BOUNDARY.
+//
+// A 9-byte body declaring 100,000 inputs returns an error with len(TxIn)==100000 and 99,999 nil
+// elements. What actually makes the P2P path safe is that a decode error is always propagated and
+// the partially-decoded transaction discarded -- never that nils cannot exist. Anyone who ignores a
+// decode error and uses the result gets a nil deref; measured, doing that AND removing this guard
+// panics inside btcd's writeTxInBuf.
+//
+// tbcapi decodes *wire.MsgTx and *wire.MsgBlock straight out of json.Unmarshal,
+// and JSON can express "TxIn":[null]. btcd then dereferences it without a nil check: MsgTx.TxHash()
+// -> SerializeSizeStripped() -> txIn.SerializeSizeStripped(), and MsgTx.Copy() likewise. There is no
+// recover() anywhere in service/tbc or api/, and the RPC dispatcher runs each request in a bare
+// goroutine, so a nil element is process death from an unauthenticated caller.
+func rejectNilTxElements(tx *wire.MsgTx, idx int) error {
+	if tx == nil {
+		return fmt.Errorf("%w: transaction %d is null", ErrNilElement, idx)
+	}
+	for j, in := range tx.TxIn {
+		if in == nil {
+			return fmt.Errorf("%w: transaction %d input %d is null", ErrNilElement, idx, j)
+		}
+	}
+	for j, out := range tx.TxOut {
+		if out == nil {
+			return fmt.Errorf("%w: transaction %d output %d is null", ErrNilElement, idx, j)
+		}
+	}
+	return nil
+}
+
+// checkBlockMerkleRoot binds a peer-supplied block body to the header it arrived under. See
+// ErrBlockMerkleMismatch for why nothing else on the Bitcoin P2P path does.
+//
+// DO NOT reduce this to the merkle comparison alone. btcd's tree duplicates the last hash when a
+// level holds an odd number of nodes (CVE-2012-2459), so the transaction lists [A B C] and [A B C C]
+// produce the IDENTICAL root. ([A B] and [A B B] do NOT -- an even level is not duplicated, and the
+// three-element form is the minimal shape.) An attacker can therefore append duplicated transactions
+// to a genuine body and pass a bare comparison.
+func checkBlockMerkleRoot(block *btcutil.Block) error {
+	if block == nil {
+		return fmt.Errorf("%w: no block provided", ErrNilElement)
+	}
+	txs := block.Transactions()
+	if len(txs) == 0 {
+		// Nothing to bind. btcd calls this ErrNoTransactions inside CheckBlockSanity.
+		return fmt.Errorf("%w: block has no transactions", ErrBlockMerkleMismatch)
+	}
+	// A 64-byte transaction whose serialization is exactly txid(P)||txid(Q) is indistinguishable
+	// from an interior tree node, so [P Q] and [T] hash to the SAME root with NO duplicate txid --
+	// the one collision family the duplicate guard below cannot see (BIP-54). Requiring a coinbase
+	// first closes it: the impostor is always at index 0. A colliding forged list is either shallower
+	// (its leaf 0 IS an interior honest node, i.e. the impostor), or the same depth with a different
+	// leaf count (which forces a duplicate txid, caught below), or deeper (which  needs a second
+	// preimage on the coinbase txid). A 64-byte transaction CAN be a valid coinbase on its own; what
+	// it cannot be is a coinbase AND an impostor at once, because the impostor layout forces 27 chosen
+	// zero bytes inside txid(P) -- 2^216 work, and higher still because txid(Q)'s leading bytes are
+	// pinned by the index field.
+	//
+	// CheckBlockSanity already enforces the same thing (ErrFirstTxNotCoinbase) on the other two
+	// ingest paths. DO NOT close this by banning 64-byte transactions instead: they are STILL
+	// CONSENSUS-VALID on Bitcoin today (that is what BIP-54 would change; they have merely been
+	// non-standard since 2019, and were last seen on mainnet around 2016). Banning them would be a
+	// consensus DIVERGENCE from Bitcoin as well as a false-reject on historical blocks.
+	if !blockchain.IsCoinBase(txs[0]) {
+		return fmt.Errorf("%w: first transaction is not a coinbase", ErrBlockMerkleMismatch)
+	}
+
+	seen := make(map[chainhash.Hash]struct{}, len(txs))
+	for _, tx := range txs {
+		if _, dup := seen[*tx.Hash()]; dup {
+			return fmt.Errorf("%w: %v", ErrBlockDuplicateTx, tx.Hash())
+		}
+		seen[*tx.Hash()] = struct{}{}
+	}
+	// witness=false: Header.MerkleRoot commits to the TXID tree. The witness merkle root is committed
+	// separately, via the coinbase's BIP141 commitment, and witness data is not currently supported.
+	got := blockchain.CalcMerkleRoot(txs, false)
+	want := block.MsgBlock().Header.MerkleRoot
+	if !got.IsEqual(&want) {
+		return fmt.Errorf("%w: header %v, computed %v", ErrBlockMerkleMismatch, want, got)
+	}
+	return nil
+}
+
+// rejectNilBlockElements refuses a block containing a nil transaction, input, or output.
+// See rejectNilTxElements.
+func rejectNilBlockElements(blk *wire.MsgBlock) error {
+	if blk == nil {
+		return fmt.Errorf("%w: no block provided", ErrNilElement)
+	}
+	for i, tx := range blk.Transactions {
+		if err := rejectNilTxElements(tx, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*chainhash.Hash, error) {
 	log.Tracef("TxBroadcast")
 	defer log.Tracef("TxBroadcast exit")
@@ -2160,6 +2504,12 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 
 	if tx == nil {
 		return nil, errors.New("tx: nil")
+	}
+	// A nil INPUT or OUTPUT is not the same as a nil transaction, and it is reachable: this method is
+	// fed by tbcapi's TxBroadcast handler straight from json.Unmarshal. tx.TxHash() below panics on
+	// one, on a goroutine with no recover. See rejectNilTxElements.
+	if err := rejectNilTxElements(tx, 0); err != nil {
+		return nil, err
 	}
 
 	s.mtx.Lock()

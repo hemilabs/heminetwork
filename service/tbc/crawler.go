@@ -551,7 +551,9 @@ func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire
 			continue
 		}
 		txOuts := tx.MsgTx().TxOut
-		if len(txOuts) < int(txIndex) {
+		// <=, NOT <. A prevout index EQUAL to len(txOuts) passed this guard and then indexed one
+		// past the end of the slice.
+		if uint32(len(txOuts)) <= txIndex {
 			return nil, fmt.Errorf("tx index invalid: %v", op)
 		}
 		return txOuts[txIndex], nil

@@ -397,8 +397,16 @@ func TestDbUpgradeV4(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	// Wait for Run to return before the test ends: t.TempDir's RemoveAll runs after
+	// this defer, and leveldb is still writing into home until shutdown completes.
+	runDone := make(chan struct{})
 	defer func() {
 		cancel()
+		select {
+		case <-runDone:
+		case <-time.After(30 * time.Second):
+			t.Error("s.Run did not return within 30s of cancellation")
+		}
 	}()
 
 	// Connect tbc service
@@ -426,6 +434,7 @@ func TestDbUpgradeV4(t *testing.T) {
 	}
 
 	go func() {
+		defer close(runDone)
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
