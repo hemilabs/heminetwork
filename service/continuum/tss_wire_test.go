@@ -5,7 +5,9 @@
 package continuum
 
 import (
+	"bytes"
 	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/hemilabs/x/tss/v3/crypto"
@@ -119,27 +121,22 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unmarshal %s: %v", tt.name, err)
 			}
-			// Verify the round-trip produces the correct Go type.
-			// Compare struct name only (the wire key is checked implicitly
-			// because unmarshal dispatches on it).
-			gotStructName := tt.name[len(tt.name)-len(structNameFromWireKey(tt.name)):]
-			wantStructName := structNameFromWireKey(tt.name)
-			if gotStructName != wantStructName {
-				t.Fatalf("struct name mismatch: %s vs %s", gotStructName, wantStructName)
+			// The wire key must map back to the exact Go type that
+			// went in, not merely to some type unmarshal knows.
+			if gotT, wantT := reflect.TypeOf(got), reflect.TypeOf(tt.content); gotT != wantT {
+				t.Fatalf("round-trip type = %v, want %v", gotT, wantT)
 			}
-			_ = got // type already verified by unmarshal dispatch
+			// And the decoded value must re-encode to the same
+			// bytes, so no field was dropped or renamed on the way.
+			again, err := marshalTSSContent(got)
+			if err != nil {
+				t.Fatalf("re-marshal %s: %v", tt.name, err)
+			}
+			if !bytes.Equal(again, data) {
+				t.Fatalf("re-marshal %s: %s != %s", tt.name, again, data)
+			}
 		})
 	}
-}
-
-// structNameFromWireKey extracts the struct name from a prefixed wire key.
-func structNameFromWireKey(key string) string {
-	for i := len(key) - 1; i >= 0; i-- {
-		if key[i] == '.' {
-			return key[i+1:]
-		}
-	}
-	return key
 }
 
 func TestMarshalNilContent(t *testing.T) {
