@@ -115,9 +115,12 @@ func TestTenNodeCeremonyFlow(t *testing.T) {
 		t.Logf("node %d: %v at %s", i, servers[i].Identity(), addrs[i])
 	}
 
-	// Wait for gossip convergence — all peers known with NaCl
-	// pubkeys.  Does NOT require full session connectivity
-	// (PeersWanted=3 means sparse mesh).
+	// Wait for gossip convergence — every node holds every other
+	// node's record.  E2e keys are not part of this: gossip carries
+	// no key material, so a non-adjacent committee member's key is
+	// bound only by the challenge-response exchange that ceremony
+	// dispatch runs before its rounds start.  Does NOT require full
+	// session connectivity (PeersWanted=3 means sparse mesh).
 	waitForGossip(t, servers, n, 90*time.Second)
 	t.Log("gossip converged: all 10 nodes know each other")
 
@@ -284,18 +287,8 @@ func waitForGossip(t *testing.T, servers []*continuum.Server, n int, timeout tim
 		case <-ticker.C:
 			ready := true
 			for i := 0; i < n; i++ {
-				peers := servers[i].KnownPeers()
-				if len(peers) < n {
+				if len(servers[i].KnownPeers()) < n {
 					ready = false
-					break
-				}
-				for _, pr := range peers {
-					if len(pr.NaClPub) != continuum.NaClPubSize {
-						ready = false
-						break
-					}
-				}
-				if !ready {
 					break
 				}
 			}
