@@ -7,7 +7,7 @@ package tbc
 import (
 	"context"
 	"math"
-	"sort"
+	"slices"
 
 	"github.com/btcsuite/btcd/blockchain"
 
@@ -65,8 +65,15 @@ func (m *Mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBloc
 	}
 
 	// sort transactions by fee rate in descending order
-	sort.Slice(mptxs, func(i, j int) bool {
-		return mptxs[i].FeeRate() > mptxs[j].FeeRate()
+	slices.SortFunc(mptxs, func(a, b *MempoolTx) int {
+		aRate, bRate := a.FeeRate(), b.FeeRate()
+		if aRate > bRate {
+			return -1
+		}
+		if aRate < bRate {
+			return 1
+		}
+		return 0
 	})
 
 	// create mempool blocks
