@@ -5,7 +5,11 @@ edition.workspace = true
 license = "MIT"
 
 [dependencies]
-bitcoin = "=0.32.101"
+# Integration patch: pinned back to 0.32.9 to match op-reth's consensus bitcoin pin (host<->guest/Oxygen
+# alignment, WU-0). The trust client source is byte-identical to the pre-V7 toni pin (91dda34) which used
+# 0.32.9, so this is a no-op for the client; only the V7 server-side moved. Revert if op-reth's consensus
+# bitcoin is ever coordinated up to 0.32.101 across host+guest.
+bitcoin = "=0.32.9"
 ethnum = "=1.5.3"
 futures-util = "=0.3.32"
 hex = "=0.4.3"
@@ -14,7 +18,7 @@ hmac = "=0.13.0"
 sha2 = "=0.11.0"
 rocksdb = "=0.24.0"
 serde = { version = "=1.0.228", features = ["derive"] }
-serde_json = "=1.0.150"
+serde_json = "=1.0.149" # integration: back to workspace/kona pin (V7 bumped to 1.0.150); client source identical
 thiserror = "=2.0.18"
 tokio = { version = "=1.52.3", features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 tokio-tungstenite = { version = "=0.29.0", features = ["rustls-tls-native-roots"] }
