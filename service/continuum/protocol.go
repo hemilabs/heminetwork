@@ -728,7 +728,8 @@ var BroadcastDestination = Identity{}
 
 // broadcastWhitelist is the set of payload types allowed to use the
 // broadcast primitive.  Non-whitelisted types with BroadcastDestination
-// are silently dropped.
+// are silently dropped.  Every entry must also be handled by
+// VerifyBroadcast, which fails closed on types it does not know.
 var broadcastWhitelist = map[reflect.Type]bool{
 	reflect.TypeOf(CeremonyResult{}): true,
 	reflect.TypeOf(CeremonyAbort{}):  true,
@@ -742,6 +743,37 @@ func IsBroadcastable(cmd any) bool {
 		t = t.Elem()
 	}
 	return broadcastWhitelist[t]
+}
+
+// VerifyBroadcast checks the signature carried by a broadcast payload.
+//
+// A node relays a broadcast to every neighbour before any handler
+// looks at it, so an unauthenticated flood is amplified across the
+// whole mesh even when local dispatch later rejects it.  Every
+// broadcastable type carries a Signer and a signature over a
+// domain-separated hash, so authenticity is decidable without local
+// state — the check every relaying node can make.  Authority (is this
+// signer the coordinator or a committee member?) needs the ceremony
+// record and stays in the dispatch handlers, because a relaying node
+// that is not tracking the ceremony must still pass the message on.
+//
+// Returns an error for a bad signature or a payload type that is not
+// broadcastable.
+func VerifyBroadcast(cmd any) error {
+	switch v := cmd.(type) {
+	case *CeremonyResult:
+		if _, err := Verify(HashCeremonyResult(*v), v.Signer, v.Signature); err != nil {
+			return fmt.Errorf("ceremony result from %v: %w", v.Signer, err)
+		}
+		return nil
+	case *CeremonyAbort:
+		if _, err := Verify(HashCeremonyAbort(*v), v.Signer, v.Signature); err != nil {
+			return fmt.Errorf("ceremony abort from %v: %w", v.Signer, err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("payload type %T is not broadcastable", cmd)
+	}
 }
 
 // Protocol and transport wire constants.

@@ -91,9 +91,19 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 		}
 
 	case errors.Is(err, context.Canceled):
-		// Cancel already fired the remove callback directly;
-		// v.remove was nil'd to prevent double-fire.  Nothing
-		// to do here except autoDelete cleanup below.
+		// Cancel() fires the remove callback itself and nils
+		// v.remove under the mutex, so it is nil here on that
+		// path.  It is still set when the cancellation came
+		// from the parent context passed to Put — that entry
+		// is being removed just the same, so the callback must
+		// fire.  A Put that overwrote the key cancels the old
+		// context too, but that goroutine already returned on
+		// the generation check above.
+		if v.remove != nil {
+			remove := v.remove
+			v.remove = nil
+			go remove(v.callbackContext, key, v.value)
+		}
 	}
 
 	if tm.autoDelete {
