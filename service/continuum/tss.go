@@ -486,6 +486,31 @@ func NewTSS(self Identity, store TSSStore, transport TSSTransport) TSS {
 	}
 }
 
+// ceremonyNotifier is an optional capability of a TSSTransport: it is
+// told when a ceremony becomes known to HandleMessage.
+//
+// This is the signal that a message which arrived ahead of its
+// ceremony can now be delivered.  Without it the only way to find out
+// is to retry on a timer, which is a poll — it burns wakeups finding
+// nothing and adds the tick interval to the latency of every raced
+// message.  Declared as an optional interface so test transports that
+// do not care are unaffected.
+type ceremonyNotifier interface {
+	ceremonyRegistered(CeremonyID)
+}
+
+// announceRegistered fires the ceremonyRegistered hook if the
+// transport implements it.  Called after ceremoniesMu is released:
+// the handler delivers buffered messages back through HandleMessage,
+// which takes that same mutex.
+func (t *tssImpl) announceRegistered(ceremonyID CeremonyID) {
+	n, ok := t.transport.(ceremonyNotifier)
+	if !ok {
+		return
+	}
+	n.ceremonyRegistered(ceremonyID)
+}
+
 func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []Identity, threshold int) (rKeyID []byte, rErr error) {
 	// Backstop: a panic in the round functions (e.g. a nil or duplicate message
 	// slot that ingest checks did not catch) must fail this ceremony, not crash
@@ -528,6 +553,7 @@ func (t *tssImpl) Keygen(ctx context.Context, ceremonyID CeremonyID, parties []I
 	t.ceremoniesMu.Lock()
 	t.ceremonies[ceremonyID] = c
 	t.ceremoniesMu.Unlock()
+	t.announceRegistered(ceremonyID)
 	defer func() {
 		t.ceremoniesMu.Lock()
 		delete(t.ceremonies, ceremonyID)
@@ -675,6 +701,7 @@ func (t *tssImpl) Sign(ctx context.Context, ceremonyID CeremonyID, keyID []byte,
 	t.ceremoniesMu.Lock()
 	t.ceremonies[ceremonyID] = c
 	t.ceremoniesMu.Unlock()
+	t.announceRegistered(ceremonyID)
 	defer func() {
 		t.ceremoniesMu.Lock()
 		delete(t.ceremonies, ceremonyID)
@@ -952,6 +979,7 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 	t.ceremoniesMu.Lock()
 	t.ceremonies[ceremonyID] = c
 	t.ceremoniesMu.Unlock()
+	t.announceRegistered(ceremonyID)
 	defer func() {
 		t.ceremoniesMu.Lock()
 		delete(t.ceremonies, ceremonyID)
