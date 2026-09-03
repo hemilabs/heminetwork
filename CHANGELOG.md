@@ -198,6 +198,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix bug in `synctester` where unbounded reads of the docker logs could lead
 to an OOM crash ([#1159](https://github.com/hemilabs/heminetwork/pull/1159)).
 
+- Fix `continuum` exiting when a configured `TRF_CONNECT` peer is
+  briefly unreachable. A transient dial, key-exchange or handshake
+  failure to one peer terminated the whole daemon, and silently — the
+  error went to the run channel without being logged. Per-peer failures
+  are now logged and the node keeps running; the peer is redialled once
+  gossip advertises it
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+
 - Convert the `ttl` tests to `testing/synctest`. They slept past real
   deadlines and relied on the callback goroutines having been scheduled
   by the time the assertion ran; the fake clock and `synctest.Wait` make

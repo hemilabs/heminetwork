@@ -3671,6 +3671,33 @@ func TestHandleRoutedMessageDedup(t *testing.T) {
 // --- connection error paths ---
 
 // TestConnectDialError verifies connect() handles dial failure.
+// runConnect runs Server.connect to completion and returns the
+// resulting session count.
+//
+// connect reports per-peer failures by logging and returning — a
+// failed configured peer must not terminate the server — so the
+// observable outcome of a failure is the session map, not an error on
+// a channel.
+func runConnect(t *testing.T, ctx context.Context, s *Server, addr string) int {
+	t.Helper()
+
+	done := make(chan struct{})
+	s.wg.Add(1)
+	go func() {
+		defer close(done)
+		s.connect(ctx, addr)
+	}()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("connect did not return")
+	}
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return len(s.sessions)
+}
+
 func TestConnectDialError(t *testing.T) {
 	secret, err := NewSecret()
 	if err != nil {
@@ -3689,18 +3716,10 @@ func TestConnectDialError(t *testing.T) {
 		cfg:      &Config{PeersWanted: 8},
 	}
 
-	// Dial an unreachable address with a live context so sendErr
-	// delivers the error rather than racing with ctx.Done().
-	errC := make(chan error, 1)
-	s.wg.Add(1)
-	go s.connect(t.Context(), "127.0.0.1:1", errC)
-	select {
-	case err := <-errC:
-		if err == nil {
-			t.Fatal("expected dial error, got nil")
-		}
-	case <-time.After(15 * time.Second):
-		t.Fatal("connect did not return error")
+	// An unreachable address must leave the server running with no
+	// session, not terminate it.
+	if n := runConnect(t, t.Context(), s, "127.0.0.1:1"); n != 0 {
+		t.Fatalf("sessions = %d, want 0: unreachable address", n)
 	}
 }
 
@@ -4512,20 +4531,10 @@ func TestConnectKXError(t *testing.T) {
 			Connect:     []string{ln.Addr().String()},
 		},
 	}
-	errC := make(chan error, 1)
-	s.wg.Add(1)
-	go s.connect(ctx, ln.Addr().String(), errC)
-
-	// connect() dials, KX fails (server closes immediately), sends
-	// error to errC.  No retry loop — just read the result.
-	select {
-	case err := <-errC:
-		if err != nil && !errors.Is(err, context.Canceled) &&
-			!errors.Is(err, io.EOF) {
-			t.Fatalf("connect: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for connect to return")
+	// connect() dials, KX fails (the server closes immediately).
+	// The failure is logged and the server survives with no session.
+	if n := runConnect(t, ctx, s, ln.Addr().String()); n != 0 {
+		t.Fatalf("sessions = %d, want 0: key exchange failed", n)
 	}
 }
 
@@ -4687,19 +4696,10 @@ func TestConnectHandshakeError(t *testing.T) {
 			PeersWanted: 8,
 		},
 	}
-	errC := make(chan error, 1)
-	s.wg.Add(1)
-	go s.connect(ctx, ln.Addr().String(), errC)
-
-	select {
-	case err := <-errC:
-		// Handshake error is expected.
-		if err == nil {
-			t.Fatal("expected handshake error")
-		}
-		t.Logf("connect error (expected): %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for connect error")
+	// The peer completes KX then drops, so Handshake fails.  That is
+	// a per-peer failure: logged, no session, server still running.
+	if n := runConnect(t, ctx, s, ln.Addr().String()); n != 0 {
+		t.Fatalf("sessions = %d, want 0: handshake failed", n)
 	}
 	cancel()
 }
@@ -8785,24 +8785,8 @@ func TestConnectSkipsSelf(t *testing.T) {
 	}
 	s.listenAddress = "127.0.0.1:45067"
 
-	errC := make(chan error, 1)
-	s.wg.Add(1)
-	done := make(chan struct{})
-	go func() {
-		s.connect(t.Context(), "127.0.0.1:45067", errC)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("connect did not skip self")
-	}
-
-	select {
-	case err := <-errC:
-		t.Fatalf("unexpected error on errC: %v", err)
-	default:
+	if n := runConnect(t, t.Context(), s, "127.0.0.1:45067"); n != 0 {
+		t.Fatalf("sessions = %d, want 0: connect did not skip self", n)
 	}
 }
 
@@ -8846,22 +8830,79 @@ func TestConnectDuplicateSession(t *testing.T) {
 			PeersWanted: 8,
 		},
 	}
-	errC := make(chan error, 1)
-	s.wg.Add(1)
-	go s.connect(ctx, addrB, errC)
-
 	// connect() succeeds through KX+Handshake but newSession returns
-	// duplicate.  connect() logs the error and returns without sending
-	// to errC.
-	select {
-	case err := <-errC:
-		t.Fatalf("unexpected errC send: %v", err)
-	case <-time.After(3 * time.Second):
-		// Expected: connect() returned silently after log.Errorf.
+	// duplicate.  connect() logs and returns, leaving the existing
+	// session untouched and the server running.
+	if n := runConnect(t, ctx, s, addrB); n != 1 {
+		t.Fatalf("sessions = %d, want 1: the pre-existing session", n)
 	}
 
 	cancel()
 	<-errB
+}
+
+// TestConnectFailureDoesNotKillServer is the regression test for the
+// cascade that made TestHundredNodeMesh flaky.
+//
+// A transient failure to a configured Connect peer used to be sent to
+// errC, which Run() treats as terminal, so the node exited — silently,
+// because sendErr does not log.  In a chain that cascaded: each dead
+// node closed its listener, the next node's dial was refused, and it
+// died too.  The symptom surfaced ~20 nodes later as "server did not
+// bind listen address", nowhere near the cause.
+//
+// The node must stay up, keep its listener, and leave the unreachable
+// peer to be redialled once gossip advertises it.
+func TestConnectFailureDoesNotKillServer(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+
+	// Bind a port and immediately release it so the address is
+	// well-formed but refuses connections.
+	var lc net.ListenConfig
+	probe, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := probe.Addr().String()
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServer(t, preParams, 0, "localhost:0", []string{dead})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+
+	// The listener must come up despite the configured peer being
+	// unreachable.  Before the fix, Run() returned the dial error and
+	// the listener never bound.
+	addr := waitForListenAddress(t, s, 10*time.Second)
+	if addr == "" {
+		t.Fatal("no listen address")
+	}
+
+	// Give the failing dial time to land, then confirm the server is
+	// still running rather than having exited.
+	select {
+	case err := <-errC:
+		t.Fatalf("Run exited on an unreachable Connect peer: %v", err)
+	case <-time.After(2 * time.Second):
+	}
+
+	if !s.Running() {
+		t.Fatal("server not running after a failed Connect dial")
+	}
+	if n := len(s.KnownPeers()); n == 0 {
+		t.Fatal("server should still know itself as a peer")
+	}
+
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("shutdown: %v", err)
+	}
 }
 
 // TestConnectDNSForwardRejectsIP covers connect() in forward DNS mode
@@ -8907,21 +8948,11 @@ func TestConnectDNSForwardRejectsIP(t *testing.T) {
 			DNS:         DNSForward,
 		},
 	}
-	errC := make(chan error, 1)
-	s.wg.Add(1)
-	go s.connect(ctx, addrB, errC)
-
-	select {
-	case err := <-errC:
-		if err == nil {
-			t.Fatal("expected DNS error")
-		}
-		if !strings.Contains(err.Error(), "rejecting IP-only peer") {
-			t.Fatalf("wrong error: %v", err)
-		}
-		t.Logf("connect DNS error (expected): %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for connect DNS error")
+	// The DNS policy rejects the IP-only peer, so no session forms.
+	// The rejection message itself is asserted against
+	// verifyOutboundDNS in TestDNSForwardRejectsIPPeer.
+	if n := runConnect(t, ctx, s, addrB); n != 0 {
+		t.Fatalf("sessions = %d, want 0: IP-only peer must be rejected", n)
 	}
 
 	cancel()
@@ -9001,21 +9032,10 @@ func TestConnectDNSVerifyError(t *testing.T) {
 			DNS:         DNSForward,
 		},
 	}
-	errC := make(chan error, 1)
-	s.wg.Add(1)
-	go s.connect(ctx, dialTarget, errC)
-
-	select {
-	case err := <-errC:
-		if err == nil {
-			t.Fatal("expected DNS verify error")
-		}
-		if !strings.Contains(err.Error(), "dns identity mismatch") {
-			t.Fatalf("wrong error: %v", err)
-		}
-		t.Logf("connect DNS verify error (expected): %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout waiting for connect DNS verify error")
+	// DNS verification fails, so no session forms.  The mismatch
+	// message is asserted against verifyOutboundDNS elsewhere.
+	if n := runConnect(t, ctx, s, dialTarget); n != 0 {
+		t.Fatalf("sessions = %d, want 0: dns identity mismatch", n)
 	}
 
 	cancel()
