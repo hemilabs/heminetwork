@@ -2,37 +2,258 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-// Package continuum implements the service that runs the p2p network for
-// MinerFI Multi-Party Threshold Signature Scheme.
 package continuum
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"crypto/subtle"
+	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/hemilabs/x/tss/v3/ecdsa/keygen"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"
 	"github.com/hemilabs/heminetwork/v2/service/pprof"
+	"github.com/hemilabs/heminetwork/v2/ttl"
+)
+
+// DNS verification modes for Config.DNS.
+const (
+	DNSOff     = "off"     // No DNS verification.
+	DNSForward = "forward" // Forward TXT verify hostname peers; reject IP-only.
+	DNSReverse = "reverse" // Reverse DNS verify IP peers.
+	DNSAll     = "all"     // Forward on hostnames, reverse on IPs.
 )
 
 const (
 	logLevel = "INFO"
 	appName  = "continuum"
 
-	defaultListenAddress  = "localhost:45067"
-	defaultMaxConnections = 8
+	defaultListenAddress = "localhost:45067"
+	defaultPeersWanted   = 8
+	defaultMaxPeers      = 256
+
+	// peerTTL is the duration a peer record stays alive without
+	// refresh.  Prime to avoid resonance with other timers.
+	peerTTL = 67 * time.Second
+
+	// maxGossipPeers caps the number of peer records accepted in a
+	// single PeerListResponse to prevent memory exhaustion from a
+	// malicious peer.
+	maxGossipPeers = 256
+
+	// pingInterval is how often each session sends a heartbeat.
+	// Prime to avoid resonance with other periodic timers.
+	pingInterval = 29 * time.Second
+
+	// pingTimeout is how long to wait for a pong before closing
+	// the transport.  Prime, well under pingInterval.
+	pingTimeout = 13 * time.Second
+
+	// maintainInterval is how often the server checks whether it
+	// needs to dial additional peers.  Prime, distinct from ping.
+	maintainInterval = 67 * time.Second
+
+	// seenTTL is the duration a message hash stays in the dedup
+	// cache.  Prime, ~1 minute.  After expiry the same message
+	// can be processed again.
+	seenTTL = 67 * time.Second
+
+	// seenCapacity is the maximum number of entries in the message
+	// dedup cache.  Scaled for rate-limited traffic: with
+	// PeersWanted=8 connections at 100 msgs/sec over a 67s
+	// window, the theoretical max is ~53K unique hashes.
+	seenCapacity = 1 << 16 // 65536
+
+	// messageRate is the sustained PER-IDENTITY message rate
+	// limit; the budget follows the peer across sessions rather
+	// than being rebuilt per connection.  Excess messages are
+	// refused after transport decrypt (to keep the stream in sync)
+	// but before dispatch.
+	messageRate  = 97  // msgs/sec
+	messageBurst = 199 // burst allowance
+
+	// messageDropRate and messageDropBurst bound the rate at which
+	// a session may have messages REFUSED before it is closed.
+	// Dropping alone is not a defence: the message has already
+	// cost a transport decrypt by the time the limiter sees it, so
+	// a peer that ignores the limit imposes that cost forever.
+	//
+	// This is a rate, not a count of consecutive drops.  A
+	// consecutive counter is defeated by pacing: the token bucket
+	// accepts messageRate messages per second no matter how fast
+	// they arrive, so one accepted message lands every 1/messageRate
+	// and resets the run.  Reaching N consecutive drops then
+	// requires more than (N+1)*messageRate msgs/sec, and anything
+	// under that sustains the full decrypt cost indefinitely.
+	// Budgeting drops over time has no such hole — any sustained
+	// excess converges on the limit regardless of interleaving.
+	//
+	// The burst absorbs a peer that briefly overshoots and backs
+	// off; the sustained rate is well under what an honest peer
+	// hitting a transient spike produces.
+	messageDropRate  = 10 // refusals/sec
+	messageDropBurst = 256
+
+	// limiterTTL is how long a peer's message bucket survives
+	// without that peer connecting, and limiterCap bounds the
+	// table.  Identities are free to mint, so the table must expire
+	// on its own rather than follow the peer record: an identity
+	// addPeer rejects never creates a peer record and would
+	// otherwise leak an entry for the life of the process.
+	// limiterTTL is far longer than the bucket needs to refill, so
+	// expiry forgives nothing time had not already restored.
+	limiterTTL = 11 * time.Minute
+	limiterCap = 1 << 13 // 8192
+
+	// connCooldownTTL is the per-IP cooldown after a
+	// BusyResponse.  Prevents rapid reconnection cycling
+	// that monopolizes the handshake semaphore.
+	connCooldownTTL = 31 * time.Second
+
+	// maxHandshakesPerIP caps how many handshakes ONE source may
+	// have IN FLIGHT at once.  handshakeSem bounds total
+	// concurrency, but a slot is held for the whole key exchange —
+	// up to handshakeTimeout — so without a per-source cap one
+	// address opening connections it never completes occupies every
+	// slot and starves legitimate peers.
+	//
+	// An arrival-RATE limit cannot do this job: occupancy is
+	// rate x hold-time, so any rate R holds R*handshakeTimeout
+	// slots in steady state, and bounding that below PeersWanted
+	// requires a rate so low it locks out honest peers.  Capping
+	// in-flight work bounds occupancy directly and is indifferent
+	// to how fast connections arrive.
+	//
+	// It also cannot lock anyone out: a source with fewer than this
+	// many handshakes actually in progress is never refused, so a
+	// NAT gateway or a fleet behind one egress is unaffected while
+	// a single flooder is still bounded to this many slots.
+	//
+	// The tracking map is bounded by construction: an entry exists
+	// only while a handshake is in flight, and total in-flight work
+	// is capped by handshakeSem.
+	maxHandshakesPerIP = 2
+
+	// envelopeRateLimit caps the number of EncryptedPayload
+	// messages accepted from a single sender identity per
+	// minute.  Prevents signature verification amplification
+	// attacks where an attacker floods unique envelopes.
+	envelopeRateLimit = 199
+	envelopeRateTTL   = 61 * time.Second
+
+	// naclXchgTTL bounds how long an outbound NaCl key exchange
+	// challenge stays valid.  Prime, comfortably above a mesh
+	// round trip with retries.
+	naclXchgTTL = 59 * time.Second
+
+	// naclXchgRateLimit caps how many NaClKeyRequests we answer
+	// from one AUTHENTICATED SESSION PEER per window.  Keying on
+	// the session rather than the request's Requester field is what
+	// makes the bound real: Requester is unauthenticated wire data a
+	// flooder can vary per message, whereas sessions are capped by
+	// PeersWanted, so total signing work is bounded.  Sized well
+	// above legitimate traffic — a relay neighbour forwards requests
+	// on behalf of a whole committee — while still bounding the
+	// secp256k1 signing an attacker can extract.
+	naclXchgRateLimit = 64
+	naclXchgRateTTL   = 1 * time.Second
+
+	// naclXchgRetry is how often ensurePeerKeys re-sends a key
+	// request while waiting.  Each retry carries a fresh
+	// challenge so the dedup cache does not swallow it.
+	naclXchgRetry = 2 * time.Second
+
+	// naclXchgCapacity bounds the pending-challenge and
+	// rate-limiter maps.
+	naclXchgCapacity = 1 << 10 // 1024
+
+	// naclXchgEnsureTimeout bounds the pre-ceremony key prefetch.
+	// A committee member whose key cannot be fetched in this window
+	// is unreachable enough that the ceremony should fail fast.
+	naclXchgEnsureTimeout = 31 * time.Second
+
+	// defaultPreParamsTimeout is the default timeout for Paillier
+	// safe prime generation.  Sufficient for modern hardware;
+	// increase for slow CI runners.
+	defaultPreParamsTimeout = 1 * time.Minute
+
+	// initialPingTimeout is how long to wait for the first pong
+	// after connecting.  Fired immediately post-KX — real peers
+	// reply in milliseconds; ephemeral clients (hemictl) never
+	// pong and get reaped.  Short fuse, no settling.
+	initialPingTimeout = 7 * time.Second
+
+	// dialTimeout bounds how long a connectPeer or seed-dial waits
+	// for the TCP handshake.
+	dialTimeout = 11 * time.Second
+
+	// connectRetryMin and connectRetryMax bound the backoff used
+	// when a configured Connect peer is not reachable yet.  Prime,
+	// to avoid resonance with the other periodic timers.
+	connectRetryMin = 2 * time.Second
+	connectRetryMax = 37 * time.Second
+
+	// promPollInterval is how often the Prometheus scrape loop
+	// refreshes ceremony/peer gauges.
+	promPollInterval = 3 * time.Second
+
+	// defaultTTL is the hop count for originated routed messages.
+	defaultTTL = 8
+
+	// defaultCeremonyTimeout bounds how long a single ceremony may
+	// run.  A TSS round waits for messages from every participant,
+	// so one member that goes offline or withholds a message stalls
+	// the ceremony forever; without a deadline the driver goroutine
+	// and its tracking entry live until the process exits, and the
+	// entry is never evicted because eviction skips running
+	// ceremonies.  Well under ceremonyMaxAge so a timed-out
+	// ceremony still ages out of the tracking map.
+	defaultCeremonyTimeout = 13 * time.Minute
+
+	// maxTrackedCeremonies caps the ceremony tracking map.
+	//
+	// A CeremonyResult broadcast for a ceremony this node is not
+	// running creates a status-only record, and the CeremonyID is
+	// attacker-chosen wire data.  Any authenticated peer could
+	// otherwise flood records that live until ceremonyMaxAge, on
+	// every node in the mesh, by signing results for IDs it invented.
+	// Ceremonies this node actually participates in are registered
+	// through registerCeremony and are not subject to this cap.
+	maxTrackedCeremonies = 4096
+
+	// ceremonyMaxAge is how long completed/failed ceremonies remain in the
+	// tracking map before eviction.  Running ceremonies are never evicted.
+	ceremonyMaxAge = 29 * time.Minute
+
+	// ceremonyEvictInterval is the tick period for the eviction goroutine.
+	ceremonyEvictInterval = 11 * time.Minute
+
+	// tcpKeepAlivePeriod is the TCP keepalive probe interval.  With Linux
+	// default 9 retries, worst-case dead-peer detection is ~153s.
+	// Complements the application-layer ping TTL (~54s worst case).
+	tcpKeepAlivePeriod = 17 * time.Second
 )
 
 var log = loggo.GetLogger(appName)
@@ -43,31 +264,201 @@ func init() {
 	}
 }
 
+// Config holds the configuration for a continuum Server.
 type Config struct {
+	Connect                 []string
+	DNS                     string // DNSOff, DNSForward, DNSReverse, DNSAll
+	Hostname                string // Hostname to advertise in gossip; empty = IP
 	Home                    string
+	ListenAddress           string
 	LogLevel                string
+	PeersWanted             int           // 0 uses default (8)
+	PingInterval            time.Duration // 0 uses default (61s)
+	PingTimeout             time.Duration // 0 uses default (19s)
+	InitialPingTimeout      time.Duration // 0 uses default (5s); increase for slow CI
+	MaintainInterval        time.Duration // 0 uses default (67s)
 	PprofListenAddress      string
+	PreParamsTimeout        time.Duration // 0 uses default (1m); increase for slow CI
+	PrivateKey              string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
-	PrivateKey              string
-	ListenAddress           string
-	MaxConnections          int
+	Seeds                   []string      // DNS seed hostnames, format host:port
+	MaxPeers                int           // 0 uses default (256)
+	AdminListenAddress      string        // empty = no admin listener
+	CeremonyTimeout         time.Duration // 0 uses default (13m)
+
+	// Initiator is the source of ceremony triggers — in production
+	// the blockchain watcher.  Nil installs a no-op initiator that
+	// never emits, so the node participates in ceremonies others
+	// start but initiates none itself.  Ignored in continuum_debug
+	// builds, where hemictl drives ceremonies over the wire.
+	Initiator CeremonyInitiator
 }
 
+// CeremonyInfo tracks the state of an active TSS ceremony.
+type CeremonyInfo struct {
+	Type        CeremonyType    `json:"type"`
+	StartTime   int64           `json:"start_time"` // unix timestamp
+	Status      string          `json:"status"`     // CeremonyRunning, CeremonyComplete, CeremonyFailed
+	Error       string          `json:"error,omitempty"`
+	Coordinator Identity        `json:"coordinator"` // node responsible for broadcasting result
+	KeyID       []byte          `json:"key_id,omitempty"`
+	Signature   []byte          `json:"signature,omitempty"` // sign: R||S, 32 bytes each
+	Committee   []Identity      `json:"committee,omitempty"`
+	ctx         context.Context // canceled on terminal state
+	cancel      context.CancelFunc
+}
+
+// Server is a continuum protocol node that manages encrypted peer
+// connections, gossip-based peer discovery, and TSS ceremonies.
 type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
-	cfg *Config
+	cfg  *Config
+	data string // Data directory home+identity
 
 	// Sessions
-	sessions map[string]*Transport
+	sessions map[Identity]*Transport
+	ponged   map[Identity]struct{} // peers that responded to at least one ping
 
 	// Secrets
 	secret *Secret
 
+	// TSS
+	preParams keygen.LocalPreParams
+	tss       TSS
+	tssStore  TSSStore
+	stt       *serverTSSTransport
+	tssCtx    context.Context
+
+	// Ceremony tracking — admin RPCs report status from this map.
+	ceremonies map[CeremonyID]*CeremonyInfo
+
+	// Ceremony initiation — the seam between external triggers
+	// (blockchain or debug) and the TSS engine.
+	initiator CeremonyInitiator
+	debugInit *debugInitiator // non-nil only in continuum_debug builds
+
 	// Listener
 	listenConfig *net.ListenConfig
+
+	// dialer is used for every outbound peer connection.  It is a
+	// field for the same reason listenConfig is: multi-node tests
+	// run every node on one host, and the per-IP defences in the
+	// accept path key on the source address the kernel picks --
+	// 127.0.0.1 for every node unless the dialer binds one.
+	//
+	// A value, not a pointer: net.Dialer's zero value dials, so a
+	// Server built without going through NewServer still works
+	// rather than panicking on the first outbound connection.
+	dialer net.Dialer
+
+	listenAddress   string // Actual bound address after Listen()
+	adminListenAddr string // Actual bound admin address
+
+	// Link-state routing table derived from gossip topology.
+	// Maps destination Identity to next-hop Identity.
+	// Rebuilt lazily via generation counter — see route.go.
+	routeTable    map[Identity]Identity
+	routeMtx      sync.RWMutex
+	routeGen      atomic.Uint64 // bumped on topology change
+	routeBuiltGen uint64        // gen when table was last built
+
+	// handshakeSem limits concurrent handshake goroutines to
+	// PeersWanted.  Acquired in the accept loop before spawning
+	// a goroutine, released after KX completes (success or
+	// failure).  Prevents goroutine exhaustion from connection
+	// floods.
+	handshakeSem chan struct{}
+
+	// DNS resolver; nil uses net.DefaultResolver.  Tests inject a
+	// mock resolver pointing at an in-process DNS server.
+	resolver *net.Resolver
+
+	// connCooldown rate-limits reconnections per remote IP.
+	// Set after BusyResponse to prevent an attacker from
+	// cycling connections to monopolize handshake slots.
+	connCooldown *ttl.TTL
+
+	// dnsLookups rate-limits DNS verification per remote IP.
+	// Prevents attackers from forcing unbounded TXT queries by
+	// repeatedly connecting.  Keyed by IP string, TTL of 60s.
+	dnsLookups *ttl.TTL
+
+	// Peer tracking
+	peers    map[Identity]*PeerRecord // all known peers
+	peersTTL *ttl.TTL                 // expiry for known peers
+	pings    *ttl.TTL                 // unanswered ping timeout
+
+	// Per-identity message rate limiters, keyed by peer Identity.
+	// Held across sessions so a reconnect does not hand the peer a
+	// fresh burst budget, and expired on idleness so the table
+	// cannot be grown without bound.  Guarded by limiterMtx.
+	limiters   *ttl.TTL
+	limiterMtx sync.Mutex
+
+	// In-flight handshakes per source prefix.  Checked in the
+	// accept loop so one source cannot occupy every handshakeSem
+	// slot.  Entries live only while a handshake is running, so the
+	// map is bounded by handshakeSem.  Guarded by handshakeIPMtx.
+	handshakesInFlight map[string]int
+	handshakeIPMtx     sync.Mutex
+
+	// Pending outbound NaCl key exchanges — challenge string to
+	// the Identity the challenge was issued for.  Entries expire
+	// after naclXchgTTL; the response handler consumes them.
+	naclXchg *ttl.TTL
+
+	// Inbound NaClKeyRequest rate limiter, keyed on the
+	// AUTHENTICATED session peer that delivered the request —
+	// naclXchgRateLimit answers per naclXchgRateTTL window.
+	naclXchgRates *ttl.TTL
+
+	// keyBound is closed and replaced by bindPeerKey on every
+	// successful bind, broadcasting to ensurePeerKey waiters.
+	// Guarded by mtx; waiters snapshot it before checking the peer
+	// table so they cannot miss a bind that lands in between.
+	keyBound chan struct{}
+
+	// Per-sender envelope rate counter — limits how many
+	// EncryptedPayload messages are accepted from one sender
+	// before signature verification is skipped.
+	envelopeRates *ttl.TTL
+
+	// Message deduplication — prevents forwarding loops in
+	// non-tree topologies.
+	seen *ttl.TTL
+
+	// pendingTSS buffers TSS round messages that arrive before
+	// the request registering their ceremony.
+	pendingTSS *pendingTSS
+
+	// Routing counters for observability and testing.
+	routedReceived    atomic.Int64 // messages received at final destination
+	forwarded         atomic.Int64 // messages forwarded to next hop
+	dedupDropped      atomic.Int64 // messages dropped by dedup cache
+	broadcastsSent    atomic.Int64 // broadcast originations (not forwards)
+	broadcastDropped  atomic.Int64 // broadcasts dropped before relay (bad signature)
+	rateDropped       atomic.Int64 // messages dropped by rate limiter
+	cooldownDrops     atomic.Int64 // connections dropped by IP cooldown
+	hsRateDrops       atomic.Int64 // connections dropped by per-IP handshake rate
+	rateDisconnects   atomic.Int64 // sessions closed for sustained rate abuse
+	envRateDrops      atomic.Int64 // envelopes dropped by sender rate limit
+	keyConflicts      atomic.Int64 // rejected attempts to rebind a peer e2e key
+	naclXchgDrops     atomic.Int64 // dropped NaCl key exchange messages
+	tssPendingDrops   atomic.Int64 // TSS messages dropped by pending-queue caps
+	tssPendingExpired atomic.Int64 // TSS messages discarded past pendingTSSMaxAge
+	// ceremonyRecordDrops counts status-only ceremony records refused
+	// because the tracking map was at maxTrackedCeremonies.
+	ceremonyRecordDrops atomic.Int64
+	startedAt           time.Time // set in Run() for uptime gauge
+
+	// Ceremony counters — updated every promPoll tick so prom
+	// callbacks never iterate the ceremonies map on scrape.
+	ceremoniesActive    atomic.Int64
+	ceremoniesCompleted atomic.Int64
+	ceremoniesFailed    atomic.Int64
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -75,125 +466,1126 @@ type Server struct {
 	isRunning       bool
 }
 
+// Info reports the current status of the server.  Returned as the
+// body of the /health endpoint.
 type Info struct {
-	Online bool
+	Online    bool   `json:"online"`
+	Healthy   bool   `json:"healthy"`
+	Listening string `json:"listening"` // bound address, empty pre-listen
+	Sessions  int    `json:"sessions"`  // active peer connections
+	Peers     int    `json:"peers"`     // known peer records
 }
 
+// NewDefaultConfig returns a Config with sensible defaults.
+// DNS defaults to DNSForward — operators must set Hostname or
+// explicitly opt out with DNS="off".
 func NewDefaultConfig() *Config {
 	return &Config{
+		DNS:                 DNSForward,
 		LogLevel:            logLevel,
 		PrometheusNamespace: appName,
 		PrivateKey:          "",
 		ListenAddress:       defaultListenAddress,
-		MaxConnections:      defaultMaxConnections,
+		PeersWanted:         defaultPeersWanted,
+		MaxPeers:            defaultMaxPeers,
 	}
 }
 
+// NewServer creates a new Server from the provided config.
+// If cfg is nil, NewDefaultConfig is used.
 func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
+
+	// Validate DNS configuration.
+	switch cfg.DNS {
+	case DNSOff, DNSForward, DNSReverse, DNSAll:
+	default:
+		return nil, fmt.Errorf("invalid DNS mode %q: must be \"off\", \"forward\", \"reverse\", or \"all\"", cfg.DNS)
+	}
+	if (cfg.DNS == DNSForward || cfg.DNS == DNSAll) && cfg.Hostname == "" {
+		return nil, fmt.Errorf("DNS=%q requires Hostname to be set", cfg.DNS)
+	}
+
+	// Peer counts are used directly as map, channel and TTL
+	// capacities.  A negative value panics make(); a zero value
+	// means "unset" and takes the default.  Both are validated
+	// here so no invalid capacity can reach the Server struct.
+	if cfg.PeersWanted < 0 {
+		return nil, fmt.Errorf("PeersWanted must not be negative: %d",
+			cfg.PeersWanted)
+	}
+	if cfg.PeersWanted == 0 {
+		cfg.PeersWanted = defaultPeersWanted
+	}
+	if cfg.MaxPeers < 0 {
+		return nil, fmt.Errorf("MaxPeers must not be negative: %d",
+			cfg.MaxPeers)
+	}
+	if cfg.MaxPeers == 0 {
+		cfg.MaxPeers = defaultMaxPeers
+	}
+
+	// Ceremony trigger source, in precedence order: the debug
+	// initiator (continuum_debug builds only, driven by hemictl),
+	// then an operator-supplied one, then the no-op.
+	di := serverDebugInit()
+	init := pickInitiator(di, cfg.Initiator)
+	if _, noop := init.(*noopInitiator); noop {
+		log.Infof("no ceremony initiator configured: this node will " +
+			"participate in ceremonies but never start one")
+	}
+
+	limiters, err := ttl.New(limiterCap, true)
+	if err != nil {
+		return nil, fmt.Errorf("limiter ttl: %w", err)
+	}
+
+	// NaCl key exchange state.  Created here rather than in Run()
+	// so the dispatch handlers are usable in tests that never Run().
+	naclXchg, err := ttl.New(naclXchgCapacity, true)
+	if err != nil {
+		return nil, fmt.Errorf("nacl xchg ttl: %w", err)
+	}
+	naclXchgRates, err := ttl.New(naclXchgCapacity, true)
+	if err != nil {
+		return nil, fmt.Errorf("nacl xchg rate ttl: %w", err)
+	}
+
 	return &Server{
-		cfg:          cfg,
-		listenConfig: &net.ListenConfig{},
+		limiters:           limiters,
+		cfg:                cfg,
+		listenConfig:       &net.ListenConfig{},
+		dialer:             net.Dialer{Timeout: dialTimeout},
+		sessions:           make(map[Identity]*Transport, cfg.PeersWanted),
+		ponged:             make(map[Identity]struct{}, cfg.PeersWanted),
+		peers:              make(map[Identity]*PeerRecord),
+		handshakesInFlight: make(map[string]int),
+		ceremonies:         make(map[CeremonyID]*CeremonyInfo),
+		handshakeSem:       make(chan struct{}, cfg.PeersWanted),
+		initiator:          init,
+		debugInit:          di,
+		routeTable:         make(map[Identity]Identity),
+		naclXchg:           naclXchg,
+		naclXchgRates:      naclXchgRates,
+		pendingTSS:         newPendingTSS(),
+		keyBound:           make(chan struct{}),
+		tssCtx:             context.Background(), // replaced by Run() with lifecycle context
 	}, nil
 }
 
-func genID() string {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		panic(fmt.Errorf("read random: %w", err))
-	}
-	return hex.EncodeToString(buf)
-}
-
-func (s *Server) newSession(t *Transport) string {
-	for {
-		id := genID()
-		s.mtx.Lock()
-		if _, ok := s.sessions[id]; ok {
-			s.mtx.Unlock()
-
-			// ID is already used, retry.
-			continue
+// pickInitiator resolves the ceremony trigger source.
+//
+// The debug initiator wins where it exists: the wire handlers submit
+// into it, so it has to be the one ceremonyLoop drains or a
+// hemictl-driven ceremony would vanish into a channel nobody reads.
+// Otherwise an operator-supplied Config.Initiator — the blockchain
+// watcher in production — is used.  The no-op is the last resort: the
+// node participates in ceremonies others start but initiates none.
+func pickInitiator(di *debugInitiator, cfgInit CeremonyInitiator) CeremonyInitiator {
+	if di != nil {
+		if cfgInit != nil {
+			log.Warningf("continuum_debug build: ignoring " +
+				"Config.Initiator in favour of the debug initiator")
 		}
-		s.sessions[id] = t
-		s.mtx.Unlock()
-		return id
+		return di
 	}
+	if cfgInit != nil {
+		return cfgInit
+	}
+	return &noopInitiator{}
 }
 
-func (s *Server) deleteSession(id string) {
+func (s *Server) newSession(id *Identity, t *Transport) error {
 	s.mtx.Lock()
-	t, ok := s.sessions[id]
-	delete(s.sessions, id)
-	s.mtx.Unlock()
-	if !ok {
-		log.Errorf("id not found in sessions %s", id)
+	defer s.mtx.Unlock()
+
+	if _, ok := s.sessions[*id]; ok {
+		return errors.New("duplicate identity")
 	}
-	if err := t.Close(); err != nil {
-		log.Errorf("close session %s: %v", id, err)
+	s.sessions[*id] = t
+
+	// Mark routing table stale.  Caller rebuilds after
+	// releasing s.mtx.
+	s.invalidateRoutes()
+
+	return nil
+}
+
+func (s *Server) deleteSession(id *Identity) error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	t := s.sessions[*id]
+	if t == nil {
+		return fmt.Errorf("no session: %v", id)
 	}
+	delete(s.sessions, *id)
+
+	// Mark routing table stale.  Caller rebuilds after
+	// releasing s.mtx.
+	s.invalidateRoutes()
+	if s.ponged != nil {
+		delete(s.ponged, *id)
+	}
+	return t.Close()
 }
 
 func (s *Server) deleteAllSessions() {
+	type idTransport struct {
+		id Identity
+		t  *Transport
+	}
+
 	s.mtx.Lock()
-	defer s.mtx.Unlock()
+	closing := make([]idTransport, 0, len(s.sessions))
 	for id, t := range s.sessions {
-		if err := t.Close(); err != nil {
-			log.Errorf("close session %s: %v", id, err)
+		closing = append(closing, idTransport{id, t})
+		delete(s.sessions, id)
+	}
+	s.mtx.Unlock()
+
+	for _, it := range closing {
+		if err := it.t.Close(); err != nil {
+			log.Debugf("close session %v: %v", it.id, err)
 		}
 	}
-	s.sessions = nil
 }
 
-func (s *Server) handle(ctx context.Context, conn net.Conn) {
-	log.Infof("handle: %v", conn.RemoteAddr())
-	defer log.Infof("handle exit: %v", conn.RemoteAddr())
-
-	defer s.wg.Done()
-	defer func() {
-		err := conn.Close()
-		if err != nil {
-			log.Errorf("close %v: %v", conn.RemoteAddr(), err)
-		}
-	}()
-
-	transport, err := NewTransportFromCurve(ecdh.X25519()) // XXX config option
+func (s *Server) newTransport(ctx context.Context, conn net.Conn) (*Identity, *Transport, []byte, error) {
+	transport, err := NewTransportFromCurve(ecdh.X25519()) // Only supported curve.
 	if err != nil {
-		log.Errorf("create new transport: %v", err)
-		return
+		return nil, nil, nil, fmt.Errorf("new transport: %w", err)
 	}
-	id := s.newSession(transport)
-	defer s.deleteSession(id)
 
 	err = transport.KeyExchange(ctx, conn)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return
-		}
-		log.Errorf("key exchange: %v", err)
-		return
+		// Expected from port scanners, TLS probes, wrong protocol.
+		return nil, nil, nil, fmt.Errorf("key exchange: %w", err)
 	}
 
-	hr, err := transport.Handshake(ctx, s.secret)
+	// After KX, transport owns conn.  Ensure cleanup on failure so
+	// the remote side gets a connection reset instead of hanging.
+	ok := false
+	defer func() {
+		if !ok {
+			transport.Close()
+		}
+	}()
+
+	id, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			return
-		}
-		log.Errorf("handshake: %v", err)
+		// Expected from misconfigured peers and version mismatches.
+		return nil, nil, nil, fmt.Errorf("handshake: %w", err)
+	}
+
+	// DNS verification for incoming connections.  Loopback is
+	// exempt (admin clients like hemictl).  In forward mode we
+	// cannot verify (no hostname yet).  In reverse/all mode,
+	// reverse-verify the remote IP.
+	if err := s.verifyInboundDNS(ctx, conn.RemoteAddr(), *id); err != nil {
+		return nil, nil, nil, err
+	}
+
+	ok = true
+	return id, transport, naclPub, nil
+}
+
+// isDuplicate returns true if the message identified by header hash
+// has been seen before within seenTTL.  On first encounter it records
+// the hash and returns false.  Uses the PayloadHash from the header
+// which is invariant across forwarding hops (unlike cleartext which
+// changes as TTL is decremented and transport re-encrypts).
+//
+// For routed (non-broadcast) messages, the destination is included
+// in the dedup key so that identical payloads sent to different
+// destinations are not falsely deduplicated.  Broadcast messages
+// use PayloadHash alone since they share BroadcastDestination and
+// require global dedup.
+//
+// NOTE: after seenTTL expires (~67s), a replayed message will be
+// accepted again.  This is acceptable for idempotent commands
+// (PingRequest) but should be reconsidered if non-idempotent
+// commands are routed through the mesh.
+func (s *Server) isDuplicate(ctx context.Context, h *Header) bool {
+	log.Tracef("isDuplicate %v", h.PayloadHash)
+
+	key := h.PayloadHash.String()
+	if h.Destination != nil && *h.Destination != BroadcastDestination {
+		key += ":" + h.Destination.String()
+	}
+	if _, _, err := s.seen.Get(key); err == nil {
+		return true
+	}
+	s.seen.Put(ctx, seenTTL, key, struct{}{}, nil, nil)
+	return false
+}
+
+// forward relays a message that is not destined for us.  If TTL is
+// zero, the message is dropped.  Otherwise TTL is decremented and the
+// message is sent to the destination (if directly connected) or
+// flooded to all peers except the source.
+//
+// Complexity: O(1) for direct send, O(n) over connected sessions for
+// flood.  RLock is held during transport writes which are bounded by
+// writeTimeout (4s).  This matches the existing notifyAllPeers
+// pattern.
+func (s *Server) forward(header *Header, payload any, from *Identity) {
+	log.Tracef("forward %v -> %v TTL %d", header.Origin, header.Destination, header.TTL)
+
+	if header.TTL == 0 {
+		log.Debugf("forward: TTL expired, dropping")
 		return
 	}
 
-	log.Infof("connected %v: %v", conn.RemoteAddr(), hr)
-	for {
-		header, payload, err := transport.Read()
-		if err != nil {
-			panic(err) // XXX
+	fwd := *header
+	fwd.TTL--
+
+	dest := *header.Destination
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	// Direct: destination is a connected peer.
+	if t, ok := s.sessions[dest]; ok {
+		if err := t.WriteHeader(fwd, payload); err != nil {
+			log.Debugf("forward direct to %v: %v", dest, err)
+		} else {
+			log.Debugf("forward direct to %v TTL %d", dest, fwd.TTL)
+			s.forwarded.Add(1)
 		}
-		log.Infof("%v", spew.Sdump(header))
-		log.Infof("%v", spew.Sdump(payload))
+		return
 	}
+
+	// Route via gossip topology table.
+	if hop, ok := s.routeNextHop(dest); ok {
+		if from == nil || hop != *from {
+			if t, ok := s.sessions[hop]; ok {
+				if err := t.WriteHeader(fwd, payload); err != nil {
+					log.Debugf("routed forward to %v: %v", hop, err)
+				} else {
+					log.Debugf("forward routed %v -> %v via %v TTL %d",
+						header.Origin, dest, hop, fwd.TTL)
+					s.forwarded.Add(1)
+					return
+				}
+			}
+		}
+	}
+
+	// Flood fallback: send to all connected peers except source.
+	var sent int
+	for id, t := range s.sessions {
+		if from != nil && id == *from {
+			continue
+		}
+		if err := t.WriteHeader(fwd, payload); err != nil {
+			log.Debugf("flood forward to %v: %v", id, err)
+			continue
+		}
+		s.forwarded.Add(1)
+		sent++
+	}
+	log.Debugf("forward flood %v -> %v: sent to %d peer(s) TTL %d",
+		header.Origin, dest, sent, fwd.TTL)
+}
+
+// forwardBroadcast relays a broadcast message to all connected peers
+// except the source.  TTL is decremented.  Called from handle() after
+// isDuplicate and whitelist checks pass.
+func (s *Server) forwardBroadcast(header *Header, payload any, from *Identity) {
+	log.Tracef("forwardBroadcast %v TTL %d", header.Origin, header.TTL)
+
+	fwd := *header
+	fwd.TTL--
+
+	// Collect transports under lock, write outside to avoid
+	// blocking all broadcast forwarding on a slow peer.
+	type target struct {
+		id Identity
+		t  *Transport
+	}
+	s.mtx.RLock()
+	targets := make([]target, 0, len(s.sessions))
+	for id, t := range s.sessions {
+		if from != nil && id == *from {
+			continue
+		}
+		targets = append(targets, target{id, t})
+	}
+	s.mtx.RUnlock()
+
+	var sent int
+	for _, tgt := range targets {
+		if err := tgt.t.WriteHeader(fwd, payload); err != nil {
+			log.Debugf("broadcast forward to %v: %v", tgt.id, err)
+			continue
+		}
+		s.forwarded.Add(1)
+		sent++
+	}
+	log.Debugf("broadcast %v: forwarded to %d peer(s) TTL %d",
+		header.Origin, sent, fwd.TTL)
+}
+
+// Broadcast sends a command to all connected peers using the broadcast
+// primitive.  The payload type must be in broadcastWhitelist.  The
+// message is sent with BroadcastDestination and defaultTTL.  Each
+// receiver processes locally and forwards to its peers (flood + dedup).
+func (s *Server) Broadcast(cmd any) error {
+	return s.broadcastWithTTL(cmd, defaultTTL)
+}
+
+// broadcastWithTTL is the inner implementation of Broadcast.  It
+// accepts a custom TTL for testing (e.g., verifying TTL expiry).
+func (s *Server) broadcastWithTTL(cmd any, ttl uint8) error {
+	if !IsBroadcastable(cmd) {
+		return fmt.Errorf("payload type %T is not broadcastable", cmd)
+	}
+
+	pt, ok := pt2str[reflect.TypeOf(cmd)]
+	if !ok {
+		return fmt.Errorf("unknown command type: %T", cmd)
+	}
+	hash, payload, err := NewPayloadFromCommand(cmd)
+	// untested: NewPayloadFromCommand uses json.Marshal on wire types; cannot fail with valid cmd
+	if err != nil {
+		return err
+	}
+
+	dest := BroadcastDestination
+	header, err := json.Marshal(Header{
+		PayloadType: pt,
+		PayloadHash: *hash,
+		Origin:      s.secret.Identity,
+		Destination: &dest,
+		TTL:         ttl,
+	})
+	// untested: json.Marshal of Header (strings + []byte) cannot fail
+	if err != nil {
+		return err
+	}
+	msg := append(header, payload...)
+
+	// Collect transports under lock, write outside to avoid
+	// blocking all broadcast sends on a slow peer.
+	type target struct {
+		id Identity
+		t  *Transport
+	}
+	s.mtx.RLock()
+	targets := make([]target, 0, len(s.sessions))
+	for id, t := range s.sessions {
+		targets = append(targets, target{id, t})
+	}
+	s.mtx.RUnlock()
+
+	var sent int
+	for _, tgt := range targets {
+		if err := tgt.t.write(writeTimeout, msg); err != nil {
+			log.Debugf("broadcast to %v: %v", tgt.id, err)
+		} else {
+			sent++
+		}
+	}
+	log.Debugf("Broadcast %T: sent to %d peer(s)", cmd, sent)
+	s.broadcastsSent.Add(1)
+	return nil
+}
+
+// handle runs the session read loop.  It reports whether the peer
+// ended the session with BusyResponse, which connect needs in order to
+// tell "contacted the peer" from "the peer has no room right now".
+func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin bool) (busy bool) {
+	// Per-session context: cancelled when handle() exits (read
+	// error, shutdown, etc.), which also stops the pingLoop.
+	sessionCtx, sessionCancel := context.WithCancel(ctx)
+
+	// Defer order (LIFO): cleanup → sessionCancel → wg.Done.
+	// sessionCancel must fire before wg.Done so the transport-
+	// close goroutine below exits before the server's wg.Wait
+	// returns.
+	defer s.wg.Done()
+	defer sessionCancel()
+	defer func() {
+		if admin {
+			if err := t.Close(); err != nil {
+				log.Debugf("admin close %v: %v", id, err)
+			}
+		} else {
+			// Disarm any pending ping timeout so pingExpired
+			// does not fire on an already-closing transport.
+			_, _ = s.pings.Delete(*id)
+			if err := s.deleteSession(id); err != nil {
+				log.Debugf("delete session %v: %v", id, err)
+			}
+			s.rebuildRoutes()
+		}
+	}()
+
+	// Close transport on context cancellation to unblock
+	// ReadEnvelope.  deleteAllSessions covers the common case,
+	// but connections mid-handshake can finish newSession+handle
+	// after deleteAllSessions ran.  This goroutine guarantees
+	// every handle() unblocks.  Lifecycle: bounded by
+	// sessionCtx; exits before wg.Done via defer ordering above.
+	go func() {
+		<-sessionCtx.Done()
+		t.Close()
+	}()
+
+	log.Debugf("handle: %v admin=%v", id, admin)
+	defer log.Debugf("handle exit: %v", id)
+
+	// Admin sessions skip gossip, ping, and rate limiting.
+	// They exist only for ceremony injection and status queries.
+	var limiter *rate.Limiter
+	if !admin {
+		s.wg.Add(1)
+		go s.pingLoop(sessionCtx, id, t)
+
+		err := t.Write(s.secret.Identity, PeerNotify{
+			Count: s.PeerCount(),
+		})
+		if err != nil {
+			log.Warningf("initial peer notify %v: %v", id, err)
+		}
+		err = t.Write(s.secret.Identity, PeerListRequest{})
+		if err != nil {
+			log.Warningf("initial peer list request %v: %v", id, err)
+		}
+
+		err = t.Write(s.secret.Identity, PingRequest{
+			OriginTimestamp: time.Now().Unix(),
+		})
+		if err != nil {
+			log.Warningf("initial ping %v: %v", id, err)
+		} else {
+			ipt := s.cfg.InitialPingTimeout
+			if ipt == 0 {
+				ipt = initialPingTimeout
+			}
+			s.pings.Put(sessionCtx, ipt, *id, t, s.pingExpired, nil)
+		}
+
+		limiter = s.peerLimiter(*id)
+	}
+
+	// Budget for REFUSED messages.  Independent of limiter so that
+	// pacing cannot erase accumulated evidence of abuse.
+	var dropLimiter *rate.Limiter
+	if !admin {
+		dropLimiter = rate.NewLimiter(messageDropRate, messageDropBurst)
+	}
+
+	for {
+		header, payload, _, err := t.ReadEnvelope()
+		if err != nil {
+			// Debug not Error — fires on every normal session
+			// teardown (transport close breaks ReadEnvelope).
+			log.Debugf("read %v: %v", id, err)
+			return
+		}
+
+		if limiter != nil && !limiter.Allow() {
+			s.rateDropped.Add(1)
+			if dropLimiter != nil && !dropLimiter.Allow() {
+				// Sustained abuse: the decrypt cost has
+				// already been paid and will be paid again for
+				// every message this peer sends.  Close the
+				// session so the peer has to reconnect.
+				s.rateDisconnects.Add(1)
+				log.Warningf("rate limited %v: sustained refusal "+
+					"rate above %d/s, disconnecting",
+					id, messageDropRate)
+				return
+			}
+			log.Debugf("rate limited %v: dropping message", id)
+			continue
+		}
+
+		// Dedup: drop messages we have already seen.
+		// Only applied to routed messages (those with a
+		// destination).  Local one-hop messages like ping,
+		// gossip are unique per exchange and don't need dedup.
+		if header.Destination != nil {
+			if s.isDuplicate(sessionCtx, header) {
+				log.Debugf("handle %v: duplicate message dropped", id)
+				s.dedupDropped.Add(1)
+				continue
+			}
+		}
+
+		// Cleartext TSS rejection: a TSSMessage must never
+		// carry a routing header.  Legitimate cleartext TSS
+		// is one-hop (Destination == nil, via Write).  Multi-
+		// hop TSS must be inside an EncryptedPayload.  If a
+		// peer sends a routed cleartext TSSMessage, it is
+		// either buggy or malicious — disconnect immediately.
+		if _, isTSS := payload.(*TSSMessage); isTSS && header.Destination != nil {
+			log.Warningf("handle %v: cleartext TSSMessage with routing header: disconnecting", id)
+			return
+		}
+
+		// broadcastVerified is per message, not per session.
+		broadcastVerified := false
+
+		// Forward: if destination is set and is not us,
+		// decrement TTL and relay to the next hop.
+		// Broadcast: if destination is BroadcastDestination,
+		// forward to all peers except source, then fall
+		// through to local dispatch.
+		if header.Destination != nil && *header.Destination == BroadcastDestination {
+			if header.TTL == 0 {
+				log.Debugf("handle %v: broadcast TTL expired", id)
+				continue
+			}
+			if !IsBroadcastable(payload) {
+				log.Warningf("handle %v: non-broadcastable type %T dropped", id, payload)
+				continue
+			}
+			// Authenticate before relaying.  Forwarding first
+			// turns one forged message into one write per edge
+			// of the mesh; the signature check is stateless, so
+			// every relay can make it.
+			if err := VerifyBroadcast(payload); err != nil {
+				log.Warningf("handle %v: unauthenticated broadcast dropped: %v",
+					id, err)
+				s.broadcastDropped.Add(1)
+				continue
+			}
+			s.forwardBroadcast(header, payload, id)
+			broadcastVerified = true
+			// Fall through to dispatch for local processing.
+		} else if header.Destination != nil && *header.Destination != s.secret.Identity {
+			s.forward(header, payload, id)
+			continue
+		}
+
+		// If this message was routed to us (has destination == us),
+		// count it for observability.
+		if header.Destination != nil {
+			s.routedReceived.Add(1)
+		}
+
+		// Gate on trace level so spew.Sdump does not run on
+		// every message when tracing is disabled.
+		if log.IsTraceEnabled() {
+			log.Tracef("%v", spew.Sdump(header))
+			log.Tracef("%v", spew.Sdump(payload))
+		}
+
+		// Dispatch payload through the registration-based handler map.
+		dc := &dispatchCtx{
+			ctx:        ctx,
+			sessionCtx: sessionCtx,
+			s:          s,
+			id:         id,
+			t:          t,
+			admin:      admin,
+
+			broadcastVerified: broadcastVerified,
+		}
+		if dispatchPayload(dc, payload) {
+			return dc.busy
+		}
+	}
+}
+
+// pingLoop sends periodic PingRequest heartbeats to the peer.  It exits
+// when ctx is cancelled (handle() returned) or a write fails.
+// After each ping, a TTL is armed; if no pong arrives before it
+// expires, pingExpired closes the transport which breaks the blocked
+// read in handle().
+func (s *Server) pingLoop(ctx context.Context, id *Identity, t *Transport) {
+	defer s.wg.Done()
+
+	interval := s.cfg.PingInterval
+	if interval == 0 {
+		interval = pingInterval
+	}
+	timeout := s.cfg.PingTimeout
+	if timeout == 0 {
+		timeout = pingTimeout
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Cancel any previous unanswered ping.
+			_ = s.pings.Cancel(*id)
+
+			err := t.Write(s.secret.Identity, PingRequest{
+				OriginTimestamp: time.Now().Unix(),
+			})
+			if err != nil {
+				log.Debugf("ping %v failed: %v", id, err)
+				return
+			}
+
+			// Arm timeout — pingExpired closes the transport
+			// if no pong arrives.
+			s.pings.Put(ctx, timeout, *id, t, s.pingExpired, nil)
+		}
+	}
+}
+
+// pingExpired is called when a ping TTL expires without a pong.
+// Closing the transport breaks the blocked ReadEnvelope in handle(),
+// which tears down the session.
+func (s *Server) pingExpired(_ context.Context, key any, value any) {
+	id, ok := key.(Identity)
+	if !ok {
+		log.Errorf("pingExpired: invalid key type: %T", key)
+		return
+	}
+	t, ok := value.(*Transport)
+	if !ok {
+		log.Errorf("pingExpired %v: invalid value type: %T", id, value)
+		return
+	}
+	log.Debugf("pingExpired %v: closing transport", id)
+	t.Close()
+}
+
+// refreshPeerLastSeen updates a peer's LastSeen timestamp and refreshes
+// its TTL entry to prevent expiry.
+func (s *Server) refreshPeerLastSeen(ctx context.Context, id Identity) {
+	s.mtx.Lock()
+	pr, ok := s.peers[id]
+	if ok {
+		pr.LastSeen = time.Now().Unix()
+		if s.ponged != nil {
+			s.ponged[id] = struct{}{}
+		}
+	}
+	s.mtx.Unlock()
+
+	if ok {
+		s.peersTTL.Put(ctx, peerTTL, id,
+			nil, s.peerExpired, nil)
+	}
+}
+
+// maintainConnections periodically checks whether the session count is
+// below PeersWanted and dials randomly-chosen known-but-unconnected
+// peers to fill the gap.
+func (s *Server) maintainConnections(ctx context.Context) {
+	defer s.wg.Done()
+
+	interval := s.cfg.MaintainInterval
+	if interval == 0 {
+		interval = maintainInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.mtx.RLock()
+			active := len(s.sessions)
+			want := s.cfg.PeersWanted
+			s.mtx.RUnlock()
+
+			if active < want {
+				s.connectRandom(ctx)
+			}
+		}
+	}
+}
+
+// dnsResolver returns the server's DNS resolver. If none was injected
+// (e.g. by tests), it returns the default system resolver.
+func (s *Server) dnsResolver() *net.Resolver {
+	if s.resolver != nil {
+		return s.resolver
+	}
+	return net.DefaultResolver
+}
+
+// seed resolves DNS seed hostnames to IP addresses and kicks off
+// connections. Errors are logged, not fatal — a node can still
+// operate in listen-only mode or learn peers via inbound gossip.
+func (s *Server) seed(ctx context.Context) {
+	log.Tracef("seed")
+	defer log.Tracef("seed exit")
+
+	resolver := s.dnsResolver()
+	seedCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	for _, v := range s.cfg.Seeds {
+		host, port, err := net.SplitHostPort(v)
+		if err != nil {
+			log.Errorf("seed parse: %v", err)
+			continue
+		}
+
+		ips, err := resolver.LookupHost(seedCtx, host)
+		if err != nil {
+			log.Errorf("seed lookup %v: %v", host, err)
+			continue
+		}
+
+		// In forward/all mode with a hostname seed, resolve
+		// for dialing but pass the original hostname:port as
+		// the gossip address.  Peers need the hostname for
+		// forward TXT verification.
+		//
+		// In reverse/off mode, the resolved IP is correct
+		// for both dialing and gossip (rDNS verification).
+		var gossipAddr string
+		if (s.cfg.DNS == DNSForward || s.cfg.DNS == DNSAll) && isHostname(host) {
+			gossipAddr = v
+		}
+		for _, ip := range ips {
+			addr := net.JoinHostPort(ip, port)
+			log.Infof("seed resolved %v -> %v", v, addr)
+			s.wg.Add(1)
+			go s.connectPeer(ctx, addr, gossipAddr)
+		}
+	}
+}
+
+// verifyDNSIdentity does a forward TXT lookup on hostname and verifies
+// the identity in the TXT record matches the expected identity.
+//
+// DNS verification is defense-in-depth for operational assurance — it
+// lets operators detect misconfigured or rogue nodes early.  The real
+// identity proof comes from the KX + secretbox layer.  An attacker who
+// controls DNS responses can forge TXT records; the crypto layer
+// prevents them from impersonating a node regardless.
+//
+// If multiple TXT records exist, only the first with v=transfunctioner
+// is considered authoritative.  A hostname should publish exactly one
+// record for this application.
+func (s *Server) verifyDNSIdentity(ctx context.Context, hostname string, id Identity) error {
+	log.Tracef("verifyDNSIdentity %v", hostname)
+	defer log.Tracef("verifyDNSIdentity %v exit", hostname)
+	resolver := s.dnsResolver()
+	txts, err := resolver.LookupTXT(ctx, hostname)
+	if err != nil {
+		return fmt.Errorf("dns txt lookup %v: %w", hostname, err)
+	}
+	if len(txts) == 0 {
+		return fmt.Errorf("dns no txt records for %v", hostname)
+	}
+	// Try each TXT record — there may be multiple.
+	for _, txt := range txts {
+		m, err := kvFromTxt(txt)
+		if err != nil {
+			continue
+		}
+		if m["v"] != dnsAppName {
+			continue
+		}
+		remoteDNSID, err := NewIdentityFromString(m["identity"])
+		if err != nil {
+			continue
+		}
+		if subtle.ConstantTimeCompare(id[:], remoteDNSID[:]) == 1 {
+			return nil
+		}
+		return fmt.Errorf("dns identity mismatch: got %v, want %v",
+			remoteDNSID, id)
+	}
+	return fmt.Errorf("dns no valid txt record for %v", hostname)
+}
+
+// isHostname returns true if host is a DNS name (not an IP address).
+func isHostname(host string) bool {
+	return net.ParseIP(host) == nil
+}
+
+// dnsRateLimited returns true if the remote IP has exceeded the DNS
+// lookup rate limit.  Keyed by IP string with a 60s TTL — each IP
+// gets one lookup attempt per minute.  The handshake semaphore limits
+// concurrency; this limits frequency.
+func (s *Server) dnsRateLimited(remoteAddr net.Addr) bool {
+	host, _, err := net.SplitHostPort(remoteAddr.String())
+	if err != nil {
+		return false
+	}
+	if _, _, err := s.dnsLookups.Get(host); err == nil {
+		return true // already looked up recently
+	}
+	// context.Background is intentional: the rate limit entry must
+	// outlive the caller's request context.  If we used the caller's
+	// ctx, canceling the request would cancel the TTL entry and
+	// defeat the rate limit.
+	s.dnsLookups.Put(context.Background(), 59*time.Second,
+		host, struct{}{}, nil, nil)
+	return false
+}
+
+// verifyOutboundDNS verifies DNS identity for outbound connections
+// (connect and connectPeer).  The dial target determines the
+// verification method:
+//
+//   - Hostname target: forward TXT lookup (DNS="forward" or "all")
+//   - IP target: reverse DNS lookup (DNS="reverse" or "all")
+//   - DNS="off": no verification
+//
+// In forward mode, IP-only peers are rejected — only nodes that
+// advertise a verifiable hostname in gossip are accepted.
+func (s *Server) verifyOutboundDNS(ctx context.Context, dialTarget string, remoteAddr net.Addr, id Identity) error {
+	if s.cfg.DNS == DNSOff {
+		return nil
+	}
+
+	host, _, err := net.SplitHostPort(dialTarget)
+	if err != nil {
+		host = dialTarget
+	}
+
+	if isHostname(host) {
+		// Forward verification — available in forward and all modes.
+		switch s.cfg.DNS {
+		case DNSForward, DNSAll:
+			if s.dnsRateLimited(remoteAddr) {
+				return fmt.Errorf("dns rate limited: %v", remoteAddr)
+			}
+			return s.verifyDNSIdentity(ctx, host, id)
+		}
+		return nil
+	}
+
+	// IP target — forward mode rejects IP-only peers.
+	switch s.cfg.DNS {
+	case DNSForward:
+		return fmt.Errorf("dns forward: rejecting IP-only peer %v", dialTarget)
+	case DNSReverse, DNSAll:
+		if s.dnsRateLimited(remoteAddr) {
+			return fmt.Errorf("dns rate limited: %v", remoteAddr)
+		}
+		ok, err := VerifyRemoteDNSIdentity(ctx, s.dnsResolver(), remoteAddr, id)
+		if err != nil {
+			return fmt.Errorf("dns reverse verify %v: %w", remoteAddr, err)
+		}
+		if !ok {
+			return fmt.Errorf("dns reverse identity mismatch: %v", remoteAddr)
+		}
+		return nil
+	}
+	return nil
+}
+
+// verifyInboundDNS verifies DNS identity for incoming connections.
+// Incoming connections only have a remote IP — no hostname is known
+// until the peer gossips its address.
+//
+//   - DNS="forward": accept without verification (no hostname to check)
+//   - DNS="reverse" or "all": reverse DNS verify the remote IP
+//   - DNS="off": no verification
+func (s *Server) verifyInboundDNS(ctx context.Context, remoteAddr net.Addr, id Identity) error {
+	// Loopback connections are localhost admin clients (hemictl).
+	// DNS is meaningless for 127.0.0.1 and would reject the only
+	// way to send commands to the node.  Same pattern as requireAdmin.
+	if isLocalhost(remoteAddr) {
+		return nil
+	}
+	switch s.cfg.DNS {
+	case DNSReverse, DNSAll:
+		if s.dnsRateLimited(remoteAddr) {
+			return fmt.Errorf("dns rate limited: %v", remoteAddr)
+		}
+		ok, err := VerifyRemoteDNSIdentity(ctx, s.dnsResolver(), remoteAddr, id)
+		if err != nil {
+			return fmt.Errorf("dns reverse verify %v: %w", remoteAddr, err)
+		}
+		if !ok {
+			return fmt.Errorf("dns reverse identity mismatch: %v", remoteAddr)
+		}
+	}
+	return nil
+}
+
+// connectRandom picks a random known peer that has no active session
+// and dials it.  Errors are logged, not fatal.
+func (s *Server) connectRandom(ctx context.Context) {
+	s.mtx.RLock()
+	gap := s.cfg.PeersWanted - len(s.sessions)
+	candidates := make([]PeerRecord, 0, len(s.peers))
+	for id, pr := range s.peers {
+		if id == s.secret.Identity {
+			continue // skip self
+		}
+		if _, active := s.sessions[id]; active {
+			continue // already connected
+		}
+		if pr.Address == "" {
+			continue // no address to dial
+		}
+		// In forward mode, skip peers that only advertise an IP
+		// address — they cannot be verified via TXT lookup.
+		if s.cfg.DNS == DNSForward || s.cfg.DNS == DNSAll {
+			if host, _, err := net.SplitHostPort(pr.Address); err == nil {
+				if !isHostname(host) {
+					continue
+				}
+			}
+		}
+		candidates = append(candidates, *pr)
+	}
+	s.mtx.RUnlock()
+
+	if gap <= 0 || len(candidates) == 0 {
+		return
+	}
+
+	// Shuffle to avoid topology clustering using crypto/rand.
+	// Dial up to the remaining gap — some will be rejected
+	// (BusyResponse from full peers), but trying multiple per
+	// cycle converges faster than one-per-cycle in large meshes.
+	for i := len(candidates) - 1; i > 0; i-- {
+		var buf [8]byte
+		if _, err := rand.Read(buf[:]); err != nil {
+			log.Warningf("maintainConnections: rand.Read: %v", err)
+			break
+		}
+		j := int(binary.BigEndian.Uint64(buf[:]) % uint64(i+1))
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	}
+
+	if gap > len(candidates) {
+		gap = len(candidates)
+	}
+
+	for i := 0; i < gap; i++ {
+		pr := candidates[i]
+		log.Infof("maintainConnections: dialing %v at %v",
+			pr.Identity, pr.Address)
+		s.wg.Add(1)
+		go s.connectPeer(ctx, pr.Address, "")
+	}
+}
+
+// tcpKeepAlive enables TCP keepalive on conn with the given period.
+// Non-TCP connections (e.g. net.Pipe in tests) are a silent no-op.
+func tcpKeepAlive(conn net.Conn, period time.Duration) {
+	tc, ok := conn.(*net.TCPConn)
+	if !ok {
+		return
+	}
+	if err := tc.SetKeepAlive(true); err != nil {
+		log.Warningf("tcp keepalive: %v", err)
+		return
+	}
+	if err := tc.SetKeepAlivePeriod(period); err != nil {
+		log.Warningf("tcp keepalive period: %v", err)
+	}
+}
+
+// connectPeer dials addr, performs key exchange and handshake, registers
+// the session, and enters handle().  Unlike connect(), errors are logged
+// rather than sent to errC - failed maintenance dials must not kill the
+// server.
+//
+// gossipAddr overrides the address stored in the PeerRecord and used
+// for DNS verification.  When empty, addr is used for both.  seed()
+// passes a hostname:port gossipAddr in forward/all mode so the mesh
+// gossips hostnames instead of resolved IPs.
+func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
+	defer s.wg.Done()
+
+	log.Debugf("connectPeer: %v", addr)
+	defer log.Debugf("connectPeer: %v exit", addr)
+
+	// Reject self before wasting a dial.
+	s.mtx.RLock()
+	selfAddr := s.listenAddress
+	s.mtx.RUnlock()
+	if selfAddr != "" && addr == selfAddr {
+		log.Debugf("connectPeer: skipping self %v", addr)
+		return
+	}
+
+	conn, err := s.dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		log.Warningf("connectPeer dial %v: %v", addr, err)
+		return
+	}
+	tcpKeepAlive(conn, tcpKeepAlivePeriod)
+
+	transport := new(Transport)
+	greatSuccess := false
+	defer func() {
+		if !greatSuccess {
+			// A transport whose dial or key exchange never
+			// completed has no connection to close.  That is the
+			// normal outcome of a failed connect, not an error:
+			// logging it at Errorf produced thousands of
+			// identical lines a second during peer churn and
+			// buried the failure that actually mattered.
+			err := transport.Close()
+			if err != nil && !errors.Is(err, ErrNoConn) {
+				log.Errorf("connectPeer close %v: %v", addr, err)
+			}
+		}
+	}()
+
+	if err := transport.KeyExchange(ctx, conn); err != nil {
+		log.Warningf("connectPeer kx %v: %v", addr, err)
+		return
+	}
+	them, naclPub, err := transport.Handshake(ctx, s.secret)
+	if err != nil {
+		log.Warningf("connectPeer handshake %v: %v", addr, err)
+		return
+	}
+
+	// Defense-in-depth: reject self even if the address didn't
+	// match (e.g. hostname resolved to our IP, NAT hairpin).
+	if *them == s.secret.Identity {
+		log.Warningf("connectPeer: connected to self at %v", addr)
+		return
+	}
+
+	// DNS verification based on peer address from gossip.
+	// Hostname addresses get forward TXT verification.
+	// IP addresses get reverse DNS verification (if enabled).
+	recordAddr := gossipAddr
+	if recordAddr == "" {
+		recordAddr = addr
+	}
+	if err := s.verifyOutboundDNS(ctx, recordAddr, conn.RemoteAddr(), *them); err != nil {
+		log.Warningf("connectPeer dns %v: %v", recordAddr, err)
+		return
+	}
+
+	if err := s.newSession(them, transport); err != nil {
+		log.Warningf("connectPeer session %v: %v", them, err)
+		return
+	}
+	s.rebuildRoutes()
+
+	s.addPeer(ctx, PeerRecord{
+		Identity: *them,
+		Address:  recordAddr,
+		Version:  ProtocolVersion,
+		LastSeen: time.Now().Unix(),
+	})
+	// The handshake signature covered this key — bind it.
+	if err := s.bindPeerKey(ctx, *them, naclPub); err != nil {
+		log.Errorf("connectPeer %v: %v", them, err)
+	}
+	s.notifyAllPeers(ctx)
+
+	log.Infof("connectPeer connected %v: %v", conn.RemoteAddr(), them)
+
+	greatSuccess = true
+	s.wg.Add(1)
+	s.handle(ctx, them, transport, false)
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -203,21 +1595,1291 @@ func (s *Server) Collectors() []prometheus.Collector {
 
 	if s.promCollectors == nil {
 		// Naming: https://prometheus.io/docs/practices/naming/
+		ns := s.cfg.PrometheusNamespace
 		s.promCollectors = []prometheus.Collector{
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
+				Namespace: ns,
 				Name:      "running",
-				Help:      "Whether the TBC service is running",
+				Help:      "Whether the continuum service is running",
 			}, s.promRunning),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "healthy",
+				Help:      "Whether the node is healthy (listening with peers)",
+			}, s.promHealthy),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "uptime_seconds",
+				Help:      "Seconds since the service started",
+			}, s.promUptime),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "sessions_active",
+				Help:      "Number of active peer sessions",
+			}, s.promSessions),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "peers_known",
+				Help:      "Number of known peer records",
+			}, s.promPeersKnown),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "peers_live",
+				Help:      "Peers that responded to at least one ping",
+			}, s.promPeersLive),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "messages_forwarded_total",
+				Help:      "Total messages forwarded to next hop",
+			}, s.promForwarded),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "messages_routed_received_total",
+				Help:      "Total routed messages received at final destination",
+			}, s.promRoutedReceived),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "messages_dedup_dropped_total",
+				Help:      "Total messages dropped by dedup cache",
+			}, s.promDedupDropped),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "broadcasts_sent_total",
+				Help:      "Total broadcasts originated by this node",
+			}, s.promBroadcastsSent),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "ceremonies_active",
+				Help:      "Number of currently running ceremonies",
+			}, s.promCeremoniesActive),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "ceremonies_completed_total",
+				Help:      "Total ceremonies completed successfully",
+			}, s.promCeremoniesCompleted),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "ceremonies_failed_total",
+				Help:      "Total ceremonies that failed",
+			}, s.promCeremoniesFailed),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "messages_rate_dropped_total",
+				Help:      "Messages dropped by per-peer-identity rate limiter",
+			}, s.promRateDropped),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "broadcasts_unauthenticated_dropped_total",
+				Help:      "Broadcasts dropped before relay for a bad signature",
+			}, s.promBroadcastDropped),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "tss_pending_dropped_total",
+				Help:      "TSS messages refused by the pending-queue caps",
+			}, s.promTSSPendingDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "tss_pending_expired_total",
+				Help:      "TSS messages discarded waiting for their ceremony",
+			}, s.promTSSPendingExpired),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "ceremony_records_dropped_total",
+				Help:      "Remote ceremony status records refused, tracking map full",
+			}, s.promCeremonyRecordDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "connections_cooldown_dropped_total",
+				Help:      "Connections rejected by per-IP cooldown",
+			}, s.promCooldownDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "handshakes_rate_dropped_total",
+				Help:      "Connections rejected by per-IP handshake rate limit",
+			}, s.promHSRateDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "sessions_rate_disconnected_total",
+				Help:      "Sessions closed for sustained rate limit abuse",
+			}, s.promRateDisconnects),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "envelopes_rate_dropped_total",
+				Help:      "Envelopes dropped by per-sender rate gate",
+			}, s.promEnvRateDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "peer_key_conflicts_total",
+				Help:      "Rejected attempts to rebind a peer e2e key; always an attack or broken peer",
+			}, s.promKeyConflicts),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "nacl_xchg_dropped_total",
+				Help:      "NaCl key exchange messages dropped (malformed, unsolicited, rate limited, or bad signature)",
+			}, s.promNaClXchgDrops),
 		}
 	}
 	return s.promCollectors
 }
 
+// Running reports whether the server is currently running.
 func (s *Server) Running() bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return s.isRunning
+}
+
+// ListenAddress returns the actual address the server is listening on.
+func (s *Server) ListenAddress() string {
+	log.Tracef("ListenAddress")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return s.listenAddress
+}
+
+// Identity returns the server's identity. Only valid after Run() has been
+// called.
+func (s *Server) Identity() Identity {
+	log.Tracef("Identity")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.secret == nil {
+		return Identity{}
+	}
+	return s.secret.Identity
+}
+
+// SessionIdentities returns the identities of all active sessions.
+func (s *Server) SessionIdentities() []Identity {
+	log.Tracef("SessionIdentities")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	ids := make([]Identity, 0, len(s.sessions))
+	for id := range s.sessions {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// PeerCount returns the number of known peers.
+func (s *Server) PeerCount() int {
+	log.Tracef("PeerCount")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return len(s.peers)
+}
+
+// sendTo sends a command to a remote peer, routing through the mesh if
+// no direct session exists.  When no direct session is available, the
+// message is sent via an arbitrary connected peer for multi-hop
+// forwarding.  Returns an error if no sessions are available.
+func (s *Server) sendTo(dest Identity, cmd any) error {
+	log.Tracef("sendTo %v", dest)
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	// Direct session: send with routing header so the destination
+	// knows this was an addressed message.
+	// A write failure here means the session is dead but has not
+	// been reaped yet.  Fall through to the next strategy rather
+	// than returning: the point of the route and flood fallbacks
+	// is to survive exactly this.
+	if t, ok := s.sessions[dest]; ok {
+		err := t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+		if err == nil {
+			return nil
+		}
+		log.Debugf("sendTo %v: direct write failed: %v", dest, err)
+	}
+
+	// Route via gossip topology table: send to the computed
+	// next hop on the shortest path to dest.
+	if hop, ok := s.routeNextHop(dest); ok {
+		if t, ok := s.sessions[hop]; ok {
+			err := t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+			if err == nil {
+				log.Debugf("sendTo %v via route hop %v", dest, hop)
+				return nil
+			}
+			log.Debugf("sendTo %v via route hop %v: %v", dest, hop, err)
+		}
+	}
+
+	// Flood fallback: routing table is stale or incomplete.
+	// Send to all peers and let dedup + TTL handle convergence.
+	var sent int
+	for id, t := range s.sessions {
+		if err := t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd); err != nil {
+			log.Debugf("sendTo flood %v via %v: %v", dest, id, err)
+		} else {
+			sent++
+		}
+	}
+	if sent == 0 {
+		return errors.New("no route to destination")
+	}
+	log.Debugf("sendTo %v: flooded to %d peer(s) (no route)", dest, sent)
+	return nil
+}
+
+// SendEncrypted encrypts cmd with nacl box to the destination's X25519
+// public key, then routes the EncryptedPayload through the mesh.
+// Intermediate nodes can read the routing header but not the payload.
+func (s *Server) SendEncrypted(dest Identity, cmd any) error {
+	log.Tracef("SendEncrypted %v %T", dest, cmd)
+
+	// Broadcast-type payloads must use Broadcast(), not point-to-point
+	// e2e encryption.  This guard prevents accidental misuse.
+	if IsBroadcastable(cmd) {
+		return ErrUseBroadcast
+	}
+
+	// Look up the inner command's PayloadType.
+	innerType, ok := pt2str[reflect.TypeOf(cmd)]
+	if !ok {
+		return fmt.Errorf("unknown command type: %T", cmd)
+	}
+
+	// Look up the destination's AUTHENTICATED e2e key.  Only
+	// bindPeerKey writes this field, and only after a handshake or
+	// NaClKeyRequest exchange proved the binding.  Callers that may
+	// race key discovery use ensurePeerKey/ensurePeerKeys first.
+	//
+	// Read through peerNaClPub so the slice header is copied under
+	// s.mtx: bindPeerKey mutates the published record in place, so
+	// an unlocked field read would race it.  The backing array is
+	// safe to use after the lock is dropped because a bound key is
+	// immutable — a conflicting rebind is rejected, never applied.
+	naclPub, ok := s.peerNaClPub(dest)
+	if !ok {
+		s.mtx.RLock()
+		_, known := s.peers[dest]
+		s.mtx.RUnlock()
+		if !known {
+			return fmt.Errorf("unknown peer: %v", dest)
+		}
+		return fmt.Errorf("peer %v has no authenticated e2e key", dest)
+	}
+
+	// Serialize the inner command.
+	plaintext, err := json.Marshal(cmd)
+	// untested: json.Marshal of wire command types cannot fail (no channels, funcs, or cycles)
+	if err != nil {
+		return fmt.Errorf("marshal inner: %w", err)
+	}
+
+	// Encrypt with ephemeral sender key.
+	ep, err := SealBox(plaintext, naclPub, s.secret, innerType)
+	// untested: SealBox wraps rand.Read + box.Seal; fails only on OS entropy exhaustion
+	if err != nil {
+		return fmt.Errorf("seal: %w", err)
+	}
+
+	return s.sendTo(dest, *ep)
+}
+
+// decryptPayload decrypts an EncryptedPayload received at this node.
+// Verifies the sender's secp256k1 signature over the envelope hash,
+// then opens the nacl box using the ephemeral public key carried in
+// the payload.
+func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
+	log.Tracef("decryptPayload sender %v type %v", ep.Sender, ep.InnerType)
+
+	// Per-sender envelope rate gate (F3): limit how many
+	// envelopes we accept from one sender before paying the
+	// secp256k1 Verify cost (~200μs).  Prevents signature
+	// verification amplification via forged envelopes.
+	if s.envelopeRates != nil {
+		key := ep.Sender.String()
+		if v, _, err := s.envelopeRates.Get(key); err == nil {
+			count := v.(*atomic.Int64)
+			if count.Add(1) > int64(envelopeRateLimit) {
+				s.envRateDrops.Add(1)
+				return nil, fmt.Errorf("envelope rate limited: %v", ep.Sender)
+			}
+		} else {
+			counter := new(atomic.Int64)
+			counter.Store(1)
+			s.envelopeRates.Put(context.Background(), envelopeRateTTL,
+				key, counter, nil, nil)
+		}
+	}
+
+	// Verify sender signature before touching the box.
+	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.Sender, ep.InnerType, ep.Ciphertext)
+	if _, err := Verify(hash, ep.Sender, ep.Signature); err != nil {
+		return nil, fmt.Errorf("envelope signature: %w", err)
+	}
+
+	recipientPriv, err := s.secret.NaClPrivateKey()
+	// untested: NaClPrivateKey derives curve25519 from valid secp256k1; cannot fail with valid secret
+	if err != nil {
+		return nil, fmt.Errorf("nacl private key: %w", err)
+	}
+
+	plaintext, err := OpenBox(ep, recipientPriv)
+	if err != nil {
+		return nil, err
+	}
+
+	// Replay protection analysis.
+	//
+	// Two tiers protect against replay:
+	//
+	//  - Direct peers: the transport runs over a point-to-point
+	//    TCP stream.  Re-injecting a transport frame requires
+	//    TCP-level MitM, which is a separate and much harder
+	//    threat than mesh-level replay.
+	//
+	//  - Routed peers: a routing node sees the raw EncryptedPayload
+	//    between tunnels and could save/replay it.  The routing-layer
+	//    dedup cache (67s TTL) catches immediate replays.  Beyond
+	//    that window, the inner protocol state machines (below) make
+	//    replayed messages inert.
+	//
+	// Per-inner-type analysis beyond the dedup window:
+	//
+	//  - Ceremony-initiating messages (KeygenRequest, SignRequest,
+	//    ReshareRequest): in production these originate from the
+	//    blockchain watcher via CeremonyInitiator, never from the
+	//    wire.  Debug-mode wire initiation is build-tagged out of
+	//    production binaries.  No replay risk in production.
+	//
+	//  - TSS round messages (TSSMessage): tss-lib state machines
+	//    reject duplicate or out-of-order round messages internally.
+	//    Replay after dedup expiry is harmless.
+	//
+	//  - CeremonyResult (broadcast): handleCeremonyResult is
+	//    idempotent — duplicate results for a completed ceremony
+	//    are logged and dropped.
+	//
+	// If a future protocol change routes non-idempotent encrypted
+	// commands through the mesh, add a per-sender nonce registry
+	// here: reject if (Sender, Nonce) was already seen.  The NaCl
+	// box nonce is random per SealBox and invariant across replays,
+	// so collision == replay.
+
+	// Decode using the InnerType hint.
+	ct, ok := str2pt[ep.InnerType]
+	if !ok {
+		return nil, fmt.Errorf("unknown inner type: %v", ep.InnerType)
+	}
+	cmd := reflect.New(ct)
+	if err := json.Unmarshal(plaintext, cmd.Interface()); err != nil {
+		return nil, fmt.Errorf("unmarshal inner: %w", err)
+	}
+	return cmd.Interface(), nil
+}
+
+// RoutedReceived returns the count of messages that arrived at this
+// node as their final destination via routing.
+func (s *Server) RoutedReceived() int64 {
+	return s.routedReceived.Load()
+}
+
+// Forwarded returns the count of messages this node has forwarded
+// to other peers.
+func (s *Server) Forwarded() int64 {
+	return s.forwarded.Load()
+}
+
+// isLocalhost reports whether the given net.Addr is a loopback address.
+func isLocalhost(addr net.Addr) bool {
+	if addr == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}
+
+// requireAdmin authorizes an admin RPC.  The request must have
+// arrived directly on the dedicated admin listener (dc.admin) AND
+// that socket must be loopback.
+//
+// The provenance check is the real gate.  A loopback peer address is
+// not evidence of an admin client: a co-located mesh node dials from
+// 127.0.0.1, and the last hop of a routed or encrypted message is
+// whatever peer forwarded it — authorizing on the socket address
+// alone lets either of them act as the operator.
+//
+// Returns false and logs a warning if rejected.
+func requireAdmin(dc *dispatchCtx) bool {
+	if !dc.admin {
+		log.Warningf("handle %v: admin request off the admin listener, rejected",
+			dc.id)
+		return false
+	}
+	if !isLocalhost(dc.t.RemoteAddr()) {
+		log.Warningf("handle %v: admin request from non-localhost, rejected",
+			dc.id)
+		return false
+	}
+	return true
+}
+
+// registerCeremony records a new ceremony in the tracking map and
+// returns the context its driver must run under.  The context derives
+// from s.tssCtx so server shutdown propagates cancellation, and it is
+// cancelled by failCeremony — including a verified CeremonyAbort — so
+// an abort stops the rounds rather than only relabelling the status.
+//
+// It also carries a deadline (Config.CeremonyTimeout).  Every TSS
+// round blocks until each participant has been heard from, so a
+// participant that goes offline or withholds a message would
+// otherwise pin the driver goroutine and the tracking entry for the
+// life of the process, and eviction never reclaims the entry because
+// it skips running ceremonies.  On expiry the round returns the
+// context error and the driver fails the ceremony like any other
+// failure.
+//
+// If a ceremony with the same ID is already running, registration is
+// refused and false is returned: the caller must not start another
+// driver.  This keeps re-delivery or a reorg from clobbering the
+// in-flight state or running two sets of rounds under one ID.  A
+// terminal (complete or failed) entry is replaced.
+func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity, committee []Identity) (context.Context, bool) {
+	timeout := s.cfg.CeremonyTimeout
+	if timeout <= 0 {
+		timeout = defaultCeremonyTimeout
+	}
+	ctx, cancel := context.WithTimeout(s.tssCtx, timeout) //nolint:gosec // cancel stored in CeremonyInfo, called on ceremony completion
+	s.mtx.Lock()
+	if existing, ok := s.ceremonies[cid]; ok && existing.Status == CeremonyRunning {
+		s.mtx.Unlock()
+		cancel() // release context; we won't use it
+		log.Warningf("registerCeremony %s: already running, skipping duplicate", cid)
+		return nil, false
+	}
+	s.ceremonies[cid] = &CeremonyInfo{
+		Type:        ct,
+		StartTime:   time.Now().Unix(),
+		Status:      CeremonyRunning,
+		Coordinator: coordinator,
+		Committee:   committee,
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+	s.mtx.Unlock()
+	return ctx, true
+}
+
+// ceremonyAuthorized reports whether signer may declare a result for,
+// or abort, ceremony cid.
+//
+// Keygen carries a coordinator: it is the only node allowed to
+// broadcast the result, so it is the only node allowed to speak for
+// the ceremony.  Sign and reshare have no coordinator — nobody
+// broadcasts their result — so authority there is committee
+// membership.  A committee member can already stall a ceremony by
+// withholding a round, so letting one abort grants it nothing new,
+// while an outsider gets nothing at all.  Before this, a zero
+// coordinator disabled the check entirely and any mesh peer could
+// abort another node's sign or reshare.
+//
+// An untracked ceremony returns true.  There is no committee or
+// coordinator recorded to check a signer against, so this is not an
+// authorization decision the node can make.  The consequence is that a
+// signed CeremonyResult for an unknown ID creates a status-only
+// record; that path is capped by maxTrackedCeremonies rather than by
+// authorization.
+func (s *Server) ceremonyAuthorized(cid CeremonyID, signer Identity) bool {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	ci, ok := s.ceremonies[cid]
+	if !ok {
+		return true
+	}
+	if ci.Coordinator != (Identity{}) {
+		return ci.Coordinator == signer
+	}
+	return slices.Contains(ci.Committee, signer)
+}
+
+// completeCeremony marks a tracked ceremony as complete.  Only a
+// running ceremony transitions: the first terminal state wins, so a
+// driver that finishes after a CeremonyAbort already failed the
+// ceremony does not flip it back to complete.
+//
+// Cancel is called outside the lock to avoid potential deadlock
+// if a ci.ctx.Done() waiter touches s.mtx.
+func (s *Server) completeCeremony(cid CeremonyID) {
+	s.mtx.Lock()
+	ci, ok := s.ceremonies[cid]
+	ok = ok && ci.Status == CeremonyRunning
+	if ok {
+		ci.Status = CeremonyComplete
+	}
+	s.mtx.Unlock()
+	if ok {
+		ci.cancel()
+	}
+}
+
+// failCeremony marks a tracked ceremony as failed with an error and
+// cancels its context, which stops the driver's rounds.  Only a
+// running ceremony transitions, so the driver's own context-cancelled
+// error that follows an abort does not overwrite the abort reason.
+func (s *Server) failCeremony(cid CeremonyID, reason string) {
+	s.mtx.Lock()
+	ci, ok := s.ceremonies[cid]
+	ok = ok && ci.Status == CeremonyRunning
+	if ok {
+		ci.Status = CeremonyFailed
+		ci.Error = reason
+	}
+	s.mtx.Unlock()
+	if ok {
+		ci.cancel()
+	}
+}
+
+// handleCeremonyResult processes a broadcast CeremonyResult.  If this
+// node is already tracking the ceremony (as a committee member), the
+// local dispatchKeygen/dispatchSign goroutine owns the status
+// transition — the broadcast is a no-op.  For non-committee nodes
+// this is the only notification — register the ceremony as complete
+// or failed.
+func (s *Server) handleCeremonyResult(r CeremonyResult) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	_, ok := s.ceremonies[r.CeremonyID]
+	if ok {
+		// Committee member: local goroutine owns status; ignore
+		// the broadcast to avoid racing ahead of SaveKeyShare.
+		return
+	}
+
+	// Non-committee node: first time seeing this ceremony.  This is
+	// the only path that lets a remote peer create ceremony state, so
+	// it is capped.
+	if len(s.ceremonies) >= maxTrackedCeremonies {
+		s.ceremonyRecordDrops.Add(1)
+		log.Warningf("ceremony result %s from %v: tracking map full (%d), dropped",
+			r.CeremonyID, r.Signer, maxTrackedCeremonies)
+		return
+	}
+
+	// Pre-cancelled context.Background() — this record is status-only,
+	// no goroutine lifecycle is attached.  The cancel() call is
+	// immediate; the ctx exists solely to satisfy the CeremonyInfo
+	// struct fields so that ci.ctx.Done() is already closed.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ci := &CeremonyInfo{
+		Type:      CeremonyKeygen, // broadcast only comes from keygen for now
+		StartTime: time.Now().Unix(),
+		ctx:       ctx,
+		cancel:    cancel,
+	}
+	if r.Success {
+		ci.Status = CeremonyComplete
+	} else {
+		ci.Status = CeremonyFailed
+		ci.Error = r.Error
+	}
+	s.ceremonies[r.CeremonyID] = ci
+}
+
+// handlePeerListAdmin builds a PeerListAdminResponse from the peer
+// and session maps.
+func (s *Server) handlePeerListAdmin() PeerListAdminResponse {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	resp := PeerListAdminResponse{
+		Peers: make([]PeerAdminRecord, 0, len(s.peers)),
+	}
+	for id, pr := range s.peers {
+		_, connected := s.sessions[id]
+		_, hasPonged := s.ponged[id]
+		self := id == s.secret.Identity
+		resp.Peers = append(resp.Peers, PeerAdminRecord{
+			PeerRecord: *pr,
+			Connected:  connected,
+			Live:       self || (connected && hasPonged),
+			Self:       self,
+		})
+	}
+	return resp
+}
+
+// handleCeremonyStatus returns the status of a specific ceremony.
+func (s *Server) handleCeremonyStatus(cid CeremonyID) CeremonyStatusResponse {
+	// Read the fields under the lock: the ceremony driver writes
+	// them under this same mutex.
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	ci, ok := s.ceremonies[cid]
+	if !ok {
+		return CeremonyStatusResponse{
+			CeremonyID: cid,
+			Found:      false,
+		}
+	}
+	return CeremonyStatusResponse{
+		CeremonyID: cid,
+		Found:      true,
+		Type:       ci.Type.String(),
+		Status:     ci.Status,
+		StartTime:  ci.StartTime,
+		KeyID:      ci.KeyID,
+		Signature:  ci.Signature,
+		Committee:  ci.Committee,
+		Error:      ci.Error,
+	}
+}
+
+// handleCeremonyList returns the status of all known ceremonies.
+func (s *Server) handleCeremonyList() CeremonyListResponse {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	resp := CeremonyListResponse{
+		Ceremonies: make([]CeremonyStatusResponse, 0, len(s.ceremonies)),
+	}
+	for cid, ci := range s.ceremonies {
+		resp.Ceremonies = append(resp.Ceremonies, CeremonyStatusResponse{
+			CeremonyID: cid,
+			Found:      true,
+			Type:       ci.Type.String(),
+			Status:     ci.Status,
+			StartTime:  ci.StartTime,
+			KeyID:      ci.KeyID,
+			Signature:  ci.Signature,
+			Committee:  ci.Committee,
+			Error:      ci.Error,
+		})
+	}
+	return resp
+}
+
+// handlePeerAdd attempts to connect to a peer at the given address.
+func (s *Server) handlePeerAdd(ctx context.Context, addr string) PeerAddResponse {
+	if addr == "" {
+		return PeerAddResponse{
+			Accepted: false,
+			Error:    "address required",
+		}
+	}
+	s.wg.Add(1)
+	go s.connectPeer(ctx, addr, "")
+	return PeerAddResponse{
+		Accepted: true,
+	}
+}
+
+// evictCeremonies removes completed/failed ceremonies older than
+// ceremonyMaxAge from the tracking map.  Running ceremonies are never
+// evicted.  Called periodically from a goroutine started by Run().
+func (s *Server) evictCeremonies(ctx context.Context) {
+	defer s.wg.Done()
+	log.Tracef("evictCeremonies")
+	defer log.Tracef("evictCeremonies exit")
+
+	ticker := time.NewTicker(ceremonyEvictInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		s.evictStaleCeremonies()
+	}
+}
+
+// evictStaleCeremonies is the single-shot eviction pass used by
+// evictCeremonies.  Exported as a method so tests can call it
+// without waiting for the ticker.
+func (s *Server) evictStaleCeremonies() {
+	cutoff := time.Now().Add(-ceremonyMaxAge).Unix()
+	var evicted int
+	s.mtx.Lock()
+	for cid, ci := range s.ceremonies {
+		if ci.Status == CeremonyRunning {
+			continue
+		}
+		if ci.StartTime < cutoff {
+			delete(s.ceremonies, cid)
+			evicted++
+		}
+	}
+	s.mtx.Unlock()
+	if evicted > 0 {
+		log.Debugf("evictCeremonies: removed %d stale entries", evicted)
+	}
+}
+
+// KnownPeers returns all known peer records.
+func (s *Server) KnownPeers() []PeerRecord {
+	log.Tracef("KnownPeers")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	records := make([]PeerRecord, 0, len(s.peers))
+	for _, pr := range s.peers {
+		records = append(records, *pr)
+	}
+	return records
+}
+
+// validatePeerAddress checks that a peer address is a well-formed
+// host:port with reasonable length and no control characters.
+// Loopback/private-range filtering happens at connect time, not here,
+// because locally-learned addresses (e.g. our own) are valid records.
+func validatePeerAddress(addr string) error {
+	if len(addr) > 256 {
+		return fmt.Errorf("address too long: %d", len(addr))
+	}
+	for _, c := range addr {
+		if c < 0x20 {
+			return errors.New("control character in address")
+		}
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("split host port: %w", err)
+	}
+	if host == "" {
+		return errors.New("empty host")
+	}
+	if port == "" || port == "0" {
+		return fmt.Errorf("invalid port: %q", port)
+	}
+	return nil
+}
+
+// peerExpired is the TTL expiry callback for peer records.  It runs
+// in its own goroutine (dispatched by the ttl package).
+func (s *Server) peerExpired(_ context.Context, key, _ any) {
+	id, ok := key.(Identity)
+	if !ok {
+		log.Errorf("peer expired: unexpected key type %T", key)
+		return
+	}
+	s.mtx.Lock()
+	delete(s.peers, id)
+	// Its advertised edges leave the routing graph with it.
+	s.invalidateRoutes()
+	s.mtx.Unlock()
+	log.Debugf("peer expired: %v", id)
+}
+
+// addPeer adds or refreshes a peer's DISCOVERY metadata: address,
+// version, sessions, last-seen.  Returns true if the peer was
+// previously unknown.  Rejects self and version mismatches.
+//
+// addPeer never touches the e2e key.  NaClPub on the incoming record
+// is discarded and an existing binding is always preserved: peer
+// records arrive from unauthenticated gossip, and an e2e key may only
+// be learned from the identity holder itself — via the handshake or
+// the NaClKeyRequest exchange, both of which prove the binding with a
+// secp256k1 signature and store it through bindPeerKey, the sole
+// writer of the field.
+//
+// When updating an existing peer, preserves non-empty Address from
+// the old record if the new record omits it.
+//
+// Sessions are the peer's edges in the routing graph, so a changed
+// session list marks the routing table stale (invalidateRoutes); the
+// caller rebuilds after releasing s.mtx.
+func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
+	log.Tracef("addPeer %v", pr.Identity)
+
+	if pr.Version != ProtocolVersion {
+		log.Warningf("addPeer %v: version %d != %d, rejected",
+			pr.Identity, pr.Version, ProtocolVersion)
+		return false
+	}
+
+	// Never accept key material through a peer record.
+	pr.NaClPub = nil
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	// Don't track ourselves.
+	if pr.Identity == s.secret.Identity {
+		return false
+	}
+
+	// Reject new peers when the table is full.  Updates to
+	// existing peers always pass — only new entries are capped.
+	existing, existed := s.peers[pr.Identity]
+	if !existed && s.cfg.MaxPeers > 0 && len(s.peers) >= s.cfg.MaxPeers {
+		log.Debugf("addPeer %v: peer table full (%d)",
+			pr.Identity, s.cfg.MaxPeers)
+		return false
+	}
+	var oldSessions []Identity
+	if existed {
+		// Preserve Address if the caller doesn't have it.
+		// The listen path knows the session but not the peer's
+		// listen address; gossip may later provide Address.
+		if pr.Address == "" && existing.Address != "" {
+			pr.Address = existing.Address
+		}
+		// Always preserve an authenticated key binding.
+		pr.NaClPub = existing.NaClPub
+		oldSessions = existing.Sessions
+	}
+
+	// A changed session advertisement changes the routing graph.
+	// Unchanged gossip leaves the generation alone so the caller's
+	// rebuildRoutes stays a no-op.
+	if !sameIdentitySet(oldSessions, pr.Sessions) {
+		s.invalidateRoutes()
+	}
+
+	s.peers[pr.Identity] = &pr
+	s.peersTTL.Put(ctx, peerTTL, pr.Identity, &pr, s.peerExpired, nil)
+
+	if !existed {
+		log.Debugf("new peer: %v at %s", pr.Identity, pr.Address)
+	}
+	return !existed
+}
+
+// peerLimiter returns the message rate limiter for a peer identity,
+// creating it on first use.
+//
+// The limiter is keyed on identity and outlives the session so that
+// reconnecting does not refill the burst budget.  A per-session
+// limiter let a peer spend its full burst, drop the connection, and
+// immediately reconnect for another one, which makes the sustained
+// rate unbounded in practice.
+//
+// Identity does NOT bound the table: minting one is free, so an
+// attacker can present a fresh identity per connection.  The table is
+// therefore self-bounding on time — every lookup refreshes an idle
+// expiry of limiterTTL, so an identity that stops connecting is
+// reclaimed whether or not it ever became a tracked peer.  Tying
+// eviction to the peer record instead leaked permanently for any
+// identity addPeer rejects.
+func (s *Server) peerLimiter(id Identity) *rate.Limiter {
+	s.limiterMtx.Lock()
+	defer s.limiterMtx.Unlock()
+
+	var l *rate.Limiter
+	if v, _, err := s.limiters.Get(id); err == nil {
+		l, _ = v.(*rate.Limiter)
+	}
+	if l == nil {
+		l = rate.NewLimiter(messageRate, messageBurst)
+	}
+	// context.Background is intentional, matching dnsRateLimited:
+	// the entry must OUTLIVE the session.  Passing the session
+	// context would cancel the entry on disconnect and hand the
+	// peer a fresh bucket on reconnect, which is the exact hole
+	// this limiter closes.
+	//
+	// Put refreshes the expiry, so an active peer keeps its bucket
+	// and an idle one is reclaimed.
+	s.limiters.Put(context.Background(), limiterTTL, id, l, nil, nil)
+	return l
+}
+
+// handshakeIP returns the map key for a remote address: the source
+// address aggregated to its allocation prefix.
+//
+// IPv6 is masked to /64.  A routed /64 is the standard host
+// allocation, so keying on the full /128 would let one machine mint an
+// unlimited number of distinct keys and bypass any per-source limit
+// entirely.  IPv4 is used whole.
+//
+// The bool reports whether a key could be derived; a non-TCP address
+// has no IP to key on.
+func handshakeIP(addr net.Addr) (string, bool) {
+	ta, ok := addr.(*net.TCPAddr)
+	if !ok {
+		return "", false
+	}
+	if v4 := ta.IP.To4(); v4 != nil {
+		return v4.String(), true
+	}
+	return ta.IP.Mask(net.CIDRMask(64, 128)).String(), true
+}
+
+// acquireHandshake reserves an in-flight handshake slot for a source
+// address.  It reports whether the slot was granted; on success the
+// caller MUST call releaseHandshake with the same key when the
+// handshake finishes, success or failure.
+//
+// A non-TCP address cannot be keyed and is admitted: handshakeSem
+// still bounds total concurrency.
+func (s *Server) acquireHandshake(addr net.Addr) (string, bool) {
+	key, ok := handshakeIP(addr)
+	if !ok {
+		return "", true
+	}
+
+	s.handshakeIPMtx.Lock()
+	defer s.handshakeIPMtx.Unlock()
+
+	if s.handshakesInFlight == nil {
+		s.handshakesInFlight = make(map[string]int)
+	}
+	if s.handshakesInFlight[key] >= maxHandshakesPerIP {
+		return key, false
+	}
+	s.handshakesInFlight[key]++
+	return key, true
+}
+
+// releaseHandshake frees a slot taken by acquireHandshake.  The entry
+// is removed at zero so the map stays bounded by work actually in
+// flight rather than by addresses ever seen.
+func (s *Server) releaseHandshake(key string) {
+	if key == "" {
+		return
+	}
+
+	s.handshakeIPMtx.Lock()
+	defer s.handshakeIPMtx.Unlock()
+
+	n := s.handshakesInFlight[key] - 1
+	if n <= 0 {
+		delete(s.handshakesInFlight, key)
+		return
+	}
+	s.handshakesInFlight[key] = n
+}
+
+// bindPeerKey records an AUTHENTICATED identity→X25519-key binding.
+// It is the only writer of PeerRecord.NaClPub and may only be called
+// after the binding has been proven — a completed handshake (the
+// challenge signature covers the key) or a verified NaClKeyResponse.
+//
+// The binding is immutable for the life of an identity: the X25519
+// key is derived deterministically from the secp256k1 private key
+// (NaClPrivateKey), so a conflicting key is never a rotation — it is
+// provably an attack or a broken peer.  Conflicts are rejected,
+// counted, and logged loudly.
+//
+// If the peer has no record yet (key exchange completed before any
+// gossip arrived), a minimal record is created so SendEncrypted can
+// use the key immediately.
+func (s *Server) bindPeerKey(ctx context.Context, id Identity, naclPub []byte) error {
+	log.Tracef("bindPeerKey %v", id)
+
+	if id == s.secret.Identity {
+		return errors.New("bindPeerKey: refusing to bind self")
+	}
+	if len(naclPub) != NaClPubSize {
+		return fmt.Errorf("bindPeerKey %v: bad NaClPub length %d (want %d)",
+			id, len(naclPub), NaClPubSize)
+	}
+	// Reject all-zeros — cryptographically useless and collides
+	// with the BroadcastDestination sentinel.
+	var zeroKey [NaClPubSize]byte
+	if bytes.Equal(naclPub, zeroKey[:]) {
+		return fmt.Errorf("bindPeerKey %v: all-zeros NaClPub", id)
+	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	pr, ok := s.peers[id]
+	if !ok {
+		pr = &PeerRecord{
+			Identity: id,
+			Version:  ProtocolVersion,
+			LastSeen: time.Now().Unix(),
+		}
+		s.peers[id] = pr
+		s.peersTTL.Put(ctx, peerTTL, id, pr, s.peerExpired, nil)
+	}
+	if len(pr.NaClPub) != 0 {
+		if bytes.Equal(pr.NaClPub, naclPub) {
+			return nil // idempotent re-bind of the same key
+		}
+		// The derivation is deterministic, so this is never
+		// legitimate.  True positive by construction.
+		s.keyConflicts.Add(1)
+		log.Errorf("bindPeerKey %v: CONFLICTING e2e key rejected: "+
+			"identity already bound to a different X25519 key; "+
+			"this is an attack or a broken peer", id)
+		return fmt.Errorf("bindPeerKey %v: conflicting e2e key", id)
+	}
+	pr.NaClPub = append([]byte(nil), naclPub...)
+	s.signalKeyBoundLocked()
+	return nil
+}
+
+// signalKeyBoundLocked wakes every ensurePeerKey waiter.  Callers must
+// hold mtx.  Waiters re-check the peer table, so one broadcast for all
+// identities is enough and costs nothing per waiter.
+func (s *Server) signalKeyBoundLocked() {
+	if s.keyBound == nil {
+		return
+	}
+	close(s.keyBound)
+	s.keyBound = make(chan struct{})
+}
+
+// keyBoundWaiter returns the channel closed by the next successful
+// bind.  Snapshot it BEFORE checking the peer table so a bind landing
+// between the check and the wait still wakes the waiter.
+func (s *Server) keyBoundWaiter() <-chan struct{} {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return s.keyBound
+}
+
+// peerNaClPub returns the authenticated e2e key held for id, or false
+// when none is bound.
+func (s *Server) peerNaClPub(id Identity) ([]byte, bool) {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	pr, ok := s.peers[id]
+	if !ok || len(pr.NaClPub) == 0 {
+		return nil, false
+	}
+	return pr.NaClPub, true
+}
+
+// sendKnownPath delivers cmd to dest over a KNOWN path only: a direct
+// session, or the next hop the routing table already has for dest.  It
+// never falls back to flooding.
+//
+// Use this, not sendTo, whenever a REMOTE party chose the destination.
+// sendTo's flood fallback is correct for traffic a node originates for
+// its own reasons — the destination is one it picked, and the flood is
+// bounded by dedup and TTL like any other originated message.  It is
+// not correct when the destination arrives on the wire: NaClKeyRequest
+// names its own reply target, so flooding would let one small
+// unauthenticated message be amplified across every edge of the mesh.
+// Refusing is the right answer there, since a reply nobody has a path
+// to is a reply nobody asked for.
+func (s *Server) sendKnownPath(dest Identity, cmd any) error {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	if t, ok := s.sessions[dest]; ok {
+		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+	}
+	hop, ok := s.routeNextHop(dest)
+	if !ok {
+		return fmt.Errorf("no known path to %v", dest)
+	}
+	t, ok := s.sessions[hop]
+	if !ok {
+		return fmt.Errorf("no session with next hop %v for %v", hop, dest)
+	}
+	return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+}
+
+// sendNaClKeyRequest issues one key exchange round trip: register a
+// fresh challenge as pending, then route the request toward id.  The
+// pending entry is registered BEFORE the send so a fast response
+// cannot race the bookkeeping, and expires after naclXchgTTL.
+func (s *Server) sendNaClKeyRequest(ctx context.Context, id Identity) error {
+	// Guard for hand-built test servers; NewServer always sets this.
+	if s.naclXchg == nil {
+		return errors.New("key exchange state not initialized")
+	}
+	var challenge [ChallengeSize]byte
+	_, err := rand.Read(challenge[:])
+	// untested: rand.Read fails only on OS entropy exhaustion
+	if err != nil {
+		return fmt.Errorf("key exchange challenge: %w", err)
+	}
+	s.naclXchg.Put(ctx, naclXchgTTL, string(challenge[:]), id, nil, nil)
+	// sendTo, not sendKnownPath: WE chose this destination — a peer
+	// we are about to run a ceremony with — so its flood fallback is
+	// as legitimate here as for any other originated traffic, and it
+	// is what reaches a committee member before gossip has populated
+	// a route to them.  Only the REPLY, whose destination an attacker
+	// names, is restricted to known paths.
+	return s.sendTo(id, NaClKeyRequest{
+		Requester: s.secret.Identity,
+		Challenge: challenge[:],
+	})
+}
+
+// ensurePeerKey blocks until an authenticated e2e key for id is bound
+// or ctx expires, driving NaClKeyRequest exchanges through the mesh.
+// Requests are re-sent every naclXchgRetry with a fresh challenge (so
+// the dedup cache does not swallow the retry).
+//
+// Waking is signal-driven, not polled: every path that can satisfy us
+// — this exchange, one started by a concurrent caller, an inbound
+// handshake — funnels through bindPeerKey, which broadcasts.  The
+// waiter channel is snapshotted before each table check so a bind
+// landing in between cannot be missed.
+func (s *Server) ensurePeerKey(ctx context.Context, id Identity) error {
+	log.Tracef("ensurePeerKey %v", id)
+
+	if id == s.secret.Identity {
+		return nil
+	}
+	if _, ok := s.peerNaClPub(id); ok {
+		return nil
+	}
+	if err := s.sendNaClKeyRequest(ctx, id); err != nil {
+		// No known path yet is not fatal — routes fill in as
+		// gossip propagates; the retry ticker re-attempts.
+		log.Debugf("ensurePeerKey %v: initial request: %v", id, err)
+	}
+	retry := time.NewTicker(naclXchgRetry)
+	defer retry.Stop()
+	for {
+		bound := s.keyBoundWaiter()
+		if _, ok := s.peerNaClPub(id); ok {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("key exchange with %v: %w", id, ctx.Err())
+		case <-bound:
+		case <-retry.C:
+			if err := s.sendNaClKeyRequest(ctx, id); err != nil {
+				log.Debugf("ensurePeerKey %v: retry: %v", id, err)
+			}
+		}
+	}
+}
+
+// ensurePeerKeys binds authenticated e2e keys for all ids (self
+// excluded), running the exchanges concurrently.  Returns the first
+// failure.  Ceremony dispatch calls this before starting rounds so
+// SendEncrypted never lacks a key mid-ceremony.
+func (s *Server) ensurePeerKeys(ctx context.Context, ids []Identity) error {
+	g, gctx := errgroup.WithContext(ctx)
+	for _, id := range ids {
+		g.Go(func() error {
+			return s.ensurePeerKey(gctx, id)
+		})
+	}
+	return g.Wait()
+}
+
+// knownPeerList returns peer records suitable for gossip, excluding
+// only the specified identity (typically the requester, so we don't
+// tell them about themselves).  Our own record IS included so that
+// remote peers learn about us.
+func (s *Server) knownPeerList(exclude Identity) []PeerRecord {
+	log.Tracef("knownPeerList")
+
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	// Snapshot current session identities for self's record.
+	selfSessions := make([]Identity, 0, len(s.sessions))
+	for id := range s.sessions {
+		selfSessions = append(selfSessions, id)
+	}
+
+	records := make([]PeerRecord, 0, len(s.peers))
+	for id, pr := range s.peers {
+		if id == exclude {
+			continue
+		}
+		rec := *pr
+		if id == s.secret.Identity {
+			rec.Sessions = selfSessions
+		}
+		// E2e keys never travel in gossip — not even our own.
+		// A recipient can only learn a key from its holder via
+		// the handshake or the NaClKeyRequest exchange, both of
+		// which prove the binding with a signature.
+		rec.NaClPub = nil
+		records = append(records, rec)
+	}
+	return records
+}
+
+// notifyAllPeers sends a PeerNotify to all active sessions.
+// Each write is bounded by the transport's 4s write deadline so
+// a hung peer cannot block others.  Write failures are logged but
+// do NOT close the transport — dead sessions are reaped by
+// pingExpired instead.  Closing on write failure raced with active
+// TSS ceremony traffic and caused message loss in sparse meshes.
+func (s *Server) notifyAllPeers(ctx context.Context) {
+	log.Tracef("notifyAllPeers")
+
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
+	s.mtx.RLock()
+	count := len(s.peers)
+	type dest struct {
+		id Identity
+		t  *Transport
+	}
+	targets := make([]dest, 0, len(s.sessions))
+	for id, t := range s.sessions {
+		targets = append(targets, dest{id: id, t: t})
+	}
+	s.mtx.RUnlock()
+
+	notify := PeerNotify{Count: count}
+	for _, d := range targets {
+		go func(d dest) {
+			if err := d.t.Write(s.secret.Identity, notify); err != nil {
+				// Log but do NOT close the transport.  Closing
+				// here races with active TSS message delivery —
+				// a temporary write timeout (TCP buffer full)
+				// would kill a session carrying ceremony traffic.
+				// Dead sessions are reaped by pingExpired instead.
+				log.Debugf("peer notify %v: %v", d.id, err)
+			}
+		}(d)
+	}
+}
+
+// registerSelfAsPeer adds our own record to the peer map so that we
+// are included in gossip responses.  Self is stored directly (not via
+// addPeer which skips self) and has no TTL — we never expire ourselves.
+func (s *Server) registerSelfAsPeer() {
+	log.Tracef("registerSelfAsPeer")
+
+	naclPub, err := s.secret.NaClPublicKey()
+	if err != nil {
+		log.Errorf("registerSelfAsPeer nacl public key: %v", err)
+		return
+	}
+
+	// Advertise hostname:port when Hostname is configured so
+	// peers in forward/all mode can verify us via TXT lookup.
+	// Otherwise advertise IP:port from the bound listener.
+	addr := s.listenAddress
+	if s.cfg.Hostname != "" {
+		_, port, err := net.SplitHostPort(s.listenAddress)
+		if err == nil {
+			addr = net.JoinHostPort(s.cfg.Hostname, port)
+		}
+	}
+
+	s.mtx.Lock()
+	s.peers[s.secret.Identity] = &PeerRecord{
+		Identity: s.secret.Identity,
+		Address:  addr,
+		NaClPub:  naclPub,
+		Version:  ProtocolVersion,
+		LastSeen: time.Now().Unix(),
+	}
+	s.mtx.Unlock()
 }
 
 func (s *Server) testAndSetRunning(b bool) bool {
@@ -229,7 +2891,7 @@ func (s *Server) testAndSetRunning(b bool) bool {
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(promPollInterval)
 	for {
 		select {
 		case <-ctx.Done():
@@ -238,9 +2900,33 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
+		// Single pass through ceremonies — callbacks read atomics.
+		var active, completed, failed int64
+		s.mtx.RLock()
+		for _, ci := range s.ceremonies {
+			switch ci.Status {
+			case CeremonyRunning:
+				active++
+			case CeremonyComplete:
+				completed++
+			case CeremonyFailed:
+				failed++
+			}
+		}
+		s.mtx.RUnlock()
+		s.ceremoniesActive.Store(active)
+		s.ceremoniesCompleted.Store(completed)
+		s.ceremoniesFailed.Store(failed)
+
 		if s.promPollVerbose {
 			s.mtx.RLock()
-			log.Infof("promPoll XXX")
+			log.Infof("promPoll: peers %d sessions %d live %d "+
+				"fwd %d recv %d dedup %d bcast %d "+
+				"ceremonies active %d complete %d failed %d",
+				len(s.peers), len(s.sessions), len(s.ponged),
+				s.forwarded.Load(), s.routedReceived.Load(),
+				s.dedupDropped.Load(), s.broadcastsSent.Load(),
+				active, completed, failed)
 			s.mtx.RUnlock()
 		}
 	}
@@ -254,17 +2940,486 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func (s *Server) isHealthy(_ context.Context) bool {
-	return true // XXX
+func (s *Server) promHealthy() float64 {
+	if s.isHealthy() {
+		return 1
+	}
+	return 0
+}
+
+func (s *Server) promUptime() float64 {
+	s.mtx.RLock()
+	t := s.startedAt
+	s.mtx.RUnlock()
+	if t.IsZero() {
+		return 0
+	}
+	return time.Since(t).Seconds()
+}
+
+func (s *Server) promSessions() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return float64(len(s.sessions))
+}
+
+func (s *Server) promPeersKnown() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return float64(len(s.peers))
+}
+
+func (s *Server) promPeersLive() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return float64(len(s.ponged))
+}
+
+func (s *Server) promForwarded() float64 {
+	return float64(s.forwarded.Load())
+}
+
+func (s *Server) promRoutedReceived() float64 {
+	return float64(s.routedReceived.Load())
+}
+
+func (s *Server) promDedupDropped() float64 {
+	return float64(s.dedupDropped.Load())
+}
+
+func (s *Server) promKeyConflicts() float64 {
+	return float64(s.keyConflicts.Load())
+}
+
+func (s *Server) promBroadcastDropped() float64 {
+	return float64(s.broadcastDropped.Load())
+}
+
+func (s *Server) promTSSPendingDrops() float64 {
+	return float64(s.tssPendingDrops.Load())
+}
+
+func (s *Server) promTSSPendingExpired() float64 {
+	return float64(s.tssPendingExpired.Load())
+}
+
+func (s *Server) promCeremonyRecordDrops() float64 {
+	return float64(s.ceremonyRecordDrops.Load())
+}
+
+func (s *Server) promNaClXchgDrops() float64 {
+	return float64(s.naclXchgDrops.Load())
+}
+
+func (s *Server) promBroadcastsSent() float64 {
+	return float64(s.broadcastsSent.Load())
+}
+
+func (s *Server) promCeremoniesActive() float64 {
+	return float64(s.ceremoniesActive.Load())
+}
+
+func (s *Server) promCeremoniesCompleted() float64 {
+	return float64(s.ceremoniesCompleted.Load())
+}
+
+func (s *Server) promCeremoniesFailed() float64 {
+	return float64(s.ceremoniesFailed.Load())
+}
+
+func (s *Server) promRateDropped() float64 {
+	return float64(s.rateDropped.Load())
+}
+
+func (s *Server) promCooldownDrops() float64 {
+	return float64(s.cooldownDrops.Load())
+}
+
+func (s *Server) promHSRateDrops() float64 {
+	return float64(s.hsRateDrops.Load())
+}
+
+func (s *Server) promRateDisconnects() float64 {
+	return float64(s.rateDisconnects.Load())
+}
+
+func (s *Server) promEnvRateDrops() float64 {
+	return float64(s.envRateDrops.Load())
+}
+
+// isHealthy reports whether the server is ready to participate in the
+// mesh.  A node is healthy when it is listening for connections and
+// has at least one active peer session.  A node with zero sessions
+// cannot route TSS messages or participate in ceremonies.
+//
+// Paillier preParams are not checked here because Run() loads them
+// before starting the listener; if loading fails, Run() returns an
+// error and the service never reaches the health endpoint.
+func (s *Server) isHealthy() bool {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return s.listenAddress != "" && len(s.sessions) > 0
 }
 
 func (s *Server) health(ctx context.Context) (bool, any, error) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	return s.isHealthy(ctx), Info{Online: true}, nil
+	healthy := s.isHealthy()
+
+	s.mtx.RLock()
+	info := Info{
+		Online:    true,
+		Healthy:   healthy,
+		Listening: s.listenAddress,
+		Sessions:  len(s.sessions),
+		Peers:     len(s.peers),
+	}
+	s.mtx.RUnlock()
+
+	return healthy, info, nil
 }
 
+// sendErr sends err to errC unless ctx is already cancelled.
+// Multiple goroutines may race to report errors on the same
+// unbuffered channel; without this guard the losers block
+// forever and leak their defer wg.Done().
+func sendErr(ctx context.Context, errC chan<- error, err error) {
+	select {
+	case <-ctx.Done():
+	case errC <- err:
+	}
+}
+
+// connect dials a single address from Config.Connect and, on success,
+// runs the session until it ends.  It reports whether a session was
+// ever established, which connectBootstrap uses to decide whether to
+// keep retrying.
+//
+// Every failure here is per-peer and logged, never fatal to the
+// server.  A configured peer that is down, or that drops a connection
+// mid-handshake under load, must not take the node with it: the node
+// still listens, and the peer comes back through gossip and is
+// redialled by maintainConnections.  This mirrors seed() and
+// connectPeer(), which have always behaved this way.
+//
+// Before this, a transient dial/KX/handshake error was sent to errC,
+// which Run() treats as terminal.  In a chain of nodes that cascaded
+// silently — sendErr does not log — because each node's exit closed
+// its listener and refused the next node's dial.
+func (s *Server) connect(ctx context.Context, c string) bool {
+	defer s.wg.Done()
+
+	log.Infof("connect: %v", c)
+	defer log.Infof("connect: %v exit", c)
+
+	// reached reports that we got far enough to know the peer is
+	// there: a completed handshake, or the discovery that the
+	// address is us.  Only a failure to reach it is worth retrying;
+	// a duplicate session or a DNS policy rejection means the peer
+	// answered, so retrying just churns connections.
+	var reached bool
+
+	// Reject self before wasting a dial.
+	s.mtx.RLock()
+	selfAddr := s.listenAddress
+	s.mtx.RUnlock()
+	if selfAddr != "" && c == selfAddr {
+		log.Warningf("connect: skipping self %v", c)
+		return true
+	}
+
+	conn, err := s.dialer.DialContext(ctx, "tcp", c)
+	if err != nil {
+		log.Warningf("connect dial %v: %v", c, err)
+		return reached
+	}
+	tcpKeepAlive(conn, tcpKeepAlivePeriod)
+
+	transport := new(Transport)
+	greatSuccess := false
+	defer func() {
+		if !greatSuccess {
+			// A transport whose dial or key exchange never
+			// completed has no connection to close.  That is the
+			// normal outcome of a failed connect, not an error:
+			// logging it at Errorf produced thousands of
+			// identical lines a second during peer churn and
+			// buried the failure that actually mattered.
+			err := transport.Close()
+			if err != nil && !errors.Is(err, ErrNoConn) {
+				log.Errorf("connect close %v: %v", c, err)
+			}
+		}
+	}()
+
+	if err := transport.KeyExchange(ctx, conn); err != nil {
+		log.Warningf("connect kx %v: %v", c, err)
+		return reached
+	}
+	them, naclPub, err := transport.Handshake(ctx, s.secret)
+	if err != nil {
+		log.Warningf("connect handshake %v: %v", c, err)
+		return reached
+	}
+
+	// The peer answered and proved its identity.  Nothing below is
+	// a reachability failure, so nothing below is worth retrying.
+	reached = true
+
+	// Defense-in-depth: reject self even if the address didn't
+	// match (e.g. hostname resolved to our IP, NAT hairpin).
+	if *them == s.secret.Identity {
+		log.Warningf("connect: connected to self at %v", c)
+		return reached
+	}
+
+	// DNS verification based on the dial target.
+	// Hostname targets get forward TXT verification.
+	// IP targets get reverse DNS verification (if enabled).
+	if err := s.verifyOutboundDNS(ctx, c, conn.RemoteAddr(), *them); err != nil {
+		log.Warningf("connect dns %v: %v", c, err)
+		return reached
+	}
+
+	if err := s.newSession(them, transport); err != nil {
+		// Duplicate session is transient (peer reconnected before
+		// old session was reaped).  Deferred cleanup closes the
+		// transport.
+		log.Errorf("connect session %v: %v", them, err)
+		return reached
+	}
+	s.rebuildRoutes()
+
+	// Register the peer we connected to.  We know their listen
+	// address (c) — the listen side will learn ours via gossip.
+	s.addPeer(ctx, PeerRecord{
+		Identity: *them,
+		Address:  c,
+		Version:  ProtocolVersion,
+		LastSeen: time.Now().Unix(),
+	})
+	// The handshake signature covered this key — bind it.
+	if err := s.bindPeerKey(ctx, *them, naclPub); err != nil {
+		log.Errorf("connect %v: %v", them, err)
+	}
+	s.notifyAllPeers(ctx)
+
+	log.Infof("connected %v: %v", conn.RemoteAddr(), them)
+
+	greatSuccess = true
+	s.wg.Add(1)
+	if s.handle(ctx, them, transport, false) {
+		// The peer is up but full.  BusyResponse means "come back
+		// later", so a bootstrap dial must keep trying: nothing
+		// else on this node knows the address, and giving up here
+		// leaves us in whichever partition we started in.
+		return false
+	}
+
+	return reached
+}
+
+func (s *Server) connectAll(ctx context.Context) {
+	defer s.wg.Done()
+
+	log.Tracef("connectAll")
+	defer log.Tracef("connectAll exit")
+
+	// Errors are logged per-connection in connect; no global exit
+	// needed since partial mesh connectivity is normal.
+	for k := range s.cfg.Connect {
+		s.wg.Add(1)
+		go s.connectBootstrap(ctx, s.cfg.Connect[k])
+	}
+}
+
+// connectBootstrap dials a configured Connect peer, retrying with
+// backoff until a session is established or ctx ends.
+//
+// Reconnection is normally gossip's job: maintainConnections redials
+// peers from the peer table, which is populated by advertisement.  A
+// bootstrap peer that is unreachable at startup never gets that far —
+// no session means no identity, so it never enters the peer table, and
+// nothing else on the node knows its address.  Without a retry here a
+// single transient failure strands the node for its whole life.
+//
+// Once a session has been established the peer is in the peer table
+// and maintainConnections owns it from then on, so this stops.
+func (s *Server) connectBootstrap(ctx context.Context, addr string) {
+	defer s.wg.Done()
+
+	log.Tracef("connectBootstrap %v", addr)
+	defer log.Tracef("connectBootstrap %v exit", addr)
+
+	backoff := connectRetryMin
+	for {
+		s.wg.Add(1)
+		if s.connect(ctx, addr) {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		backoff *= 2
+		if backoff > connectRetryMax {
+			backoff = connectRetryMax
+		}
+	}
+}
+
+func (s *Server) listen(ctx context.Context, errC chan error) {
+	defer s.wg.Done()
+
+	listener, err := s.listenConfig.Listen(ctx, "tcp", s.cfg.ListenAddress)
+	if err != nil {
+		sendErr(ctx, errC, err)
+		return
+	}
+	s.mtx.Lock()
+	s.listenAddress = listener.Addr().String()
+	s.mtx.Unlock()
+	s.registerSelfAsPeer()
+	go func() {
+		<-ctx.Done()
+		// untested: listener.Close error is logged not returned; cosmetic
+		if err := listener.Close(); err != nil {
+			log.Errorf("listener close: %v", err)
+		}
+		s.deleteAllSessions()
+	}()
+
+	for {
+		conn, err := listener.Accept()
+		// untested: Accept error after ctx cancel; requires mock net.Listener
+		if err != nil {
+			// The goroutine above closes the listener once ctx
+			// is done — for any reason, cancel or deadline — so
+			// every subsequent Accept fails.  Testing only for
+			// context.Canceled turns a deadline-bound parent
+			// context into an endless error log that never lets
+			// wg.Wait return.
+			if ctx.Err() != nil {
+				return
+			}
+			log.Errorf("accept: %v", err)
+			continue
+		}
+		if ctx.Err() != nil {
+			conn.Close() // best-effort: shutting down
+			return
+		}
+
+		// Per-IP cooldown (F5): reject immediately if this IP
+		// was recently sent a BusyResponse.
+		if s.connCooldown != nil {
+			if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+				ip := addr.IP.String()
+				if _, _, err := s.connCooldown.Get(ip); err == nil {
+					conn.Close()
+					s.cooldownDrops.Add(1)
+					continue
+				}
+			}
+		}
+
+		// Cap in-flight handshakes per source.  handshakeSem
+		// below bounds total concurrency, but a slot is held for
+		// the whole key exchange, so without this one source that
+		// never completes KX occupies every slot and starves
+		// legitimate peers.
+		hsKey, ok := s.acquireHandshake(conn.RemoteAddr())
+		if !ok {
+			log.Debugf("handshake in-flight cap reached for %v: "+
+				"dropping connection", conn.RemoteAddr())
+			conn.Close()
+			s.hsRateDrops.Add(1)
+			continue
+		}
+
+		// Limit concurrent handshakes to PeersWanted.  Acquire
+		// WITHOUT blocking: blocking here stalls the accept loop,
+		// so during a flood no further connection is ever
+		// examined and the per-source cap above stops being
+		// consulted at all.  A full semaphore means the node is
+		// saturated; refuse and keep accepting.
+		select {
+		case <-ctx.Done():
+			s.releaseHandshake(hsKey)
+			conn.Close() // best-effort: shutting down
+			return
+		case s.handshakeSem <- struct{}{}:
+		default:
+			s.releaseHandshake(hsKey)
+			log.Debugf("handshake slots full: dropping %v",
+				conn.RemoteAddr())
+			conn.Close()
+			s.hsRateDrops.Add(1)
+			continue
+		}
+
+		// Handle handshake and session setup in goroutine.
+		// Capacity check happens post-KX inside
+		// handleIncomingConnection (BusyResponse).
+		tcpKeepAlive(conn, tcpKeepAlivePeriod)
+		s.wg.Add(1)
+		go s.handleIncomingConnection(ctx, conn, hsKey)
+	}
+}
+
+func (s *Server) initPaillierPrimes(pctx context.Context) error {
+	log.Tracef("initPaillierPrimes")
+	defer log.Tracef("initPaillierPrimes exit")
+
+	timeout := s.cfg.PreParamsTimeout
+	if timeout == 0 {
+		timeout = defaultPreParamsTimeout
+	}
+	ctx, cancel := context.WithTimeout(pctx, timeout)
+	defer cancel()
+
+	preparamsFilename := filepath.Join(s.data, "preparams.json")
+	f, err := os.Open(preparamsFilename)
+	if err == nil {
+		if err := json.NewDecoder(f).Decode(&s.preParams); err != nil {
+			_ = f.Close()
+			return err
+		}
+		return f.Close()
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	log.Infof("Generating TSS Paillier primes (timeout %v)", timeout)
+	lpp, err := keygen.GeneratePreParamsWithContextAndRandom(ctx, rand.Reader)
+	if err != nil {
+		return err
+	}
+	f, err = os.OpenFile(preparamsFilename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o400)
+	if err != nil {
+		return err
+	}
+	je := json.NewEncoder(f)
+	je.SetIndent("", "  ")
+	if err = je.Encode(lpp); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	s.preParams = *lpp
+	log.Infof("Generating TSS Paillier primes complete")
+	return nil
+}
+
+// Run starts the server, listens for connections, and blocks until the
+// context is cancelled or a fatal error occurs.
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -274,19 +3429,92 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.testAndSetRunning(false)
 
+	s.mtx.Lock()
+	s.startedAt = time.Now()
+	s.mtx.Unlock()
+
+	// Make sure we have a valid secret
 	var err error
-	s.cfg.Home, err = homedir.Expand(s.cfg.Home)
-	if err != nil {
-		return fmt.Errorf("expand: %w", err)
-	}
 	s.secret, err = NewSecretFromString(s.cfg.PrivateKey)
 	if err != nil {
 		return fmt.Errorf("secret: %w", err)
 	}
-	s.cfg.PrivateKey = "" // hopefully PrivateKey is reaped later.
+	// TODO(go1.26): wrap key loading in runtime/secret.Do for forward
+	// secrecy.  Go strings are immutable so we cannot zero the backing
+	// array; setting to "" only drops the reference.  secret.Do will
+	// zero stack, registers, and heap allocations when they become
+	// unreachable.  Requires GOEXPERIMENT=runtimesecret.
+	s.cfg.PrivateKey = ""
+
+	// Setup home
+	s.cfg.Home, err = homedir.Expand(s.cfg.Home)
+	if err != nil {
+		return fmt.Errorf("expand: %w", err)
+	}
+	s.data = filepath.Join(s.cfg.Home, s.secret.String())
+	err = os.MkdirAll(s.data, 0o700)
+	if err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
+
+	// Initialize peer TTL map.
+	s.peersTTL, err = ttl.New(s.cfg.PeersWanted, true)
+	if err != nil {
+		return fmt.Errorf("peer ttl: %w", err)
+	}
+
+	// Initialize unanswered ping timeout map.
+	s.pings, err = ttl.New(s.cfg.PeersWanted, true)
+	if err != nil {
+		return fmt.Errorf("ping ttl: %w", err)
+	}
+
+	// Initialize message dedup cache.
+	s.seen, err = ttl.New(seenCapacity, true)
+	if err != nil {
+		return fmt.Errorf("seen ttl: %w", err)
+	}
+
+	// Initialize DNS lookup rate limiter — one lookup per IP
+	// per 60 seconds.
+	s.dnsLookups, err = ttl.New(s.cfg.PeersWanted, true)
+	if err != nil {
+		return fmt.Errorf("dns ttl: %w", err)
+	}
+
+	// Per-IP reconnection cooldown (F5).
+	s.connCooldown, err = ttl.New(s.cfg.PeersWanted*4, true)
+	if err != nil {
+		return fmt.Errorf("conn cooldown ttl: %w", err)
+	}
+
+	// Per-sender envelope rate limiter (F3).
+	s.envelopeRates, err = ttl.New(s.cfg.PeersWanted*4, true)
+	if err != nil {
+		return fmt.Errorf("envelope rate ttl: %w", err)
+	}
+
+	// Read or generate Paillier primes.
+	if err = s.initPaillierPrimes(ctx); err != nil {
+		return fmt.Errorf("party: %w", err)
+	}
+
+	// Initialize TSS engine with encrypted transport bridge.
+	s.tssCtx = ctx
+	s.stt = newServerTSSTransport(s)
+	tssDir := filepath.Join(s.data, "tss")
+	s.tssStore, err = NewTSSStore(tssDir, s.secret)
+	if err != nil {
+		return fmt.Errorf("tss store: %w", err)
+	}
+	// Seed the store with the server's pre-loaded Paillier primes
+	// so that GetPreParams() returns immediately instead of
+	// generating fresh ones (~30s).
+	s.tssStore.SetPreParams(&s.preParams)
+	s.tss = NewTSS(s.secret.Identity, s.tssStore, s.stt)
 
 	// pprof
 	if s.cfg.PprofListenAddress != "" {
@@ -296,13 +3524,15 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create pprof server: %w", err)
 		}
-		s.wg.Go(func() {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
 			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
 				log.Errorf("pprof server terminated with error: %v", err)
 				return
 			}
 			log.Infof("pprof server clean shutdown")
-		})
+		}()
 	}
 
 	// Prometheus
@@ -313,14 +3543,18 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-		s.wg.Go(func() {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
 			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
 			log.Infof("prometheus clean shutdown")
-		})
-		s.wg.Go(func() {
+		}()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
 			err := s.promPoll(ctx)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
@@ -328,52 +3562,38 @@ func (s *Server) Run(pctx context.Context) error {
 				}
 				return
 			}
-		})
+		}()
 	}
 
 	errC := make(chan error)
-	s.wg.Go(func() {
-		listener, err := s.listenConfig.Listen(ctx, "tcp", s.cfg.ListenAddress)
-		if err != nil {
-			errC <- err
-			return
-		}
-		go func() {
-			<-ctx.Done()
-			if err := listener.Close(); err != nil {
-				log.Errorf("listener close: %v", err)
-			}
-			s.deleteAllSessions()
-		}()
+	if s.cfg.ListenAddress != "" {
+		s.wg.Add(1)
+		go s.listen(ctx, errC)
+	}
 
-		for {
-			conn, err := listener.Accept()
-			if errors.Is(ctx.Err(), context.Canceled) {
-				return
-			}
-			if err != nil {
-				log.Errorf("accept: %v", err)
-				continue
-			}
+	if s.cfg.AdminListenAddress != "" {
+		s.wg.Add(1)
+		go s.listenAdmin(ctx, errC)
+	}
 
-			s.mtx.RLock()
-			conNum := len(s.sessions)
-			s.mtx.RUnlock()
-			if conNum >= s.cfg.MaxConnections {
-				// XXX send a "busy" message?
-				log.Debugf("server full, connection rejected: %s",
-					conn.RemoteAddr())
-				if err := conn.Close(); err != nil {
-					log.Errorf("close connection %s:  %v", err)
-				}
-				continue
-			}
+	if len(s.cfg.Connect) != 0 {
+		s.wg.Add(1)
+		go s.connectAll(ctx)
+	} else if len(s.cfg.Seeds) != 0 {
+		s.seed(ctx)
+	}
 
-			// handle connection
-			s.wg.Add(1)
-			go s.handle(ctx, conn)
-		}
-	})
+	// Evict completed/failed ceremonies older than ceremonyMaxAge.
+	s.wg.Add(1)
+	go s.evictCeremonies(ctx)
+
+	// Ceremony dispatcher — reads from CeremonyInitiator channel.
+	s.wg.Add(1)
+	go s.ceremonyLoop(ctx)
+
+	// Periodically dial gossip-learned peers when below PeersWanted.
+	s.wg.Add(1)
+	go s.maintainConnections(ctx)
 
 	log.Infof("Identity: %v", s.secret)
 
@@ -386,7 +3606,149 @@ func (s *Server) Run(pctx context.Context) error {
 
 	log.Infof("continuum service shutting down")
 	s.wg.Wait()
+
+	// Zero key material after all goroutines have exited.
+	if s.tssStore != nil {
+		if cerr := s.tssStore.Close(); cerr != nil {
+			log.Errorf("tss store close: %v", cerr)
+		}
+	}
+
 	log.Infof("continuum service clean shutdown")
 
 	return err
+}
+
+// handleIncomingConnection processes an incoming connection in a separate
+// goroutine to prevent blocking the accept loop. This protects against
+// DDoS attacks where an attacker opens many slow connections.
+func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn, hsKey string) {
+	var success bool
+	defer func() {
+		if !success {
+			s.wg.Done()
+		}
+	}()
+
+	log.Debugf("handleIncomingConnection: %v", conn.RemoteAddr())
+	defer log.Debugf("handleIncomingConnection: %v exit", conn.RemoteAddr())
+
+	// Perform KX and handshake, then release the semaphore.
+	// The semaphore only gates the expensive KX phase —
+	// once complete, the slot is free for the next connection.
+	id, transport, naclPub, err := s.newTransport(ctx, conn)
+	<-s.handshakeSem          // release regardless of success/failure
+	s.releaseHandshake(hsKey) // free the per-source in-flight slot
+	if err != nil {
+		// Warning not Error — failed KX/handshake is expected
+		// from port scanners and misconfigured peers.
+		log.Warningf("transport %v: %v", conn.RemoteAddr(), err)
+		return
+	}
+
+	// Reject self-connections (NAT hairpin, misconfigured seeds).
+	if *id == s.secret.Identity {
+		log.Warningf("handleIncomingConnection: rejecting self %v", conn.RemoteAddr())
+		transport.Close()
+		return
+	}
+
+	// Capacity check post-KX.  The peer proved identity via
+	// handshake (proof-of-work against trivial DoS).  If at
+	// capacity, send BusyResponse so the peer backs off
+	// instead of hammering reconnect.
+	s.mtx.RLock()
+	full := len(s.sessions) >= s.cfg.PeersWanted
+	s.mtx.RUnlock()
+	if full {
+		log.Debugf("server full, sending busy to %v", id)
+		_ = transport.Write(s.secret.Identity, BusyResponse{})
+		transport.Close()
+		// Set per-IP cooldown so this IP doesn't immediately
+		// retry and monopolize the handshake semaphore.
+		if s.connCooldown != nil {
+			if addr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+				s.connCooldown.Put(ctx, connCooldownTTL, addr.IP.String(),
+					struct{}{}, nil, nil)
+			}
+		}
+		return
+	}
+
+	// Insert into sessions
+	if err := s.newSession(id, transport); err != nil {
+		log.Errorf("session %v: %v", conn.RemoteAddr(), err)
+		return
+	}
+	s.rebuildRoutes()
+
+	// Register the peer.  Address is empty because we don't know
+	// their listen address — they'll advertise it via gossip.
+	s.addPeer(ctx, PeerRecord{
+		Identity: *id,
+		Version:  ProtocolVersion,
+		LastSeen: time.Now().Unix(),
+	})
+	// The handshake signature covered this key — bind it.
+	if err := s.bindPeerKey(ctx, *id, naclPub); err != nil {
+		log.Errorf("handleIncomingConnection %v: %v", id, err)
+	}
+
+	// Tell existing peers we learned about someone new so
+	// they can request our updated peer list.
+	s.notifyAllPeers(ctx)
+
+	// Connection successful
+	success = true
+	log.Infof("connected %v: %v", conn.RemoteAddr(), id)
+
+	// handle connection
+	s.handle(ctx, id, transport, false)
+}
+
+// CeremonyStatus returns a snapshot of the ceremony status by ID,
+// or nil if the ceremony is not registered on this node.  The
+// returned struct is a copy — mutations do not affect server state.
+func (s *Server) CeremonyStatus(cid CeremonyID) *CeremonyInfo {
+	// The copy is made under the lock: every field of CeremonyInfo
+	// is written by the ceremony driver under this same mutex, so
+	// copying after releasing it races the driver.
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	ci := s.ceremonies[cid]
+	if ci == nil {
+		return nil
+	}
+	cp := *ci
+	cp.ctx = nil
+	cp.cancel = nil
+	if ci.Committee != nil {
+		cp.Committee = make([]Identity, len(ci.Committee))
+		copy(cp.Committee, ci.Committee)
+	}
+	if ci.KeyID != nil {
+		cp.KeyID = make([]byte, len(ci.KeyID))
+		copy(cp.KeyID, ci.KeyID)
+	}
+	if ci.Signature != nil {
+		cp.Signature = make([]byte, len(ci.Signature))
+		copy(cp.Signature, ci.Signature)
+	}
+	return &cp
+}
+
+// ListKeyIDs returns all key share IDs stored in this node's TSS
+// store by scanning for .key files in the store directory.
+func (s *Server) ListKeyIDs() [][]byte {
+	tssDir := filepath.Join(s.data, "tss")
+	matches, _ := filepath.Glob(filepath.Join(tssDir, "*.key"))
+	var ids [][]byte
+	for _, m := range matches {
+		hexID := strings.TrimSuffix(filepath.Base(m), ".key")
+		if id, err := hex.DecodeString(hexID); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }

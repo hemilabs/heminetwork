@@ -1,0 +1,174 @@
+// Copyright (c) 2026 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
+package continuum
+
+// Routing implementation.
+//
+// The routing table maps every known peer identity to the next-hop
+// identity on the shortest path from the local node.  It is derived
+// from gossip topology data: each node advertises its direct session
+// neighbors in PeerRecord.Sessions, and every receiver stores that
+// data in its peer map.  The local node's own edges come from its
+// session map — its own peer record never carries Sessions.
+//
+// Rebuild is generation-gated: topology changes bump routeGen — a
+// local session add/remove (newSession, deleteSession), a gossip
+// record whose session list changed (addPeer), or a peer expiring
+// (peerExpired).  rebuildRoutes compares routeGen to routeBuiltGen
+// and skips the BFS if already current, so gossip that repeats what
+// is already known costs no rebuild.
+//
+// Staleness: the table reflects the last rebuild.  A dropped session
+// on a remote node takes up to one gossip round (~67s) to propagate.
+// During that window, a route may point through a dead link.  When
+// the next-hop write fails, sendTo and forward fall through to the
+// flood path, which delivers as long as the mesh is connected.
+//
+// Complexity: BFS is O(V+E) where V = known peers and E = sum of
+// session lists.  For 100 nodes with PeersWanted=8, that is ~900
+// operations — microseconds.
+//
+// Trust model: PeerRecord.Sessions is unauthenticated gossip data.
+// A malicious node can advertise fabricated session adjacencies to
+// attract traffic through itself.  This enables traffic analysis
+// (observing Header.Destination on routed messages) and selective
+// message dropping to delay ceremonies.  It does NOT enable:
+//
+//   - Impersonation: EncryptedPayload and TSSMessage carry their own
+//     signatures verified against the inner sender identity.
+//   - Content reading: EncryptedPayload is NaCl-box encrypted to the
+//     destination's X25519 key.
+//   - Key compromise: NaCl keys are bound via challenge-response, not
+//     affected by routing.
+//
+// The flood fallback in sendTo and forward is the safety net: when the
+// routed path fails or silently drops, retry logic (ensurePeerKey,
+// ceremony timeouts) re-sends, and the flood path delivers as long as
+// the mesh has any honest path.  Routing is an optimization; security
+// does not depend on it.
+
+// invalidateRoutes bumps the routing generation counter, marking
+// the current table as stale.  Called under s.mtx.Lock by
+// newSession and deleteSession.  The actual rebuild happens at the
+// next safe call site (after the lock is released).
+func (s *Server) invalidateRoutes() {
+	s.routeGen.Add(1)
+}
+
+// rebuildRoutes recomputes the routing table if the generation
+// counter indicates a topology change since the last build.
+// Must NOT be called while holding s.mtx — it acquires s.mtx.RLock
+// internally to snapshot the peer map.
+func (s *Server) rebuildRoutes() {
+	gen := s.routeGen.Load()
+	s.routeMtx.Lock()
+	if s.routeBuiltGen == gen {
+		s.routeMtx.Unlock()
+		return
+	}
+	s.routeMtx.Unlock()
+
+	s.mtx.RLock()
+	self := s.secret.Identity
+	adj := make(map[Identity][]Identity, len(s.peers)+1)
+	for id, pr := range s.peers {
+		if len(pr.Sessions) > 0 {
+			adj[id] = pr.Sessions
+		}
+	}
+	// Seed the BFS root from the live session map.  Our own peer
+	// record has no Sessions (knownPeerList overlays them only on
+	// the gossip copy), so without this the root has no edges, the
+	// table comes out empty, and every non-direct message takes the
+	// flood path.
+	selfAdj := make([]Identity, 0, len(s.sessions))
+	for id := range s.sessions {
+		selfAdj = append(selfAdj, id)
+	}
+	adj[self] = selfAdj
+	s.mtx.RUnlock()
+
+	table := bfsRoutes(self, adj)
+
+	s.routeMtx.Lock()
+	if gen >= s.routeBuiltGen {
+		s.routeTable = table
+		s.routeBuiltGen = gen
+	}
+	s.routeMtx.Unlock()
+}
+
+// bfsRoutes computes shortest-path next hops from src using the
+// given adjacency list.  Returns a map from destination to next
+// hop (the first step on the shortest path from src to dest).
+func bfsRoutes(src Identity, adj map[Identity][]Identity) map[Identity]Identity {
+	table := make(map[Identity]Identity)
+	visited := make(map[Identity]bool)
+	visited[src] = true
+
+	// BFS queue entries: (node, firstHop)
+	type entry struct {
+		node     Identity
+		firstHop Identity
+	}
+	queue := make([]entry, 0, len(adj))
+
+	// Seed queue with direct neighbors.
+	for _, neighbor := range adj[src] {
+		if neighbor == src {
+			continue
+		}
+		if !visited[neighbor] {
+			visited[neighbor] = true
+			table[neighbor] = neighbor // direct neighbor: next hop is itself
+			queue = append(queue, entry{neighbor, neighbor})
+		}
+	}
+
+	// BFS.
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+
+		for _, neighbor := range adj[cur.node] {
+			if neighbor == src || visited[neighbor] {
+				continue
+			}
+			visited[neighbor] = true
+			table[neighbor] = cur.firstHop // inherit the first hop
+			queue = append(queue, entry{neighbor, cur.firstHop})
+		}
+	}
+	return table
+}
+
+// routeNextHop returns the next-hop identity for the given destination,
+// or zero Identity + false if no route is known.
+func (s *Server) routeNextHop(dest Identity) (Identity, bool) {
+	s.routeMtx.RLock()
+	hop, ok := s.routeTable[dest]
+	s.routeMtx.RUnlock()
+	return hop, ok
+}
+
+// sameIdentitySet reports whether a and b hold the same identities,
+// ignoring order.  Gossip emits session lists in map order, so a
+// positional comparison would see a topology change on every round.
+func sameIdentitySet(a, b []Identity) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[Identity]int, len(a))
+	for _, id := range a {
+		seen[id]++
+	}
+	for _, id := range b {
+		if seen[id] == 0 {
+			return false
+		}
+		seen[id]--
+	}
+	return true
+}
