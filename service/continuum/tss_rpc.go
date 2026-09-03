@@ -48,6 +48,23 @@ func (st *serverTSSTransport) registerCeremony(cid CeremonyID, ct CeremonyType) 
 	st.mu.Unlock()
 }
 
+// ceremonyRegistered implements the TSS engine's optional
+// ceremonyNotifier hook: a ceremony just became known to
+// HandleMessage, so anything buffered for it can be delivered now.
+//
+// The delivery runs on its own goroutine because HandleMessage feeds a
+// bounded per-ceremony channel; the pending queue can hold more than
+// that channel buffers, and this hook is called on the goroutine that
+// is about to run the rounds.
+func (st *serverTSSTransport) ceremonyRegistered(cid CeremonyID) {
+	s := st.server
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.drainPendingTSS(s.tssCtx, cid)
+	}()
+}
+
 func (st *serverTSSTransport) unregisterCeremony(cid CeremonyID) {
 	st.mu.Lock()
 	delete(st.ctypes, cid)
@@ -393,7 +410,8 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 	// normal race in a distributed mesh: the coordinator starts
 	// producing round messages immediately while the request is
 	// still being routed to the other committee members.  Buffer
-	// the message and let pendingTSSLoop redeliver it.  The buffer
+	// the message; the TSS engine's ceremonyRegistered hook delivers
+	// it the moment the ceremony exists.  The buffer
 	// is capped in bytes and per ceremony, so an unknown ceremony
 	// ID is no longer a way to make this node hold memory on
 	// demand.
