@@ -7163,6 +7163,7 @@ func dispatchTestServer(t *testing.T, mock *mockTSS) *Server {
 		t.Fatal(err)
 	}
 	s := &Server{
+		cfg:        NewDefaultConfig(),
 		secret:     secret,
 		tss:        mock,
 		tssCtx:     context.Background(),
@@ -7170,6 +7171,7 @@ func dispatchTestServer(t *testing.T, mock *mockTSS) *Server {
 		peers:      make(map[Identity]*PeerRecord),
 		peersTTL:   peersTTL,
 		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+		pendingTSS: newPendingTSS(),
 	}
 	s.stt = newServerTSSTransport(s)
 	return s
@@ -7453,10 +7455,11 @@ func TestDispatchAbortCancelsRounds(t *testing.T) {
 	s := dispatchTestServer(t, mock)
 	cid := NewCeremonyID()
 	s.dispatchKeygen(CeremonyRequest{
-		CeremonyID: cid,
-		Type:       CeremonyKeygen,
-		Committee:  boundIdentities(t, s, 1),
-		Threshold:  1,
+		CeremonyID:  cid,
+		Type:        CeremonyKeygen,
+		Committee:   boundIdentities(t, s, 1),
+		Threshold:   1,
+		Coordinator: s.secret.Identity,
 	})
 	select {
 	case <-mock.keygenCalled:
@@ -9568,6 +9571,42 @@ func readAdminResponse[T any](t *testing.T, tr *Transport) T {
 	return zero
 }
 
+// newTestAdminServer builds a test server with the dedicated admin
+// listener enabled.  Admin RPCs are authorized on the provenance of
+// that listener, not on the peer's address, so a test that exercises
+// them has to connect to it.
+func newTestAdminServer(t *testing.T, preParams []keygen.LocalPreParams) *Server {
+	t.Helper()
+
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.AdminListenAddress = "localhost:0"
+	return s
+}
+
+// waitForAdminListenAddress is waitForListenAddress for the admin
+// listener.
+func waitForAdminListenAddress(t *testing.T, s *Server, timeout time.Duration) string {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
+
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+
+	for {
+		if addr := s.AdminListenAddress(); addr != "" {
+			return addr
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("server did not bind admin listen address")
+			return ""
+		case <-tick.C:
+		}
+	}
+}
+
 // TestAdminNonLocalhost verifies that admin requests sent from a
 // non-localhost connection are silently dropped.  handleTestServer uses
 // net.Pipe whose RemoteAddr is "pipe" — not localhost.
@@ -9608,14 +9647,14 @@ func TestAdminNonLocalhost(t *testing.T) {
 
 func TestAdminPeerList(t *testing.T) {
 	preParams := loadPreParams(t, 1)
-	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s := newTestAdminServer(t, preParams)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	errC := make(chan error, 1)
 	go func() { errC <- s.Run(ctx) }()
-	addr := waitForListenAddress(t, s, 2*time.Second)
+	addr := waitForAdminListenAddress(t, s, 2*time.Second)
 
 	// Dial from localhost — admin RPC should be accepted.
 	clientSecret, err := NewSecret()
@@ -9659,16 +9698,80 @@ func TestAdminPeerList(t *testing.T) {
 	}
 }
 
-func TestAdminCeremonyStatusNotFound(t *testing.T) {
+// TestAdminRejectedOnMeshListener proves admin authorization is
+// provenance, not address.  A peer that dials the ordinary mesh
+// listener from loopback — a co-located node, or the last hop of a
+// routed message — must not be able to drive admin RPCs, even though
+// its RemoteAddr is 127.0.0.1.
+func TestAdminRejectedOnMeshListener(t *testing.T) {
 	preParams := loadPreParams(t, 1)
-	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s := newTestAdminServer(t, preParams)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	errC := make(chan error, 1)
 	go func() { errC <- s.Run(ctx) }()
+
+	// Note: the MESH address, not the admin one.
 	addr := waitForListenAddress(t, s, 2*time.Second)
+
+	clientSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	tr := new(Transport)
+	kxCtx, kxCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer kxCancel()
+	if err := tr.KeyExchange(kxCtx, conn); err != nil {
+		t.Fatalf("kx: %v", err)
+	}
+	if _, _, err := tr.Handshake(kxCtx, clientSecret); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	if err := tr.Write(clientSecret.Identity, PeerListAdminRequest{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// The request is dropped, so no admin response ever arrives.
+	// Everything read here is ordinary gossip.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		_, cmd, err := tr.Read()
+		if err != nil {
+			break // read deadline or teardown: no admin response
+		}
+		if _, ok := cmd.(*PeerListAdminResponse); ok {
+			t.Fatal("admin RPC answered on the mesh listener")
+		}
+	}
+
+	cancel()
+	if err := <-errC; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server: %v", err)
+	}
+}
+
+func TestAdminCeremonyStatusNotFound(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestAdminServer(t, preParams)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+	addr := waitForAdminListenAddress(t, s, 2*time.Second)
 
 	clientSecret, err := NewSecret()
 	if err != nil {
@@ -9716,14 +9819,14 @@ func TestAdminCeremonyStatusNotFound(t *testing.T) {
 
 func TestAdminCeremonyList(t *testing.T) {
 	preParams := loadPreParams(t, 1)
-	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s := newTestAdminServer(t, preParams)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	errC := make(chan error, 1)
 	go func() { errC <- s.Run(ctx) }()
-	addr := waitForListenAddress(t, s, 2*time.Second)
+	addr := waitForAdminListenAddress(t, s, 2*time.Second)
 
 	// Register a couple of ceremonies directly on the server.
 	var cid1, cid2 CeremonyID
@@ -9796,14 +9899,14 @@ func TestAdminCeremonyList(t *testing.T) {
 
 func TestAdminCeremonyStatusFound(t *testing.T) {
 	preParams := loadPreParams(t, 1)
-	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s := newTestAdminServer(t, preParams)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	errC := make(chan error, 1)
 	go func() { errC <- s.Run(ctx) }()
-	addr := waitForListenAddress(t, s, 2*time.Second)
+	addr := waitForAdminListenAddress(t, s, 2*time.Second)
 
 	// Register and complete a ceremony.
 	var cid CeremonyID
@@ -10050,12 +10153,16 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 	servers := make([]*Server, 3)
 	addrs := make([]string, 3)
 
-	// Node A — PeersWanted=4 to accept admin + 2 peers + headroom.
+	// Node A — PeersWanted=4 to accept 2 peers + headroom.  The
+	// admin client gets the dedicated admin listener; admin RPCs
+	// are authorized on arriving there, not on the peer address.
 	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
 	servers[0].cfg.PeersWanted = 4
 	servers[0].cfg.MaintainInterval = 500 * time.Millisecond
+	servers[0].cfg.AdminListenAddress = "localhost:0"
 	g.Go(func() error { return servers[0].Run(gctx) })
 	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+	adminAddr := waitForAdminListenAddress(t, servers[0], 5*time.Second)
 
 	// Node B.
 	servers[1] = newTestServer(t, preParams, 1, "localhost:0",
@@ -10082,7 +10189,7 @@ func TestThreeNodeKeygenDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", addrs[0])
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", adminAddr)
 	if err != nil {
 		t.Fatalf("admin dial: %v", err)
 	}
@@ -10232,12 +10339,17 @@ func TestFiveNodeKeygen(t *testing.T) {
 			connect = []string{addrs[i-1]} //nolint:gosec // guarded by i > 0
 		}
 		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
-		servers[i].cfg.PeersWanted = 6 // n-1 peer sessions + admin headroom
+		servers[i].cfg.PeersWanted = 6 // n-1 peer sessions + headroom
 		servers[i].cfg.MaintainInterval = 500 * time.Millisecond
+		if i == 0 {
+			// The admin client connects here.
+			servers[i].cfg.AdminListenAddress = "localhost:0"
+		}
 		idx := i
 		g.Go(func() error { return servers[idx].Run(gctx) })
 		addrs[i] = waitForListenAddress(t, servers[i], 2*time.Second)
 	}
+	adminAddr := waitForAdminListenAddress(t, servers[0], 5*time.Second)
 
 	// Wait for gossip convergence: every node knows all n peers,
 	// all have NaClPub, and every node has sessions to all n-1 others.
@@ -10249,7 +10361,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", addrs[0])
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", adminAddr)
 	if err != nil {
 		t.Fatalf("admin dial: %v", err)
 	}
@@ -11321,108 +11433,197 @@ func (m *retryMockTSS) HandleMessage(_ context.Context, _ Identity, _ CeremonyID
 	return m.handleFn(n)
 }
 
-// TestDispatchTSSMessageRetryThenSuccess covers the retry loop succeeding.
-func TestDispatchTSSMessageRetryThenSuccess(t *testing.T) {
-	secret, _ := NewSecret()
+// pendingTestServer builds the minimal Server the pending-TSS paths
+// need.
+func pendingTestServer(t *testing.T, ctx context.Context, mock TSS) *Server {
+	t.Helper()
+
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret:     secret,
+		tss:        mock,
+		tssCtx:     ctx,
+		sessions:   make(map[Identity]*Transport),
+		peers:      make(map[Identity]*PeerRecord),
+		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+		pendingTSS: newPendingTSS(),
+	}
+	s.stt = newServerTSSTransport(s)
+	return s
+}
+
+// signedTSSMessage builds a TSSMessage signed by s so it survives
+// dispatchTSSMessage's signature check.
+func signedTSSMessage(s *Server, cid CeremonyID, data []byte) TSSMessage {
+	return TSSMessage{
+		CeremonyID: cid,
+		From:       s.secret.Identity,
+		Data:       data,
+		Signature: s.secret.Sign(
+			HashTSSMessage(cid, s.secret.Identity, 0, 0, data)),
+	}
+}
+
+// TestDispatchTSSMessageBuffersUnknownCeremony covers a message that
+// races ahead of the request registering its ceremony: it is buffered,
+// redelivered by the drain, and dropped from the buffer once accepted.
+func TestDispatchTSSMessageBuffersUnknownCeremony(t *testing.T) {
 	mock := &retryMockTSS{
 		handleFn: func(n int) error {
 			if n <= 2 {
 				return ErrUnknownCeremony
 			}
-			return nil // succeed on 3rd call
+			return nil // ceremony registered by the 3rd call
 		},
 	}
-	s := &Server{
-		secret:     secret,
-		tss:        mock,
-		tssCtx:     context.Background(),
-		sessions:   make(map[Identity]*Transport),
-		peers:      make(map[Identity]*PeerRecord),
-		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+	s := pendingTestServer(t, context.Background(), mock)
+
+	s.dispatchTSSMessage(signedTSSMessage(s, NewCeremonyID(), []byte("test-data")))
+
+	// First HandleMessage failed with ErrUnknownCeremony, so the
+	// message is buffered rather than retried on its own goroutine.
+	if n := s.pendingTSS.len(); n != 1 {
+		t.Fatalf("pending = %d, want 1", n)
 	}
-	s.stt = newServerTSSTransport(s)
 
-	cid := NewCeremonyID()
-	data := []byte("test-data")
-	hash := HashTSSMessage(cid, secret.Identity, 0, 0, data)
-	sig := secret.Sign(hash)
+	// Second attempt still fails: requeued, not dropped.
+	s.drainPendingTSS(t.Context())
+	if n := s.pendingTSS.len(); n != 1 {
+		t.Fatalf("pending after first drain = %d, want 1", n)
+	}
 
-	s.dispatchTSSMessage(TSSMessage{
-		CeremonyID: cid,
-		From:       secret.Identity,
-		Signature:  sig,
-		Data:       data,
-	})
-
-	s.wg.Wait()
+	// Third attempt succeeds: buffer drains.
+	s.drainPendingTSS(t.Context())
+	if n := s.pendingTSS.len(); n != 0 {
+		t.Fatalf("pending after second drain = %d, want 0", n)
+	}
 
 	mock.mu.Lock()
 	calls := mock.calls
 	mock.mu.Unlock()
-	if calls < 3 {
-		t.Fatalf("expected at least 3 calls, got %d", calls)
+	if calls != 3 {
+		t.Fatalf("HandleMessage calls = %d, want 3", calls)
 	}
 }
 
-// TestDispatchTSSMessageRetryContextCancel covers retry cancelled.
-func TestDispatchTSSMessageRetryContextCancel(t *testing.T) {
-	secret, _ := NewSecret()
+// TestPendingTSSLoopExitsOnCancel proves the drain goroutine is bound
+// by the server lifecycle.
+func TestPendingTSSLoopExitsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{
-		secret:     secret,
-		tss:        &retryMockTSS{handleFn: func(int) error { return ErrUnknownCeremony }},
-		tssCtx:     ctx,
-		sessions:   make(map[Identity]*Transport),
-		peers:      make(map[Identity]*PeerRecord),
-		ceremonies: make(map[CeremonyID]*CeremonyInfo),
-	}
-	s.stt = newServerTSSTransport(s)
+	s := pendingTestServer(t, ctx,
+		&retryMockTSS{handleFn: func(int) error { return ErrUnknownCeremony }})
 
-	cid := NewCeremonyID()
-	data := []byte("test-data")
-	sig := secret.Sign(HashTSSMessage(cid, secret.Identity, 0, 0, data))
+	s.dispatchTSSMessage(signedTSSMessage(s, NewCeremonyID(), []byte("test-data")))
 
-	s.dispatchTSSMessage(TSSMessage{
-		CeremonyID: cid, From: secret.Identity,
-		Signature: sig, Data: data,
-	})
+	s.wg.Add(1)
+	go s.pendingTSSLoop(ctx)
 
 	cancel()
 	s.wg.Wait()
 }
 
-// TestDispatchTSSMessageRetryNonCeremonyError covers retry giving up
-// on a non-"unknown ceremony" error.
-func TestDispatchTSSMessageRetryNonCeremonyError(t *testing.T) {
-	secret, _ := NewSecret()
+// TestDispatchTSSMessageDropsOnHardError covers a redelivery that
+// fails for a reason other than an unregistered ceremony: the message
+// is discarded instead of being retried until it ages out.
+func TestDispatchTSSMessageDropsOnHardError(t *testing.T) {
 	mock := &retryMockTSS{
 		handleFn: func(n int) error {
 			if n == 1 {
 				return ErrUnknownCeremony
 			}
-			return errors.New("some other error") // retry gives up
+			return errors.New("some other error")
 		},
 	}
-	s := &Server{
-		secret:     secret,
-		tss:        mock,
-		tssCtx:     context.Background(),
-		sessions:   make(map[Identity]*Transport),
-		peers:      make(map[Identity]*PeerRecord),
-		ceremonies: make(map[CeremonyID]*CeremonyInfo),
+	s := pendingTestServer(t, context.Background(), mock)
+
+	s.dispatchTSSMessage(signedTSSMessage(s, NewCeremonyID(), []byte("test-data")))
+	if n := s.pendingTSS.len(); n != 1 {
+		t.Fatalf("pending = %d, want 1", n)
 	}
-	s.stt = newServerTSSTransport(s)
 
-	cid := NewCeremonyID()
-	data := []byte("test-data")
-	sig := secret.Sign(HashTSSMessage(cid, secret.Identity, 0, 0, data))
+	s.drainPendingTSS(t.Context())
+	if n := s.pendingTSS.len(); n != 0 {
+		t.Fatalf("pending after drain = %d, want 0", n)
+	}
+}
 
-	s.dispatchTSSMessage(TSSMessage{
-		CeremonyID: cid, From: secret.Identity,
-		Signature: sig, Data: data,
+// TestPendingTSSCaps proves an unknown ceremony ID is not a way to
+// make a node hold memory on demand: the per-ceremony message cap, the
+// global byte cap and content dedup all refuse the message rather than
+// buffering it.
+func TestPendingTSSCaps(t *testing.T) {
+	t.Run("dedup", func(t *testing.T) {
+		p := newPendingTSS()
+		cid := NewCeremonyID()
+		var from Identity
+		if !p.add(cid, from, []byte("same")) {
+			t.Fatal("first add refused")
+		}
+		if p.add(cid, from, []byte("same")) {
+			t.Fatal("duplicate accepted")
+		}
+		if n := p.len(); n != 1 {
+			t.Fatalf("len = %d, want 1", n)
+		}
 	})
 
-	s.wg.Wait()
+	t.Run("per ceremony", func(t *testing.T) {
+		p := newPendingTSS()
+		cid := NewCeremonyID()
+		var from Identity
+		for i := range pendingTSSMaxPerCeremony {
+			if !p.add(cid, from, []byte(fmt.Sprintf("msg-%d", i))) {
+				t.Fatalf("add %d refused below the cap", i)
+			}
+		}
+		if p.add(cid, from, []byte("one too many")) {
+			t.Fatal("accepted past pendingTSSMaxPerCeremony")
+		}
+	})
+
+	t.Run("global bytes", func(t *testing.T) {
+		p := newPendingTSS()
+		var from Identity
+		// A fresh ceremony ID per message defeats the
+		// per-ceremony cap, which is exactly the shape of the
+		// attack; the byte cap has to stop it.
+		big := make([]byte, 1<<20)
+		for i := range pendingTSSMaxBytes/len(big) + 8 {
+			big[0] = byte(i)
+			cp := append([]byte(nil), big...)
+			p.add(NewCeremonyID(), from, cp)
+		}
+		p.mtx.Lock()
+		bytes := p.bytes
+		p.mtx.Unlock()
+		if bytes > pendingTSSMaxBytes {
+			t.Fatalf("buffered %d bytes, cap is %d",
+				bytes, pendingTSSMaxBytes)
+		}
+	})
+
+	t.Run("age", func(t *testing.T) {
+		p := newPendingTSS()
+		cid := NewCeremonyID()
+		var from Identity
+		if !p.add(cid, from, []byte("stale")) {
+			t.Fatal("add refused")
+		}
+		p.mtx.Lock()
+		p.byID[cid][0].received = time.Now().Add(-2 * pendingTSSMaxAge)
+		p.mtx.Unlock()
+
+		live, expired := p.take()
+		if expired != 1 {
+			t.Fatalf("expired = %d, want 1", expired)
+		}
+		if len(live) != 0 {
+			t.Fatalf("live = %d, want 0", len(live))
+		}
+	})
 }
 
 // TestBuildResharePartyContext covers old/new context building.
@@ -11598,16 +11799,20 @@ func TestFiveNodeKeygenAndSign(t *testing.T) {
 		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
 		servers[i].cfg.PeersWanted = 6
 		servers[i].cfg.MaintainInterval = 500 * time.Millisecond
-		servers[i].cfg.InitialPingTimeout = time.Minute // admin client never pongs
+		if i == 0 {
+			// The admin client connects here.
+			servers[i].cfg.AdminListenAddress = "localhost:0"
+		}
 		idx := i
 		g.Go(func() error { return servers[idx].Run(gctx) })
 		addrs[i] = waitForListenAddress(t, servers[i], 2*time.Second)
 	}
+	adminAddr := waitForAdminListenAddress(t, servers[0], 5*time.Second)
 
 	waitForFullMesh(t, servers, n, 30*time.Second)
 	t.Log("gossip converged")
 
-	adminSecret, adminTr := adminConnect(t, ctx, addrs[0])
+	adminSecret, adminTr := adminConnect(t, ctx, adminAddr)
 
 	if err := adminTr.Write(adminSecret.Identity, PeerListAdminRequest{}); err != nil {
 		t.Fatal(err)
@@ -12647,5 +12852,340 @@ func TestSeedForwardModePreservesHostname(t *testing.T) {
 		if err := <-errCh; err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("server: %v", err)
 		}
+	}
+}
+
+// --- config validation, ceremony authority and deadline ---
+
+// TestPickInitiator pins the precedence of the ceremony trigger
+// source.  The wire handlers submit into debugInit, so it has to be
+// the initiator ceremonyLoop drains whenever it exists; otherwise an
+// operator-supplied one (the blockchain watcher) is used; the no-op is
+// the last resort.
+func TestPickInitiator(t *testing.T) {
+	di := newDebugInitiator()
+	cfgInit := newDebugInitiator() // any non-nil CeremonyInitiator
+
+	if got := pickInitiator(di, nil); got != CeremonyInitiator(di) {
+		t.Fatalf("debug only: got %T, want the debug initiator", got)
+	}
+	if got := pickInitiator(di, cfgInit); got != CeremonyInitiator(di) {
+		t.Fatalf("debug wins: got %T, want the debug initiator", got)
+	}
+	if got := pickInitiator(nil, cfgInit); got != CeremonyInitiator(cfgInit) {
+		t.Fatalf("config only: got %T, want the config initiator", got)
+	}
+	got := pickInitiator(nil, nil)
+	if _, ok := got.(*noopInitiator); !ok {
+		t.Fatalf("neither: got %T, want *noopInitiator", got)
+	}
+	// The no-op must never emit, or ceremonyLoop would spin.
+	if ch := got.CeremonyChan(); ch != nil {
+		t.Fatal("noopInitiator returned a non-nil channel")
+	}
+}
+
+// TestConfigInitiatorIsWired proves Config.Initiator reaches the
+// server, so a production build has a way to drive ceremonies at all.
+// Under the continuum_debug tag the debug initiator takes precedence,
+// which pickInitiator covers directly.
+func TestConfigInitiatorIsWired(t *testing.T) {
+	if serverDebugInit() != nil {
+		t.Skip("continuum_debug build: debug initiator takes precedence")
+	}
+
+	init := newDebugInitiator()
+	cfg := NewDefaultConfig()
+	cfg.DNS = DNSOff
+	cfg.Initiator = init
+
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.initiator != CeremonyInitiator(init) {
+		t.Fatalf("initiator = %T, want the configured one", s.initiator)
+	}
+}
+
+// TestNewServerPeerCountValidation covers peer counts arriving from
+// the environment.  They are used directly as map, channel and TTL
+// capacities, so a negative value would panic make() rather than
+// return an error to the operator.
+func TestNewServerPeerCountValidation(t *testing.T) {
+	newCfg := func() *Config {
+		cfg := NewDefaultConfig()
+		cfg.DNS = DNSOff
+		return cfg
+	}
+
+	t.Run("negative PeersWanted", func(t *testing.T) {
+		cfg := newCfg()
+		cfg.PeersWanted = -1
+		if _, err := NewServer(cfg); err == nil {
+			t.Fatal("negative PeersWanted accepted")
+		}
+	})
+
+	t.Run("negative MaxPeers", func(t *testing.T) {
+		cfg := newCfg()
+		cfg.MaxPeers = -1
+		if _, err := NewServer(cfg); err == nil {
+			t.Fatal("negative MaxPeers accepted")
+		}
+	})
+
+	t.Run("zero takes defaults", func(t *testing.T) {
+		cfg := newCfg()
+		cfg.PeersWanted = 0
+		cfg.MaxPeers = 0
+		s, err := NewServer(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.PeersWanted != defaultPeersWanted {
+			t.Fatalf("PeersWanted = %d, want %d",
+				cfg.PeersWanted, defaultPeersWanted)
+		}
+		if cfg.MaxPeers != defaultMaxPeers {
+			t.Fatalf("MaxPeers = %d, want %d",
+				cfg.MaxPeers, defaultMaxPeers)
+		}
+		if cap(s.handshakeSem) != defaultPeersWanted {
+			t.Fatalf("handshake semaphore cap = %d, want %d",
+				cap(s.handshakeSem), defaultPeersWanted)
+		}
+	})
+}
+
+// TestCeremonyTimeoutFailsCeremony proves a ceremony cannot run
+// forever.  Every TSS round waits on all participants, so a member
+// that goes offline would otherwise pin the driver goroutine and the
+// tracking entry for the life of the process — and eviction never
+// reclaims it, because eviction skips running ceremonies.
+func TestCeremonyTimeoutFailsCeremony(t *testing.T) {
+	mock := &mockTSS{
+		keygenCalled: make(chan struct{}),
+		block:        make(chan struct{}), // never closed: stalls the round
+	}
+	s := dispatchTestServer(t, mock)
+	s.cfg.CeremonyTimeout = 100 * time.Millisecond
+
+	cid := NewCeremonyID()
+	s.dispatchKeygen(CeremonyRequest{
+		CeremonyID:  cid,
+		Type:        CeremonyKeygen,
+		Committee:   boundIdentities(t, s, 1),
+		Threshold:   1,
+		Coordinator: s.secret.Identity,
+	})
+
+	select {
+	case <-mock.keygenCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tss.Keygen not called")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stalled ceremony outlived its deadline")
+	}
+
+	if ci := s.CeremonyStatus(cid); ci.Status != CeremonyFailed {
+		t.Fatalf("status = %q, want %q", ci.Status, CeremonyFailed)
+	}
+
+	// A terminal ceremony is reclaimable; a running one is not.
+	s.evictStaleCeremonies() // too young to evict, but must not panic
+}
+
+// TestCeremonyAuthorized covers who may declare a result for, or
+// abort, a ceremony.  Keygen carries a coordinator and only it may
+// speak.  Sign and reshare have none, so authority is committee
+// membership: without that rule a zero coordinator disabled the check
+// and any mesh peer could abort another node's ceremony.
+func TestCeremonyAuthorized(t *testing.T) {
+	s := dispatchTestServer(t, &mockTSS{})
+
+	coordinator := Identity{0x01}
+	member := Identity{0x02}
+	outsider := Identity{0x03}
+
+	keygenID := NewCeremonyID()
+	if _, ok := s.registerCeremony(keygenID, CeremonyKeygen, coordinator,
+		[]Identity{coordinator, member}); !ok {
+		t.Fatal("registerCeremony keygen")
+	}
+
+	signID := NewCeremonyID()
+	if _, ok := s.registerCeremony(signID, CeremonySign, Identity{},
+		[]Identity{coordinator, member}); !ok {
+		t.Fatal("registerCeremony sign")
+	}
+
+	tests := []struct {
+		name   string
+		cid    CeremonyID
+		signer Identity
+		want   bool
+	}{
+		{"keygen coordinator", keygenID, coordinator, true},
+		{"keygen committee member is not the coordinator", keygenID, member, false},
+		{"keygen outsider", keygenID, outsider, false},
+		{"sign committee member", signID, member, true},
+		{"sign outsider", signID, outsider, false},
+		{"untracked ceremony", NewCeremonyID(), outsider, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := s.ceremonyAuthorized(tc.cid, tc.signer); got != tc.want {
+				t.Fatalf("ceremonyAuthorized = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSignCeremonyAbortRequiresCommitteeMember is the end-to-end form
+// of the rule above: a correctly signed CeremonyAbort from a peer
+// outside the committee must not cancel a sign ceremony.
+func TestSignCeremonyAbortRequiresCommitteeMember(t *testing.T) {
+	mock := &mockTSS{
+		signCalled: make(chan struct{}),
+		block:      make(chan struct{}),
+	}
+	s := dispatchTestServer(t, mock)
+
+	committee := boundIdentities(t, s, 1)
+	cid := NewCeremonyID()
+	s.dispatchSign(CeremonyRequest{
+		CeremonyID: cid,
+		Type:       CeremonySign,
+		Committee:  committee,
+		Threshold:  1,
+		Data:       make([]byte, sha256.Size),
+	})
+	select {
+	case <-mock.signCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("tss.Sign not called")
+	}
+
+	// An outsider with a perfectly valid identity signature.
+	outsider, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	abort := CeremonyAbort{
+		CeremonyID: cid,
+		Reason:     "not yours to abort",
+		Signer:     outsider.Identity,
+	}
+	abort.Signature = outsider.Sign(HashCeremonyAbort(abort))
+	handleCeremonyAbort(&dispatchCtx{s: s, id: &outsider.Identity}, &abort)
+
+	if ci := s.CeremonyStatus(cid); ci.Status != CeremonyRunning {
+		t.Fatalf("status = %q, want %q: an outsider aborted the ceremony",
+			ci.Status, CeremonyRunning)
+	}
+
+	// The committee member's abort is honoured.
+	s.failCeremony(cid, "done")
+	close(mock.block)
+	s.wg.Wait()
+}
+
+// TestBroadcastForgedNotForwarded proves a broadcast is authenticated
+// before it is relayed.  Forwarding first turns one forged message
+// into one write per edge of the mesh, so a peer that can sign nothing
+// still gets the whole network to do its fan-out — local dispatch
+// rejecting the payload afterwards is too late.  Uses a 3-node chain
+// A-B-C and watches B.
+func TestBroadcastForgedNotForwarded(t *testing.T) {
+	preParams := loadPreParams(t, 3)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	servers := make([]*Server, 3)
+	addrs := make([]string, 3)
+
+	servers[0] = newTestServer(t, preParams, 0, "localhost:0", nil)
+	servers[0].cfg.PeersWanted = 1
+	servers[0].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[0].Run(gctx) })
+	addrs[0] = waitForListenAddress(t, servers[0], 2*time.Second)
+
+	servers[1] = newTestServer(t, preParams, 1, "localhost:0",
+		[]string{addrs[0]})
+	servers[1].cfg.PeersWanted = 2
+	servers[1].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[1].Run(gctx) })
+	addrs[1] = waitForListenAddress(t, servers[1], 2*time.Second)
+
+	waitForSessions(t, servers[0], 1, 5*time.Second)
+	waitForSessions(t, servers[1], 1, 5*time.Second)
+
+	servers[2] = newTestServer(t, preParams, 2, "localhost:0",
+		[]string{addrs[1]})
+	servers[2].cfg.PeersWanted = 2
+	servers[2].cfg.MaintainInterval = 10 * time.Second
+	g.Go(func() error { return servers[2].Run(gctx) })
+	addrs[2] = waitForListenAddress(t, servers[2], 2*time.Second)
+
+	waitForSessions(t, servers[1], 2, 5*time.Second)
+	waitForSessions(t, servers[2], 1, 5*time.Second)
+
+	fwdBefore := servers[1].forwarded.Load()
+	dropBefore := servers[1].broadcastDropped.Load()
+
+	// A broadcasts a CeremonyAbort it did not sign.  Broadcast()
+	// writes whatever it is handed; the receiver has to be the one
+	// that refuses to relay it.
+	forged := CeremonyAbort{
+		CeremonyID: NewCeremonyID(),
+		Reason:     "forged",
+		Signer:     servers[0].secret.Identity,
+		Signature:  make([]byte, 65),
+	}
+	if err := servers[0].Broadcast(forged); err != nil {
+		t.Fatalf("Broadcast forged: %v", err)
+	}
+
+	waitForCondition(t, "B dropped the forged broadcast", 5*time.Second,
+		func() bool {
+			return servers[1].broadcastDropped.Load() > dropBefore
+		})
+
+	if got := servers[1].forwarded.Load() - fwdBefore; got != 0 {
+		t.Fatalf("B relayed the forged broadcast %d time(s), want 0", got)
+	}
+
+	// The same path still relays a properly signed broadcast, so the
+	// check rejects forgeries rather than broadcasts as such.
+	genuine := CeremonyResult{
+		CeremonyID: NewCeremonyID(),
+		Success:    true,
+		Signer:     servers[0].secret.Identity,
+	}
+	genuine.Signature = servers[0].secret.Sign(HashCeremonyResult(genuine))
+	if err := servers[0].Broadcast(genuine); err != nil {
+		t.Fatalf("Broadcast genuine: %v", err)
+	}
+	waitForCondition(t, "B relayed the genuine broadcast", 5*time.Second,
+		func() bool {
+			return servers[1].forwarded.Load() > fwdBefore
+		})
+
+	cancel()
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server error: %v", err)
 	}
 }

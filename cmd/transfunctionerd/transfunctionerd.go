@@ -26,6 +26,12 @@ const (
 	// defaultNetwork  = "mainnet"
 	defaultHome        = "~/." + daemonName
 	defaultPeersWanted = 8
+
+	// defaultAdminListenAddress is the loopback-only port hemictl
+	// uses to drive ceremonies and read status.  Admin RPCs are
+	// authorized on arriving here, so this listener and the peer
+	// listener must stay distinct.
+	defaultAdminListenAddress = "localhost:45068"
 )
 
 var (
@@ -34,6 +40,15 @@ var (
 
 	cfg = continuum.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"TRF_ADMIN_LISTEN_ADDRESS": config.Config{
+			Value:        &cfg.AdminListenAddress,
+			DefaultValue: defaultAdminListenAddress,
+			Help: "address and port transfunctionerd listens on for " +
+				"local admin commands (hemictl); admin RPCs are only " +
+				"honoured on this listener, so keep it loopback-only. " +
+				"Empty disables it",
+			Print: config.PrintAll,
+		},
 		"TRF_CONNECT": config.Config{
 			Value:        &cfg.Connect,
 			DefaultValue: []string{},

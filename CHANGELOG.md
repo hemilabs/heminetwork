@@ -108,6 +108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   peer-to-peer transport with multi-hop routing, DNS seeding,
   coordinator election, and `hemictl` ceremony management commands
   ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+- Add `TRF_ADMIN_LISTEN_ADDRESS` to `transfunctionerd`, a loopback-only
+  listener (default `localhost:45068`) dedicated to `hemictl` admin
+  RPCs. Admin commands are authorized on arriving there, so the peer
+  listener refuses them; `HEMICTL_CONTINUUM_ADDRESS` defaults to the
+  admin port ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 - Add external ECDSA and schnorr signature injection to `bitcoin/wallet`,
   enabling threshold signature committees, hardware wallets, and PSBT flows
   to produce signatures out of band and hand them to the wallet for
@@ -192,6 +197,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix bug in `synctester` where unbounded reads of the docker logs could lead
 to an OOM crash ([#1159](https://github.com/hemilabs/heminetwork/pull/1159)).
+
+- Fix a data race in `continuum`'s ceremony status reads. `CeremonyStatus`
+  and the ceremony status admin RPC copied `CeremonyInfo` after releasing
+  the mutex the ceremony driver writes it under
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 
 ## [v2.0.0]
 

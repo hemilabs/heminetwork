@@ -611,3 +611,72 @@ func TestTTLCancelThenPutRemoveStillFires(t *testing.T) {
 		t.Fatalf("expected new-val, got %v", v)
 	}
 }
+
+// TestTTLParentCancelFiresRemove covers cancellation that does not come
+// through TTL.Cancel.  The context handed to Put is the caller's, so
+// cancelling it removes the entry just as Cancel does, and the remove
+// callback has to fire — Cancel is the only path that clears it.
+func TestTTLParentCancelFiresRemove(t *testing.T) {
+	tm, err := New(1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	removed := make(chan any, 1)
+	removeCB := func(_ context.Context, _ any, val any) {
+		removed <- val
+	}
+
+	tm.Put(ctx, 10*time.Second, "k", "the-value", callbackPanic, removeCB)
+
+	cancel()
+
+	select {
+	case v := <-removed:
+		if v != "the-value" {
+			t.Fatalf("remove got %v, want \"the-value\"", v)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parent cancel dropped the remove callback")
+	}
+}
+
+// TestTTLParentCancelAfterCancelFiresOnce proves the two cancellation
+// paths do not double-fire: TTL.Cancel clears the callback under the
+// mutex, so the goroutine woken by the same context cancellation finds
+// nothing left to call.
+func TestTTLParentCancelAfterCancelFiresOnce(t *testing.T) {
+	tm, err := New(1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	var mtx sync.Mutex
+	var calls int
+	removeCB := func(context.Context, any, any) {
+		mtx.Lock()
+		calls++
+		mtx.Unlock()
+	}
+
+	tm.Put(ctx, 10*time.Second, "k", "v", callbackPanic, removeCB)
+
+	if err := tm.Cancel("k"); err != nil {
+		t.Fatal(err)
+	}
+	// Cancel already cancelled the value context; give the ttl
+	// goroutine time to wake on it and reach the Canceled branch.
+	time.Sleep(100 * time.Millisecond)
+
+	mtx.Lock()
+	got := calls
+	mtx.Unlock()
+	if got != 1 {
+		t.Fatalf("remove callback fired %d times, want 1", got)
+	}
+}
