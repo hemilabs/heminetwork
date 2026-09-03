@@ -6,7 +6,6 @@ package continuum
 
 import (
 	"context"
-	"errors"
 	"net"
 )
 
@@ -36,12 +35,19 @@ func (s *Server) listenAdmin(ctx context.Context, errC chan error) {
 
 	for {
 		conn, err := listener.Accept()
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return
-		}
 		if err != nil {
+			// See listen(): the listener is closed for any
+			// completed context, not just a cancelled one, so
+			// exit on ctx.Err() rather than on Canceled alone.
+			if ctx.Err() != nil {
+				return
+			}
 			log.Errorf("admin accept: %v", err)
 			continue
+		}
+		if ctx.Err() != nil {
+			conn.Close() // best-effort: shutting down
+			return
 		}
 		tcpKeepAlive(conn, tcpKeepAlivePeriod)
 		s.wg.Add(1)

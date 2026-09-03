@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -215,6 +216,16 @@ const (
 	// defaultTTL is the hop count for originated routed messages.
 	defaultTTL = 8
 
+	// defaultCeremonyTimeout bounds how long a single ceremony may
+	// run.  A TSS round waits for messages from every participant,
+	// so one member that goes offline or withholds a message stalls
+	// the ceremony forever; without a deadline the driver goroutine
+	// and its tracking entry live until the process exits, and the
+	// entry is never evicted because eviction skips running
+	// ceremonies.  Well under ceremonyMaxAge so a timed-out
+	// ceremony still ages out of the tracking map.
+	defaultCeremonyTimeout = 13 * time.Minute
+
 	// ceremonyMaxAge is how long completed/failed ceremonies remain in the
 	// tracking map before eviction.  Running ceremonies are never evicted.
 	ceremonyMaxAge = 29 * time.Minute
@@ -244,7 +255,7 @@ type Config struct {
 	Home                    string
 	ListenAddress           string
 	LogLevel                string
-	PeersWanted             int
+	PeersWanted             int           // 0 uses default (8)
 	PingInterval            time.Duration // 0 uses default (61s)
 	PingTimeout             time.Duration // 0 uses default (19s)
 	InitialPingTimeout      time.Duration // 0 uses default (5s); increase for slow CI
@@ -254,9 +265,17 @@ type Config struct {
 	PrivateKey              string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
-	Seeds                   []string // DNS seed hostnames, format host:port
-	MaxPeers                int      // 0 uses default (256)
-	AdminListenAddress      string   // empty = no admin listener
+	Seeds                   []string      // DNS seed hostnames, format host:port
+	MaxPeers                int           // 0 uses default (256)
+	AdminListenAddress      string        // empty = no admin listener
+	CeremonyTimeout         time.Duration // 0 uses default (13m)
+
+	// Initiator is the source of ceremony triggers — in production
+	// the blockchain watcher.  Nil installs a no-op initiator that
+	// never emits, so the node participates in ceremonies others
+	// start but initiates none itself.  Ignored in continuum_debug
+	// builds, where hemictl drives ceremonies over the wire.
+	Initiator CeremonyInitiator
 }
 
 // CeremonyInfo tracks the state of an active TSS ceremony.
@@ -382,19 +401,26 @@ type Server struct {
 	// non-tree topologies.
 	seen *ttl.TTL
 
+	// pendingTSS buffers TSS round messages that arrive before
+	// the request registering their ceremony.
+	pendingTSS *pendingTSS
+
 	// Routing counters for observability and testing.
-	routedReceived  atomic.Int64 // messages received at final destination
-	forwarded       atomic.Int64 // messages forwarded to next hop
-	dedupDropped    atomic.Int64 // messages dropped by dedup cache
-	broadcastsSent  atomic.Int64 // broadcast originations (not forwards)
-	rateDropped     atomic.Int64 // messages dropped by rate limiter
-	cooldownDrops   atomic.Int64 // connections dropped by IP cooldown
-	hsRateDrops     atomic.Int64 // connections dropped by per-IP handshake rate
-	rateDisconnects atomic.Int64 // sessions closed for sustained rate abuse
-	envRateDrops    atomic.Int64 // envelopes dropped by sender rate limit
-	keyConflicts    atomic.Int64 // rejected attempts to rebind a peer e2e key
-	naclXchgDrops   atomic.Int64 // dropped NaCl key exchange messages
-	startedAt       time.Time    // set in Run() for uptime gauge
+	routedReceived    atomic.Int64 // messages received at final destination
+	forwarded         atomic.Int64 // messages forwarded to next hop
+	dedupDropped      atomic.Int64 // messages dropped by dedup cache
+	broadcastsSent    atomic.Int64 // broadcast originations (not forwards)
+	broadcastDropped  atomic.Int64 // broadcasts dropped before relay (bad signature)
+	rateDropped       atomic.Int64 // messages dropped by rate limiter
+	cooldownDrops     atomic.Int64 // connections dropped by IP cooldown
+	hsRateDrops       atomic.Int64 // connections dropped by per-IP handshake rate
+	rateDisconnects   atomic.Int64 // sessions closed for sustained rate abuse
+	envRateDrops      atomic.Int64 // envelopes dropped by sender rate limit
+	keyConflicts      atomic.Int64 // rejected attempts to rebind a peer e2e key
+	naclXchgDrops     atomic.Int64 // dropped NaCl key exchange messages
+	tssPendingDrops   atomic.Int64 // TSS messages dropped by pending-queue caps
+	tssPendingExpired atomic.Int64 // TSS messages discarded past pendingTSSMaxAge
+	startedAt         time.Time    // set in Run() for uptime gauge
 
 	// Ceremony counters — updated every promPoll tick so prom
 	// callbacks never iterate the ceremonies map on scrape.
@@ -450,15 +476,31 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("DNS=%q requires Hostname to be set", cfg.DNS)
 	}
 
-	if cfg.MaxPeers <= 0 {
+	// Peer counts are used directly as map, channel and TTL
+	// capacities.  A negative value panics make(); a zero value
+	// means "unset" and takes the default.  Both are validated
+	// here so no invalid capacity can reach the Server struct.
+	if cfg.PeersWanted < 0 {
+		return nil, fmt.Errorf("PeersWanted must not be negative: %d",
+			cfg.PeersWanted)
+	}
+	if cfg.PeersWanted == 0 {
+		cfg.PeersWanted = defaultPeersWanted
+	}
+	if cfg.MaxPeers < 0 {
+		return nil, fmt.Errorf("MaxPeers must not be negative: %d",
+			cfg.MaxPeers)
+	}
+	if cfg.MaxPeers == 0 {
 		cfg.MaxPeers = defaultMaxPeers
 	}
 
+	// Ceremony trigger source, in precedence order: the debug
+	// initiator (continuum_debug builds only, driven by hemictl),
+	// then an operator-supplied one, then the no-op.
 	di := serverDebugInit()
-	var init CeremonyInitiator = &noopInitiator{}
-	if di != nil {
-		init = di
-	}
+	init := pickInitiator(di, cfg.Initiator)
+
 	limiters, err := ttl.New(limiterCap, true)
 	if err != nil {
 		return nil, fmt.Errorf("limiter ttl: %w", err)
@@ -490,9 +532,32 @@ func NewServer(cfg *Config) (*Server, error) {
 		routeTable:         make(map[Identity]Identity),
 		naclXchg:           naclXchg,
 		naclXchgRates:      naclXchgRates,
+		pendingTSS:         newPendingTSS(),
 		keyBound:           make(chan struct{}),
 		tssCtx:             context.Background(), // replaced by Run() with lifecycle context
 	}, nil
+}
+
+// pickInitiator resolves the ceremony trigger source.
+//
+// The debug initiator wins where it exists: the wire handlers submit
+// into it, so it has to be the one ceremonyLoop drains or a
+// hemictl-driven ceremony would vanish into a channel nobody reads.
+// Otherwise an operator-supplied Config.Initiator — the blockchain
+// watcher in production — is used.  The no-op is the last resort: the
+// node participates in ceremonies others start but initiates none.
+func pickInitiator(di *debugInitiator, cfgInit CeremonyInitiator) CeremonyInitiator {
+	if di != nil {
+		if cfgInit != nil {
+			log.Warningf("continuum_debug build: ignoring " +
+				"Config.Initiator in favour of the debug initiator")
+		}
+		return di
+	}
+	if cfgInit != nil {
+		return cfgInit
+	}
+	return &noopInitiator{}
 }
 
 func (s *Server) newSession(id *Identity, t *Transport) error {
@@ -937,6 +1002,16 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 				log.Warningf("handle %v: non-broadcastable type %T dropped", id, payload)
 				continue
 			}
+			// Authenticate before relaying.  Forwarding first
+			// turns one forged message into one write per edge
+			// of the mesh; the signature check is stateless, so
+			// every relay can make it.
+			if err := VerifyBroadcast(payload); err != nil {
+				log.Warningf("handle %v: unauthenticated broadcast dropped: %v",
+					id, err)
+				s.broadcastDropped.Add(1)
+				continue
+			}
 			s.forwardBroadcast(header, payload, id)
 			// Fall through to dispatch for local processing.
 		} else if header.Destination != nil && *header.Destination != s.secret.Identity {
@@ -964,6 +1039,7 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 			s:          s,
 			id:         id,
 			t:          t,
+			admin:      admin,
 		}
 		if dispatchPayload(dc, payload) {
 			return
@@ -1637,16 +1713,28 @@ func (s *Server) sendTo(dest Identity, cmd any) error {
 
 	// Direct session: send with routing header so the destination
 	// knows this was an addressed message.
+	// A write failure here means the session is dead but has not
+	// been reaped yet.  Fall through to the next strategy rather
+	// than returning: the point of the route and flood fallbacks
+	// is to survive exactly this.
 	if t, ok := s.sessions[dest]; ok {
-		return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+		err := t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+		if err == nil {
+			return nil
+		}
+		log.Debugf("sendTo %v: direct write failed: %v", dest, err)
 	}
 
 	// Route via gossip topology table: send to the computed
 	// next hop on the shortest path to dest.
 	if hop, ok := s.routeNextHop(dest); ok {
 		if t, ok := s.sessions[hop]; ok {
-			log.Debugf("sendTo %v via route hop %v", dest, hop)
-			return t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+			err := t.WriteTo(s.secret.Identity, dest, defaultTTL, cmd)
+			if err == nil {
+				log.Debugf("sendTo %v via route hop %v", dest, hop)
+				return nil
+			}
+			log.Debugf("sendTo %v via route hop %v: %v", dest, hop, err)
 		}
 	}
 
@@ -1844,14 +1932,29 @@ func isLocalhost(addr net.Addr) bool {
 	return ip.IsLoopback()
 }
 
-// requireAdmin checks that the transport originates from localhost.
-// Returns false and logs a warning if rejected.  Used by admin RPCs.
-func requireAdmin(t *Transport, id *Identity) bool {
-	if isLocalhost(t.RemoteAddr()) {
-		return true
+// requireAdmin authorizes an admin RPC.  The request must have
+// arrived directly on the dedicated admin listener (dc.admin) AND
+// that socket must be loopback.
+//
+// The provenance check is the real gate.  A loopback peer address is
+// not evidence of an admin client: a co-located mesh node dials from
+// 127.0.0.1, and the last hop of a routed or encrypted message is
+// whatever peer forwarded it — authorizing on the socket address
+// alone lets either of them act as the operator.
+//
+// Returns false and logs a warning if rejected.
+func requireAdmin(dc *dispatchCtx) bool {
+	if !dc.admin {
+		log.Warningf("handle %v: admin request off the admin listener, rejected",
+			dc.id)
+		return false
 	}
-	log.Warningf("handle %v: admin request from non-localhost, rejected", id)
-	return false
+	if !isLocalhost(dc.t.RemoteAddr()) {
+		log.Warningf("handle %v: admin request from non-localhost, rejected",
+			dc.id)
+		return false
+	}
+	return true
 }
 
 // registerCeremony records a new ceremony in the tracking map and
@@ -1860,13 +1963,26 @@ func requireAdmin(t *Transport, id *Identity) bool {
 // cancelled by failCeremony — including a verified CeremonyAbort — so
 // an abort stops the rounds rather than only relabelling the status.
 //
+// It also carries a deadline (Config.CeremonyTimeout).  Every TSS
+// round blocks until each participant has been heard from, so a
+// participant that goes offline or withholds a message would
+// otherwise pin the driver goroutine and the tracking entry for the
+// life of the process, and eviction never reclaims the entry because
+// it skips running ceremonies.  On expiry the round returns the
+// context error and the driver fails the ceremony like any other
+// failure.
+//
 // If a ceremony with the same ID is already running, registration is
 // refused and false is returned: the caller must not start another
 // driver.  This keeps re-delivery or a reorg from clobbering the
 // in-flight state or running two sets of rounds under one ID.  A
 // terminal (complete or failed) entry is replaced.
 func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator Identity, committee []Identity) (context.Context, bool) {
-	ctx, cancel := context.WithCancel(s.tssCtx) //nolint:gosec // cancel stored in CeremonyInfo, called on ceremony completion
+	timeout := s.cfg.CeremonyTimeout
+	if timeout <= 0 {
+		timeout = defaultCeremonyTimeout
+	}
+	ctx, cancel := context.WithTimeout(s.tssCtx, timeout) //nolint:gosec // cancel stored in CeremonyInfo, called on ceremony completion
 	s.mtx.Lock()
 	if existing, ok := s.ceremonies[cid]; ok && existing.Status == CeremonyRunning {
 		s.mtx.Unlock()
@@ -1885,6 +2001,35 @@ func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator I
 	}
 	s.mtx.Unlock()
 	return ctx, true
+}
+
+// ceremonyAuthorized reports whether signer may declare a result for,
+// or abort, ceremony cid.
+//
+// Keygen carries a coordinator: it is the only node allowed to
+// broadcast the result, so it is the only node allowed to speak for
+// the ceremony.  Sign and reshare have no coordinator — nobody
+// broadcasts their result — so authority there is committee
+// membership.  A committee member can already stall a ceremony by
+// withholding a round, so letting one abort grants it nothing new,
+// while an outsider gets nothing at all.  Before this, a zero
+// coordinator disabled the check entirely and any mesh peer could
+// abort another node's sign or reshare.
+//
+// An untracked ceremony returns true: there is no local state to act
+// on, so there is nothing to authorize against.
+func (s *Server) ceremonyAuthorized(cid CeremonyID, signer Identity) bool {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	ci, ok := s.ceremonies[cid]
+	if !ok {
+		return true
+	}
+	if ci.Coordinator != (Identity{}) {
+		return ci.Coordinator == signer
+	}
+	return slices.Contains(ci.Committee, signer)
 }
 
 // completeCeremony marks a tracked ceremony as complete.  Only a
@@ -1989,10 +2134,12 @@ func (s *Server) handlePeerListAdmin() PeerListAdminResponse {
 
 // handleCeremonyStatus returns the status of a specific ceremony.
 func (s *Server) handleCeremonyStatus(cid CeremonyID) CeremonyStatusResponse {
+	// Read the fields under the lock: the ceremony driver writes
+	// them under this same mutex.
 	s.mtx.RLock()
-	ci, ok := s.ceremonies[cid]
-	s.mtx.RUnlock()
+	defer s.mtx.RUnlock()
 
+	ci, ok := s.ceremonies[cid]
 	if !ok {
 		return CeremonyStatusResponse{
 			CeremonyID: cid,
@@ -2968,13 +3115,23 @@ func (s *Server) listen(ctx context.Context, errC chan error) {
 
 	for {
 		conn, err := listener.Accept()
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return
-		}
 		// untested: Accept error after ctx cancel; requires mock net.Listener
 		if err != nil {
+			// The goroutine above closes the listener once ctx
+			// is done — for any reason, cancel or deadline — so
+			// every subsequent Accept fails.  Testing only for
+			// context.Canceled turns a deadline-bound parent
+			// context into an endless error log that never lets
+			// wg.Wait return.
+			if ctx.Err() != nil {
+				return
+			}
 			log.Errorf("accept: %v", err)
 			continue
+		}
+		if ctx.Err() != nil {
+			conn.Close() // best-effort: shutting down
+			return
 		}
 
 		// Per-IP cooldown (F5): reject immediately if this IP
@@ -3250,6 +3407,10 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go s.evictCeremonies(ctx)
 
+	// Redeliver TSS messages that raced ahead of their ceremony.
+	s.wg.Add(1)
+	go s.pendingTSSLoop(ctx)
+
 	// Ceremony dispatcher — reads from CeremonyInitiator channel.
 	s.wg.Add(1)
 	go s.ceremonyLoop(ctx)
@@ -3373,9 +3534,13 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn, hs
 // or nil if the ceremony is not registered on this node.  The
 // returned struct is a copy — mutations do not affect server state.
 func (s *Server) CeremonyStatus(cid CeremonyID) *CeremonyInfo {
+	// The copy is made under the lock: every field of CeremonyInfo
+	// is written by the ceremony driver under this same mutex, so
+	// copying after releasing it races the driver.
 	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
 	ci := s.ceremonies[cid]
-	s.mtx.RUnlock()
 	if ci == nil {
 		return nil
 	}
