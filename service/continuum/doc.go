@@ -47,8 +47,8 @@
 // sides generate ephemeral keys, derive a shared secret, and use it
 // to encrypt all subsequent traffic with XSalsa20-Poly1305 (NaCl
 // secretbox).  After key exchange, a mutual challenge-response
-// handshake authenticates both peers using their long-term ed25519
-// signing keys.  The handshake also exchanges NaCl public keys for
+// handshake authenticates both peers using their long-term secp256k1
+// identity keys.  The handshake also exchanges NaCl public keys for
 // end-to-end encryption of routed messages.
 //
 // Messages are length-prefixed and JSON-encoded within the encrypted
@@ -180,6 +180,13 @@
 // inject ceremony commands (keygen, sign, reshare) and query status.
 // Routed messages from admin are forwarded into the mesh via the
 // standard forward() path.
+//
+// Admin RPCs are authorized on that provenance: arriving on this
+// listener, on a loopback socket.  A loopback peer address by itself
+// is not evidence of an admin client — a co-located node dials from
+// 127.0.0.1, and the last hop of a routed message is whichever peer
+// relayed it — so the flag is set only by the admin accept path and
+// is cleared for payloads recovered from an encrypted envelope.
 //
 // # Broadcast Cost at 100 Nodes
 //
