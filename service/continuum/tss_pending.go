@@ -7,7 +7,6 @@ package continuum
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
 	"sync"
 	"time"
 )
@@ -26,20 +25,19 @@ import (
 // ceremony ID each time buys hundreds of goroutines and hundreds of
 // megabytes for the cost of signing.
 //
-// pendingTSS replaces that with one buffer and one drain goroutine.
-// Memory is capped globally and per ceremony, entries expire on age,
-// and a message already queued for a ceremony is not queued twice.
+// pendingTSS replaces that with one buffer, drained on a signal.  The
+// TSS engine calls ceremonyRegistered the moment a ceremony becomes
+// known to HandleMessage, which is exactly when the buffered messages
+// for it can be delivered — no timer, no wasted wakeups, and no tick
+// interval added to the latency of a raced message.  Memory is capped
+// globally and per ceremony, entries expire on age, and a message
+// already queued for a ceremony is not queued twice.
 const (
 	// pendingTSSMaxAge is how long a message for an unregistered
 	// ceremony is retried before it is discarded.  Matches the old
 	// backoff horizon: past this the request is not merely in
 	// flight, it is not coming.
 	pendingTSSMaxAge = 5 * time.Second
-
-	// pendingTSSInterval is the drain tick.  Short enough that the
-	// common case — the request lands milliseconds behind the first
-	// round message — costs no visible latency.
-	pendingTSSInterval = 50 * time.Millisecond
 
 	// pendingTSSMaxBytes caps the payload bytes buffered across all
 	// ceremonies.
@@ -62,9 +60,10 @@ type pendingTSSMsg struct {
 // pendingTSS buffers TSSMessages whose ceremony is not yet registered.
 // Safe for concurrent use.
 type pendingTSS struct {
-	mtx   sync.Mutex
-	byID  map[CeremonyID][]*pendingTSSMsg
-	bytes int
+	mtx     sync.Mutex
+	byID    map[CeremonyID][]*pendingTSSMsg
+	bytes   int
+	expired int // messages dropped past pendingTSSMaxAge, since last read
 }
 
 func newPendingTSS() *pendingTSS {
@@ -90,6 +89,10 @@ func (p *pendingTSS) addMsg(cid CeremonyID, m *pendingTSSMsg) bool {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
+	// No timer sweeps this buffer, so reclaim here.  A ceremony that
+	// never registers must not hold its bytes against everyone else.
+	p.expire()
+
 	if p.bytes+len(m.data) > pendingTSSMaxBytes {
 		return false
 	}
@@ -108,38 +111,65 @@ func (p *pendingTSS) addMsg(cid CeremonyID, m *pendingTSSMsg) bool {
 	return true
 }
 
-// take removes and returns every buffered message, along with the
-// count of entries discarded for exceeding pendingTSSMaxAge.  The
-// caller redelivers what it gets back and re-adds anything whose
-// ceremony is still unknown.
-func (p *pendingTSS) take() (map[CeremonyID][]*pendingTSSMsg, int) {
+// take removes and returns the buffered messages for one ceremony,
+// dropping any that are past pendingTSSMaxAge.
+func (p *pendingTSS) take(cid CeremonyID) []*pendingTSSMsg {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
-	if len(p.byID) == 0 {
-		return nil, 0
+	q := p.byID[cid]
+	if q == nil {
+		return nil
 	}
+	delete(p.byID, cid)
 
 	cutoff := time.Now().Add(-pendingTSSMaxAge)
-	live := make(map[CeremonyID][]*pendingTSSMsg, len(p.byID))
-	var expired int
+	live := make([]*pendingTSSMsg, 0, len(q))
+	for _, m := range q {
+		p.bytes -= len(m.data)
+		if m.received.Before(cutoff) {
+			p.expired++
+			continue
+		}
+		live = append(live, m)
+	}
+	return live
+}
+
+// expire drops every buffered message past pendingTSSMaxAge and
+// reports how many went.  Called from add so a ceremony that never
+// registers cannot hold its bytes forever; there is no timer to do it.
+func (p *pendingTSS) expire() int {
+	cutoff := time.Now().Add(-pendingTSSMaxAge)
+	var n int
 	for cid, q := range p.byID {
-		var keep []*pendingTSSMsg
+		keep := q[:0]
 		for _, m := range q {
 			if m.received.Before(cutoff) {
-				expired++
+				p.bytes -= len(m.data)
+				n++
 				continue
 			}
 			keep = append(keep, m)
 		}
-		if len(keep) != 0 {
-			live[cid] = keep
+		if len(keep) == 0 {
+			delete(p.byID, cid)
+			continue
 		}
+		p.byID[cid] = keep
 	}
+	p.expired += n
+	return n
+}
 
-	p.byID = make(map[CeremonyID][]*pendingTSSMsg)
-	p.bytes = 0
-	return live, expired
+// takeExpired returns and resets the running expiry count.
+func (p *pendingTSS) takeExpired() int {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	n := p.expired
+	p.expired = 0
+	return n
 }
 
 // len reports the number of buffered messages.  Test and metrics
@@ -155,53 +185,21 @@ func (p *pendingTSS) len() int {
 	return n
 }
 
-// pendingTSSLoop redelivers buffered messages until their ceremony
-// exists or they age out.  One goroutine for the whole server,
-// started by Run.
-func (s *Server) pendingTSSLoop(ctx context.Context) {
-	log.Tracef("pendingTSSLoop")
-	defer log.Tracef("pendingTSSLoop exit")
-	defer s.wg.Done()
+// drainPendingTSS delivers the messages buffered for cid.  Called from
+// the TSS engine's ceremonyRegistered hook, on the goroutine running
+// the ceremony, once the ceremony is known to HandleMessage.
+func (s *Server) drainPendingTSS(ctx context.Context, cid CeremonyID) {
+	log.Tracef("drainPendingTSS %v", cid)
+	defer log.Tracef("drainPendingTSS %v exit", cid)
 
-	ticker := time.NewTicker(pendingTSSInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		s.drainPendingTSS(ctx)
-	}
-}
-
-// drainPendingTSS is the single-shot pass used by pendingTSSLoop.
-// Split out so tests can run it without waiting for the ticker.
-func (s *Server) drainPendingTSS(ctx context.Context) {
-	live, expired := s.pendingTSS.take()
-	if expired > 0 {
-		s.tssPendingExpired.Add(int64(expired))
-		log.Debugf("pendingTSS: discarded %d message(s) past max age",
-			expired)
+	if n := s.pendingTSS.takeExpired(); n > 0 {
+		s.tssPendingExpired.Add(int64(n))
+		log.Debugf("pendingTSS: discarded %d message(s) past max age", n)
 	}
 
-	for cid, q := range live {
-		for _, m := range q {
-			err := s.tss.HandleMessage(ctx, m.from, cid, m.data)
-			switch {
-			case err == nil:
-			case errors.Is(err, ErrUnknownCeremony):
-				// Still not registered; keep waiting.  The
-				// original received stamp rides along, so the
-				// requeue does not extend its life.
-				if !s.pendingTSS.addMsg(cid, m) {
-					s.tssPendingDrops.Add(1)
-				}
-			default:
-				log.Errorf("tss msg from %s ceremony %s: %v",
-					m.from, cid, err)
-			}
+	for _, m := range s.pendingTSS.take(cid) {
+		if err := s.tss.HandleMessage(ctx, m.from, cid, m.data); err != nil {
+			log.Errorf("tss msg from %s ceremony %s: %v", m.from, cid, err)
 		}
 	}
 }

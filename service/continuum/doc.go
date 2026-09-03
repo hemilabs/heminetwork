@@ -38,8 +38,14 @@
 //     material.  In production, ceremonies are initiated by the
 //     CeremonyInitiator (smart contract watcher), not by wire messages.
 //
-//   - Broadcast: CeremonyResult.  These are flooded to all peers with
-//     TTL-based propagation and deduplication via a time-bounded cache.
+//   - Broadcast: CeremonyResult and CeremonyAbort.  These are flooded
+//     to all peers with TTL-based propagation and deduplication via a
+//     time-bounded cache.  A relaying node verifies the payload
+//     signature before forwarding: forwarding first would turn one
+//     forged message into one write per edge of the mesh.  Authority
+//     — whether the signer may speak for that ceremony — needs the
+//     ceremony record and so stays in the dispatch handlers, which a
+//     relaying node that is not participating cannot evaluate.
 //
 // # Transport
 //

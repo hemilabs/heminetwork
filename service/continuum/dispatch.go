@@ -25,6 +25,18 @@ type dispatchCtx struct {
 	id         *Identity
 	t          *Transport
 
+	// busy records that the peer answered BusyResponse: it is up and
+	// reachable but has no session slot.  handle() reports this to
+	// connect so a bootstrap dial treats it as "try again later"
+	// rather than as a peer successfully contacted.
+	busy bool
+
+	// broadcastVerified records that handle() already checked this
+	// payload's signature before relaying it.  Verification is a
+	// secp256k1 recover; doing it again in the handler would double
+	// the cost of every broadcast the node relays.
+	broadcastVerified bool
+
 	// admin records that this payload arrived directly on the
 	// dedicated admin listener.  It is provenance, not an address
 	// check: a mesh peer that happens to dial from loopback (a
@@ -265,6 +277,7 @@ func handleEncryptedPayload(dc *dispatchCtx, payload any) bool {
 	// payload never inherits admin provenance.
 	innerDC := *dc
 	innerDC.admin = false
+	innerDC.broadcastVerified = false
 	return dispatchPayload(&innerDC, inner)
 }
 
@@ -410,11 +423,14 @@ func handleNaClKeyResponse(dc *dispatchCtx, payload any) bool {
 
 func handleCeremonyResult(dc *dispatchCtx, payload any) bool {
 	v := payload.(*CeremonyResult)
-	// Repeated on the relay path in handle(), but this handler is
-	// also reached by unicast and through an encrypted envelope.
-	if err := VerifyBroadcast(v); err != nil {
-		log.Warningf("ceremony result: %v", err)
-		return false
+	// handle() verifies before relaying, so a broadcast arrives here
+	// already checked.  Unicast and encrypted-envelope deliveries do
+	// not go through that path and are verified here.
+	if !dc.broadcastVerified {
+		if err := VerifyBroadcast(v); err != nil {
+			log.Warningf("ceremony result: %v", err)
+			return false
+		}
 	}
 	if !dc.s.ceremonyAuthorized(v.CeremonyID, v.Signer) {
 		log.Warningf("ceremony result %s from %v: not authorized",
@@ -427,9 +443,11 @@ func handleCeremonyResult(dc *dispatchCtx, payload any) bool {
 
 func handleCeremonyAbort(dc *dispatchCtx, payload any) bool {
 	v := payload.(*CeremonyAbort)
-	if err := VerifyBroadcast(v); err != nil {
-		log.Warningf("ceremony abort: %v", err)
-		return false
+	if !dc.broadcastVerified {
+		if err := VerifyBroadcast(v); err != nil {
+			log.Warningf("ceremony abort: %v", err)
+			return false
+		}
 	}
 	if !dc.s.ceremonyAuthorized(v.CeremonyID, v.Signer) {
 		log.Warningf("ceremony abort %s from %v: not authorized",
@@ -489,5 +507,6 @@ func handlePeerAddReq(dc *dispatchCtx, payload any) bool {
 
 func handleBusyResponse(dc *dispatchCtx, payload any) bool {
 	log.Infof("peer %v at capacity, disconnecting", dc.id)
+	dc.busy = true
 	return true // exit handle()
 }
