@@ -324,7 +324,19 @@ type Server struct {
 	debugInit *debugInitiator // non-nil only in continuum_debug builds
 
 	// Listener
-	listenConfig    *net.ListenConfig
+	listenConfig *net.ListenConfig
+
+	// dialer is used for every outbound peer connection.  It is a
+	// field for the same reason listenConfig is: multi-node tests
+	// run every node on one host, and the per-IP defences in the
+	// accept path key on the source address the kernel picks --
+	// 127.0.0.1 for every node unless the dialer binds one.
+	//
+	// A value, not a pointer: net.Dialer's zero value dials, so a
+	// Server built without going through NewServer still works
+	// rather than panicking on the first outbound connection.
+	dialer net.Dialer
+
 	listenAddress   string // Actual bound address after Listen()
 	adminListenAddr string // Actual bound admin address
 
@@ -521,6 +533,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		limiters:           limiters,
 		cfg:                cfg,
 		listenConfig:       &net.ListenConfig{},
+		dialer:             net.Dialer{Timeout: dialTimeout},
 		sessions:           make(map[Identity]*Transport, cfg.PeersWanted),
 		ponged:             make(map[Identity]struct{}, cfg.PeersWanted),
 		peers:              make(map[Identity]*PeerRecord),
@@ -1464,8 +1477,7 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		return
 	}
 
-	d := &net.Dialer{Timeout: dialTimeout}
-	conn, err := d.DialContext(ctx, "tcp", addr)
+	conn, err := s.dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		log.Warningf("connectPeer dial %v: %v", addr, err)
 		return
@@ -3005,8 +3017,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 		return
 	}
 
-	d := &net.Dialer{Timeout: dialTimeout}
-	conn, err := d.DialContext(ctx, "tcp", c)
+	conn, err := s.dialer.DialContext(ctx, "tcp", c)
 	if err != nil {
 		sendErr(ctx, errC, err)
 		return
