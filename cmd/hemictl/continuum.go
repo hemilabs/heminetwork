@@ -18,7 +18,10 @@ import (
 	"github.com/hemilabs/heminetwork/v2/service/continuum"
 )
 
-const defaultContinuumAddress = "localhost:45067"
+// defaultContinuumAddress is transfunctionerd's admin listener, not
+// its peer listener.  Admin RPCs are authorized on the provenance of
+// that listener; the same request sent to the peer port is refused.
+const defaultContinuumAddress = "localhost:45068"
 
 var (
 	continuumAddress string
@@ -26,7 +29,7 @@ var (
 		"HEMICTL_CONTINUUM_ADDRESS": config.Config{
 			Value:        &continuumAddress,
 			DefaultValue: defaultContinuumAddress,
-			Help:         "address of local transfunctionerd",
+			Help:         "admin address of local transfunctionerd (TRF_ADMIN_LISTEN_ADDRESS)",
 			Print:        config.PrintAll,
 		},
 	}

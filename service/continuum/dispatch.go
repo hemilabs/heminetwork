@@ -24,6 +24,15 @@ type dispatchCtx struct {
 	s          *Server
 	id         *Identity
 	t          *Transport
+
+	// admin records that this payload arrived directly on the
+	// dedicated admin listener.  It is provenance, not an address
+	// check: a mesh peer that happens to dial from loopback (a
+	// co-located node) is not an admin client, and neither is the
+	// last hop of a routed message.  Set only by
+	// handleAdminConnection and cleared for decrypted inner
+	// payloads.
+	admin bool
 }
 
 // dispatchFn handles a dispatched payload.  Returns true if the
@@ -251,7 +260,12 @@ func handleEncryptedPayload(dc *dispatchCtx, payload any) bool {
 		log.Warningf("handle %v: rejecting nested EncryptedPayload", dc.id)
 		return false
 	}
-	return dispatchPayload(dc, inner)
+	// The envelope was authored by whoever holds the sender key,
+	// not by the peer whose socket delivered it, so the inner
+	// payload never inherits admin provenance.
+	innerDC := *dc
+	innerDC.admin = false
+	return dispatchPayload(&innerDC, inner)
 }
 
 // handleNaClKeyRequest answers a routed e2e key attestation request:
@@ -396,19 +410,15 @@ func handleNaClKeyResponse(dc *dispatchCtx, payload any) bool {
 
 func handleCeremonyResult(dc *dispatchCtx, payload any) bool {
 	v := payload.(*CeremonyResult)
-	hash := HashCeremonyResult(*v)
-	if _, err := Verify(hash, v.Signer, v.Signature); err != nil {
-		log.Warningf("ceremony result from %v: bad signature: %v",
-			v.Signer, err)
+	// Repeated on the relay path in handle(), but this handler is
+	// also reached by unicast and through an encrypted envelope.
+	if err := VerifyBroadcast(v); err != nil {
+		log.Warningf("ceremony result: %v", err)
 		return false
 	}
-	// Only the coordinator may broadcast a ceremony result.
-	dc.s.mtx.RLock()
-	ci, known := dc.s.ceremonies[v.CeremonyID]
-	dc.s.mtx.RUnlock()
-	if known && ci.Coordinator != (Identity{}) && ci.Coordinator != v.Signer {
-		log.Warningf("ceremony result %s from %v: not coordinator %v",
-			v.CeremonyID, v.Signer, ci.Coordinator)
+	if !dc.s.ceremonyAuthorized(v.CeremonyID, v.Signer) {
+		log.Warningf("ceremony result %s from %v: not authorized",
+			v.CeremonyID, v.Signer)
 		return false
 	}
 	dc.s.handleCeremonyResult(*v)
@@ -417,19 +427,13 @@ func handleCeremonyResult(dc *dispatchCtx, payload any) bool {
 
 func handleCeremonyAbort(dc *dispatchCtx, payload any) bool {
 	v := payload.(*CeremonyAbort)
-	hash := HashCeremonyAbort(*v)
-	if _, err := Verify(hash, v.Signer, v.Signature); err != nil {
-		log.Warningf("ceremony abort from %v: bad signature: %v",
-			v.Signer, err)
+	if err := VerifyBroadcast(v); err != nil {
+		log.Warningf("ceremony abort: %v", err)
 		return false
 	}
-	// Only the coordinator may abort a ceremony.
-	dc.s.mtx.RLock()
-	ci, known := dc.s.ceremonies[v.CeremonyID]
-	dc.s.mtx.RUnlock()
-	if known && ci.Coordinator != (Identity{}) && ci.Coordinator != v.Signer {
-		log.Warningf("ceremony abort %s from %v: not coordinator %v",
-			v.CeremonyID, v.Signer, ci.Coordinator)
+	if !dc.s.ceremonyAuthorized(v.CeremonyID, v.Signer) {
+		log.Warningf("ceremony abort %s from %v: not authorized",
+			v.CeremonyID, v.Signer)
 		return false
 	}
 	log.Infof("ceremony abort %s from %v: %s", v.CeremonyID, dc.id, v.Reason)
@@ -438,7 +442,7 @@ func handleCeremonyAbort(dc *dispatchCtx, payload any) bool {
 }
 
 func handlePeerListAdmin(dc *dispatchCtx, payload any) bool {
-	if !requireAdmin(dc.t, dc.id) {
+	if !requireAdmin(dc) {
 		return false
 	}
 	resp := dc.s.handlePeerListAdmin()
@@ -450,7 +454,7 @@ func handlePeerListAdmin(dc *dispatchCtx, payload any) bool {
 
 func handleCeremonyStatusReq(dc *dispatchCtx, payload any) bool {
 	v := payload.(*CeremonyStatusRequest)
-	if !requireAdmin(dc.t, dc.id) {
+	if !requireAdmin(dc) {
 		return false
 	}
 	resp := dc.s.handleCeremonyStatus(v.CeremonyID)
@@ -461,7 +465,7 @@ func handleCeremonyStatusReq(dc *dispatchCtx, payload any) bool {
 }
 
 func handleCeremonyListReq(dc *dispatchCtx, payload any) bool {
-	if !requireAdmin(dc.t, dc.id) {
+	if !requireAdmin(dc) {
 		return false
 	}
 	resp := dc.s.handleCeremonyList()
@@ -472,7 +476,7 @@ func handleCeremonyListReq(dc *dispatchCtx, payload any) bool {
 }
 
 func handlePeerAddReq(dc *dispatchCtx, payload any) bool {
-	if !requireAdmin(dc.t, dc.id) {
+	if !requireAdmin(dc) {
 		return false
 	}
 	v := payload.(*PeerAddRequest)

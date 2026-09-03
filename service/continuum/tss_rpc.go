@@ -10,24 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/hemilabs/x/tss/v3/tss"
 )
 
 // =============================================================================
-// tssRetryBackoff is the fixed backoff schedule for retrying
-// HandleMessage when a TSSMessage arrives before its ceremony is
-// registered.  Totals ~4 seconds.
-var tssRetryBackoff = []time.Duration{
-	50 * time.Millisecond,
-	100 * time.Millisecond,
-	250 * time.Millisecond,
-	500 * time.Millisecond,
-	1 * time.Second,
-	2 * time.Second,
-}
-
 // Server TSS Transport — TSSTransport over encrypted RPC sessions
 //
 // Bridges the TSS engine (tss.go) to the protocol layer. Outgoing
@@ -138,9 +125,20 @@ func (st *serverTSSTransport) Send(to Identity, ceremonyID CeremonyID, data []by
 	st.server.mtx.RUnlock()
 
 	if tr != nil {
-		return tr.Write(st.server.secret.Identity, msg)
+		err := tr.Write(st.server.secret.Identity, msg)
+		if err == nil {
+			return nil
+		}
+		// The session is dead or dying and handle() has not
+		// reaped it yet.  Committing to a stale socket loses a
+		// round the ceremony cannot proceed without, which is
+		// far more expensive than paying for the multi-hop
+		// encrypted path, so fall through instead of returning.
+		log.Debugf("tss send %s: direct session write failed (%v), "+
+			"falling back to encrypted envelope", to, err)
+	} else {
+		log.Debugf("tss send %s: no direct session, using encrypted envelope", to)
 	}
-	log.Debugf("tss send %s: no direct session, using encrypted envelope", to)
 	return st.server.SendEncrypted(to, msg)
 }
 
@@ -391,45 +389,28 @@ func (s *Server) dispatchTSSMessage(msg TSSMessage) {
 	}
 
 	// HandleMessage may fail transiently if the TSSMessage arrives
-	// before the KeygenRequest that registers the ceremony.  This
-	// is a normal race in a distributed mesh — the coordinator
-	// starts producing messages immediately while the request is
-	// still being routed to other committee members.  Retry with
-	// backoff up to ~5 seconds before giving up.  The retry runs
-	// in a goroutine to avoid blocking the connection handler
-	// (which might be delivering the KeygenRequest itself).
+	// before the request that registers the ceremony.  This is a
+	// normal race in a distributed mesh: the coordinator starts
+	// producing round messages immediately while the request is
+	// still being routed to the other committee members.  Buffer
+	// the message and let pendingTSSLoop redeliver it.  The buffer
+	// is capped in bytes and per ceremony, so an unknown ceremony
+	// ID is no longer a way to make this node hold memory on
+	// demand.
 	err := s.tss.HandleMessage(s.tssCtx, msg.From, msg.CeremonyID, data)
-	if err == nil {
+	switch {
+	case err == nil:
 		return
-	}
-	if !errors.Is(err, ErrUnknownCeremony) {
+	case errors.Is(err, ErrUnknownCeremony):
+		if !s.pendingTSS.add(msg.CeremonyID, msg.From, data) {
+			s.tssPendingDrops.Add(1)
+			log.Debugf("tss msg from %s ceremony %s: pending queue full, dropped",
+				msg.From, msg.CeremonyID)
+		}
+	default:
 		log.Errorf("tss msg from %s ceremony %s: %v",
 			msg.From, msg.CeremonyID, err)
-		return
 	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for _, delay := range tssRetryBackoff {
-			timer := time.NewTimer(delay)
-			select {
-			case <-s.tssCtx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
-			err = s.tss.HandleMessage(s.tssCtx, msg.From, msg.CeremonyID, data)
-			if err == nil {
-				return
-			}
-			if !errors.Is(err, ErrUnknownCeremony) {
-				break
-			}
-		}
-		log.Errorf("tss msg from %s ceremony %s: %v (after retries)",
-			msg.From, msg.CeremonyID, err)
-	}()
 }
 
 // =============================================================================

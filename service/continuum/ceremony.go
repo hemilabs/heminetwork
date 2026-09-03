@@ -46,9 +46,15 @@ type CeremonyRequest struct {
 	NewThreshold int
 }
 
-// noopInitiator is used in production builds until the blockchain
-// watcher is wired in.  Its nil channel blocks the ceremonyLoop
-// select forever; the loop exits only via ctx.Done().
+// noopInitiator is the fallback when no ceremony source was supplied:
+// a production build with no Config.Initiator.  Its nil channel blocks
+// the ceremonyLoop select forever, so the node still participates in
+// ceremonies other nodes start but initiates none of its own; the loop
+// exits only via ctx.Done().
+//
+// Production wires the blockchain watcher in through Config.Initiator.
+// A node left on this initiator is a node that will never call keygen,
+// sign or reshare.
 type noopInitiator struct{}
 
 func (noopInitiator) CeremonyChan() <-chan CeremonyRequest { return nil }
