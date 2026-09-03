@@ -3685,7 +3685,7 @@ func runConnect(t *testing.T, ctx context.Context, s *Server, addr string) int {
 	s.wg.Add(1)
 	go func() {
 		defer close(done)
-		s.connect(ctx, addr)
+		_ = s.connect(ctx, addr)
 	}()
 	select {
 	case <-done:
@@ -8841,6 +8841,194 @@ func TestConnectDuplicateSession(t *testing.T) {
 	<-errB
 }
 
+// TestConnectBootstrapRetriesOnlyUnreachable pins which outcomes
+// connect treats as worth retrying.
+//
+// connectBootstrap loops until connect reports the peer reached, so
+// anything that returns false is retried until the context ends.  A
+// duplicate session or a self-connection means the peer answered —
+// retrying those forever churns connections against a healthy peer.
+// Only a failure to reach the peer may retry.
+func TestConnectBootstrapRetriesOnlyUnreachable(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret:   secret,
+		seen:     seen,
+		sessions: make(map[Identity]*Transport),
+		peers:    make(map[Identity]*PeerRecord),
+		cfg:      &Config{DNS: DNSOff, PeersWanted: 8},
+	}
+	s.listenAddress = "127.0.0.1:45067"
+
+	t.Run("unreachable retries", func(t *testing.T) {
+		s.wg.Add(1)
+		if s.connect(t.Context(), "127.0.0.1:1") {
+			t.Fatal("an unreachable peer reported reached; bootstrap would give up")
+		}
+	})
+
+	t.Run("self does not retry", func(t *testing.T) {
+		s.wg.Add(1)
+		if !s.connect(t.Context(), "127.0.0.1:45067") {
+			t.Fatal("our own address reported unreached; bootstrap would spin on it")
+		}
+	})
+}
+
+// TestConnectBusyPeerRetries covers the outcome that partitioned the
+// 100-node mesh: the peer is up and completes the handshake, then
+// answers BusyResponse because it is at PeersWanted.
+//
+// That is "come back later", not "contacted".  Reporting it as reached
+// stops connectBootstrap, and since nothing else on the node knows a
+// configured peer's address, the node stays in whichever partition it
+// started in — which is exactly how a chain link went missing.
+func TestConnectBusyPeerRetries(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Server B accepts one peer and is already full, so it answers
+	// BusyResponse to anything that connects.
+	preParams := loadPreParams(t, 2)
+	serverB := newTestServer(t, preParams, 1, "localhost:0", nil)
+	serverB.cfg.PeersWanted = 0 // every inbound connection is "full"
+
+	errB := make(chan error, 1)
+	go func() { errB <- serverB.Run(ctx) }()
+	addrB := waitForListenAddress(t, serverB, 10*time.Second)
+
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// handle() runs for the life of the session, so the client needs
+	// the same TTL maps a real server has.
+	newTTL := func() *ttl.TTL {
+		t.Helper()
+		m, err := ttl.New(16, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	s := &Server{
+		secret:   secret,
+		peersTTL: newTTL(),
+		pings:    newTTL(),
+		limiters: newTTL(),
+		seen:     newTTL(),
+		sessions: make(map[Identity]*Transport),
+		peers:    make(map[Identity]*PeerRecord),
+		cfg:      &Config{DNS: DNSOff, PeersWanted: 8},
+	}
+
+	s.wg.Add(1)
+	if s.connect(ctx, addrB) {
+		t.Fatal("a peer that answered BusyResponse reported reached; " +
+			"bootstrap would give up and stay partitioned")
+	}
+
+	cancel()
+	if err := <-errB; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("server B: %v", err)
+	}
+}
+
+// TestRunShutsDownOnDeadline is the proof test for the accept loops.
+//
+// Both loops close their listener from a ctx.Done() goroutine and then
+// see Accept fail forever.  They used to exit only on
+// context.Canceled, so a Run given a deadline-bound parent logged the
+// accept error in a tight loop and never let wg.Wait return.  A
+// deadline must shut the server down as cleanly as a cancel.
+func TestRunShutsDownOnDeadline(t *testing.T) {
+	preParams := loadPreParams(t, 1)
+	s := newTestAdminServer(t, preParams)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 750*time.Millisecond)
+	t.Cleanup(cancel)
+
+	errC := make(chan error, 1)
+	go func() { errC <- s.Run(ctx) }()
+
+	// Both listeners up before the deadline fires.
+	waitForListenAddress(t, s, 10*time.Second)
+	waitForAdminListenAddress(t, s, 10*time.Second)
+
+	select {
+	case err := <-errC:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Run = %v, want context.DeadlineExceeded", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return after its context deadline")
+	}
+}
+
+// TestSendToFallsBackPastDeadSession is the proof test for the
+// stale-session fallback in sendTo.
+//
+// A session that is dead but not yet reaped used to be authoritative:
+// the write failed and sendTo returned that error instead of trying
+// the route or flood paths, losing a message the mesh could still have
+// delivered.
+func TestSendToFallsBackPastDeadSession(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dest := Identity{0xDE}
+
+	// A closed transport for dest: every write to it fails.
+	deadSrv, deadCli := connectedTransports(t)
+	if err := deadCli.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := deadSrv.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A live transport for some other peer, which the flood
+	// fallback must reach.
+	liveSrv, liveCli := connectedTransports(t)
+	other := Identity{0x0A}
+
+	s := &Server{
+		secret:   secret,
+		sessions: map[Identity]*Transport{dest: deadSrv, other: liveSrv},
+		peers:    make(map[Identity]*PeerRecord),
+		cfg:      &Config{PeersWanted: 8},
+	}
+
+	read := make(chan error, 1)
+	go func() {
+		_, _, _, err := liveCli.ReadEnvelope()
+		read <- err
+	}()
+
+	if err := s.sendTo(dest, PingRequest{}); err != nil {
+		t.Fatalf("sendTo returned the dead session's error instead of "+
+			"falling through: %v", err)
+	}
+
+	select {
+	case err := <-read:
+		if err != nil {
+			t.Fatalf("flood fallback delivered nothing: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("flood fallback did not reach the live peer")
+	}
+}
+
 // TestConnectFailureDoesNotKillServer is the regression test for the
 // cascade that made TestHundredNodeMesh flaky.
 //
@@ -8856,19 +9044,11 @@ func TestConnectDuplicateSession(t *testing.T) {
 func TestConnectFailureDoesNotKillServer(t *testing.T) {
 	preParams := loadPreParams(t, 1)
 
-	// Bind a port and immediately release it so the address is
-	// well-formed but refuses connections.
-	var lc net.ListenConfig
-	probe, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dead := probe.Addr().String()
-	if err := probe.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	s := newTestServer(t, preParams, 0, "localhost:0", []string{dead})
+	// Port 1 is never listening and cannot be claimed by another
+	// test mid-run, unlike a port we bind and release.  The sibling
+	// TestConnectDialError uses the same address.
+	s := newTestServer(t, preParams, 0, "localhost:0",
+		[]string{"127.0.0.1:1"})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -11543,19 +11723,20 @@ func signedTSSMessage(s *Server, cid CeremonyID, data []byte) TSSMessage {
 
 // TestDispatchTSSMessageBuffersUnknownCeremony covers a message that
 // races ahead of the request registering its ceremony: it is buffered,
-// redelivered by the drain, and dropped from the buffer once accepted.
+// then delivered when the ceremony registers.
 func TestDispatchTSSMessageBuffersUnknownCeremony(t *testing.T) {
 	mock := &retryMockTSS{
 		handleFn: func(n int) error {
-			if n <= 2 {
+			if n == 1 {
 				return ErrUnknownCeremony
 			}
-			return nil // ceremony registered by the 3rd call
+			return nil // registered by the time the drain runs
 		},
 	}
 	s := pendingTestServer(t, context.Background(), mock)
 
-	s.dispatchTSSMessage(signedTSSMessage(s, NewCeremonyID(), []byte("test-data")))
+	cid := NewCeremonyID()
+	s.dispatchTSSMessage(signedTSSMessage(s, cid, []byte("test-data")))
 
 	// First HandleMessage failed with ErrUnknownCeremony, so the
 	// message is buffered rather than retried on its own goroutine.
@@ -11563,45 +11744,51 @@ func TestDispatchTSSMessageBuffersUnknownCeremony(t *testing.T) {
 		t.Fatalf("pending = %d, want 1", n)
 	}
 
-	// Second attempt still fails: requeued, not dropped.
-	s.drainPendingTSS(t.Context())
-	if n := s.pendingTSS.len(); n != 1 {
-		t.Fatalf("pending after first drain = %d, want 1", n)
-	}
-
-	// Third attempt succeeds: buffer drains.
-	s.drainPendingTSS(t.Context())
+	// The registration signal delivers it.
+	s.drainPendingTSS(t.Context(), cid)
 	if n := s.pendingTSS.len(); n != 0 {
-		t.Fatalf("pending after second drain = %d, want 0", n)
+		t.Fatalf("pending after drain = %d, want 0", n)
 	}
 
 	mock.mu.Lock()
 	calls := mock.calls
 	mock.mu.Unlock()
-	if calls != 3 {
-		t.Fatalf("HandleMessage calls = %d, want 3", calls)
+	if calls != 2 {
+		t.Fatalf("HandleMessage calls = %d, want 2", calls)
 	}
 }
 
-// TestPendingTSSLoopExitsOnCancel proves the drain goroutine is bound
-// by the server lifecycle.
-func TestPendingTSSLoopExitsOnCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	s := pendingTestServer(t, ctx,
-		&retryMockTSS{handleFn: func(int) error { return ErrUnknownCeremony }})
+// TestCeremonyRegisteredDrainsPending proves the buffer is drained by
+// the TSS engine's signal rather than by a timer: registering a
+// ceremony on the real transport hook delivers what was waiting.
+func TestCeremonyRegisteredDrainsPending(t *testing.T) {
+	mock := &retryMockTSS{
+		handleFn: func(n int) error {
+			if n == 1 {
+				return ErrUnknownCeremony
+			}
+			return nil
+		},
+	}
+	s := pendingTestServer(t, context.Background(), mock)
 
-	s.dispatchTSSMessage(signedTSSMessage(s, NewCeremonyID(), []byte("test-data")))
+	cid := NewCeremonyID()
+	s.dispatchTSSMessage(signedTSSMessage(s, cid, []byte("test-data")))
+	if n := s.pendingTSS.len(); n != 1 {
+		t.Fatalf("pending = %d, want 1", n)
+	}
 
-	s.wg.Add(1)
-	go s.pendingTSSLoop(ctx)
-
-	cancel()
+	s.stt.ceremonyRegistered(cid)
 	s.wg.Wait()
+
+	if n := s.pendingTSS.len(); n != 0 {
+		t.Fatalf("pending after the registration signal = %d, want 0", n)
+	}
 }
 
 // TestDispatchTSSMessageDropsOnHardError covers a redelivery that
 // fails for a reason other than an unregistered ceremony: the message
-// is discarded instead of being retried until it ages out.
+// is discarded rather than held until it ages out.
 func TestDispatchTSSMessageDropsOnHardError(t *testing.T) {
 	mock := &retryMockTSS{
 		handleFn: func(n int) error {
@@ -11613,12 +11800,13 @@ func TestDispatchTSSMessageDropsOnHardError(t *testing.T) {
 	}
 	s := pendingTestServer(t, context.Background(), mock)
 
-	s.dispatchTSSMessage(signedTSSMessage(s, NewCeremonyID(), []byte("test-data")))
+	cid := NewCeremonyID()
+	s.dispatchTSSMessage(signedTSSMessage(s, cid, []byte("test-data")))
 	if n := s.pendingTSS.len(); n != 1 {
 		t.Fatalf("pending = %d, want 1", n)
 	}
 
-	s.drainPendingTSS(t.Context())
+	s.drainPendingTSS(t.Context(), cid)
 	if n := s.pendingTSS.len(); n != 0 {
 		t.Fatalf("pending after drain = %d, want 0", n)
 	}
@@ -11690,12 +11878,12 @@ func TestPendingTSSCaps(t *testing.T) {
 		p.byID[cid][0].received = time.Now().Add(-2 * pendingTSSMaxAge)
 		p.mtx.Unlock()
 
-		live, expired := p.take()
-		if expired != 1 {
-			t.Fatalf("expired = %d, want 1", expired)
-		}
+		live := p.take(cid)
 		if len(live) != 0 {
 			t.Fatalf("live = %d, want 0", len(live))
+		}
+		if n := p.takeExpired(); n != 1 {
+			t.Fatalf("expired = %d, want 1", n)
 		}
 	})
 }

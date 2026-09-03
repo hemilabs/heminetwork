@@ -209,6 +209,12 @@ const (
 	// for the TCP handshake.
 	dialTimeout = 11 * time.Second
 
+	// connectRetryMin and connectRetryMax bound the backoff used
+	// when a configured Connect peer is not reachable yet.  Prime,
+	// to avoid resonance with the other periodic timers.
+	connectRetryMin = 2 * time.Second
+	connectRetryMax = 37 * time.Second
+
 	// promPollInterval is how often the Prometheus scrape loop
 	// refreshes ceremony/peer gauges.
 	promPollInterval = 3 * time.Second
@@ -225,6 +231,17 @@ const (
 	// ceremonies.  Well under ceremonyMaxAge so a timed-out
 	// ceremony still ages out of the tracking map.
 	defaultCeremonyTimeout = 13 * time.Minute
+
+	// maxTrackedCeremonies caps the ceremony tracking map.
+	//
+	// A CeremonyResult broadcast for a ceremony this node is not
+	// running creates a status-only record, and the CeremonyID is
+	// attacker-chosen wire data.  Any authenticated peer could
+	// otherwise flood records that live until ceremonyMaxAge, on
+	// every node in the mesh, by signing results for IDs it invented.
+	// Ceremonies this node actually participates in are registered
+	// through registerCeremony and are not subject to this cap.
+	maxTrackedCeremonies = 4096
 
 	// ceremonyMaxAge is how long completed/failed ceremonies remain in the
 	// tracking map before eviction.  Running ceremonies are never evicted.
@@ -432,7 +449,10 @@ type Server struct {
 	naclXchgDrops     atomic.Int64 // dropped NaCl key exchange messages
 	tssPendingDrops   atomic.Int64 // TSS messages dropped by pending-queue caps
 	tssPendingExpired atomic.Int64 // TSS messages discarded past pendingTSSMaxAge
-	startedAt         time.Time    // set in Run() for uptime gauge
+	// ceremonyRecordDrops counts status-only ceremony records refused
+	// because the tracking map was at maxTrackedCeremonies.
+	ceremonyRecordDrops atomic.Int64
+	startedAt           time.Time // set in Run() for uptime gauge
 
 	// Ceremony counters — updated every promPoll tick so prom
 	// callbacks never iterate the ceremonies map on scrape.
@@ -512,6 +532,10 @@ func NewServer(cfg *Config) (*Server, error) {
 	// then an operator-supplied one, then the no-op.
 	di := serverDebugInit()
 	init := pickInitiator(di, cfg.Initiator)
+	if _, noop := init.(*noopInitiator); noop {
+		log.Infof("no ceremony initiator configured: this node will " +
+			"participate in ceremonies but never start one")
+	}
 
 	limiters, err := ttl.New(limiterCap, true)
 	if err != nil {
@@ -870,7 +894,10 @@ func (s *Server) broadcastWithTTL(cmd any, ttl uint8) error {
 	return nil
 }
 
-func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin bool) {
+// handle runs the session read loop.  It reports whether the peer
+// ended the session with BusyResponse, which connect needs in order to
+// tell "contacted the peer" from "the peer has no room right now".
+func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin bool) (busy bool) {
 	// Per-session context: cancelled when handle() exits (read
 	// error, shutdown, etc.), which also stops the pingLoop.
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
@@ -1001,6 +1028,9 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 			return
 		}
 
+		// broadcastVerified is per message, not per session.
+		broadcastVerified := false
+
 		// Forward: if destination is set and is not us,
 		// decrement TTL and relay to the next hop.
 		// Broadcast: if destination is BroadcastDestination,
@@ -1026,6 +1056,7 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 				continue
 			}
 			s.forwardBroadcast(header, payload, id)
+			broadcastVerified = true
 			// Fall through to dispatch for local processing.
 		} else if header.Destination != nil && *header.Destination != s.secret.Identity {
 			s.forward(header, payload, id)
@@ -1053,9 +1084,11 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 			id:         id,
 			t:          t,
 			admin:      admin,
+
+			broadcastVerified: broadcastVerified,
 		}
 		if dispatchPayload(dc, payload) {
-			return
+			return dc.busy
 		}
 	}
 }
@@ -1488,7 +1521,14 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 	greatSuccess := false
 	defer func() {
 		if !greatSuccess {
-			if err := transport.Close(); err != nil {
+			// A transport whose dial or key exchange never
+			// completed has no connection to close.  That is the
+			// normal outcome of a failed connect, not an error:
+			// logging it at Errorf produced thousands of
+			// identical lines a second during peer churn and
+			// buried the failure that actually mattered.
+			err := transport.Close()
+			if err != nil && !errors.Is(err, ErrNoConn) {
 				log.Errorf("connectPeer close %v: %v", addr, err)
 			}
 		}
@@ -1627,6 +1667,26 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "messages_rate_dropped_total",
 				Help:      "Messages dropped by per-peer-identity rate limiter",
 			}, s.promRateDropped),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "broadcasts_unauthenticated_dropped_total",
+				Help:      "Broadcasts dropped before relay for a bad signature",
+			}, s.promBroadcastDropped),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "tss_pending_dropped_total",
+				Help:      "TSS messages refused by the pending-queue caps",
+			}, s.promTSSPendingDrops),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "tss_pending_expired_total",
+				Help:      "TSS messages discarded waiting for their ceremony",
+			}, s.promTSSPendingExpired),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: ns,
+				Name:      "ceremony_records_dropped_total",
+				Help:      "Remote ceremony status records refused, tracking map full",
+			}, s.promCeremonyRecordDrops),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: ns,
 				Name:      "connections_cooldown_dropped_total",
@@ -2028,8 +2088,12 @@ func (s *Server) registerCeremony(cid CeremonyID, ct CeremonyType, coordinator I
 // coordinator disabled the check entirely and any mesh peer could
 // abort another node's sign or reshare.
 //
-// An untracked ceremony returns true: there is no local state to act
-// on, so there is nothing to authorize against.
+// An untracked ceremony returns true.  There is no committee or
+// coordinator recorded to check a signer against, so this is not an
+// authorization decision the node can make.  The consequence is that a
+// signed CeremonyResult for an unknown ID creates a status-only
+// record; that path is capped by maxTrackedCeremonies rather than by
+// authorization.
 func (s *Server) ceremonyAuthorized(cid CeremonyID, signer Identity) bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
@@ -2099,7 +2163,16 @@ func (s *Server) handleCeremonyResult(r CeremonyResult) {
 		return
 	}
 
-	// Non-committee node: first time seeing this ceremony.
+	// Non-committee node: first time seeing this ceremony.  This is
+	// the only path that lets a remote peer create ceremony state, so
+	// it is capped.
+	if len(s.ceremonies) >= maxTrackedCeremonies {
+		s.ceremonyRecordDrops.Add(1)
+		log.Warningf("ceremony result %s from %v: tracking map full (%d), dropped",
+			r.CeremonyID, r.Signer, maxTrackedCeremonies)
+		return
+	}
+
 	// Pre-cancelled context.Background() — this record is status-only,
 	// no goroutine lifecycle is attached.  The cancel() call is
 	// immediate; the ctx exists solely to satisfy the CeremonyInfo
@@ -2918,6 +2991,22 @@ func (s *Server) promKeyConflicts() float64 {
 	return float64(s.keyConflicts.Load())
 }
 
+func (s *Server) promBroadcastDropped() float64 {
+	return float64(s.broadcastDropped.Load())
+}
+
+func (s *Server) promTSSPendingDrops() float64 {
+	return float64(s.tssPendingDrops.Load())
+}
+
+func (s *Server) promTSSPendingExpired() float64 {
+	return float64(s.tssPendingExpired.Load())
+}
+
+func (s *Server) promCeremonyRecordDrops() float64 {
+	return float64(s.ceremonyRecordDrops.Load())
+}
+
 func (s *Server) promNaClXchgDrops() float64 {
 	return float64(s.naclXchgDrops.Load())
 }
@@ -3003,7 +3092,9 @@ func sendErr(ctx context.Context, errC chan<- error, err error) {
 }
 
 // connect dials a single address from Config.Connect and, on success,
-// runs the session until it ends.
+// runs the session until it ends.  It reports whether a session was
+// ever established, which connectBootstrap uses to decide whether to
+// keep retrying.
 //
 // Every failure here is per-peer and logged, never fatal to the
 // server.  A configured peer that is down, or that drops a connection
@@ -3016,11 +3107,18 @@ func sendErr(ctx context.Context, errC chan<- error, err error) {
 // which Run() treats as terminal.  In a chain of nodes that cascaded
 // silently — sendErr does not log — because each node's exit closed
 // its listener and refused the next node's dial.
-func (s *Server) connect(ctx context.Context, c string) {
+func (s *Server) connect(ctx context.Context, c string) bool {
 	defer s.wg.Done()
 
 	log.Infof("connect: %v", c)
 	defer log.Infof("connect: %v exit", c)
+
+	// reached reports that we got far enough to know the peer is
+	// there: a completed handshake, or the discovery that the
+	// address is us.  Only a failure to reach it is worth retrying;
+	// a duplicate session or a DNS policy rejection means the peer
+	// answered, so retrying just churns connections.
+	var reached bool
 
 	// Reject self before wasting a dial.
 	s.mtx.RLock()
@@ -3028,13 +3126,13 @@ func (s *Server) connect(ctx context.Context, c string) {
 	s.mtx.RUnlock()
 	if selfAddr != "" && c == selfAddr {
 		log.Warningf("connect: skipping self %v", c)
-		return
+		return true
 	}
 
 	conn, err := s.dialer.DialContext(ctx, "tcp", c)
 	if err != nil {
 		log.Warningf("connect dial %v: %v", c, err)
-		return
+		return reached
 	}
 	tcpKeepAlive(conn, tcpKeepAlivePeriod)
 
@@ -3042,7 +3140,14 @@ func (s *Server) connect(ctx context.Context, c string) {
 	greatSuccess := false
 	defer func() {
 		if !greatSuccess {
-			if err := transport.Close(); err != nil {
+			// A transport whose dial or key exchange never
+			// completed has no connection to close.  That is the
+			// normal outcome of a failed connect, not an error:
+			// logging it at Errorf produced thousands of
+			// identical lines a second during peer churn and
+			// buried the failure that actually mattered.
+			err := transport.Close()
+			if err != nil && !errors.Is(err, ErrNoConn) {
 				log.Errorf("connect close %v: %v", c, err)
 			}
 		}
@@ -3050,19 +3155,23 @@ func (s *Server) connect(ctx context.Context, c string) {
 
 	if err := transport.KeyExchange(ctx, conn); err != nil {
 		log.Warningf("connect kx %v: %v", c, err)
-		return
+		return reached
 	}
 	them, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		log.Warningf("connect handshake %v: %v", c, err)
-		return
+		return reached
 	}
+
+	// The peer answered and proved its identity.  Nothing below is
+	// a reachability failure, so nothing below is worth retrying.
+	reached = true
 
 	// Defense-in-depth: reject self even if the address didn't
 	// match (e.g. hostname resolved to our IP, NAT hairpin).
 	if *them == s.secret.Identity {
 		log.Warningf("connect: connected to self at %v", c)
-		return
+		return reached
 	}
 
 	// DNS verification based on the dial target.
@@ -3070,7 +3179,7 @@ func (s *Server) connect(ctx context.Context, c string) {
 	// IP targets get reverse DNS verification (if enabled).
 	if err := s.verifyOutboundDNS(ctx, c, conn.RemoteAddr(), *them); err != nil {
 		log.Warningf("connect dns %v: %v", c, err)
-		return
+		return reached
 	}
 
 	if err := s.newSession(them, transport); err != nil {
@@ -3078,7 +3187,7 @@ func (s *Server) connect(ctx context.Context, c string) {
 		// old session was reaped).  Deferred cleanup closes the
 		// transport.
 		log.Errorf("connect session %v: %v", them, err)
-		return
+		return reached
 	}
 	s.rebuildRoutes()
 
@@ -3100,7 +3209,15 @@ func (s *Server) connect(ctx context.Context, c string) {
 
 	greatSuccess = true
 	s.wg.Add(1)
-	s.handle(ctx, them, transport, false)
+	if s.handle(ctx, them, transport, false) {
+		// The peer is up but full.  BusyResponse means "come back
+		// later", so a bootstrap dial must keep trying: nothing
+		// else on this node knows the address, and giving up here
+		// leaves us in whichever partition we started in.
+		return false
+	}
+
+	return reached
 }
 
 func (s *Server) connectAll(ctx context.Context) {
@@ -3110,13 +3227,48 @@ func (s *Server) connectAll(ctx context.Context) {
 	defer log.Tracef("connectAll exit")
 
 	// Errors are logged per-connection in connect; no global exit
-	// needed since partial mesh connectivity is normal.  A peer that
-	// is unreachable at startup is not retried from here — it is
-	// picked up again once gossip advertises it and
-	// maintainConnections dials it.
+	// needed since partial mesh connectivity is normal.
 	for k := range s.cfg.Connect {
 		s.wg.Add(1)
-		go s.connect(ctx, s.cfg.Connect[k])
+		go s.connectBootstrap(ctx, s.cfg.Connect[k])
+	}
+}
+
+// connectBootstrap dials a configured Connect peer, retrying with
+// backoff until a session is established or ctx ends.
+//
+// Reconnection is normally gossip's job: maintainConnections redials
+// peers from the peer table, which is populated by advertisement.  A
+// bootstrap peer that is unreachable at startup never gets that far —
+// no session means no identity, so it never enters the peer table, and
+// nothing else on the node knows its address.  Without a retry here a
+// single transient failure strands the node for its whole life.
+//
+// Once a session has been established the peer is in the peer table
+// and maintainConnections owns it from then on, so this stops.
+func (s *Server) connectBootstrap(ctx context.Context, addr string) {
+	defer s.wg.Done()
+
+	log.Tracef("connectBootstrap %v", addr)
+	defer log.Tracef("connectBootstrap %v exit", addr)
+
+	backoff := connectRetryMin
+	for {
+		s.wg.Add(1)
+		if s.connect(ctx, addr) {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		backoff *= 2
+		if backoff > connectRetryMax {
+			backoff = connectRetryMax
+		}
 	}
 }
 
@@ -3434,10 +3586,6 @@ func (s *Server) Run(pctx context.Context) error {
 	// Evict completed/failed ceremonies older than ceremonyMaxAge.
 	s.wg.Add(1)
 	go s.evictCeremonies(ctx)
-
-	// Redeliver TSS messages that raced ahead of their ceremony.
-	s.wg.Add(1)
-	go s.pendingTSSLoop(ctx)
 
 	// Ceremony dispatcher — reads from CeremonyInitiator channel.
 	s.wg.Add(1)
