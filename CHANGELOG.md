@@ -198,6 +198,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix bug in `synctester` where unbounded reads of the docker logs could lead
 to an OOM crash ([#1159](https://github.com/hemilabs/heminetwork/pull/1159)).
 
+- Convert the `ttl` tests to `testing/synctest`. They slept past real
+  deadlines and relied on the callback goroutines having been scheduled
+  by the time the assertion ran; the fake clock and `synctest.Wait` make
+  that exact. Suite runtime drops from ~3.3s to ~3ms
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+
 - Fix a data race in `continuum`'s ceremony status reads. `CeremonyStatus`
   and the ceremony status admin RPC copied `CeremonyInfo` after releasing
   the mutex the ceremony driver writes it under
