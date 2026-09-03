@@ -3002,7 +3002,21 @@ func sendErr(ctx context.Context, errC chan<- error, err error) {
 	}
 }
 
-func (s *Server) connect(ctx context.Context, c string, errC chan error) {
+// connect dials a single address from Config.Connect and, on success,
+// runs the session until it ends.
+//
+// Every failure here is per-peer and logged, never fatal to the
+// server.  A configured peer that is down, or that drops a connection
+// mid-handshake under load, must not take the node with it: the node
+// still listens, and the peer comes back through gossip and is
+// redialled by maintainConnections.  This mirrors seed() and
+// connectPeer(), which have always behaved this way.
+//
+// Before this, a transient dial/KX/handshake error was sent to errC,
+// which Run() treats as terminal.  In a chain of nodes that cascaded
+// silently — sendErr does not log — because each node's exit closed
+// its listener and refused the next node's dial.
+func (s *Server) connect(ctx context.Context, c string) {
 	defer s.wg.Done()
 
 	log.Infof("connect: %v", c)
@@ -3019,7 +3033,7 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 
 	conn, err := s.dialer.DialContext(ctx, "tcp", c)
 	if err != nil {
-		sendErr(ctx, errC, err)
+		log.Warningf("connect dial %v: %v", c, err)
 		return
 	}
 	tcpKeepAlive(conn, tcpKeepAlivePeriod)
@@ -3035,12 +3049,12 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	}()
 
 	if err := transport.KeyExchange(ctx, conn); err != nil {
-		sendErr(ctx, errC, err)
+		log.Warningf("connect kx %v: %v", c, err)
 		return
 	}
 	them, naclPub, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
-		sendErr(ctx, errC, err)
+		log.Warningf("connect handshake %v: %v", c, err)
 		return
 	}
 
@@ -3055,14 +3069,14 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	// Hostname targets get forward TXT verification.
 	// IP targets get reverse DNS verification (if enabled).
 	if err := s.verifyOutboundDNS(ctx, c, conn.RemoteAddr(), *them); err != nil {
-		sendErr(ctx, errC, err)
+		log.Warningf("connect dns %v: %v", c, err)
 		return
 	}
 
 	if err := s.newSession(them, transport); err != nil {
 		// Duplicate session is transient (peer reconnected before
-		// old session was reaped).  Don't send to errC — that
-		// kills the server.  Deferred cleanup closes transport.
+		// old session was reaped).  Deferred cleanup closes the
+		// transport.
 		log.Errorf("connect session %v: %v", them, err)
 		return
 	}
@@ -3089,17 +3103,20 @@ func (s *Server) connect(ctx context.Context, c string, errC chan error) {
 	s.handle(ctx, them, transport, false)
 }
 
-func (s *Server) connectAll(ctx context.Context, errC chan error) {
+func (s *Server) connectAll(ctx context.Context) {
 	defer s.wg.Done()
 
 	log.Tracef("connectAll")
 	defer log.Tracef("connectAll exit")
 
-	// Errors are logged per-connection in connectPeer; no global
-	// exit needed since partial mesh connectivity is normal.
+	// Errors are logged per-connection in connect; no global exit
+	// needed since partial mesh connectivity is normal.  A peer that
+	// is unreachable at startup is not retried from here — it is
+	// picked up again once gossip advertises it and
+	// maintainConnections dials it.
 	for k := range s.cfg.Connect {
 		s.wg.Add(1)
-		go s.connect(ctx, s.cfg.Connect[k], errC)
+		go s.connect(ctx, s.cfg.Connect[k])
 	}
 }
 
@@ -3409,7 +3426,7 @@ func (s *Server) Run(pctx context.Context) error {
 
 	if len(s.cfg.Connect) != 0 {
 		s.wg.Add(1)
-		go s.connectAll(ctx, errC)
+		go s.connectAll(ctx)
 	} else if len(s.cfg.Seeds) != 0 {
 		s.seed(ctx)
 	}
