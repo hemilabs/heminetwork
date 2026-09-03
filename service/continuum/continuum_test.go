@@ -2063,6 +2063,53 @@ func TestFiveNodeMesh(t *testing.T) {
 	}
 }
 
+// loopbackAddrs returns n distinct loopback listen addresses,
+// 127.0.0.1 through 127.0.0.n.
+//
+// A multi-node test that exceeds PeersWanted cannot run every node on
+// 127.0.0.1.  Saturated nodes answer BusyResponse, and the accept loop
+// then installs a connCooldownTTL (31s) cooldown keyed on the source
+// IP so one client cannot hammer reconnect.  With every node sharing
+// 127.0.0.1 that cooldown is collective: one peer being told "busy"
+// blocks the entire mesh from connecting to that node for 31 seconds.
+// The defence is right, an IP is a peer on the internet; the
+// single-host test is what violates that assumption, so the test gives
+// each node its own address instead.
+//
+// Binding the listener is not enough on its own: the kernel picks the
+// source address for an outbound connection, and for a loopback
+// destination that is 127.0.0.1 whatever the node listens on.  The
+// caller must also point each node's dialer at its own address, which
+// is what the Server.dialer seam is for.
+//
+// All of 127.0.0.0/8 is local on Linux.  Other platforms may only have
+// 127.0.0.1 configured, so this skips rather than fails there.
+func loopbackAddrs(t *testing.T, n int) []string {
+	t.Helper()
+
+	if n > 255 {
+		t.Fatalf("loopbackAddrs: %d exceeds one /24", n)
+	}
+
+	addrs := make([]string, n)
+	for i := range n {
+		ip := fmt.Sprintf("127.0.0.%d", i+1)
+		if i > 0 {
+			var lc net.ListenConfig
+			l, err := lc.Listen(t.Context(), "tcp", net.JoinHostPort(ip, "0"))
+			if err != nil {
+				t.Skipf("cannot bind %v (%v); this platform needs "+
+					"loopback aliases configured for multi-node tests", ip, err)
+			}
+			if err := l.Close(); err != nil {
+				t.Fatalf("close probe listener: %v", err)
+			}
+		}
+		addrs[i] = net.JoinHostPort(ip, "0")
+	}
+	return addrs
+}
+
 // TestHundredNodeMesh validates gossip convergence and autonomous
 // connection management at scale.  100 nodes are chained
 // (0→1→2→...→99), each with PeersWanted=8.  Gossip must propagate
@@ -2087,6 +2134,7 @@ func TestHundredNodeMesh(t *testing.T) {
 	servers := make([]*Server, n)
 	errChs := make([]chan error, n)
 	addrs := make([]string, n)
+	listenAddrs := loopbackAddrs(t, n)
 
 	// Start all nodes in chain order.  Each node connects to the
 	// previous one.  waitForListenAddress ensures the previous
@@ -2100,7 +2148,13 @@ func TestHundredNodeMesh(t *testing.T) {
 		if i > 0 {
 			connect = []string{addrs[i-1]} //nolint:gosec // guarded by i > 0
 		}
-		servers[i] = newTestServer(t, preParams, i, "localhost:0", connect)
+		servers[i] = newTestServer(t, preParams, i, listenAddrs[i], connect)
+		// Dial from this node's own address too, so the accept
+		// side sees 100 distinct peers rather than one busy IP.
+		servers[i].dialer = net.Dialer{
+			Timeout:   dialTimeout,
+			LocalAddr: &net.TCPAddr{IP: net.ParseIP(fmt.Sprintf("127.0.0.%d", i+1))},
+		}
 		servers[i].cfg.MaintainInterval = fastMaintain
 		servers[i].cfg.PeersWanted = peersWanted
 		// Generous initial ping timeout: 100 servers on one machine
