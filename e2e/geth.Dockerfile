@@ -16,7 +16,7 @@ RUN go mod tidy
 
 RUN make geth
 
-ENV PATH="${PATH}:./build/bin"
+RUN cp ./build/bin/geth /bin/geth
 
 RUN geth --version
 
