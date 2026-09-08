@@ -5,7 +5,7 @@
 # GitHub Actions workflow to run e2e network tests.
 name: "Localnet Test"
 on:
-  workflow_dispatch: # Manually triggered
+  push:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
