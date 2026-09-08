@@ -191,9 +191,7 @@ services:
 
   geth-l1-setup:
     # yamllint disable-line rule:line-length
-    build:
-      context: .
-      dockerfile: geth.Dockerfile
+    image: ${LOCALNET_GETH_L1_IMAGE:-ethereum/client-go:v1.17.4@sha256:dcb9a1fbb135e9c7afe708662f1c87f95646e710971cbff45c1bcc6351c82e08}
     working_dir: "/tmp/geth"
     depends_on:
       op-geth-l2-setup:
