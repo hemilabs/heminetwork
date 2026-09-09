@@ -5,6 +5,8 @@
 
 set -xe
 
+sleep 10
+
 /bin/geth init --datadir /tmp/datadir --state.scheme hash /shared-dir/genesis.json 
 
 JSON_RPC=http://geth-l1:8545
