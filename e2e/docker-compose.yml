@@ -219,6 +219,7 @@ services:
       geth-l1-setup:
         condition: "service_completed_successfully"
     command:
+      - "geth"
       - "--dev"
       - "--dev.period"
       - "3"
