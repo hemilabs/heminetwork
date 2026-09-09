@@ -20,6 +20,4 @@ RUN cp ./build/bin/geth /bin/geth
 
 RUN geth --version
 
-ENTRYPOINT geth
-
 
