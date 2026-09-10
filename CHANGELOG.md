@@ -128,6 +128,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix `tbc` wedging and never recovering (block sync stops; op-geth
+  cannot advance the L2). Root cause: the peer handshake dropped any
+  peer whose advertised height was below our best *header*. In
+  external-header mode op-geth pushes headers ahead of block download,
+  so a bad/future header in the DB (observed: a header ~1600 blocks
+  above the live chain) made the node reject every real peer, leaving
+  it with zero peers and no way to download the missing block bodies --
+  and it survived restarts because the bad header stayed on disk. The
+  gate now keys on the indexed block frontier, which never runs ahead
+  of the live chain. The zero-peer state was also invisible (peer count
+  was logged only mid-block-insert, and the reject reason was
+  swallowed); peer count is now logged periodically and the reason is
+  recorded. Also fixes two latent header-sync bugs found alongside: an
+  `inv` listing several blocks was abandoned at the first already-known
+  one, and the post-index recovery asked for headers using missing
+  hashes as the getheaders locator.
+
 - Fix `BlockHashByTxId` panic on BIP30 duplicate coinbase txids. Two
   mainnet Bitcoin transactions exist in two blocks each; querying either
   txid via RPC crashed `tbcd`.
