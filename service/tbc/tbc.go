@@ -609,6 +609,29 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 	return nil
 }
 
+// peerBehindFrontier reports whether a peer advertising lastBlock is
+// behind our indexed block frontier, and therefore cannot serve a
+// block we still need.
+//
+// It gates on the indexer height, NOT the best *header* height. In
+// external-header mode op-geth pushes headers into this node ahead of
+// block download, so the best header can sit above the live chain. If
+// a bad or future header ever lands in the DB, a header-tip gate would
+// reject every real peer ("remote peer height below ours"), starve the
+// node of the peers it needs to download the missing block bodies, and
+// never recover across restarts -- the wedge this fixes. The indexer
+// height only advances on blocks we actually downloaded and processed,
+// so it is never above the live chain.
+func (s *Server) peerBehindFrontier(ctx context.Context, lastBlock int32) bool {
+	var frontier uint64
+	if s.ui != nil {
+		if ib, err := s.ui.IndexerAt(ctx); err == nil && ib != nil {
+			frontier = ib.Height
+		}
+	}
+	return uint64(lastBlock) < frontier
+}
+
 func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	log.Tracef("handlePeer %v", p)
 
@@ -644,18 +667,20 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 		readError = err
 		return fmt.Errorf("peer remote version: %w", err)
 	}
-	if uint64(remoteVersion.LastBlock) < bhb.Height {
-		// Disconnect for now. We only want more or less synced peers.
+	// Skip peers that are behind our indexed block frontier: those
+	// cannot serve a block we still need.  See peerBehindFrontier
+	// for why this gates on the indexer height, not the header tip.
+	if s.peerBehindFrontier(ctx, remoteVersion.LastBlock) {
+		// Set readError so the Disconnected line records why; a
+		// swallowed reason here is what made this failure silent.
+		readError = errors.New("remote peer height below ours")
+		return readError
+	}
+	if err := s.getHeadersByHeights(ctx, p,
+		bhb.Height, bhb.Height-1000, bhb.Height-1999,
+		previousCheckpointHeight(bhb.Height, s.g.chain.Checkpoints)); err != nil {
 		readError = err
-		return errors.New("remote peer height below ours")
-	} else {
-		err := s.getHeadersByHeights(ctx, p,
-			bhb.Height, bhb.Height-1000, bhb.Height-1999,
-			previousCheckpointHeight(bhb.Height, s.g.chain.Checkpoints))
-		if err != nil {
-			readError = err
-			return fmt.Errorf("handle peer heights: %w", err)
-		}
+		return fmt.Errorf("handle peer heights: %w", err)
 	}
 
 	// Get p2p information.
@@ -1395,29 +1420,35 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				s.invBlocks = make([]*chainhash.Hash, 0, 16)
 				s.mtx.Unlock()
 
-				// Fixup ib array to not ask for block headers
-				// we already have.
+				// Drop hashes whose headers we already have; what
+				// remains are announcements seen during indexing
+				// that we still lack.  Used only as a gate here:
+				// if nothing new arrived, there is nothing to do.
 				ib = slices.DeleteFunc(ib, func(h *chainhash.Hash) bool {
 					_, _, err := s.BlockHeaderByHash(ctx, *h)
 					return err == nil
 				})
-
-				// Flush out blocks we saw during quiesce.
-				log.Debugf("download missed block headers %v", len(ib))
 
 				if len(ib) == 0 {
 					log.Debugf("nothing to do")
 					return
 				}
 
-				hp := func(ctx context.Context, p *rawpeer.RawPeer) {
-					if err = s.getHeadersByHashes(ctx, p, ib...); err != nil {
-						log.Errorf("missed block headers: %v %v",
-							p, err)
-						return
-					}
-				}
-				s.pm.All(ctx, hp)
+				// Ask each peer for headers from our best tip.
+				//
+				// Do NOT use the missing hashes as the getheaders
+				// locator.  A locator is a list of blocks we
+				// already have; the peer replies with the headers
+				// that follow the first hash it recognizes.  A hash
+				// we are missing makes the peer start AFTER the
+				// block we need, so that header is never delivered
+				// and the node wedges here, stuck at its current
+				// tip forever.  The missing headers descend from
+				// that tip, so a normal getheaders from best
+				// retrieves them -- the same request the not-synced
+				// branch below makes.
+				log.Debugf("download missed block headers %v", len(ib))
+				s.pm.All(ctx, s.headersPeer)
 			} else {
 				log.Debugf("handle all")
 				s.pm.All(ctx, s.headersPeer)
@@ -1921,10 +1952,18 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 			// at a time while taking a mutex.
 			txsFound = true
 		case wire.InvTypeBlock:
-			// Make sure we haven't seen block header yet.
+			// Skip blocks whose header we already have.  This must
+			// continue, not return: an inv can list several blocks,
+			// and an earlier one being known says nothing about the
+			// rest.  Returning here dropped every block announced
+			// after a known one in the same message -- when two
+			// blocks were found seconds apart and a peer announced
+			// both while we already had the first, the second (which
+			// we still needed) was silently discarded and the node
+			// wedged, unable to advance.
 			_, _, err := s.BlockHeaderByHash(ctx, v.Hash)
 			if err == nil {
-				return nil
+				continue
 			}
 			if s.invInsert(v.Hash) {
 				log.Debugf("inventory block: %v", v.Hash)
@@ -3453,6 +3492,18 @@ func (s *Server) Run(pctx context.Context) error {
 					return
 
 				case <-ticker.C:
+				}
+				// Surface peer count every tick. Zero connected
+				// peers means the node cannot sync bitcoin, and it
+				// used to be invisible unless a block was being
+				// inserted -- so a starved node looked healthy.
+				connected, good, bad := s.pm.Stats()
+				if connected == 0 {
+					log.Warningf("no connected peers (good %v bad %v): "+
+						"cannot sync bitcoin", good, bad)
+				} else {
+					log.Debugf("connected peers %v (good %v bad %v)",
+						connected, good, bad)
 				}
 				s.pm.All(ctx, s.pingPeer)
 			}
