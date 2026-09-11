@@ -141,6 +141,17 @@ jq \
   /shared-dir/l1genesis.json > /tmp/genesis.json.new \
   && mv /tmp/genesis.json.new /shared-dir/l1genesis.json
 
+jq --arg addr "0x0000bFF46984e3725691FA540a8C7589300D8282" \
+   --arg code "0x00" \
+   '.alloc[$addr].code = $code' \
+   /shared-dir/l1genesis.json > /shared-dir/l1genesis.json.tmp \
+   && mv /shared-dir/l1genesis.json.tmp /shared-dir/l1genesis.json
+
+jq --arg addr "0x000064D678505ad48F8cCb093BC65613800E8282" \
+   --arg code "0x00" \
+   '.alloc[$addr].code = $code' \
+   /shared-dir/l1genesis.json > /shared-dir/l1genesis.json.tmp \
+   && mv /shared-dir/l1genesis.json.tmp /shared-dir/l1genesis.json
 
 echo "$(jq --argjson timestamp "$(jq '.timestamp' /shared-dir/genesis.json)" '.timestamp = $timestamp' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 
