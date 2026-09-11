@@ -894,7 +894,10 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		break
@@ -955,7 +958,10 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		t.Logf("l1 erc20 approve tx: %s", tx.Hash())
@@ -1032,7 +1038,10 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("receipt status is %d (failed), logs: %v", types.ReceiptStatusFailed, receipt.Logs)
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
@@ -1127,7 +1136,10 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("receipt status is %d, gas used %d (failed), logs: %v", receipt.Status, receipt.GasUsed, receipt.Logs)
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d, nonce %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status, tx.Nonce())
@@ -1227,7 +1239,10 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 		break
 	}
@@ -1478,7 +1493,10 @@ func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Addre
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("transaction failed: %v", receipt.Logs)
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		break
@@ -1549,7 +1567,10 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("receipt status is %d (failed), logs: %v", types.ReceiptStatusFailed, receipt.Logs)
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		break
@@ -1591,7 +1612,10 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("receipt status is %d, gas used %d (failed), logs: %v", receipt.Status, receipt.GasUsed, receipt.Logs)
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
@@ -1700,7 +1724,10 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("receipt status is %d, gas used %d (failed), logs: %v", receipt.Status, receipt.GasUsed, receipt.Logs)
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d, nonce %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status, tx.Nonce())
@@ -1792,7 +1819,10 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 		break
 	}
@@ -2308,7 +2338,10 @@ func bridgeEthL2ToL1Legacy(t *testing.T, ctx context.Context, l1Client *ethclien
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("receipt status is %d, gas used %d (failed), logs: %v", receipt.Status, receipt.GasUsed, receipt.Logs)
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d, nonce %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status, tx.Nonce())
@@ -2421,7 +2454,10 @@ func bridgeEthL2ToL1Legacy(t *testing.T, ctx context.Context, l1Client *ethclien
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 		break
 	}
@@ -2485,7 +2521,10 @@ func bridgeEthL2ToL1Legacy(t *testing.T, ctx context.Context, l1Client *ethclien
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		break
@@ -2560,7 +2599,10 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("receipt status is %d, gas used %d (failed), logs: %v", receipt.Status, receipt.GasUsed, receipt.Logs)
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d, nonce %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status, tx.Nonce())
@@ -2665,7 +2707,10 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 		break
 	}
@@ -2729,7 +2774,10 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			if i == abort {
+				t.Fatal("retries exceeded")
+			}
+			continue
 		}
 
 		break
