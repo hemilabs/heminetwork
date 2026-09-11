@@ -143,13 +143,13 @@ jq \
 
 jq --arg addr "0x0000bFF46984e3725691FA540a8C7589300D8282" \
    --arg code "0x00" \
-   '.alloc[$addr].code = $code' \
+   '.alloc[$addr] = {"balance": "0x0", "code": $code}' \
    /shared-dir/l1genesis.json > /shared-dir/l1genesis.json.tmp \
    && mv /shared-dir/l1genesis.json.tmp /shared-dir/l1genesis.json
 
 jq --arg addr "0x000064D678505ad48F8cCb093BC65613800E8282" \
    --arg code "0x00" \
-   '.alloc[$addr].code = $code' \
+   '.alloc[$addr] = {"balance": "0x0", "code": $code}' \
    /shared-dir/l1genesis.json > /shared-dir/l1genesis.json.tmp \
    && mv /shared-dir/l1genesis.json.tmp /shared-dir/l1genesis.json
 
