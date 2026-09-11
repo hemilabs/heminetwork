@@ -897,6 +897,8 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 			t.Fatal("tx failed")
 		}
 
+		t.Logf("gas used for contract creation: %d", receipt.GasUsed)
+
 		break
 	}
 
