@@ -877,7 +877,7 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 		}
 		auth.Nonce = big.NewInt(int64(nonce))
 		auth.Value = big.NewInt(0)      // in wei
-		auth.GasLimit = uint64(3000000) // in units
+		auth.GasLimit = uint64(6000000) // in units
 		auth.GasPrice = gasPrice
 
 		address, tx, _, err = mybindings.DeployTesttoken(auth, l1Client)
