@@ -613,15 +613,16 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 // behind our indexed block frontier, and therefore cannot serve a
 // block we still need.
 //
-// It gates on the indexer height, NOT the best *header* height. In
-// external-header mode op-geth pushes headers into this node ahead of
-// block download, so the best header can sit above the live chain. If
-// a bad or future header ever lands in the DB, a header-tip gate would
-// reject every real peer ("remote peer height below ours"), starve the
-// node of the peers it needs to download the missing block bodies, and
-// never recover across restarts -- the wedge this fixes. The indexer
+// It gates on the indexer height, NOT the best *header* height. The
+// header tip routinely leads block download (headers-first IBD; op-geth
+// pushing external headers), and a datadir can even carry a header
+// chain that is entirely ahead of the live network. Whenever the header
+// tip is above the live chain, a header-tip gate rejects every real
+// peer ("remote peer height below ours") -- including the peers at the
+// live tip that hold the block bodies we still need -- leaving the node
+// with zero peers and no way to progress, across restarts. The indexer
 // height only advances on blocks we actually downloaded and processed,
-// so it is never above the live chain.
+// so it never runs ahead of the live chain.
 func (s *Server) peerBehindFrontier(ctx context.Context, lastBlock int32) bool {
 	var frontier uint64
 	if s.ui != nil {
