@@ -12,3 +12,11 @@ coverage:
       default:
         target: auto
         threshold: 5%
+    # Patch coverage is informational only: it reports but never fails
+    # the build.  Consistent with require_ci_to_pass: false above -- the
+    # project has never gated merges on coverage, and a hard patch gate
+    # penalises PRs whose new lines are lifecycle/logging plumbing that
+    # is not worth an integration harness to exercise.
+    patch:
+      default:
+        informational: true

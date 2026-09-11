@@ -128,6 +128,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix `tbc` rejecting every peer when its best header is ahead of the
+  live chain. `handlePeer` gated peer acceptance on the best *header*
+  height, but the header tip routinely leads block download (headers-
+  first IBD, external-header push) and a datadir can carry a chain that
+  is entirely ahead of the live network. In that state every peer at the
+  live tip -- the peers holding the block bodies we still need -- is
+  "below ours" and rejected, leaving the node with zero peers and no way
+  to progress, across restarts. Gate on the indexed block frontier
+  instead; record the reject reason (it was swallowed) and log peer
+  count periodically (it was only logged mid-block-insert, so a starved
+  node looked healthy). Also fixes two latent header-sync bugs found
+  alongside: `handleInv` abandoned an inv at the first already-known
+  block, and the post-index recovery used the missing hashes as the
+  getheaders locator. This is hardening for a downstream failure mode;
+  the origin of the incident that surfaced it was a build predating the
+  header proof-of-work checks added in #1117 accepting a zero-PoW fork,
+  which those checks now reject on insertion.
+
 - Fix `BlockHashByTxId` panic on BIP30 duplicate coinbase txids. Two
   mainnet Bitcoin transactions exist in two blocks each; querying either
   txid via RPC crashed `tbcd`.
