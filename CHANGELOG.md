@@ -141,7 +141,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   node looked healthy). Also fixes two latent header-sync bugs found
   alongside: `handleInv` abandoned an inv at the first already-known
   block, and the post-index recovery used the missing hashes as the
-  getheaders locator.
+  getheaders locator. This is hardening for a downstream failure mode;
+  the origin of the incident that surfaced it was a build predating the
+  header proof-of-work checks added in #1117 accepting a zero-PoW fork,
+  which those checks now reject on insertion.
 
 - Fix `BlockHashByTxId` panic on BIP30 duplicate coinbase txids. Two
   mainnet Bitcoin transactions exist in two blocks each; querying either
