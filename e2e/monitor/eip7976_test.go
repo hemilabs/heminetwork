@@ -182,7 +182,8 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 	for range retries {
 		nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
 		if err != nil {
-			h.t.Fatalf("fetching nonce: %v", err)
+			h.t.Logf("fetching nonce: %v", err)
+			continue
 		}
 
 		tx := types.NewTx(&types.LegacyTx{
@@ -197,7 +198,8 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 		signer := types.LatestSignerForChainID(h.chainID)
 		signedTx, err := types.SignTx(tx, signer, h.key)
 		if err != nil {
-			h.t.Fatalf("signing tx: %v", err)
+			h.t.Logf("signing tx: %v", err)
+			continue
 		}
 
 		if err := h.client.SendTransaction(h.ctx, signedTx); err != nil {
