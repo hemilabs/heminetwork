@@ -56,6 +56,7 @@ import (
 	"testing"
 	"time"
 
+	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -125,7 +126,6 @@ type harness struct {
 	key      *ecdsa.PrivateKey
 	from     common.Address
 	chainID  *big.Int
-	nonce    uint64
 	gasPrice *big.Int
 }
 
@@ -174,7 +174,7 @@ func newHarness(t *testing.T, key *ecdsa.PrivateKey) *harness {
 	return &harness{
 		t: t, ctx: ctx, client: client, rpc: rc,
 		key: key, from: from, chainID: chainID,
-		nonce: nonce, gasPrice: gasPrice,
+		gasPrice: gasPrice,
 	}
 }
 
@@ -183,8 +183,13 @@ func newHarness(t *testing.T, key *ecdsa.PrivateKey) *harness {
 func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.Receipt {
 	h.t.Helper()
 
+	nonce, err := client.PendingNonceAt(ctx, from)
+	if err != nil {
+		t.Fatalf("fetching nonce: %v", err)
+	}
+
 	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    h.nonce,
+		Nonce:    nonce,
 		To:       to,
 		Value:    big.NewInt(0),
 		Gas:      gasLimit,
@@ -198,9 +203,8 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 	}
 
 	if err := h.client.SendTransaction(h.ctx, signedTx); err != nil {
-		h.t.Fatalf("node rejected transaction (nonce %d): %v", h.nonce, err)
+		h.t.Fatalf("node rejected transaction (nonce %d): %v", nonce, err)
 	}
-	h.nonce++
 
 	receipt, err := h.waitMined(signedTx.Hash())
 	if err != nil {
@@ -215,10 +219,15 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 func (h *harness) sendExpectingRejection(to *common.Address, data []byte, gasLimit uint64) {
 	h.t.Helper()
 
+	nonce, err := client.PendingNonceAt(ctx, from)
+	if err != nil {
+		t.Fatalf("fetching nonce: %v", err)
+	}
+
 	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    h.nonce,
+		Nonce:    nonce,
 		To:       to,
-		Value:    big.NewInt(0),
+		Value:    big.NewInt(1),
 		Gas:      gasLimit,
 		GasPrice: h.gasPrice,
 		Data:     data,
@@ -231,7 +240,6 @@ func (h *harness) sendExpectingRejection(to *common.Address, data []byte, gasLim
 
 	err = h.client.SendTransaction(h.ctx, signedTx)
 	if err == nil {
-		h.nonce++ // it was actually accepted; keep local nonce in sync
 		h.t.Logf("expected node to reject tx with gas limit %d below the "+
 			"EIP-7976 floor, but it was accepted (hash %s)", gasLimit, signedTx.Hash())
 	}
