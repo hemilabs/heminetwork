@@ -188,7 +188,7 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 		tx := types.NewTx(&types.LegacyTx{
 			Nonce:    nonce,
 			To:       to,
-			Value:    big.NewInt(0),
+			Value:    big.NewInt(1),
 			Gas:      gasLimit,
 			GasPrice: h.gasPrice,
 			Data:     data,
@@ -422,7 +422,7 @@ func EIP7976_DataHeavyFloorCost(t *testing.T, key *ecdsa.PrivateKey) {
 				t.Fatalf("transaction failed (status=%d)", receipt.Status)
 			}
 			if receipt.GasUsed != want {
-				t.Errorf("gasUsed = %d, want %d (floor formula: 21000 + 64*%d bytes)",
+				t.Fatalf("gasUsed = %d, want %d (floor formula: 21000 + 64*%d bytes)",
 					receipt.GasUsed, want, len(tc.data))
 			}
 			// Sanity check against the EIP's stated 64 gas/byte equivalence.
