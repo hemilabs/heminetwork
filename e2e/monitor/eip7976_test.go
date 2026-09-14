@@ -178,12 +178,13 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 	h.t.Helper()
 
 	retries := 10
-	nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
-	if err != nil {
-		h.t.Fatalf("fetching nonce: %v", err)
-	}
 
 	for range retries {
+		nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
+		if err != nil {
+			h.t.Fatalf("fetching nonce: %v", err)
+		}
+
 		tx := types.NewTx(&types.LegacyTx{
 			Nonce:    nonce,
 			To:       to,
@@ -197,20 +198,17 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 		signedTx, err := types.SignTx(tx, signer, h.key)
 		if err != nil {
 			h.t.Logf("signing tx: %v", err)
-			nonce++
 			continue
 		}
 
 		if err := h.client.SendTransaction(h.ctx, signedTx); err != nil {
 			h.t.Logf("node rejected transaction (nonce %d): %v", nonce, err)
-			nonce++
 			continue
 		}
 
 		receipt, err := h.waitMined(signedTx.Hash())
 		if err != nil {
 			h.t.Logf("waiting for tx %s to be mined: %v", signedTx.Hash(), err)
-			nonce++
 			continue
 		}
 		return receipt
