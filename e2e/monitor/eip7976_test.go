@@ -177,7 +177,7 @@ func newHarness(t *testing.T, key *ecdsa.PrivateKey) *harness {
 func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.Receipt {
 	h.t.Helper()
 
-	retries := 10
+	retries := 20
 
 	for range retries {
 		nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
