@@ -183,7 +183,7 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 		h.t.Fatalf("fetching nonce: %v", err)
 	}
 
-	for i := range retries {
+	for range retries {
 		tx := types.NewTx(&types.LegacyTx{
 			Nonce:    nonce,
 			To:       to,
