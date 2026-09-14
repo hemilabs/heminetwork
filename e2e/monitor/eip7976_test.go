@@ -188,7 +188,7 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 		tx := types.NewTx(&types.LegacyTx{
 			Nonce:    nonce,
 			To:       to,
-			Value:    big.NewInt(0),
+			Value:    big.NewInt(1),
 			Gas:      gasLimit,
 			GasPrice: h.gasPrice,
 			Data:     data,
