@@ -98,23 +98,6 @@ func floorCost(data []byte) uint64 {
 	return totalCostFloorPerToken * floorTokensInCalldata(data)
 }
 
-// expectedGasUsed implements the full EIP-7976 formula.
-func expectedGasUsed(data []byte, executionGasUsed uint64, isCreate bool, initcodeWords uint64) uint64 {
-	standard := standardTokenCost*tokensInCalldata(data) + executionGasUsed
-	if isCreate {
-		standard += contractCreationGas + initcodeWordCost*initcodeWords
-	}
-	floor := floorCost(data)
-	return txBaseCost + max64(standard, floor)
-}
-
-func max64(a, b uint64) uint64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // ---- Test harness -----------------------------------------------------
 
 type harness struct {
@@ -299,7 +282,7 @@ func nonZeroByteData(n int) []byte {
 // pure value/data transfers that involve zero EVM execution.
 var dummyRecipient = common.HexToAddress("0x00000000000000000000000000000000C0FFEE")
 
-// TestEIP7976_RejectsInsufficientGasLimit verifies EIP test case 5: a
+// TestEIP7976_RejectsInsufficientGasLimit verifies EIP test case: a
 // transaction whose gas limit is below 21000 + floor_cost must be rejected
 // by the node, even though its calldata involves no EVM execution.
 func EIP7976_RejectsInsufficientGasLimit(t *testing.T, key *ecdsa.PrivateKey) {
