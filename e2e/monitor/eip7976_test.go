@@ -177,34 +177,44 @@ func newHarness(t *testing.T, key *ecdsa.PrivateKey) *harness {
 func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.Receipt {
 	h.t.Helper()
 
-	nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
-	if err != nil {
-		h.t.Fatalf("fetching nonce: %v", err)
+	retries := 10
+
+	for range retries {
+		nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
+		if err != nil {
+			h.t.Fatalf("fetching nonce: %v", err)
+		}
+
+		tx := types.NewTx(&types.LegacyTx{
+			Nonce:    nonce,
+			To:       to,
+			Value:    big.NewInt(0),
+			Gas:      gasLimit,
+			GasPrice: h.gasPrice,
+			Data:     data,
+		})
+
+		signer := types.LatestSignerForChainID(h.chainID)
+		signedTx, err := types.SignTx(tx, signer, h.key)
+		if err != nil {
+			h.t.Fatalf("signing tx: %v", err)
+		}
+
+		if err := h.client.SendTransaction(h.ctx, signedTx); err != nil {
+			h.t.Logf("node rejected transaction (nonce %d): %v", nonce, err)
+			continue
+		}
+
+		receipt, err := h.waitMined(signedTx.Hash())
+		if err != nil {
+			h.t.Logf("waiting for tx %s to be mined: %v", signedTx.Hash(), err)
+			continue
+		}
+		return receipt
 	}
 
-	tx := types.NewTx(&types.LegacyTx{
-		Nonce:    nonce,
-		To:       to,
-		Value:    big.NewInt(0),
-		Gas:      gasLimit,
-		GasPrice: h.gasPrice,
-		Data:     data,
-	})
-	signer := types.LatestSignerForChainID(h.chainID)
-	signedTx, err := types.SignTx(tx, signer, h.key)
-	if err != nil {
-		h.t.Fatalf("signing tx: %v", err)
-	}
-
-	if err := h.client.SendTransaction(h.ctx, signedTx); err != nil {
-		h.t.Fatalf("node rejected transaction (nonce %d): %v", nonce, err)
-	}
-
-	receipt, err := h.waitMined(signedTx.Hash())
-	if err != nil {
-		h.t.Fatalf("waiting for tx %s to be mined: %v", signedTx.Hash(), err)
-	}
-	return receipt
+	h.t.Fatal("retries exceeded")
+	return nil
 }
 
 // sendExpectingRejection signs and submits a transaction that is expected to
@@ -241,7 +251,7 @@ func (h *harness) sendExpectingRejection(to *common.Address, data []byte, gasLim
 }
 
 func (h *harness) waitMined(hash common.Hash) (*types.Receipt, error) {
-	ctx, cancel := context.WithTimeout(h.ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
 	defer cancel()
 	for {
 		receipt, err := h.client.TransactionReceipt(ctx, hash)
