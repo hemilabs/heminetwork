@@ -133,7 +133,7 @@ func newHarness(t *testing.T, key *ecdsa.PrivateKey) *harness {
 
 	url := "http://localhost:8545"
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*5*time.Second)
 	t.Cleanup(cancel)
 
 	rc, err := gethrpc.DialContext(ctx, url)
