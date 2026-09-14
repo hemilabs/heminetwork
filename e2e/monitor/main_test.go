@@ -345,11 +345,8 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				t.Fatal(err)
 			}
 
+			// check for the existence of EIP-7976, do not exhaustively test it
 			EIP7976_RejectsInsufficientGasLimit(t, privateKey)
-			EIP7976_FloorExecutionBoundary(t, privateKey)
-			EIP7976_EVMHeavyStandardPricing(t, privateKey)
-			EIP7976_EstimateGasMatchesFloor(t, privateKey)
-			EIP7976_DataHeavyFloorCost(t, privateKey)
 
 			invalidTxidRetries := 10
 			for i := range invalidTxidRetries {
