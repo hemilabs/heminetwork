@@ -11,9 +11,9 @@ import (
 
 var accessList = []types.AccessTuple{
 	types.AccessTuple{
-		Address:     common.HexToAddress("0xed94c848bee8df6bc65456064eee602619b0cea0"),
+		Address: common.HexToAddress("0xed94c848bee8df6bc65456064eee602619b0cea0"),
 		StorageKeys: []common.Hash{
-			common.HexToHash("0xd18c12b87124f9ceb7e1d3a5d06a5ac92ecab15931417e8d1558d9a263f99d63")
+			common.HexToHash("0xd18c12b87124f9ceb7e1d3a5d06a5ac92ecab15931417e8d1558d9a263f99d63"),
 		},
 	},
 }
