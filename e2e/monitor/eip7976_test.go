@@ -447,7 +447,7 @@ func EIP7976_EstimateGasMatchesFloor(t *testing.T, key *ecdsa.PrivateKey) {
 		t.Fatalf("eth_estimateGas failed: %v", err)
 	}
 	if got != want {
-		t.Errorf("eth_estimateGas = %d, want %d", got, want)
+		t.Fatalf("eth_estimateGas = %d, want %d", got, want)
 	}
 }
 
@@ -476,14 +476,14 @@ func EIP7976_EVMHeavyStandardPricing(t *testing.T, key *ecdsa.PrivateKey) {
 	}
 
 	if receipt.GasUsed <= txBaseCost+floor {
-		t.Errorf("gasUsed = %d did not exceed floor-only cost (%d); "+
+		t.Fatalf("gasUsed = %d did not exceed floor-only cost (%d); "+
 			"execution-heavy transaction appears to have been incorrectly "+
 			"capped at the calldata floor", receipt.GasUsed, txBaseCost+floor)
 	}
 	// The node's own estimate and the actual mined cost should agree,
 	// since this bytecode has no gas-dependent branching or refunds.
 	if receipt.GasUsed != estimate {
-		t.Errorf("gasUsed = %d, want eth_estimateGas value %d", receipt.GasUsed, estimate)
+		t.Fatalf("gasUsed = %d, want eth_estimateGas value %d", receipt.GasUsed, estimate)
 	}
 }
 
@@ -541,7 +541,7 @@ func EIP7976_FloorExecutionBoundary(t *testing.T, key *ecdsa.PrivateKey) {
 		t.Fatalf("call at N=%d failed (status=%d)", belowN, belowReceipt.Status)
 	}
 	if want := txBaseCost + floor; belowReceipt.GasUsed != want {
-		t.Errorf("at N=%d (below crossover): gasUsed = %d, want floor cost %d",
+		t.Fatalf("at N=%d (below crossover): gasUsed = %d, want floor cost %d",
 			belowN, belowReceipt.GasUsed, want)
 	}
 
@@ -554,11 +554,11 @@ func EIP7976_FloorExecutionBoundary(t *testing.T, key *ecdsa.PrivateKey) {
 		t.Fatalf("call at N=%d failed (status=%d)", crossoverN, atReceipt.Status)
 	}
 	if atReceipt.GasUsed <= txBaseCost+floor {
-		t.Errorf("at N=%d (at/above crossover): gasUsed = %d did not exceed floor cost %d",
+		t.Fatalf("at N=%d (at/above crossover): gasUsed = %d did not exceed floor cost %d",
 			crossoverN, atReceipt.GasUsed, txBaseCost+floor)
 	}
 	if atReceipt.GasUsed != atEstimate {
-		t.Errorf("at N=%d: gasUsed = %d, want eth_estimateGas value %d",
+		t.Fatalf("at N=%d: gasUsed = %d, want eth_estimateGas value %d",
 			crossoverN, atReceipt.GasUsed, atEstimate)
 	}
 
@@ -586,6 +586,6 @@ func EIP7976_RejectsInsufficientGasLimit(t *testing.T, key *ecdsa.PrivateKey) {
 			minRequired, receipt.Status)
 	}
 	if receipt.GasUsed != minRequired {
-		t.Errorf("gasUsed = %d, want %d", receipt.GasUsed, minRequired)
+		t.Fatalf("gasUsed = %d, want %d", receipt.GasUsed, minRequired)
 	}
 }
