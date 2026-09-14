@@ -345,6 +345,12 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				t.Fatal(err)
 			}
 
+			EIP7976_RejectsInsufficientGasLimit(t, privateKey)
+			EIP7976_FloorExecutionBoundary(t, privateKey)
+			EIP7976_EVMHeavyStandardPricing(t, privateKey)
+			EIP7976_EstimateGasMatchesFloor(t, privateKey)
+			EIP7976_DataHeavyFloorCost(t, privateKey)
+
 			invalidTxidRetries := 10
 			for i := range invalidTxidRetries {
 				if err := sendToTBCPrecompileWithInvalidTXID(t, ctx, l1Client, privateKey); err != nil {
@@ -897,8 +903,6 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 			t.Fatal("tx failed")
 		}
 
-		t.Logf("gas used for contract creation: %d", receipt.GasUsed)
-
 		break
 	}
 
@@ -1032,6 +1036,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			}
 			continue
 		}
+		t.Logf("l1 -> l2 eth bridge; gas used %d, calldata length %d", receipt.GasUsed, len(tx.Data()))
 
 		if receipt.Status == types.ReceiptStatusFailed {
 			t.Fatalf("receipt status is %d (failed), logs: %v", types.ReceiptStatusFailed, receipt.Logs)
