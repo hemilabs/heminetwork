@@ -56,7 +56,6 @@ import (
 	"testing"
 	"time"
 
-	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -150,11 +149,6 @@ func newHarness(t *testing.T, key *ecdsa.PrivateKey) *harness {
 		t.Fatalf("fetching chain ID: %v", err)
 	}
 
-	nonce, err := client.PendingNonceAt(ctx, from)
-	if err != nil {
-		t.Fatalf("fetching nonce: %v", err)
-	}
-
 	gasPrice, err := client.SuggestGasPrice(ctx)
 	if err != nil {
 		t.Fatalf("fetching gas price: %v", err)
@@ -183,9 +177,9 @@ func newHarness(t *testing.T, key *ecdsa.PrivateKey) *harness {
 func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.Receipt {
 	h.t.Helper()
 
-	nonce, err := client.PendingNonceAt(ctx, from)
+	nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
 	if err != nil {
-		t.Fatalf("fetching nonce: %v", err)
+		h.t.Fatalf("fetching nonce: %v", err)
 	}
 
 	tx := types.NewTx(&types.LegacyTx{
@@ -219,9 +213,9 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 func (h *harness) sendExpectingRejection(to *common.Address, data []byte, gasLimit uint64) {
 	h.t.Helper()
 
-	nonce, err := client.PendingNonceAt(ctx, from)
+	nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
 	if err != nil {
-		t.Fatalf("fetching nonce: %v", err)
+		h.t.Fatalf("fetching nonce: %v", err)
 	}
 
 	tx := types.NewTx(&types.LegacyTx{
