@@ -179,8 +179,10 @@ func (h *harness) send(to *common.Address, data []byte, gasLimit uint64) *types.
 
 	retries := 10
 
-	for range retries {
-		time.Sleep(1 * time.Second)
+	for i := range retries {
+		if i > 0 {
+			time.Sleep(5 * time.Second)
+		}
 		nonce, err := h.client.PendingNonceAt(h.ctx, h.from)
 		if err != nil {
 			h.t.Logf("fetching nonce: %v", err)
