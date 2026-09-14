@@ -21,14 +21,14 @@ func EIP7981_RejectsInsufficientGasLimit(t *testing.T, key *ecdsa.PrivateKey) {
 
 	accessListBytes := 0
 	for _, a := range accessList {
-		accessListBytes += len(a.Address)
-		for _, s := range a.StorageKeys {
-			accessListBytes += len(s)
+		accessListBytes += 1280
+		for range a.StorageKeys {
+			accessListBytes += 2048
 		}
 	}
 
 	data := nonZeroByteData(10_000)
-	minRequired := txBaseCost + floorCost(data)
+	minRequired := txBaseCost + floorCost(data) + uint64(64*accessListBytes)
 
 	// One gas below the required minimum must be rejected.
 	h.sendExpectingRejectionWithAccessList(&dummyRecipient, data, minRequired-1)
