@@ -305,72 +305,72 @@ func nonZeroByteData(n int) []byte {
 // pure value/data transfers that involve zero EVM execution.
 var dummyRecipient = common.HexToAddress("0x00000000000000000000000000000000C0FFEE")
 
-// ---- Gas-burner contract for the EVM-heavy and boundary test cases --------
-//
-// The runtime bytecode below reads a uint256 loop count N from calldata[0:32]
-// and busy-loops N times, burning a controllable, monotonically increasing
-// amount of execution gas per call. This lets the boundary test find the
-// exact crossover between the calldata floor and standard/execution pricing
-// empirically (via eth_estimateGas) rather than relying on hand-derived
-// opcode gas accounting, which is fragile across client versions.
-//
-// Runtime bytecode (annotated):
-//
-//	PUSH1 0x00       ; 0
-//	CALLDATALOAD     ; 2   -> N
-//	JUMPDEST         ; 3   <- loop_start (pc=3)
-//	DUP1
-//	ISZERO
-//	PUSH1 0x10       ; exit_pc = 16
-//	JUMPI
-//	PUSH1 0x01
-//	SWAP1
-//	SUB
-//	PUSH1 0x03       ; loop_start_pc = 3
-//	JUMP
-//	JUMPDEST         ; 16  <- exit
-//	POP
-//	STOP
+// Opcodes used below.
+const (
+	opSTOP         = 0x00
+	opSUB          = 0x03
+	opISZERO       = 0x15
+	opCALLDATALOAD = 0x35
+	opCODECOPY     = 0x39
+	opPOP          = 0x50
+	opPUSH1        = 0x60
+	opDUP1         = 0x80
+	opSWAP1        = 0x90
+	opJUMP         = 0x56
+	opJUMPI        = 0x57
+	opJUMPDEST     = 0x5b
+	opRETURN       = 0xf3
+)
+
+// gasBurnerRuntime returns deployed bytecode whose gas consumption is a
+// pure function of the 32-byte loop count passed as calldata. It contains
+// no GAS-opcode checks, no storage access, and no other state- or
+// gas-dependent branching, so repeated calls with identical calldata
+// consume identical gas regardless of the gas limit supplied.
 func gasBurnerRuntime() []byte {
 	return []byte{
-		0x60, 0x00, // PUSH1 0x00
-		0x35,       // CALLDATALOAD
-		0x5b,       // JUMPDEST (loop_start, pc=3)
-		0x80,       // DUP1
-		0x15,       // ISZERO
-		0x60, 0x10, // PUSH1 0x10 (exit_pc=16)
-		0x57,       // JUMPI
-		0x60, 0x01, // PUSH1 0x01
-		0x90,       // SWAP1
-		0x03,       // SUB
-		0x60, 0x03, // PUSH1 0x03 (loop_start_pc=3)
-		0x56, // JUMP
-		0x5b, // JUMPDEST (exit, pc=16)
-		0x50, // POP
-		0x00, // STOP
+		opPUSH1, 0x00, // dest of CALLDATALOAD
+		opCALLDATALOAD, // [n]
+		opJUMPDEST,     // L = offset 3: loop start
+		opDUP1,         // [n, n]
+		opISZERO,       // [n, n==0]
+		opPUSH1, 0x10,  // [n, n==0, end=16]
+		opJUMPI,       // [n] -- jump to end if n==0
+		opPUSH1, 0x01, // [n, 1]
+		opSWAP1,       // [1, n]
+		opSUB,         // [n-1]
+		opPUSH1, 0x03, // [n-1, L=3]
+		opJUMP,     // [n-1] -- back to loop start
+		opJUMPDEST, // end = offset 16
+		opPOP,      // []
+		opSTOP,
 	}
 }
 
-// gasBurnerInitCode wraps runtime code in a standard CODECOPY/RETURN
-// constructor so it can be deployed with a plain CREATE transaction.
+// gasBurnerInitCode wraps runtime in constructor bytecode that deploys it
+// verbatim (CODECOPY + RETURN), with no extra logic that could affect gas.
 func gasBurnerInitCode(runtime []byte) []byte {
-	const prefixLen = 13
-	codeOffset := uint16(prefixLen)
-	length := uint16(len(runtime))
+	if len(runtime) > 255 {
+		panic("gasBurnerInitCode: runtime too large for PUSH1 encoding")
+	}
+	size := byte(len(runtime))
 
-	init := []byte{
-		0x61, byte(length >> 8), byte(length), // PUSH2 <len>
-		0x80,                                          // DUP1
-		0x61, byte(codeOffset >> 8), byte(codeOffset), // PUSH2 <codeOffset>
-		0x60, 0x00, // PUSH1 0x00
-		0x39,       // CODECOPY
-		0x60, 0x00, // PUSH1 0x00
-		0xf3, // RETURN
+	// Stack discipline:
+	//   CODECOPY pops (destOffset, offset, length) top-to-bottom
+	//   RETURN   pops (offset, length) top-to-bottom
+	prelude := []byte{
+		opPUSH1, size, // length
+		opPUSH1, 0x0c, // offset = 12, where runtime begins (patched below if needed)
+		opPUSH1, 0x00, // destOffset
+		opCODECOPY,
+		opPUSH1, size, // length
+		opPUSH1, 0x00, // offset
+		opRETURN,
 	}
-	if len(init) != prefixLen {
-		panic("gasBurnerInitCode: prefix length assumption violated")
-	}
-	return append(init, runtime...)
+	codeOffset := byte(len(prelude))
+	prelude[3] = codeOffset // keep offset operand in sync with actual prelude length
+
+	return append(prelude, runtime...)
 }
 
 // loopCountCalldata ABI-encodes a loop count as a single uint256 argument
