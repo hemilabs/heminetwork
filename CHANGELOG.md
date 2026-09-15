@@ -25,9 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Zero timeouts allowed slowloris-style connection exhaustion and
   unbounded request bodies could cause OOM
   ([#1079](https://github.com/hemilabs/heminetwork/pull/1079)).
+- Authenticate `continuum` peer end-to-end encryption keys. A peer's
+  X25519 key was accepted from unsigned gossip, so any connected peer
+  could bind a victim's identity to an attacker-held key and read the
+  confidential ceremony traffic every node then sealed to it. Gossip no
+  longer carries key material; a key is learned only from its holder,
+  either through the handshake (whose challenge signature now covers
+  the key) or through a new routed `NaClKeyRequest`/`NaClKeyResponse`
+  challenge-response for peers without a direct session. Bindings are
+  immutable — the X25519 key is derived deterministically from the
+  secp256k1 identity key, so a conflicting binding is rejected and
+  exported as `continuum_peer_key_conflicts_total`.
 
 ### Breaking Changes
 
+- `continuum` protocol version is now 2 and does not interoperate with
+  version 1 nodes. The handshake binds the announced X25519 key into
+  the challenge signature and requires it to be present and well
+  formed, and gossip peer records no longer carry key material.
 - `BlockHashByTxId` now returns `(*chainhash.Hash, wire.TxLoc, error)`;
   callers that only need the hash use `bh, _, err :=`
   ([#1052](https://github.com/hemilabs/heminetwork/pull/1052)).
@@ -88,6 +103,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
 - Add multiple RPC commands to regular and authenticated TBC routes ([#1026](https://github.com/hemilabs/heminetwork/pull/1026)).
 - Add maximum fee configuration to `popmd` ([#1037](https://github.com/hemilabs/heminetwork/pull/1037)).
+- Add `continuum` TSS peer mesh with keygen, signing, and resharing
+  ceremonies, secp256k1-signed wire messages, NaCl-encrypted
+  peer-to-peer transport with multi-hop routing, DNS seeding,
+  coordinator election, and `hemictl` ceremony management commands
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+- Add `TRF_ADMIN_LISTEN_ADDRESS` to `transfunctionerd`, a loopback-only
+  listener (default `localhost:45068`) dedicated to `hemictl` admin
+  RPCs. Admin commands are authorized on arriving there, so the peer
+  listener refuses them; `HEMICTL_CONTINUUM_ADDRESS` defaults to the
+  admin port ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 - Add external ECDSA and schnorr signature injection to `bitcoin/wallet`,
   enabling threshold signature committees, hardware wallets, and PSBT flows
   to produce signatures out of band and hand them to the wallet for
@@ -172,6 +197,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix bug in `synctester` where unbounded reads of the docker logs could lead
 to an OOM crash ([#1159](https://github.com/hemilabs/heminetwork/pull/1159)).
+
+- Fix `continuum` exiting when a configured `TRF_CONNECT` peer is
+  briefly unreachable. A transient dial, key-exchange or handshake
+  failure to one peer terminated the whole daemon, and silently — the
+  error went to the run channel without being logged. Per-peer failures
+  are now logged and the node keeps running; the peer is redialled once
+  gossip advertises it
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+
+- Convert the `ttl` tests to `testing/synctest`. They slept past real
+  deadlines and relied on the callback goroutines having been scheduled
+  by the time the assertion ran; the fake clock and `synctest.Wait` make
+  that exact. Suite runtime drops from ~3.3s to ~3ms
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
+
+- Fix a data race in `continuum`'s ceremony status reads. `CeremonyStatus`
+  and the ceremony status admin RPC copied `CeremonyInfo` after releasing
+  the mutex the ceremony driver writes it under
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 
 ## [v2.0.0]
 
