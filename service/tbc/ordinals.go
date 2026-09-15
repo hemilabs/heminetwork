@@ -156,20 +156,67 @@ type InscriptionEnvelope struct {
 
 // ParseInscriptionEnvelope parses an inscription envelope from witness data.
 // Returns nil if no inscription is found.
+//
+// A taproot script-path spend ends with [..., script, control_block]: the
+// reveal script is the second-to-last element and the last element is the
+// control block. A non-taproot reveal (e.g. a P2WSH witnessScript) has no
+// control block, so the reveal script is the LAST element; an ord envelope
+// found there is cursed pre-jubilee (rule #3), so NonTaprootWitness is set.
+// The two cases are told apart by whether the last stack element has the
+// shape of a BIP341 control block, not by position, so envelopes in
+// non-taproot witnesses are still found and flagged.
 func ParseInscriptionEnvelope(witness wire.TxWitness) (*InscriptionEnvelope, error) {
-	if len(witness) == 0 {
-		return nil, nil
-	}
-
-	// Inscriptions are in the tapscript (second-to-last witness element
-	// in a taproot script-path spend). The last element is the control
-	// block.
+	// A script-path reveal needs at least a reveal script plus one more
+	// stack element (the control block for taproot, or a preceding push
+	// for P2WSH).
 	if len(witness) < 2 {
 		return nil, nil
 	}
 
-	script := witness[len(witness)-2]
-	return parseEnvelopeFromScript(script)
+	// Strip a taproot annex if present: BIP341 places it last, marked by a
+	// leading 0x50 byte, and it is not part of the script-path stack.
+	w := witness
+	if last := w[len(w)-1]; len(last) > 0 && last[0] == taprootAnnexTag {
+		w = w[:len(w)-1]
+		if len(w) < 2 {
+			return nil, nil
+		}
+	}
+
+	var (
+		script     []byte
+		nonTaproot bool
+	)
+	if isTaprootControlBlock(w[len(w)-1]) {
+		script = w[len(w)-2]
+	} else {
+		script = w[len(w)-1]
+		nonTaproot = true
+	}
+
+	env, err := parseEnvelopeFromScript(script)
+	if err != nil {
+		return nil, err
+	}
+	if env != nil && nonTaproot {
+		env.NonTaprootWitness = true
+	}
+	return env, nil
+}
+
+// taprootAnnexTag is the leading byte that marks a taproot witness annex
+// (BIP341).
+const taprootAnnexTag = 0x50
+
+// isTaprootControlBlock reports whether b has the shape of a BIP341
+// taproot script-path control block: a leaf-version byte (0xc0 with the
+// low parity bit ignored) followed by the 32-byte internal key and zero
+// or more 32-byte merkle path elements — a total of 33+32n bytes.
+func isTaprootControlBlock(b []byte) bool {
+	if len(b) < 33 || (len(b)-33)%32 != 0 {
+		return false
+	}
+	return b[0]&0xfe == 0xc0
 }
 
 // parseEnvelopeFromScript parses the ord envelope from a tapscript.

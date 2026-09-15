@@ -446,8 +446,86 @@ func buildOrdEnvelope(t *testing.T, tags map[int][]byte) wire.TxWitness {
 	}
 
 	// Taproot witness: [... script, control_block]
-	// Control block can be empty for our test purposes.
-	return wire.TxWitness{script, {0x00}}
+	return wire.TxWitness{script, taprootControlBlockForTest()}
+}
+
+// taprootControlBlockForTest returns a structurally valid BIP341 control
+// block (leaf version 0xc0 + 32-byte internal key), so ParseInscriptionEnvelope
+// classifies the witness as a taproot script-path spend.
+func taprootControlBlockForTest() []byte {
+	cb := make([]byte, 33)
+	cb[0] = 0xc0
+	return cb
+}
+
+// TestParseInscriptionEnvelopeNonTaproot verifies that an ord envelope in a
+// non-taproot witness (no control block; reveal script is the last element,
+// e.g. a P2WSH witnessScript) is found and flagged NonTaprootWitness, so the
+// pre-jubilee cursed rule #3 can trigger. Regression for the bug where the
+// parser always treated the second-to-last element as the script and never
+// set the flag.
+func TestParseInscriptionEnvelopeNonTaproot(t *testing.T) {
+	// Extract just the reveal script from a taproot-shaped witness.
+	script := buildOrdEnvelope(t, map[int][]byte{
+		1: []byte("text/plain"),
+		5: []byte("cursed"),
+	})[0]
+
+	// Non-taproot witness: [<non-control-block push>, revealScript]. The
+	// last element is the reveal script, not a control block.
+	witness := wire.TxWitness{{0xAA, 0xBB}, script}
+	env, err := ParseInscriptionEnvelope(witness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env == nil {
+		t.Fatal("expected envelope in non-taproot witness")
+	}
+	if !env.NonTaprootWitness {
+		t.Error("expected NonTaprootWitness = true")
+	}
+	if !bytes.Equal(env.Content, []byte("cursed")) {
+		t.Errorf("content: got %q want %q", env.Content, "cursed")
+	}
+	// Pre-jubilee, a non-taproot reveal is cursed (rule #3) even at input 0.
+	if !isInscriptionCursed(0, 0, env) {
+		t.Error("expected non-taproot envelope to be cursed pre-jubilee")
+	}
+
+	// A proper taproot witness must NOT be flagged.
+	tap := buildOrdEnvelope(t, map[int][]byte{1: []byte("text/plain"), 5: []byte("ok")})
+	tapEnv, err := ParseInscriptionEnvelope(tap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tapEnv == nil || tapEnv.NonTaprootWitness {
+		t.Errorf("taproot witness: NonTaprootWitness = %v, want false", tapEnv != nil && tapEnv.NonTaprootWitness)
+	}
+}
+
+// TestIsTaprootControlBlock covers the BIP341 control-block shape check that
+// distinguishes taproot script-path spends from non-taproot reveals.
+func TestIsTaprootControlBlock(t *testing.T) {
+	tests := []struct {
+		name string
+		b    []byte
+		want bool
+	}{
+		{"min valid 0xc0", append([]byte{0xc0}, make([]byte, 32)...), true},
+		{"valid 0xc1 parity", append([]byte{0xc1}, make([]byte, 32)...), true},
+		{"one merkle step", append([]byte{0xc0}, make([]byte, 64)...), true},
+		{"too short", make([]byte, 32), false},
+		{"bad leaf version", append([]byte{0x00}, make([]byte, 32)...), false},
+		{"bad length", append([]byte{0xc0}, make([]byte, 40)...), false},
+		{"empty", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTaprootControlBlock(tt.b); got != tt.want {
+				t.Fatalf("isTaprootControlBlock(len=%d) = %v, want %v", len(tt.b), got, tt.want)
+			}
+		})
+	}
 }
 
 func TestParseInscriptionEnvelope(t *testing.T) {
@@ -534,7 +612,7 @@ func TestParseInscriptionEnvelope(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env, err := ParseInscriptionEnvelope(wire.TxWitness{script, {0x00}})
+		env, err := ParseInscriptionEnvelope(wire.TxWitness{script, taprootControlBlockForTest()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1185,7 +1263,7 @@ func TestParseEnvelopeWrongMagic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := ParseInscriptionEnvelope(wire.TxWitness{script, {0x00}})
+	env, err := ParseInscriptionEnvelope(wire.TxWitness{script, taprootControlBlockForTest()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1206,7 +1284,7 @@ func TestParseEnvelopeTruncatedNoEndif(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := ParseInscriptionEnvelope(wire.TxWitness{script, {0x00}})
+	env, err := ParseInscriptionEnvelope(wire.TxWitness{script, taprootControlBlockForTest()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1312,7 +1390,7 @@ func TestParseEnvelopeScriptWithoutOrdPattern(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := ParseInscriptionEnvelope(wire.TxWitness{script, {0x00}})
+	env, err := ParseInscriptionEnvelope(wire.TxWitness{script, taprootControlBlockForTest()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1382,9 +1460,9 @@ func FuzzParseInscriptionEnvelope(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Build a witness with the fuzzed data as the tapscript element.
 		witness := wire.TxWitness{
-			{0x01},     // dummy signature
-			data,       // fuzzed tapscript
-			{0xc0, 42}, // dummy control block
+			{0x01},                       // dummy signature
+			data,                         // fuzzed tapscript
+			taprootControlBlockForTest(), // valid taproot control block
 		}
 		// Must not panic. Errors are expected and fine.
 		_, _ = ParseInscriptionEnvelope(witness)
@@ -1395,9 +1473,9 @@ func FuzzParseInscriptionEnvelope(f *testing.F) {
 
 func buildWitness(script []byte) wire.TxWitness {
 	return wire.TxWitness{
-		{0x01},     // dummy signature
-		script,     // tapscript
-		{0xc0, 42}, // dummy control block
+		{0x01},                       // dummy signature
+		script,                       // tapscript
+		taprootControlBlockForTest(), // valid taproot control block
 	}
 }
 

@@ -1079,10 +1079,16 @@ func buildInscriptionWitness(contentType, content string) wire.TxWitness {
 		panic(fmt.Sprintf("buildInscriptionWitness: %v", err))
 	}
 
+	// A BIP341 control block is 33+32n bytes and starts with the leaf
+	// version (0xc0); ParseInscriptionEnvelope inspects its shape to tell
+	// taproot from non-taproot reveals, so the placeholder must be a
+	// structurally valid control block, not a short stub.
+	controlBlock := make([]byte, 33)
+	controlBlock[0] = 0xc0
 	return wire.TxWitness{
-		{0x01},             // dummy signature
-		script,             // tapscript with inscription
-		{0xc0, 0x01, 0x02}, // dummy control block (taproot v1)
+		{0x01},       // dummy signature
+		script,       // tapscript with inscription
+		controlBlock, // taproot control block (leaf version 0xc0 + internal key)
 	}
 }
 
