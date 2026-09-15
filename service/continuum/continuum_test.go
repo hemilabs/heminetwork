@@ -2288,7 +2288,11 @@ func TestForwardDirect(t *testing.T) {
 }
 
 // TestForwardDirectWriteError verifies that a write failure on the
-// direct path is handled gracefully: logged but no forwarded count.
+// direct path is handled gracefully.  The dead session is the only
+// peer, so after falling through to the route/flood path there is
+// nowhere left to deliver and the forwarded count stays 0.  See
+// TestForwardDirectWriteFallsThroughToFlood for the case where a
+// healthy peer exists.
 func TestForwardDirectWriteError(t *testing.T) {
 	seen, err := ttl.New(64, true)
 	if err != nil {
@@ -11092,6 +11096,10 @@ func TestHandleCeremonyResultExistingComplete(t *testing.T) {
 
 func TestPeerExpiredCallback(t *testing.T) {
 	s, _ := NewServer(testConfig())
+	// peerExpired now rebuilds the routing table, which reads the
+	// server identity; in production Run sets this before any peer is
+	// added.  A bare NewServer leaves it nil, so set it here.
+	s.secret, _ = NewSecret()
 	secret1, _ := NewSecret()
 	naclPub, _ := secret1.NaClPublicKey()
 	s.mtx.Lock()

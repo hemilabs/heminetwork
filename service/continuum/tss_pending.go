@@ -34,10 +34,26 @@ import (
 // already queued for a ceremony is not queued twice.
 const (
 	// pendingTSSMaxAge is how long a message for an unregistered
-	// ceremony is retried before it is discarded.  Matches the old
-	// backoff horizon: past this the request is not merely in
-	// flight, it is not coming.
-	pendingTSSMaxAge = 5 * time.Second
+	// ceremony is retried before it is discarded.
+	//
+	// It must exceed the pre-registration skew, not just network
+	// latency.  Before a node registers a ceremony's internal state
+	// it runs ensureCommitteeKeys, bounded by naclXchgEnsureTimeout
+	// (see dispatchKeygen/dispatchSign/dispatchReshare).  A faster
+	// committee member finishes its key exchange first and sends
+	// round 1 immediately; on a slower node that message lands here
+	// while ensureCommitteeKeys is still running.  There is no
+	// round-message retransmission, so if the buffer drops it before
+	// registration the ceremony stalls until its far longer overall
+	// timeout.  Hold at least the full key-exchange window plus a
+	// margin for the dispatch and registration that follow it.
+	//
+	// A longer horizon does not enlarge the attack surface: the
+	// global pendingTSSMaxBytes and per-ceremony
+	// pendingTSSMaxPerCeremony caps bound the buffer regardless of
+	// age.  Age only decides how long already-capped bytes linger
+	// before expire() reclaims them.
+	pendingTSSMaxAge = naclXchgEnsureTimeout + 4*time.Second
 
 	// pendingTSSMaxBytes caps the payload bytes buffered across all
 	// ceremonies.
