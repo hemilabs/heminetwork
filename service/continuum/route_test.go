@@ -265,3 +265,154 @@ func TestGossipTopologyChangeRebuildsRoutes(t *testing.T) {
 		t.Fatalf("route to B = %v/%v, want direct (session still up)", hop, ok)
 	}
 }
+
+// TestPeerExpiredRebuildsRoutes proves peerExpired rebuilds the routing
+// table itself.  Unlike newSession/deleteSession and the gossip handler,
+// a TTL expiry has no external call site that rebuilds, so without the
+// in-callback rebuild routeNextHop would keep handing out a route
+// through the departed peer indefinitely.  This test does NOT call
+// rebuildRoutes after the expiry — that is the whole point.
+func TestPeerExpiredRebuildsRoutes(t *testing.T) {
+	s := routeTestServer(t)
+	B, C := Identity{0x0B}, Identity{0x0C}
+	if err := s.newSession(&B, &Transport{}); err != nil {
+		t.Fatal(err)
+	}
+	// C is reachable only through B's advertised edges; B itself stays a
+	// direct session.
+	gossipSessions(t, s, B, s.secret.Identity, C)
+	if _, ok := s.routeNextHop(C); !ok {
+		t.Fatal("no route to C after gossip")
+	}
+
+	// Expire B's peer record WITHOUT any explicit rebuild.  peerExpired
+	// must rebuild; otherwise the pre-expiry C->B route (through B's
+	// now-removed advertised edges) survives.
+	s.peerExpired(t.Context(), B, nil)
+	if hop, ok := s.routeNextHop(C); ok {
+		t.Fatalf("route to C = via %v survived B's expiry with no explicit rebuild", hop)
+	}
+	// B's own direct session is untouched, so it stays routable.
+	if hop, ok := s.routeNextHop(B); !ok || hop != B {
+		t.Fatalf("route to B = %v/%v, want direct (session still up)", hop, ok)
+	}
+}
+
+// TestSanitizeSessions covers the untrusted-gossip edge-list normalizer:
+// the zero identity is dropped, duplicates are removed, and the length
+// is capped at maxPeerSessions.
+func TestSanitizeSessions(t *testing.T) {
+	var zero Identity
+	A, B := Identity{0x0A}, Identity{0x0B}
+
+	if got := sanitizeSessions(nil); got != nil {
+		t.Fatalf("sanitizeSessions(nil) = %v, want nil", got)
+	}
+	if got := sanitizeSessions([]Identity{zero, zero}); got != nil {
+		t.Fatalf("sanitizeSessions(all-zero) = %v, want nil", got)
+	}
+	if got := sanitizeSessions([]Identity{A, zero, A, B, B}); len(got) != 2 ||
+		got[0] != A || got[1] != B {
+		t.Fatalf("sanitizeSessions dedup/zero = %v, want [A B]", got)
+	}
+
+	// Oversized list is capped.
+	big := make([]Identity, 0, maxPeerSessions*2)
+	for i := range maxPeerSessions * 2 {
+		var id Identity
+		id[0] = byte(i)
+		id[1] = byte(i >> 8)
+		big = append(big, id)
+	}
+	if got := sanitizeSessions(big); len(got) != maxPeerSessions {
+		t.Fatalf("sanitizeSessions cap = %d, want %d", len(got), maxPeerSessions)
+	}
+}
+
+// TestAddPeerBoundsSessions proves the sanitizer is applied at the store
+// point: a gossiped record with a zero-polluted, duplicated, oversized
+// session list is stored bounded and clean, so rebuildRoutes never
+// traverses attacker-sized adjacency.
+func TestAddPeerBoundsSessions(t *testing.T) {
+	s := routeTestServer(t)
+	peer := Identity{0xB1}
+
+	dup := Identity{0xCC}
+	big := []Identity{{}, dup, dup} // zero + duplicate
+	for i := range maxPeerSessions * 2 {
+		var id Identity
+		id[0] = byte(i)
+		id[1] = byte(i >> 8)
+		id[2] = 0x01 // avoid colliding with dup/zero
+		big = append(big, id)
+	}
+	s.addPeer(t.Context(), PeerRecord{
+		Identity: peer,
+		Version:  ProtocolVersion,
+		Sessions: big,
+	})
+
+	s.mtx.RLock()
+	stored := s.peers[peer].Sessions
+	s.mtx.RUnlock()
+
+	if len(stored) > maxPeerSessions {
+		t.Fatalf("stored sessions = %d, want <= %d", len(stored), maxPeerSessions)
+	}
+	var zero Identity
+	seen := make(map[Identity]bool, len(stored))
+	for _, id := range stored {
+		if id == zero {
+			t.Fatal("zero identity stored")
+		}
+		if seen[id] {
+			t.Fatalf("duplicate identity %v stored", id)
+		}
+		seen[id] = true
+	}
+}
+
+// TestForwardDirectWriteFallsThroughToFlood is the regression guard for
+// the bug where forward()'s direct branch returned unconditionally: a
+// stale direct session swallowed the message instead of falling through
+// to the flood path.  With a dead direct session and one healthy peer,
+// the message must still reach the healthy peer.
+func TestForwardDirectWriteFallsThroughToFlood(t *testing.T) {
+	seen, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	destID := Identity{0xBB}
+	deadSrv, _ := connectedTransports(t)
+	deadSrv.conn.Close() // stale direct session: write will fail
+
+	healthyID := Identity{0xC1}
+	healthySrv, healthyCli := connectedTransports(t)
+	drainTransport(t, healthyCli)
+
+	s := &Server{
+		seen:       seen,
+		secret:     secret,
+		sessions:   map[Identity]*Transport{destID: deadSrv, healthyID: healthySrv},
+		routeTable: map[Identity]Identity{}, // no route -> flood
+	}
+
+	header := &Header{
+		PayloadType: PPingRequest,
+		PayloadHash: *NewPayloadHash([]byte("direct-fallthrough")),
+		Origin:      s.secret.Identity,
+		Destination: &destID,
+		TTL:         5,
+	}
+
+	s.forward(header, &PingRequest{OriginTimestamp: 1}, nil)
+
+	if got := s.Forwarded(); got != 1 {
+		t.Fatalf("forwarded = %d, want 1 (flood to healthy peer after dead direct write)", got)
+	}
+}
