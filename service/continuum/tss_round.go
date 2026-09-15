@@ -143,12 +143,21 @@ func (b *msgBuf) collectDual(ctx context.Context, n int, nParties int, acceptA f
 	return a, b2, nil
 }
 
-// sendRound serializes outbound round messages and sends them via
-// the transport.  Send errors are logged but not fatal — TSS is
-// threshold-based, so the ceremony succeeds as long as t+1 peers
-// receive the message.  A missing message causes a collect timeout
-// on the receiving end, not silent corruption.
+// sendRound serializes outbound round messages and sends them to every
+// other selected party via the transport.  Delivery is best-effort per
+// recipient — a failed Send does not stop the fan-out — but the
+// accumulated failures ARE returned rather than swallowed.
+//
+// This is NOT threshold-tolerant: every keygen/sign round collects the
+// other n-1 parties' messages (collect(ctx, n-1, n, ...)), so ALL
+// selected participants — not merely t+1 — must exchange messages.  The
+// transport only errors when a message could not be delivered by any
+// path (direct, routed, or flood), which means the recipient's collector
+// can never be satisfied and the ceremony would otherwise hang until the
+// long ceremony timeout.  Returning the aggregated error lets the caller
+// fail the ceremony promptly at its source instead.
 func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Message) error {
+	var errs []error
 	for _, msg := range msgs {
 		wireData, err := marshalTSSContent(msg.Content)
 		if err != nil {
@@ -162,6 +171,7 @@ func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Mess
 				}
 				if err := t.transport.Send(c.pidToID[pid.Id], ceremonyID, data); err != nil {
 					log.Debugf("send broadcast %x to %s: %v", ceremonyID, pid.Id, err)
+					errs = append(errs, fmt.Errorf("broadcast to %s: %w", pid.Id, err))
 				}
 			}
 		} else {
@@ -169,17 +179,20 @@ func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Mess
 			for _, dest := range msg.To {
 				if err := t.transport.Send(c.pidToID[dest.Id], ceremonyID, data); err != nil {
 					log.Debugf("send p2p %x to %s: %v", ceremonyID, dest.Id, err)
+					errs = append(errs, fmt.Errorf("p2p to %s: %w", dest.Id, err))
 				}
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // sendReshareRound serializes outbound reshare round messages with
-// committee target flags encoded in the wire format.  Send errors
-// are logged but not fatal — TSS is threshold-based, so the ceremony
-// succeeds as long as t+1 peers receive the message.
+// committee target flags encoded in the wire format.  Like sendRound,
+// delivery is best-effort per recipient but the accumulated failures are
+// returned: the reshare collectors wait for every required old/new
+// committee slot, so a silently dropped send would stall the ceremony
+// until timeout instead of failing it promptly.
 //
 // Wire format: [broadcast:1][committee_flags:1][wireBytes]
 //
@@ -187,6 +200,7 @@ func (t *tssImpl) sendRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Mess
 //	bit 1: to new committee
 //	bit 2: from new committee (sender key is XORed)
 func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []*tss.Message, fromNew bool) error {
+	var errs []error
 	for _, msg := range msgs {
 		wireData, err := marshalTSSContent(msg.Content)
 		if err != nil {
@@ -229,27 +243,46 @@ func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []*t
 		copy(data[wireHeaderLen:], wireData)
 
 		if msg.To == nil {
-			// Broadcast: send to all unique peers across both
-			// committees, skipping self.
+			// Broadcast to exactly the committees the message
+			// targets.  The committee flags computed above are the
+			// audience: an old-only (cflagToOld) or new-only
+			// (cflagToNew) broadcast must not be disclosed to the
+			// other committee, so honour those flags here instead of
+			// unconditionally sending to both.  Overlap — a member on
+			// both committees when both flags are set — is
+			// deduplicated via sent.
+			//
+			// The reshare round functions currently populate an
+			// explicit To on every message (so this branch is not hit
+			// today), but the committee audience is a confidentiality
+			// property that must not silently depend on that
+			// invariant: if a To==nil reshare broadcast is ever
+			// produced, it still goes only where its flags say.
 			sent := make(map[Identity]bool)
-			for _, pid := range c.oldPids {
-				id := c.pidToID[pid.Id]
-				if sent[id] || id == t.self {
-					continue
-				}
-				sent[id] = true
-				if err := t.transport.Send(id, ceremonyID, data); err != nil {
-					log.Debugf("send reshare broadcast %x to %s: %v", ceremonyID, id, err)
+			if cflags&cflagToOld != 0 {
+				for _, pid := range c.oldPids {
+					id := c.pidToID[pid.Id]
+					if sent[id] || id == t.self {
+						continue
+					}
+					sent[id] = true
+					if err := t.transport.Send(id, ceremonyID, data); err != nil {
+						log.Debugf("send reshare broadcast %x to %s: %v", ceremonyID, id, err)
+						errs = append(errs, fmt.Errorf("reshare broadcast to %s: %w", id, err))
+					}
 				}
 			}
-			for _, pid := range c.newPids {
-				id := c.pidToID[pid.Id]
-				if sent[id] || id == t.self {
-					continue
-				}
-				sent[id] = true
-				if err := t.transport.Send(id, ceremonyID, data); err != nil {
-					log.Debugf("send reshare broadcast %x to %s: %v", ceremonyID, id, err)
+			if cflags&cflagToNew != 0 {
+				for _, pid := range c.newPids {
+					id := c.pidToID[pid.Id]
+					if sent[id] || id == t.self {
+						continue
+					}
+					sent[id] = true
+					if err := t.transport.Send(id, ceremonyID, data); err != nil {
+						log.Debugf("send reshare broadcast %x to %s: %v", ceremonyID, id, err)
+						errs = append(errs, fmt.Errorf("reshare broadcast to %s: %w", id, err))
+					}
 				}
 			}
 		} else {
@@ -260,9 +293,10 @@ func (t *tssImpl) sendReshareRound(c *ceremony, ceremonyID CeremonyID, msgs []*t
 				}
 				if err := t.transport.Send(id, ceremonyID, data); err != nil {
 					log.Debugf("send reshare p2p %x to %s: %v", ceremonyID, id, err)
+					errs = append(errs, fmt.Errorf("reshare p2p to %s: %w", id, err))
 				}
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

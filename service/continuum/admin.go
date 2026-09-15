@@ -49,6 +49,20 @@ func (s *Server) listenAdmin(ctx context.Context, errC chan error) {
 			conn.Close() // best-effort: shutting down
 			return
 		}
+		// The admin listener is loopback-only by design: admin RPCs are
+		// authorized solely by arriving here (see requireAdmin).  Reject
+		// a non-loopback peer BEFORE spending a goroutine and an
+		// unbounded KX/handshake on it.  requireAdmin would refuse its
+		// RPCs anyway, but an admin listener accidentally bound to an
+		// external interface must not let remote clients burn goroutines
+		// and cryptographic handshake work that bypass the peer
+		// listener's handshake semaphore.
+		if !isLocalhost(conn.RemoteAddr()) {
+			log.Warningf("admin: rejecting non-loopback connection from %v",
+				conn.RemoteAddr())
+			conn.Close()
+			continue
+		}
 		tcpKeepAlive(conn, tcpKeepAlivePeriod)
 		s.wg.Add(1)
 		go s.handleAdminConnection(ctx, conn)

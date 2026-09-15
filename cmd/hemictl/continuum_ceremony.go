@@ -97,6 +97,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -151,6 +152,19 @@ func continuumKeygen(ctx context.Context, args map[string]string) error {
 	// Resolve committee: explicit members or auto-select.
 	committee, err := resolveCommittee(ctx, t, secret, args)
 	if err != nil {
+		return err
+	}
+
+	// The operator polls the LOCAL daemon for the resulting key_id
+	// (`hemictl continuum status`).  A daemon that is not in the
+	// committee never runs the ceremony, so its status carries no
+	// key_id and the key can never be referenced for a later sign or
+	// reshare.  Refuse rather than hand back an unpollable ceremony.
+	self, err := localNodeIdentity(ctx, t, secret)
+	if err != nil {
+		return err
+	}
+	if err := requireLocalParticipant(committee, self); err != nil {
 		return err
 	}
 
@@ -223,6 +237,16 @@ func continuumSign(ctx context.Context, args map[string]string) error {
 		return err
 	}
 
+	// The local daemon must sign as a committee member for its status
+	// to report the signature; see continuumKeygen.
+	self, err := localNodeIdentity(ctx, t, secret)
+	if err != nil {
+		return err
+	}
+	if err := requireLocalParticipant(committee, self); err != nil {
+		return err
+	}
+
 	ceremonyID := continuum.NewCeremonyID()
 	partyIDs := continuum.IdentitiesToPartyIDs(committee)
 
@@ -290,6 +314,20 @@ func continuumReshare(ctx context.Context, args map[string]string) error {
 	newCommittee, err := resolveCommitteePrefix(ctx, t, secret, args, "new_")
 	if err != nil {
 		return fmt.Errorf("new committee: %w", err)
+	}
+
+	// The local daemon must participate in the reshare (old and/or new
+	// committee) for its status to track the ceremony; see
+	// continuumKeygen.  Guard against a union that omits it.
+	self, err := localNodeIdentity(ctx, t, secret)
+	if err != nil {
+		return err
+	}
+	union := make([]continuum.Identity, 0, len(oldCommittee)+len(newCommittee))
+	union = append(union, oldCommittee...)
+	union = append(union, newCommittee...)
+	if err := requireLocalParticipant(union, self); err != nil {
+		return err
 	}
 
 	ceremonyID := continuum.NewCeremonyID()
@@ -460,6 +498,54 @@ func autoSelectPeers(ctx context.Context, t *continuum.Transport, secret *contin
 	}
 
 	return eligible[:n], nil
+}
+
+// localNodeIdentity returns the identity of the local transfunctionerd
+// the transport is connected to.  The daemon seeds its own record
+// (flagged Self) into the admin peer list via registerSelfAsPeer, so a
+// single PeerListAdminRequest resolves it.  Note that secret is
+// hemictl's ephemeral admin identity, which is deliberately NOT the
+// daemon's — hemictl is the stand-in smart contract, not a participant.
+func localNodeIdentity(ctx context.Context, t *continuum.Transport, secret *continuum.Secret) (continuum.Identity, error) {
+	if err := t.Write(secret.Identity, continuum.PeerListAdminRequest{}); err != nil {
+		return continuum.Identity{}, fmt.Errorf("peer list request: %w", err)
+	}
+	cmd, err := continuumReadResponse(ctx, t)
+	if err != nil {
+		return continuum.Identity{}, err
+	}
+	resp, ok := cmd.(*continuum.PeerListAdminResponse)
+	if !ok {
+		return continuum.Identity{}, fmt.Errorf("unexpected response: %T", cmd)
+	}
+	for _, pr := range resp.Peers {
+		if pr.Self {
+			return pr.Identity, nil
+		}
+	}
+	return continuum.Identity{}, errors.New("local daemon did not report " +
+		"its own identity (is its peer listener running?)")
+}
+
+// requireLocalParticipant rejects a committee that does not contain the
+// local daemon (self).  hemictl ceremony commands are fire-and-forget:
+// the operator polls the LOCAL daemon (`hemictl continuum status`) for
+// the outcome and, for keygen, the resulting key_id.  A daemon outside
+// the committee never runs the TSS engine for the ceremony, so its
+// status record never carries a key_id and the generated key cannot be
+// referenced for a later sign or reshare.  Failing here is strictly
+// better than leaving the operator polling a record that will never
+// populate.
+func requireLocalParticipant(committee []continuum.Identity, self continuum.Identity) error {
+	for _, id := range committee {
+		if id == self {
+			return nil
+		}
+	}
+	return fmt.Errorf("local node %v is not in the committee: it will not "+
+		"hold the resulting key and `hemictl continuum status` cannot "+
+		"report it; include the local node in the committee or run "+
+		"against a participating node", self)
 }
 
 // =============================================================================
