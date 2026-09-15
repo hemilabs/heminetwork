@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hemilabs/x/tss/v3/crypto"
 	resharing "github.com/hemilabs/x/tss/v3/ecdsa/resharing"
 	"github.com/hemilabs/x/tss/v3/tss"
 )
@@ -220,10 +221,28 @@ func TestReshareDoesNotCrashOnCrossCommitteePartyIndex(t *testing.T) {
 	}()
 
 	// Craft the cross-committee message: a round-1 (DGRound1Message) content the
-	// round-1 collector matches, sent with fromNew set so HandleMessage resolves
-	// the attacker's index in the larger new PID set. Reshare framing is
+	// round-1 collector matches, sent with fromNew set so a build that resolved
+	// From.Index from the attacker-controlled wire flag would place it in the
+	// larger new PID set. Reshare framing is
 	// [broadcast:1][committee_flags:1][wireBytes...].
-	wire, err := marshalTSSContent(&resharing.DGRound1Message{})
+	//
+	// The content must be STRUCTURALLY VALID. HandleMessage runs
+	// validTSSContent (ValidateBasic) on the parsed content BEFORE it resolves
+	// the sender's committee and index, so an empty DGRound1Message is rejected
+	// at that structural guard and never reaches the committee-binding path this
+	// test targets -- the test would then pass for the wrong reason even if the
+	// index protection regressed. DGRound1Message.ValidateBasic requires a
+	// non-nil ECDSAPub, a positive VCommitment and a non-empty SSID.
+	validR1 := &resharing.DGRound1Message{
+		ECDSAPub:    crypto.ScalarBaseMult(tss.S256(), big.NewInt(42)),
+		VCommitment: big.NewInt(88),
+		SSID:        []byte("cross-committee-index-test"),
+	}
+	if !validTSSContent(validR1) {
+		t.Fatal("test setup: crafted DGRound1Message must pass validTSSContent, " +
+			"otherwise it is rejected before the committee-index path")
+	}
+	wire, err := marshalTSSContent(validR1)
 	if err != nil {
 		t.Fatalf("marshal content: %v", err)
 	}

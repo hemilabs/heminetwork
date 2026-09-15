@@ -18,12 +18,16 @@ package continuum
 // record whose session list changed (addPeer), or a peer expiring
 // (peerExpired).  rebuildRoutes compares routeGen to routeBuiltGen
 // and skips the BFS if already current, so gossip that repeats what
-// is already known costs no rebuild.
+// is already known costs no rebuild.  Local session and gossip
+// changes rebuild at the next safe call site after the lock is
+// released; a peer TTL expiry has no such site, so peerExpired
+// rebuilds from its own (goroutine-run) callback.
 //
 // Staleness: the table reflects the last rebuild.  A dropped session
 // on a remote node takes up to one gossip round (~67s) to propagate.
 // During that window, a route may point through a dead link.  When
-// the next-hop write fails, sendTo and forward fall through to the
+// the next-hop write fails — including a stale DIRECT session, which
+// falls through instead of returning — sendTo and forward drop to the
 // flood path, which delivers as long as the mesh is connected.
 //
 // Complexity: BFS is O(V+E) where V = known peers and E = sum of
@@ -43,11 +47,23 @@ package continuum
 //   - Key compromise: NaCl keys are bound via challenge-response, not
 //     affected by routing.
 //
-// The flood fallback in sendTo and forward is the safety net: when the
-// routed path fails or silently drops, retry logic (ensurePeerKey,
-// ceremony timeouts) re-sends, and the flood path delivers as long as
-// the mesh has any honest path.  Routing is an optimization; security
-// does not depend on it.
+// The flood fallback in sendTo and forward is the safety net for a
+// FAILED next-hop write: a write error falls through to the flood path,
+// which reaches the destination over any honest path.  It does NOT
+// detect a next hop that accepts the write and then silently drops it.
+// The topology is unauthenticated and TSS round messages carry no
+// end-to-end acknowledgement, so a malicious on-path node can black-hole
+// a ceremony until its timeout.  This is a known limitation, not a
+// handled case: keygen/sign/reshare bound it only with ceremony timeouts
+// and by surfacing KNOWN send failures (sendRound/sendReshareRound
+// return delivery errors so a ceremony fails fast instead of hanging),
+// while higher-layer re-tries (ensurePeerKey re-runs key exchange;
+// re-initiating the ceremony) recover across the gossip staleness
+// window.  Making delivery robust against an ACTIVE on-path adversary
+// would require authenticated topology, redundant paths, or end-to-end
+// acks.  Routing is an optimization: confidentiality and authenticity
+// (NaCl-box encryption + signatures) do not depend on it, but timely
+// delivery does.
 
 // invalidateRoutes bumps the routing generation counter, marking
 // the current table as stale.  Called under s.mtx.Lock by
@@ -151,6 +167,38 @@ func (s *Server) routeNextHop(dest Identity) (Identity, bool) {
 	hop, ok := s.routeTable[dest]
 	s.routeMtx.RUnlock()
 	return hop, ok
+}
+
+// sanitizeSessions normalizes an advertised session (edge) list that
+// arrived as untrusted gossip: it drops the zero identity, removes
+// duplicates, and caps the length at maxPeerSessions.  It returns a
+// fresh slice so the stored record never pins an attacker-sized backing
+// array, and so rebuildRoutes never traverses a padded or duplicated
+// adjacency.  A nil or empty input yields nil.
+func sanitizeSessions(sessions []Identity) []Identity {
+	if len(sessions) == 0 {
+		return nil
+	}
+	var zero Identity
+	seen := make(map[Identity]struct{}, len(sessions))
+	out := make([]Identity, 0, len(sessions))
+	for _, id := range sessions {
+		if id == zero {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+		if len(out) >= maxPeerSessions {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // sameIdentitySet reports whether a and b hold the same identities,

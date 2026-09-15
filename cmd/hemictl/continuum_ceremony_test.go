@@ -9,7 +9,55 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/hemilabs/heminetwork/v2/service/continuum"
 )
+
+// mustID parses a 40-hex-char identity string for tests.
+func mustID(t *testing.T, s string) continuum.Identity {
+	t.Helper()
+	id, err := continuum.NewIdentityFromString(s)
+	if err != nil {
+		t.Fatalf("bad identity %q: %v", s, err)
+	}
+	return *id
+}
+
+func TestRequireLocalParticipant(t *testing.T) {
+	a := mustID(t, "0000000000000000000000000000000000000001")
+	b := mustID(t, "0000000000000000000000000000000000000002")
+	c := mustID(t, "0000000000000000000000000000000000000003")
+
+	tests := []struct {
+		name      string
+		committee []continuum.Identity
+		self      continuum.Identity
+		wantErr   bool
+	}{
+		{"self present, first", []continuum.Identity{a, b, c}, a, false},
+		{"self present, middle", []continuum.Identity{a, b, c}, b, false},
+		{"self present, last", []continuum.Identity{a, b, c}, c, false},
+		{"self absent", []continuum.Identity{a, b}, c, true},
+		{"empty committee", nil, a, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := requireLocalParticipant(tt.committee, tt.self)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), "not in the committee") {
+					t.Fatalf("error %q missing explanation", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
 
 func TestRequireInt(t *testing.T) {
 	tests := []struct {

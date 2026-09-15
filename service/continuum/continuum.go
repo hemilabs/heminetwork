@@ -63,6 +63,17 @@ const (
 	// malicious peer.
 	maxGossipPeers = 256
 
+	// maxPeerSessions caps the advertised session (edge) list stored
+	// per gossiped peer.  maxGossipPeers bounds the number of peer
+	// records but NOT the nested PeerRecord.Sessions slices: without
+	// this, an authenticated peer could advertise a near-transport-sized
+	// session list, repeat it under many forged peer identities, and
+	// force addPeer to retain every list while rebuildRoutes traverses
+	// them on each topology change — memory and CPU amplification.  A
+	// node's real edge count is bounded by its own peer table
+	// (defaultMaxPeers), so this matches maxGossipPeers.
+	maxPeerSessions = maxGossipPeers
+
 	// pingInterval is how often each session sends a heartbeat.
 	// Prime to avoid resonance with other periodic timers.
 	pingInterval = 29 * time.Second
@@ -505,7 +516,14 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("invalid DNS mode %q: must be \"off\", \"forward\", \"reverse\", or \"all\"", cfg.DNS)
 	}
 	if (cfg.DNS == DNSForward || cfg.DNS == DNSAll) && cfg.Hostname == "" {
-		return nil, fmt.Errorf("DNS=%q requires Hostname to be set", cfg.DNS)
+		// Fail fast and loud: a forward/all node with no hostname
+		// advertises IP-only and is rejected by every other forward
+		// peer, so it would silently fail to join the mesh.  Refusing
+		// to start is deliberate — set a hostname, or opt out of
+		// verification explicitly.
+		return nil, fmt.Errorf("DNS=%q requires Hostname to be set "+
+			"(set Hostname/TRF_HOSTNAME, or DNS=%q to disable "+
+			"verification)", cfg.DNS, DNSOff)
 	}
 
 	// Peer counts are used directly as map, channel and TTL
@@ -748,14 +766,20 @@ func (s *Server) forward(header *Header, payload any, from *Identity) {
 	defer s.mtx.RUnlock()
 
 	// Direct: destination is a connected peer.
+	//
+	// A write failure here means the session is dead but has not been
+	// reaped yet.  Fall through to the route/flood path rather than
+	// returning — the point of those fallbacks is to survive exactly
+	// this staleness window (mirrors sendTo).  Only a successful direct
+	// write ends forwarding.
 	if t, ok := s.sessions[dest]; ok {
 		if err := t.WriteHeader(fwd, payload); err != nil {
 			log.Debugf("forward direct to %v: %v", dest, err)
 		} else {
 			log.Debugf("forward direct to %v TTL %d", dest, fwd.TTL)
 			s.forwarded.Add(1)
+			return
 		}
-		return
 	}
 
 	// Route via gossip topology table.
@@ -2379,6 +2403,16 @@ func (s *Server) peerExpired(_ context.Context, key, _ any) {
 	// Its advertised edges leave the routing graph with it.
 	s.invalidateRoutes()
 	s.mtx.Unlock()
+
+	// Unlike newSession/deleteSession and the gossip path, a TTL expiry
+	// has no later call site that rebuilds: without this, routeGen
+	// outruns routeBuiltGen indefinitely and routeNextHop keeps handing
+	// out a next hop through the departed peer until some unrelated
+	// topology change happens to trigger a rebuild.  Rebuild here, after
+	// releasing s.mtx (rebuildRoutes takes s.mtx.RLock itself).  The TTL
+	// package invokes this callback on its own goroutine holding no
+	// server lock, so this is deadlock-free.
+	s.rebuildRoutes()
 	log.Debugf("peer expired: %v", id)
 }
 
@@ -2411,6 +2445,12 @@ func (s *Server) addPeer(ctx context.Context, pr PeerRecord) bool {
 
 	// Never accept key material through a peer record.
 	pr.NaClPub = nil
+
+	// Bound and normalize the advertised edge list before it is stored
+	// or traversed.  Sessions is unauthenticated gossip; without this a
+	// single record could carry an unbounded, duplicated, or self/zero
+	// polluted adjacency list.
+	pr.Sessions = sanitizeSessions(pr.Sessions)
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()

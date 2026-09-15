@@ -341,7 +341,9 @@ func adminWriteErrorServer(t *testing.T) (*Server, *Transport) {
 
 func TestHandleCeremonyStatusWriteError(t *testing.T) {
 	s, srv := adminWriteErrorServer(t)
-	dc := &dispatchCtx{s: s, id: &Identity{}, t: srv}
+	// admin:true is required or requireAdmin short-circuits before the
+	// Write, and the error path this test names is never reached.
+	dc := &dispatchCtx{admin: true, s: s, id: &Identity{}, t: srv}
 	if handleCeremonyStatusReq(dc, &CeremonyStatusRequest{}) {
 		t.Fatal("expected false")
 	}
@@ -349,7 +351,8 @@ func TestHandleCeremonyStatusWriteError(t *testing.T) {
 
 func TestHandleCeremonyListWriteError(t *testing.T) {
 	s, srv := adminWriteErrorServer(t)
-	dc := &dispatchCtx{s: s, id: &Identity{}, t: srv}
+	// admin:true is required or requireAdmin short-circuits before the Write.
+	dc := &dispatchCtx{admin: true, s: s, id: &Identity{}, t: srv}
 	if handleCeremonyListReq(dc, &CeremonyListRequest{}) {
 		t.Fatal("expected false")
 	}
@@ -357,18 +360,26 @@ func TestHandleCeremonyListWriteError(t *testing.T) {
 
 func TestHandlePeerListAdminWriteError(t *testing.T) {
 	s, srv := adminWriteErrorServer(t)
-	dc := &dispatchCtx{s: s, id: &Identity{}, t: srv}
+	// admin:true is required or requireAdmin short-circuits before the Write.
+	dc := &dispatchCtx{admin: true, s: s, id: &Identity{}, t: srv}
 	if handlePeerListAdmin(dc, &PeerListAdminRequest{}) {
 		t.Fatal("expected false")
 	}
 }
 
 func TestHandlePeerAddReqWriteError(t *testing.T) {
+	// A short ctx so the connectPeer goroutine handlePeerAdd spawns (once
+	// admin passes) fails fast, and wg.Wait() below stays bounded.
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
 	s, srv := adminWriteErrorServer(t)
-	dc := &dispatchCtx{ctx: t.Context(), s: s, id: &Identity{}, t: srv}
+	// admin:true is required or requireAdmin short-circuits before the Write;
+	// the old test passed only because it never reached the write path.
+	dc := &dispatchCtx{ctx: ctx, admin: true, s: s, id: &Identity{}, t: srv}
 	if handlePeerAddReq(dc, &PeerAddRequest{Address: "1.2.3.4:9090"}) {
 		t.Fatal("expected false")
 	}
+	s.wg.Wait() // connectPeer fails fast due to short ctx
 }
 
 // --- handlePeerAdd server method ---
@@ -405,11 +416,53 @@ func TestHandlePeerAddReqHappyPath(t *testing.T) {
 	s.secret = secret
 	srv, cli := localhostTransports(t)
 	drainTransport(t, cli)
-	dc := &dispatchCtx{ctx: ctx, s: s, id: &Identity{}, t: srv}
+	// admin:true or requireAdmin returns before the Write and this "happy
+	// path" never actually exercises a successful admin response.
+	dc := &dispatchCtx{ctx: ctx, admin: true, s: s, id: &Identity{}, t: srv}
 	if handlePeerAddReq(dc, &PeerAddRequest{Address: "192.168.1.1:9090"}) {
 		t.Fatal("expected false")
 	}
 	s.wg.Wait()
+}
+
+// TestAdminHandlerRejectedBeforeWrite is the positive control for the
+// *WriteError tests above.  Those tests only reach their Write because
+// requireAdmin passes (admin:true); this test proves the converse — with
+// admin:false the handler returns BEFORE touching the transport, so nothing
+// reaches the peer.  If the requireAdmin gate were ever dropped, the peer
+// would receive a response here and this test would fail, catching exactly
+// the regression the write-error tests could previously hide.
+func TestAdminHandlerRejectedBeforeWrite(t *testing.T) {
+	s, _ := NewServer(testConfig())
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.secret = secret
+	srv, cli := localhostTransports(t)
+
+	// Drain any key-exchange residue so the assertion observes only the
+	// handler's output (or absence of it).
+	drainConn := func(d time.Duration) (int, error) {
+		if err := cli.conn.SetReadDeadline(time.Now().Add(d)); err != nil {
+			t.Fatal(err)
+		}
+		return cli.conn.Read(make([]byte, 64*1024))
+	}
+	for {
+		if _, err := drainConn(100 * time.Millisecond); err != nil {
+			break // read deadline hit: the peer is quiescent
+		}
+	}
+
+	// admin:false: requireAdmin must reject before the Write.
+	dc := &dispatchCtx{s: s, id: &Identity{}, t: srv}
+	if handlePeerListAdmin(dc, &PeerListAdminRequest{}) {
+		t.Fatal("expected false")
+	}
+	if _, err := drainConn(200 * time.Millisecond); err == nil {
+		t.Fatal("admin request rejected but a response still reached the peer")
+	}
 }
 
 // --- signature rejection tests for broadcast handlers ---
