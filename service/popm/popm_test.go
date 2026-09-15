@@ -895,6 +895,7 @@ func TestPopMinerE2E(t *testing.T) {
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		NotificationBlocking:    true,
+		RequestTimeout:          120 * time.Second,
 		// LogLevel:                "tbc=TRACE",
 		Seeds: []string{
 			"127.0.0.1:" + mappedPeerPort.Port(),

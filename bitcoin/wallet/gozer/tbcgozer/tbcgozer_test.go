@@ -41,6 +41,7 @@ func TestTBCGozerConnection(t *testing.T) {
 		LogLevel:                "tbcd=INFO:level=INFO:tbcgozer=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 "localnet",
+		RequestTimeout:          10 * time.Second,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:18444"},
@@ -138,6 +139,7 @@ func TestTBCGozerAlreadyBroadcast(t *testing.T) {
 		LevelDBHome:             t.TempDir(),
 		MaxCachedTxs:            1000,
 		Network:                 "localnet",
+		RequestTimeout:          10 * time.Second,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:18444"},
