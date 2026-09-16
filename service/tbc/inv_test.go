@@ -84,6 +84,50 @@ func TestHandleInvKeepsScanningPastKnownBlock(t *testing.T) {
 	}
 }
 
+// TestHandleInvBoundsBlockScan pins the per-message block-scan cap.
+//
+// handleInv does a BlockHeaderByHash lookup for every block inv entry, and
+// (correctly) continues past an already-known one. Without a bound, an inv
+// that lists far more block entries than the download budget drives one DB
+// read (and one invInsert) per entry, allowing  a peer-triggered
+// amplification. The cap truncates the scan at defaultPendingBlocks.
+//
+// This test feeds 2x the cap of distinct UNKNOWN block hashes. With the
+// cap exactly defaultPendingBlocks are queued; remove the cap and all 2x are
+// queued, failing the assertion.
+func TestHandleInvBoundsBlockScan(t *testing.T) {
+	s := newDifficultyTestServer(t, &chaincfg.MainNetParams)
+
+	n := 2 * defaultPendingBlocks
+	msg := wire.NewMsgInv()
+	for i := 0; i < n; i++ {
+		// Distinct hashes, none of which are in the DB (all "unknown"),
+		// so without the cap every one would be invInsert'd.
+		var h chainhash.Hash
+		h[0], h[1] = byte(i), byte(i>>8)
+		if err := msg.AddInvVect(wire.NewInvVect(wire.InvTypeBlock, &h)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.handleInv(t.Context(), nil, msg, nil); err != nil {
+		t.Fatalf("handleInv: %v", err)
+	}
+
+	s.mtx.Lock()
+	queued := len(s.invBlocks)
+	s.mtx.Unlock()
+
+	if queued > defaultPendingBlocks {
+		t.Fatalf("handleInv did not bound the block scan: queued %d, cap %d",
+			queued, defaultPendingBlocks)
+	}
+	if queued != defaultPendingBlocks {
+		t.Fatalf("expected exactly the cap (%d) entries queued, got %d",
+			defaultPendingBlocks, queued)
+	}
+}
+
 // TestHandleInvEmpty covers the empty-inv guard.
 func TestHandleInvEmpty(t *testing.T) {
 	s := newDifficultyTestServer(t, &chaincfg.MainNetParams)

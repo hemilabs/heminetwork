@@ -1944,6 +1944,13 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 
 	var txsFound bool
 
+	// Bound the per-message block scan. Legitimate block announcements are a
+	// handful of tip hashes, far under this cap; only an adversarial flood reaches
+	// it. Past the cap we skip the expensive work (the header lookup + invInsert)
+	// but keep walking the list so trailing entries are not dropped.
+	const maxInvBlockScan = defaultPendingBlocks
+	var blockScanned int
+
 	for _, v := range msg.InvList {
 		switch v.Type {
 		case wire.InvTypeError:
@@ -1953,6 +1960,16 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 			// at a time while taking a mutex.
 			txsFound = true
 		case wire.InvTypeBlock:
+			// Past the cap, skip the expensive header lookup + invInsert
+			// but keep scanning (continue, not break) so trailing tx invs
+			// are not dropped.
+			if blockScanned++; blockScanned > maxInvBlockScan {
+				if blockScanned == maxInvBlockScan+1 {
+					log.Debugf("handleInv (%v): block scan truncated at %v of %v entries",
+						p, maxInvBlockScan, len(msg.InvList))
+				}
+				continue
+			}
 			// Skip blocks whose header we already have.  This must
 			// continue, not return: an inv can list several blocks,
 			// and an earlier one being known says nothing about the
