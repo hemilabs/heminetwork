@@ -21,16 +21,18 @@ var accessList = []types.AccessTuple{
 func EIP7981_RejectsInsufficientGasLimit(t *testing.T, key *ecdsa.PrivateKey) {
 	h := newHarness(t, key)
 
-	accessListBytes := 0
+	// EIP-7981 data surcharge: 64 gas/byte × 20 bytes per address and
+	// 32 bytes per storage key = 1280 and 2048 gas respectively.
+	accessListDataCost := 0
 	for _, a := range accessList {
-		accessListBytes += 1280
+		accessListDataCost += 1280
 		for range a.StorageKeys {
-			accessListBytes += 2048
+			accessListDataCost += 2048
 		}
 	}
 
 	data := nonZeroByteData(10_000)
-	minRequired := txBaseCost + floorCost(data) + uint64(64*accessListBytes)
+	minRequired := txBaseCost + floorCost(data) + uint64(accessListDataCost)
 
 	// One gas below the required minimum must be rejected.
 	h.sendExpectingRejectionWithAccessList(&dummyRecipient, data, minRequired-1)
@@ -72,7 +74,7 @@ func (h *harness) sendExpectingRejectionWithAccessList(to *common.Address, data 
 
 	err = h.client.SendTransaction(h.ctx, signedTx)
 	if err == nil {
-		h.t.Logf("expected node to reject tx with gas limit %d below the "+
+		h.t.Fatalf("expected node to reject tx with gas limit %d below the "+
 			"EIP-7981 floor, but it was accepted (hash %s)", gasLimit, signedTx.Hash())
 	}
 	// Rejected before entering the pool: nonce was not consumed.
