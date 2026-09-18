@@ -4,11 +4,11 @@ RUN apk add git make
 
 WORKDIR /geth
 
-RUN git clone https://github.com/ethereum/go-ethereum
+RUN git clone https://github.com/ClaytonNorthey92/go-ethereum
 
 WORKDIR /geth/go-ethereum
 
-RUN git checkout a5b90d2a28e8b68c2d6c335e17af4c64e23f7323
+RUN git checkout 776f800d83f8160a6b053ded6560337d6969dc5c
 
 RUN go get github.com/cockroachdb/swiss@333444432258d4c36b77454e016496ab67ee9ca2
 
