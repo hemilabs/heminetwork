@@ -8,7 +8,7 @@ RUN git clone https://github.com/ClaytonNorthey92/go-ethereum
 
 WORKDIR /geth/go-ethereum
 
-RUN git checkout cc660fdd8ecf12706c3b3e76497d81c36b8538e7
+RUN git checkout a5b90d2a28e8b68c2d6c335e17af4c64e23f7323
 
 RUN go get github.com/cockroachdb/swiss@333444432258d4c36b77454e016496ab67ee9ca2
 
