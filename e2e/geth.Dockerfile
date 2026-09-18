@@ -4,7 +4,7 @@ RUN apk add git make
 
 WORKDIR /geth
 
-RUN git clone https://github.com/ClaytonNorthey92/go-ethereum
+RUN git clone https://github.com/ethereum/go-ethereum
 
 WORKDIR /geth/go-ethereum
 
