@@ -83,6 +83,9 @@ RUN sed -i 's/predeploys.PoPPointsAddr/predeploys.GovernanceTokenAddr/g' ./op-no
 
 COPY --from=just_build /root/.cargo/bin/just /usr/bin/just
 
+WORKDIR /git/optimism
+RUN just build-superchain-go
+
 WORKDIR /git/optimism/op-node
 RUN just op-node
 
