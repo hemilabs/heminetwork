@@ -57,7 +57,7 @@ ARG OPTIMISM_COMMIT
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
 
 RUN apt-get update
-RUN apt-get install -y jq xxd
+RUN apt-get install -y jq xxd zip
 ARG TARGETARCH=amd64
 ARG YQ_VERSION=v4.44.5
 RUN curl -fsSL -o /usr/local/bin/yq \
