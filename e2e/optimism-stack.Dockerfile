@@ -71,13 +71,7 @@ ARG OPTIMISM_COMMIT
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
 
 RUN apt-get update
-RUN apt-get install -y jq xxd zip
-ARG TARGETARCH=amd64
-ARG YQ_VERSION=v4.44.5
-RUN curl -fsSL -o /usr/local/bin/yq \
-    https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${TARGETARCH} \
-&& chmod +x /usr/local/bin/yq \
-&& yq --version
+RUN RUN apt-get install -y jq yq xxd
 
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
