@@ -117,7 +117,7 @@ RUN just op-proposer
 
 
 COPY --from=foundry_build /git/foundry/target/release/forge /usr/bin/forge
-COPY --from=tomlq_build /git/foundry/target/release/tomlq /usr/bin/tomlq
+COPY --from=tomlq_build /git/tomlq/target/release/tomlq /usr/bin/tomlq
 
 RUN forge --help
 
