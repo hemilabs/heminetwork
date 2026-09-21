@@ -5,12 +5,11 @@
 # increment me to break the cache: 2
 
 ARG OP_GETH_COMMIT=6ceee9fc3344204415d70f783202f175dae40d79
-ARG OPTIMISM_COMMIT=765b4e662bcce27baa1a780756e01bd875a17466
+ARG OPTIMISM_COMMIT=8d6cac808ccde3a666007d6a526761b8169bc192
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken
 ARG FOUNDRY_COMMIT=4072e48705af9d93e3c0f6e29e93b5e9a40caed8
-ARG TOMLQ_COMMIT=c4a785cde4e91ffdca6661494474cd9b5ed23e8d
 
 FROM golang:1.26.5-trixie@sha256:4ee9ffa999b4583ce281939cdff828763083610292f252279a0cee77473bd9a7 AS foundry_build
 ARG FOUNDRY_COMMIT
@@ -24,19 +23,6 @@ RUN git clone https://github.com/foundry-rs/foundry.git
 WORKDIR /git/foundry
 RUN git checkout $FOUNDRY_COMMIT
 RUN cargo build --release --package forge
-
-FROM golang:1.26.5-trixie@sha256:4ee9ffa999b4583ce281939cdff828763083610292f252279a0cee77473bd9a7 AS tomlq_build
-ARG TOMLQ_COMMIT
-
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-ENV PATH="${PATH}:/root/.cargo/bin"
-
-WORKDIR /git
-RUN git clone https://github.com/cryptaliagy/tomlq.git
-
-WORKDIR /git/tomlq
-RUN git checkout $TOMLQ_COMMIT
-RUN cargo build --release --package tomlq
 
 FROM golang:1.26.5-trixie@sha256:4ee9ffa999b4583ce281939cdff828763083610292f252279a0cee77473bd9a7 AS just_build
 
@@ -111,7 +97,6 @@ RUN just op-proposer
 
 
 COPY --from=foundry_build /git/foundry/target/release/forge /usr/bin/forge
-COPY --from=tomlq_build /git/tomlq/target/release/tq /usr/bin/tq
 
 RUN forge --help
 
