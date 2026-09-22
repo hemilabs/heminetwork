@@ -524,6 +524,28 @@ func TestRpcOrdinal(t *testing.T) {
 			},
 		},
 		{
+			// XXX(marco): SatRangesByOutpoint disabled — sat ranges not
+			// stored per outpoint. Server-side gate returns an error
+			// regardless of input, protecting against the expensive
+			// backward walk.
+			name: "SatRangesByOutpoint disabled returns error",
+			req: tbcapi.OrdinalSatRangesByOutpointRequest{
+				TxID: *seed.outpoint.TxIdHash(),
+				Vout: seed.outpoint.TxIndex(),
+			},
+			respHeader: tbcapi.CmdOrdinalSatRangesByOutpointResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.OrdinalSatRangesByOutpointResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Error == nil {
+					return protocol.Errorf("expected error, got nil")
+				}
+				return nil
+			},
+		},
+		{
 			// XXX(marco): InscriptionsBySat disabled — sat ranges not
 			// stored per outpoint. Expects error response.
 			name: "InscriptionsBySat disabled returns error",

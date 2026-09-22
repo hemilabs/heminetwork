@@ -210,14 +210,6 @@ func (stubDB) OrdinalBigOByOutpoint(context.Context, tbcd.Outpoint) ([]byte, err
 	panic("stub")
 }
 
-func (stubDB) OrdinalInscribedSatsInRange(context.Context, uint64, uint64) ([]uint64, error) {
-	panic("stub")
-}
-
-func (stubDB) OrdinalInscribedSatBounds(context.Context) (uint64, uint64, error) {
-	panic("stub")
-}
-
 func (stubDB) OrdinalInscriptionsBySat(context.Context, uint64) ([][36]byte, error) {
 	panic("stub")
 }

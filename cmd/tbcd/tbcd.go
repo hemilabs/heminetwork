@@ -173,7 +173,7 @@ var (
 		"TBC_REQUEST_TIMEOUT": config.Config{
 			Value:        &cfg.RequestTimeout,
 			DefaultValue: cfg.RequestTimeout,
-			Help:         "RPC request timeout (e.g. 2m, 120s)",
+			Help:         "RPC request timeout (e.g. 2m, 120s); auto when unset: 10s, or 120s if the ordinal indexer is enabled",
 			Print:        config.PrintAll,
 			Parse: func(s string) (any, error) {
 				return parseRequestTimeout(s)

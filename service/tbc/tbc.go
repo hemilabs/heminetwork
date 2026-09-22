@@ -70,6 +70,15 @@ const (
 	defaultBlockPendingTimeout = 13 * time.Second
 
 	defaultMempoolAge = 2 * 7 * 24 * time.Hour // two weeks
+
+	// defaultRequestTimeout is the RPC request timeout when the ordinal
+	// indexer is disabled. It matches the historical hard-coded value.
+	defaultRequestTimeout = 10 * time.Second
+	// defaultOrdinalRequestTimeout is the RPC request timeout used when
+	// the ordinal indexer is enabled. Ordinal queries (e.g. on-demand
+	// sat computation) can take seconds, so the shorter default is too
+	// tight for them.
+	defaultOrdinalRequestTimeout = 120 * time.Second
 )
 
 var (
@@ -177,6 +186,24 @@ func paginationNeed(start, count uint32) uint32 {
 	return ^uint32(0)
 }
 
+// resolveRequestTimeout selects the effective RPC request timeout. An
+// explicit positive cfg.RequestTimeout is honored. A zero value means
+// "auto": defaultOrdinalRequestTimeout when the ordinal indexer is
+// enabled (its queries can take seconds), otherwise defaultRequestTimeout.
+// A negative value is rejected.
+func resolveRequestTimeout(cfg *Config) (time.Duration, error) {
+	switch {
+	case cfg.RequestTimeout < 0:
+		return 0, errors.New("request timeout must be greater than zero")
+	case cfg.RequestTimeout > 0:
+		return cfg.RequestTimeout, nil
+	case cfg.OrdinalIndex:
+		return defaultOrdinalRequestTimeout, nil
+	default:
+		return defaultRequestTimeout, nil
+	}
+}
+
 // h2b encodes a wire blockheader to the corresponding 80 bytes.
 func h2b(wbh *wire.BlockHeader) [80]byte {
 	var b bytes.Buffer
@@ -245,10 +272,13 @@ func NewDefaultConfig() *Config {
 		MempoolEnabled:         true,
 		NotificationBlocking:   false, // Default anyway, but dangerous so be explicit
 		PeersWanted:            defaultPeersWanted,
-		RequestTimeout:         120 * time.Second,
-		PrometheusNamespace:    appName,
-		ExternalHeaderMode:     false, // Default anyway, but for readability
-		DatabaseDebug:          false, // Default anyway, but dangerous so be explicit
+		// 0 means "auto": resolveRequestTimeout picks the default based
+		// on whether the ordinal indexer is enabled. An explicit
+		// positive value always wins.
+		RequestTimeout:      0,
+		PrometheusNamespace: appName,
+		ExternalHeaderMode:  false, // Default anyway, but for readability
+		DatabaseDebug:       false, // Default anyway, but dangerous so be explicit
 	}
 }
 
@@ -349,8 +379,9 @@ func NewServer(cfg *Config) (*Server, error) {
 		}
 	}
 
-	if cfg.RequestTimeout <= 0 {
-		return nil, errors.New("request timeout must be greater than zero")
+	requestTimeout, err := resolveRequestTimeout(cfg)
+	if err != nil {
+		return nil, err
 	}
 	if cfg.OrdinalIndex && cfg.MaxCachedOrdinals < 1 {
 		return nil, errors.New("max cached ordinals must be greater than zero")
@@ -368,7 +399,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			Help:      "The total number of successful RPC commands",
 		}),
 		sessions:        make(map[string]*tbcWs),
-		requestTimeout:  cfg.RequestTimeout,
+		requestTimeout:  requestTimeout,
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
 		invBlocks:       make([]*chainhash.Hash, 0, 16),
 		promPollVerbose: false,

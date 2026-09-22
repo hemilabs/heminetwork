@@ -2588,3 +2588,65 @@ func TestPaginationNeed(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveRequestTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+		ordinal bool
+		want    time.Duration
+		wantErr bool
+	}{
+		{
+			name:    "auto without ordinal indexer keeps 10s default",
+			timeout: 0,
+			ordinal: false,
+			want:    defaultRequestTimeout,
+		},
+		{
+			name:    "auto with ordinal indexer bumps to 120s",
+			timeout: 0,
+			ordinal: true,
+			want:    defaultOrdinalRequestTimeout,
+		},
+		{
+			name:    "explicit value wins without ordinal indexer",
+			timeout: 30 * time.Second,
+			ordinal: false,
+			want:    30 * time.Second,
+		},
+		{
+			name:    "explicit value wins with ordinal indexer",
+			timeout: 5 * time.Second,
+			ordinal: true,
+			want:    5 * time.Second,
+		},
+		{
+			name:    "negative is rejected",
+			timeout: -1,
+			ordinal: false,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{RequestTimeout: tt.timeout, OrdinalIndex: tt.ordinal}
+			got, err := resolveRequestTimeout(cfg)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("resolveRequestTimeout(%v, ordinal=%v) = %v, want error",
+						tt.timeout, tt.ordinal, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveRequestTimeout(%v, ordinal=%v) unexpected error: %v",
+					tt.timeout, tt.ordinal, err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveRequestTimeout(%v, ordinal=%v) = %v, want %v",
+					tt.timeout, tt.ordinal, got, tt.want)
+			}
+		})
+	}
+}

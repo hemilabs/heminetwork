@@ -4,100 +4,96 @@ This file documents the performance decisions in the ordinal indexer
 and the measured results that justified each one. Every optimization
 was profiled before and after — no speculative changes.
 
-## Problem Statement
+## Architecture
 
-The ordinal indexer must track sat-level ownership across every
-Bitcoin transaction. For each block:
-  - Collect sat ranges for all inputs (cache or DB lookup)
-  - FIFO-redistribute sats from inputs to outputs
-  - Track inscribed sat movement (which output holds each inscribed sat)
-  - Detect new inscriptions in witness data
-  - Collect fee sats (input - output) for coinbase assignment
+The indexer is split into two phases:
 
-Mainnet has ~880K blocks, ~1B transactions, ~70M inscriptions.
-Naive implementations hit O(n²) or worse on heavy blocks.
+  1. Index time (windBlock): scan every block's witness data for
+     inscription envelopes and record the reveals. This writes
+     ownership ('o'), inscription ('i'), predecessor ('p') and the
+     'O' point-Get acceleration entries. No sat numbers are computed
+     here.
+  2. Query time: sat numbers and transfer tracking are derived on
+     demand by walking backward through the spending chain to a
+     coinbase, using raw blocks and the tx index (see
+     computeInscribedSat / computeSatRanges).
 
-## Optimization 1: Parallel fixupCacheHook
+Index-time sat computation was removed: the backward walk costs 12+
+seconds per inscription at depth, which is far too slow for bulk
+indexing. Deferring it keeps windBlock proportional to the witness
+data actually present in a block. The query-time walk is opt-in per
+request (the `IncludeSat` flag, default false); the two endpoints that
+can only be answered by walking sat ranges (SatRangesByOutpoint,
+InscriptionsBySat) are disabled until sat ranges are stored per
+outpoint.
 
-Problem: satRanges() hits LevelDB on cache miss. Sequential reads
-bottleneck on I/O latency.
+Mainnet has ~880K blocks, ~1B transactions, ~70M inscriptions. The
+optimizations below keep the index-time scan and its DB access off the
+O(n²) paths that a naive implementation hits on heavy blocks.
 
-Solution: Pre-fetch all input outpoint sat ranges before windBlock
-runs, using 128 concurrent goroutines. Mirrors the proven
-fixupCacheChannel pattern from the utxo indexer.
+## Optimization 1: 'O' Acceleration Prefetch
 
-Pattern: semaphore channel (pre-filled with tokens), goroutines
-acquire/release tokens, write results to shared map under mutex.
+Problem: detection needs the committed 'O' entry for every input in a
+block. Issuing one serial point-Get per input bottlenecks on I/O
+latency on heavy blocks.
 
-Measured: fixup phase is <1s per batch even on heavy blocks.
+Solution: prefetch every input's 'O' entry in one 128-wide parallel
+pass before the sequential detection loop runs. The DB is immutable
+during a wind — all writes buffer in the OrdinalCache until commit —
+so these point-Gets are order-independent pure reads and detection
+semantics are unchanged.
 
-## Optimization 2: Block-Level Inscribed-Sat Pre-Scan
+## Optimization 2: Parent-Value Warming Pipeline
 
-Problem: updateInscribedSats called OrdinalInscribedSatsInRange per
-input range per transaction. On heavy blocks (500+ inputs), this
-was 500 LevelDB range scans per block.
+Problem: reveals reference their parent (commit) transaction. Batch
+reveals — N inputs funded by one commit transaction — would race N
+duplicate parent lookups through the fan-out.
 
-Solution: Collect the min/max sat range across ALL inputs in the
-block, then do ONE DB scan for the merged range. Build a sorted
-slice of inscribed sats for the entire block.
+Solution: a producer/consumer pipeline warms parent values for the
+whole block, deduplicating parent transactions before fetching so each
+commit transaction is fetched once, and the block's witnesses are
+parsed once. The wind log line reports iov_warm (unique parents
+warmed) alongside iov_calls. `TBC_ORDINAL_WARM` (default true) toggles
+the warm phase while its long-term value is evaluated.
 
-Measured: inscSat phase dropped from 5m51s to 965ms per batch
-(363x speedup). DB scans reduced from O(inputs_per_block) to O(1).
+## Optimization 3: Ranged Parent-Transaction Reads
 
-## Optimization 3: Sorted Slice with Binary Search
+Problem: fetching a parent transaction pulled the whole multi-MB block
+from the raw block store just to read one transaction's bytes.
 
-Problem: The block-level inscribed-sat set had 96K+ entries on
-testnet4's heavy blocks. updateInscribedSats iterated ALL entries
-for EVERY transaction — O(96K × 1200 txs) = 115M iterations/block.
+Solution: read only the transaction's bytes via a ranged read
+(TxLoc-guided pread). Legacy pre-v6 index entries, which have no
+TxLoc, keep the whole-block fallback.
 
-Solution: Store inscribed sats as a sorted []uint64 instead of
-map[uint64]struct{}. For each tx, binary search to find only the
-sats in [inputMin, inputMax). Then binary search the merged input
-ranges to verify containment.
+## Optimization 4: Byte-Bounded Chunked Flushes
 
-Measured: Blocks taking 1.7s dropped below 500ms. Dense zone that
-took 30+ minutes now processes in 2-3 minutes. Zero blocks exceed
-the 500ms threshold across a full testnet4 sync.
+Problem: an inscription-dense range accumulated an unbounded write
+batch, causing unbounded memory growth and quadratic batch-buffer
+copying.
 
-## Optimization 4: Min/Max Boundary Tracking
+Solution: flushes are bounded by bytes (~1 GiB of cached index
+payload), not only by entry count, and each flush's records are
+written to LevelDB in bounded chunks inside one atomic transaction
+(see ordinalBatchChunkSize). Nothing is visible until commit, so the
+chunking stays atomic. BlockOrdinalUpdate and OrdinalPopulatorUpdate
+share this pattern.
 
-Problem: Every block's pre-scan queries the DB even when no
-inscribed sats could possibly be in the input range.
+## Optimization 5: 'O' Acceleration Verification (Debug)
 
-Solution: Track global min/max inscribed sat numbers across batches.
-Skip the DB scan entirely when the block's input range falls outside
-[minInscribedSat, maxInscribedSat]. On mainnet, inscriptions started
-at block 767430 (~sat 1.97 quadrillion). Pre-inscription blocks
-(96% of the chain) skip the scan entirely.
+Problem: a corrupt 'O' entry would silently return the wrong parent
+value and corrupt detection.
 
-## Optimization 5: OrdinalInscribedSatBounds
+Solution: `TBC_ORDINAL_VERIFY_BIGO` (default false) cross-checks every
+consumed 'O' value against the tx index. A lookup failure surfaces as
+an error; a genuine value mismatch means a corrupt ordinal index and
+panics with reindex instructions. It re-does the lookup the fast path
+exists to skip, so it is slow — enable it only when soaking changes to
+the 'O' write paths.
 
-Problem: On restart, the indexer probed for existing inscribed sats
-by calling OrdinalInscribedSatsInRange(0, MaxUint64). On mainnet
-with 70M inscriptions, this loads 560MB into memory just to read
-the first and last entry.
+## Diagnostic: Read-Only Wind Replay
 
-Solution: Added OrdinalInscribedSatBounds — two LevelDB iterator
-seeks to get min and max inscribed sat numbers. O(1) time, O(1)
-memory.
-
-## Optimization 6: Fee Sat Conservation (Correctness)
-
-Problem: CoinbaseSatRange only returned subsidy sats. Fee sats
-(input - output per tx) vanished from the index. On mainnet where
-fees exceed subsidy, this breaks sat conservation.
-
-Solution: Two-pass windBlock — process non-coinbase txs first to
-collect fee ranges, then process coinbase with subsidy + fees.
-updateInscribedSats returns inscribed sats that became fees for
-targeted coinbase 's' entry updates.
-
-## Optimization 7: Zero-Value Output Tracking (Correctness)
-
-Problem: Zero-value outputs (txOut.Value == 0) were skipped entirely.
-When later spent, satRanges returned NotFoundError — the UTXO didn't
-exist in the index despite being a valid on-chain output.
-
-Solution: Record empty sat ranges for zero-value outputs. Every
-on-chain UTXO exists in the index. Root cause traced to testnet4
-block 32203 tx 73acc6ca...ff0e output 1 (value=0, v0_p2wpkh).
+The tbcd database layer supports read-only opens (`Config.SetReadOnly`):
+no recovery writes, no background compaction, writes error. The
+env-gated `TestWindReplay` diagnostic replays chosen blocks through the
+full ordinal wind against a read-only database — all the work, nothing
+inserted — for controlled measurement of slow blocks.

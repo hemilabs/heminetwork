@@ -2910,7 +2910,37 @@ func (l *ldb) OrdinalPopulatorUpdate(ctx context.Context, ordData map[tbcd.Ordin
 	}
 	defer ordDiscard()
 
-	batch := new(leveldb.Batch)
+	// The records are written into the transaction in bounded chunks —
+	// see ordinalBatchChunkSize — so a large populator pass does not
+	// build one unbounded batch. Chunked writes stay atomic because
+	// nothing is visible until commit. Same pattern as BlockOrdinalUpdate.
+	est := len(ordData)*256 + len(workData)*64 + 1024
+	batch := leveldb.MakeBatch(min(est, l.ordinalBatchChunkSize))
+	var pending int
+	flush := func() error {
+		if werr := l.ordinalTxWrite(ordTx, batch); werr != nil {
+			return fmt.Errorf("ordinal populator write: %w", werr)
+		}
+		batch.Reset()
+		pending = 0
+		return nil
+	}
+	add := func(k, v []byte, del bool) error {
+		rec := len(k) + len(v) + batchRecordOverhead
+		if pending > 0 && pending+rec > l.ordinalBatchChunkSize {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		if del {
+			batch.Delete(k)
+		} else {
+			batch.Put(k, v)
+		}
+		pending += rec
+		return nil
+	}
+
 	for k, v := range ordData {
 		// The populator's contract is 'i'/'a'/'m' keys only. The wind
 		// prefetch depends on nothing but BlockOrdinalUpdate writing
@@ -2919,22 +2949,30 @@ func (l *ldb) OrdinalPopulatorUpdate(ctx context.Context, ordData map[tbcd.Ordin
 			return fmt.Errorf("populator must not write 'O' keys: %x", k[:])
 		}
 		if v.IsDelete() {
-			batch.Delete(k[:])
+			err = add(k[:], nil, true)
 		} else {
-			batch.Put(k[:], v.Bytes())
+			err = add(k[:], v.Bytes(), false)
+		}
+		if err != nil {
+			return err
 		}
 		delete(ordData, k)
 	}
 	for k, v := range workData {
 		if v.IsDelete() {
-			batch.Delete(k[:])
+			err = add(k[:], nil, true)
 		} else {
-			batch.Put(k[:], v[:])
+			err = add(k[:], v[:], false)
+		}
+		if err != nil {
+			return err
 		}
 		delete(workData, k)
 	}
-	if err := ordTx.Write(batch, nil); err != nil {
-		return fmt.Errorf("ordinal populator write: %w", err)
+	if pending > 0 {
+		if err := flush(); err != nil {
+			return err
+		}
 	}
 	if err := ordCommit(); err != nil {
 		return fmt.Errorf("ordinal populator commit: %w", err)
@@ -3084,83 +3122,6 @@ func (l *ldb) OrdinalInscriptionsByOutpoint(ctx context.Context, op tbcd.Outpoin
 		result[i] = li.InscID
 	}
 	return result, nil
-}
-
-func (l *ldb) OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error) {
-	log.Tracef("OrdinalInscribedSatsInRange")
-	defer log.Tracef("OrdinalInscribedSatsInRange exit")
-
-	ordDB := l.pool[level.OrdinalDB]
-
-	// Range scan on 'a' prefix for sat numbers in [start, end).
-	// 'a' key: sat_number(8) + inscription_id(36). Sat at bytes 1:9.
-	var startKey tbcd.OrdinalKey
-	startKey[0] = 'a'
-	binary.BigEndian.PutUint64(startKey[1:], start)
-
-	var endKey tbcd.OrdinalKey
-	endKey[0] = 'a'
-	binary.BigEndian.PutUint64(endKey[1:], end)
-
-	var result []uint64
-	it := ordDB.NewIterator(&util.Range{Start: startKey[:], Limit: endKey[:]}, nil)
-	defer it.Release()
-	for it.Next() {
-		k := it.Key()
-		if len(k) != len(tbcd.OrdinalKey{}) || k[0] != 'a' {
-			continue
-		}
-		sat := binary.BigEndian.Uint64(k[1:])
-		result = append(result, sat)
-	}
-	if err := it.Error(); err != nil {
-		return nil, fmt.Errorf("ordinal inscribed sats in range: %w", err)
-	}
-	return result, nil
-}
-
-// OrdinalInscribedSatBounds returns the min and max inscribed sat numbers
-// in the DB using two iterator seeks. O(1) — does not load all entries.
-// Returns database.ErrNotFound if no inscribed sats exist.
-func (l *ldb) OrdinalInscribedSatBounds(ctx context.Context) (uint64, uint64, error) {
-	log.Tracef("OrdinalInscribedSatBounds")
-	defer log.Tracef("OrdinalInscribedSatBounds exit")
-
-	ordDB := l.pool[level.OrdinalDB]
-
-	// Find first 'a' entry.
-	var startKey tbcd.OrdinalKey
-	startKey[0] = 'a'
-	it := ordDB.NewIterator(nil, nil)
-	defer it.Release()
-
-	if !it.Seek(startKey[:]) || len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 'a' {
-		return 0, 0, database.NotFoundError("no inscribed sats")
-	}
-	minSat := binary.BigEndian.Uint64(it.Key()[1:])
-
-	// Find last 'a' entry: seek to 'b' (byte after 'a') and step back.
-	var endKey [1]byte
-	endKey[0] = 'b'
-	if !it.Seek(endKey[:]) {
-		// 'b' is past end of DB, go to last entry.
-		if !it.Last() {
-			return 0, 0, database.NotFoundError("no inscribed sats")
-		}
-	} else {
-		if !it.Prev() {
-			return 0, 0, database.NotFoundError("no inscribed sats")
-		}
-	}
-	if len(it.Key()) != len(tbcd.OrdinalKey{}) || it.Key()[0] != 'a' {
-		return 0, 0, database.NotFoundError("no inscribed sats")
-	}
-	maxSat := binary.BigEndian.Uint64(it.Key()[1:])
-
-	if err := it.Error(); err != nil {
-		return 0, 0, fmt.Errorf("ordinal inscribed sat bounds: %w", err)
-	}
-	return minSat, maxSat, nil
 }
 
 func (l *ldb) OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error) {

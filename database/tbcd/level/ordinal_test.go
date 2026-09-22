@@ -189,38 +189,6 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 		}
 	})
 
-	// --- InscribedSats range queries ---
-
-	t.Run("OrdinalInscribedSatsInRange hit", func(t *testing.T) {
-		sats, err := db.OrdinalInscribedSatsInRange(ctx, satNumber-1, satNumber+1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(sats) != 1 || sats[0] != satNumber {
-			t.Errorf("expected [%d], got %v", satNumber, sats)
-		}
-	})
-
-	t.Run("OrdinalInscribedSatsInRange miss", func(t *testing.T) {
-		sats, err := db.OrdinalInscribedSatsInRange(ctx, 0, 100)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(sats) != 0 {
-			t.Errorf("expected 0 sats, got %d", len(sats))
-		}
-	})
-
-	t.Run("OrdinalInscribedSatBounds", func(t *testing.T) {
-		lo, hi, err := db.OrdinalInscribedSatBounds(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if lo != satNumber || hi != satNumber {
-			t.Errorf("bounds: lo=%d hi=%d, want both %d", lo, hi, satNumber)
-		}
-	})
-
 	// --- Unwind (direction = -1) ---
 
 	t.Run("BlockOrdinalUpdate unwind", func(t *testing.T) {
@@ -841,5 +809,87 @@ func TestOrdinalPopulatorRejectsBigO(t *testing.T) {
 	}
 	if err := db.OrdinalPopulatorUpdate(ctx, ordData, nil); err == nil {
 		t.Fatal("populator accepted an 'O' key")
+	}
+}
+
+// TestOrdinalPopulatorUpdateChunkedBatch shrinks the flush chunk size so
+// a single OrdinalPopulatorUpdate spans many mid-loop chunk writes (both
+// put and delete paths), then verifies every record survives intact.
+func TestOrdinalPopulatorUpdateChunkedBatch(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	db := createOrdinalDB(ctx, t)
+	db.ordinalBatchChunkSize = 4096
+	var flushes int
+	innerWrite := db.ordinalTxWrite
+	db.ordinalTxWrite = func(tx *leveldb.Transaction, b *leveldb.Batch) error {
+		flushes++
+		return innerWrite(tx, b)
+	}
+
+	const entries = 64
+	value := func(i int) []byte {
+		v := make([]byte, 512)
+		for j := range v {
+			v[j] = byte(i + 1)
+		}
+		return v
+	}
+	key := func(i int) tbcd.OrdinalKey {
+		var k tbcd.OrdinalKey
+		k[0] = 'i'
+		k[1] = byte(i)
+		k[2] = 0x55
+		return k
+	}
+
+	ordData := make(map[tbcd.OrdinalKey]tbcd.OrdinalValue, entries)
+	for i := range entries {
+		ordData[key(i)] = value(i)
+	}
+	workData := make(map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue)
+	for i := range 8 {
+		var k tbcd.OrdinalWorkKey
+		k[0] = 'w'
+		k[1] = byte(i)
+		workData[k] = tbcd.OrdinalWorkValueDelete
+	}
+
+	if err := db.OrdinalPopulatorUpdate(ctx, ordData, workData); err != nil {
+		t.Fatal(err)
+	}
+	// ~64 entries x ~0.5KB against a 4096-byte chunk must have produced
+	// many chunk writes; assert chunking actually happened so accounting
+	// regressions cannot silently degrade this to a monolithic write.
+	if flushes < 6 {
+		t.Fatalf("expected many chunk flushes, got %d", flushes)
+	}
+
+	ordDB := db.pool[level.OrdinalDB]
+	for i := range entries {
+		k := key(i)
+		got, err := ordDB.Get(k[:], nil)
+		if err != nil {
+			t.Fatalf("entry %d: %v", i, err)
+		}
+		if len(got) != 512 || got[100] != byte(i+1) {
+			t.Fatalf("entry %d: value corrupted after chunked write", i)
+		}
+	}
+
+	// Second pass: tombstone everything, exercising the delete flush path.
+	ordData = make(map[tbcd.OrdinalKey]tbcd.OrdinalValue, entries)
+	for i := range entries {
+		ordData[key(i)] = nil // OrdinalValue(nil) is a delete
+	}
+	if err := db.OrdinalPopulatorUpdate(ctx, ordData, nil); err != nil {
+		t.Fatal(err)
+	}
+	for i := range entries {
+		k := key(i)
+		if _, err := ordDB.Get(k[:], nil); !errors.Is(err, leveldb.ErrNotFound) {
+			t.Fatalf("entry %d survives tombstoning: err=%v", i, err)
+		}
 	}
 }

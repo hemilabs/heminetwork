@@ -170,8 +170,6 @@ type Database interface {
 	OrdinalInscriptionsByOutpoint(ctx context.Context, op Outpoint) ([][36]byte, error)
 	OrdinalInscriptionsByOutpointWithOffset(ctx context.Context, op Outpoint) ([]OrdinalLocatedInscription, error)
 	OrdinalBigOByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
-	OrdinalInscribedSatsInRange(ctx context.Context, start, end uint64) ([]uint64, error)
-	OrdinalInscribedSatBounds(ctx context.Context) (minSat, maxSat uint64, err error)
 	OrdinalInscriptionsBySat(ctx context.Context, satNumber uint64) ([][36]byte, error)
 	OrdinalValueByKey(ctx context.Context, key OrdinalKey) ([]byte, error)
 }
