@@ -410,6 +410,14 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tzkspendingoutpoints")
 		fmt.Println("\tzkspendableoutputs")
 		fmt.Println("")
+		fmt.Println("  Ordinal index commands:")
+		fmt.Println("\tordinalrangesbyoutpoint txid=<txid> index=<vout>")
+		fmt.Println("\tordinalinscriptionbyid txid=<txid> [index=<input_index>]")
+		fmt.Println("\tordinalinscriptioncontent txid=<txid> [index=<input_index>]")
+		fmt.Println("\tordinalinscriptionsbyblock hash=<block_hash>")
+		fmt.Println("\tordinalinscriptionsbysat sat=<sat_number>")
+		fmt.Println("\tordinalinscriptionsbyaddress address=<address> [start=<n>] [count=<n>]")
+		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
 		fmt.Fprintf(os.Stderr, "\tExample: '%v tbcdb tblockheadersbyheight height=10'\n", os.Args[0])
@@ -439,8 +447,14 @@ func tbcdb(pctx context.Context, flags []string) error {
 	cfg.LevelDBHome = leveldbHome
 	cfg.Network = network
 	cfg.DatabaseDebug = *debugFlag
-	cfg.PeersWanted = 0    // disable peer manager
-	cfg.ListenAddress = "" // disable RPC
+	cfg.PeersWanted = 0         // disable peer manager
+	cfg.ListenAddress = ""      // disable RPC
+	cfg.UtxoReadCacheSize = "0" // hemictl doesn't need read cache
+	cfg.BlockCacheSize = "64mb" // smaller for CLI
+	cfg.HeaderCacheSize = "1mb" // smaller for CLI
+	if strings.HasPrefix(action, "ordinal") {
+		cfg.OrdinalIndex = true
+	}
 	s, err := tbc.NewServer(cfg)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
@@ -1129,6 +1143,154 @@ func tbcdb(pctx context.Context, flags []string) error {
 			fmt.Printf("tx id                  : %v\n", v.TxID)
 			fmt.Printf("tx out index           : %v\n\n", v.TxOutIndex)
 		}
+
+	// --- Ordinal index commands ---
+
+	case "ordinalrangesbyoutpoint":
+		txid := args["txid"]
+		if txid == "" {
+			return errors.New("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		index := args["index"]
+		if index == "" {
+			return errors.New("index: must be set")
+		}
+		idx, err := strconv.ParseUint(index, 10, 32)
+		if err != nil {
+			return err
+		}
+		ranges, err := s.SatRangesByOutpoint(ctx, *chtxid, uint32(idx))
+		if err != nil {
+			return fmt.Errorf("sat ranges: %w", err)
+		}
+		for _, r := range ranges {
+			fmt.Printf("start: %-20d count: %d\n", r.Start, r.Count)
+		}
+
+	case "ordinalinscriptionbyid":
+		txid := args["txid"]
+		if txid == "" {
+			return errors.New("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		index := args["index"]
+		if index == "" {
+			index = "0"
+		}
+		idx, err := strconv.ParseUint(index, 10, 32)
+		if err != nil {
+			return err
+		}
+		insc, err := s.InscriptionByID(ctx, *chtxid, uint32(idx), false)
+		if err != nil {
+			return fmt.Errorf("inscription: %w", err)
+		}
+		fmt.Printf("%v\n", spew.Sdump(insc))
+
+	case "ordinalinscriptioncontent":
+		txid := args["txid"]
+		if txid == "" {
+			return errors.New("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		index := args["index"]
+		if index == "" {
+			index = "0"
+		}
+		idx, err := strconv.ParseUint(index, 10, 32)
+		if err != nil {
+			return err
+		}
+		contentType, content, err := s.InscriptionContent(ctx, *chtxid, uint32(idx))
+		if err != nil {
+			return fmt.Errorf("inscription content: %w", err)
+		}
+		fmt.Printf("content type: %s\n", contentType)
+		fmt.Printf("content     : %x\n", content)
+
+	case "ordinalinscriptionsbyblock":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+		chhash, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		inscriptions, err := s.InscriptionsByBlock(ctx, *chhash, false)
+		if err != nil {
+			return fmt.Errorf("inscriptions by block: %w", err)
+		}
+		for _, insc := range inscriptions {
+			fmt.Printf("txid       : %v\n", insc.TxID)
+			fmt.Printf("input index: %d\n", insc.InputIndex)
+			fmt.Printf("sat number : %d\n", insc.SatNumber)
+			fmt.Printf("cursed     : %v\n\n", insc.Cursed)
+		}
+		fmt.Printf("total: %d\n", len(inscriptions))
+
+	case "ordinalinscriptionsbysat":
+		sat := args["sat"]
+		if sat == "" {
+			return errors.New("sat: must be set")
+		}
+		satNumber, err := strconv.ParseUint(sat, 10, 64)
+		if err != nil {
+			return fmt.Errorf("sat: %w", err)
+		}
+		inscriptions, err := s.InscriptionsBySat(ctx, satNumber)
+		if err != nil {
+			return fmt.Errorf("inscriptions by sat: %w", err)
+		}
+		for _, insc := range inscriptions {
+			fmt.Printf("txid       : %v\n", insc.TxID)
+			fmt.Printf("input index: %d\n", insc.InputIndex)
+			fmt.Printf("sat number : %d\n", insc.SatNumber)
+			fmt.Printf("cursed     : %v\n\n", insc.Cursed)
+		}
+		fmt.Printf("total: %d\n", len(inscriptions))
+
+	case "ordinalinscriptionsbyaddress":
+		address := args["address"]
+		if address == "" {
+			return errors.New("address: must be set")
+		}
+		var start, count uint32
+		if sv := args["start"]; sv != "" {
+			v, err := strconv.ParseUint(sv, 10, 32)
+			if err != nil {
+				return fmt.Errorf("start: %w", err)
+			}
+			start = uint32(v)
+		}
+		if cv := args["count"]; cv != "" {
+			v, err := strconv.ParseUint(cv, 10, 32)
+			if err != nil {
+				return fmt.Errorf("count: %w", err)
+			}
+			count = uint32(v)
+		}
+		inscriptions, err := s.InscriptionsByAddress(ctx, address, start, count, false)
+		if err != nil {
+			return fmt.Errorf("inscriptions by address: %w", err)
+		}
+		for _, insc := range inscriptions {
+			fmt.Printf("txid       : %v\n", insc.TxID)
+			fmt.Printf("input index: %d\n", insc.InputIndex)
+			fmt.Printf("sat number : %d\n", insc.SatNumber)
+			fmt.Printf("cursed     : %v\n\n", insc.Cursed)
+		}
+		fmt.Printf("total: %d\n", len(inscriptions))
 
 	case "metadatabatchget", "metadatabatchput", "blockheadergenesisinsert",
 		"blockheadercachestats", "blockheadersinsert", "blockheadersremove",

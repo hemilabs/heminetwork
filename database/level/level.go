@@ -34,6 +34,7 @@ const (
 	OutputsDB       = "outputs"
 	TransactionsDB  = "transactions"
 	ZKDB            = "zkindex"
+	OrdinalDB       = "ordinals"
 
 	BlocksDB = "blocks" // raw database
 )
@@ -55,12 +56,37 @@ type Database struct {
 	pool    Pool    // database pool
 	rawPool RawPool // raw database pool
 
+	// Shared caches, owned here so their capacity comes from exactly
+	// one place and their lifecycle follows the Database. When set,
+	// every leveldb (base options and per-DB overrides) uses these
+	// instead of private per-DB caches.
+	blockCacher opt.Cacher // shared block cache (bytes)
+	fileCacher  opt.Cacher // shared table file handle cache (count)
+
 	cfg *Config
 }
 
 type Config struct {
 	Home    string
 	Options opt.Options
+
+	// DBOptions overrides Options for the named database. Entries are
+	// typically a copy of Options with write/compaction fields changed.
+	// New installs the shared cachers into every entry that does not
+	// explicitly set its own, so no database ends up with a private
+	// unmanaged cache by accident.
+	DBOptions map[string]opt.Options
+
+	// BlockCacheCapacity is the size in bytes of one block cache
+	// shared by ALL databases; hot databases claim capacity from the
+	// common pool. 0 leaves each database on its private leveldb
+	// default (8 MiB each).
+	BlockCacheCapacity int
+
+	// OpenFilesCacheCapacity is the number of table file handles
+	// shared by ALL databases. 0 leaves each database on its private
+	// leveldb default (500 each).
+	OpenFilesCacheCapacity int
 }
 
 func NewDefaultConfig(home string) *Config {
@@ -130,28 +156,124 @@ func (l *Database) RawDB() RawPool {
 	return maps.Clone(l.rawPool)
 }
 
-// Config returns a shallow copy of the database configuration.
-// XXX this is a band-aid; the interfaces inside opt.Options (Filter,
-// Comparer, Cacher) are shared references, not deep copies.  Safe
+// Config returns a copy of the database configuration with the shared
+// cachers installed by New stripped out, so that reusing the returned
+// value for a reopen constructs fresh caches instead of resurrecting
+// this instance's.
+// XXX this remains a band-aid; the other interfaces inside opt.Options
+// (Filter, Comparer) are shared references, not deep copies.  Safe
 // today because nothing mutates them after open, but a proper fix
 // would be to stop duplicating pool/rawPool on ldb and use the
 // embedded Database directly.
 func (l *Database) Config() Config {
-	return *l.cfg
+	c := *l.cfg
+	c.DBOptions = maps.Clone(c.DBOptions)
+	if c.Options.BlockCacher != nil && c.Options.BlockCacher == l.blockCacher {
+		c.Options.BlockCacher = nil
+	}
+	if c.Options.OpenFilesCacher != nil && c.Options.OpenFilesCacher == l.fileCacher {
+		c.Options.OpenFilesCacher = nil
+	}
+	for name, o := range c.DBOptions {
+		if o.BlockCacher != nil && o.BlockCacher == l.blockCacher {
+			o.BlockCacher = nil
+		}
+		if o.OpenFilesCacher != nil && o.OpenFilesCacher == l.fileCacher {
+			o.OpenFilesCacher = nil
+		}
+		c.DBOptions[name] = o
+	}
+	return c
 }
 
 func (l *Database) openDB(name string) error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
+	opts := l.cfg.Options
+	if o, ok := l.cfg.DBOptions[name]; ok {
+		opts = o
+	}
 	bhs := filepath.Join(l.cfg.Home, name)
-	bhsDB, err := leveldb.OpenFile(bhs, &l.cfg.Options)
+	bhsDB, err := leveldb.OpenFile(bhs, &opts)
 	if err != nil {
 		return fmt.Errorf("leveldb open %v: %w", name, err)
 	}
 	l.pool[name] = bhsDB
 
 	return nil
+}
+
+// installSharedCaches creates the shared caches from the configured
+// capacities and installs them into the base options and every per-DB
+// override that does not explicitly provide its own cacher. This keeps
+// all leveldb cache memory owned and sized in one place.
+func (l *Database) installSharedCaches() {
+	if l.cfg.BlockCacheCapacity > 0 {
+		if l.cfg.Options.BlockCacher == nil {
+			l.blockCacher = opt.NewLRU(l.cfg.BlockCacheCapacity)
+			l.cfg.Options.BlockCacher = l.blockCacher
+		} else {
+			// An explicitly provided cacher wins; report the
+			// shared capacity as not in effect.
+			l.cfg.BlockCacheCapacity = 0
+		}
+	}
+	if l.cfg.OpenFilesCacheCapacity > 0 {
+		if l.cfg.Options.OpenFilesCacher == nil {
+			l.fileCacher = opt.NewLRU(l.cfg.OpenFilesCacheCapacity)
+			l.cfg.Options.OpenFilesCacher = l.fileCacher
+		} else {
+			l.cfg.OpenFilesCacheCapacity = 0
+		}
+	}
+	for name, o := range l.cfg.DBOptions {
+		if l.blockCacher != nil && o.BlockCacher == nil {
+			o.BlockCacher = l.blockCacher
+		}
+		if l.fileCacher != nil && o.OpenFilesCacher == nil {
+			o.OpenFilesCacher = l.fileCacher
+		}
+		l.cfg.DBOptions[name] = o
+	}
+}
+
+// fdHeadroom is the file descriptor allowance reserved for everything
+// outside the shared table pool: rawdb block files, per-database
+// journals and manifests, and network sockets.
+const fdHeadroom = 1024
+
+// checkFileLimit warns loudly when the process file descriptor limit
+// cannot cover the shared table file pool plus headroom. The failure
+// mode being prevented surfaces hours later as "too many open files"
+// on unrelated read paths.
+func (l *Database) checkFileLimit() {
+	if l.cfg.OpenFilesCacheCapacity <= 0 {
+		return
+	}
+	limit, ok := nofileLimit()
+	if !ok {
+		// Unreachable on unix in practice: Getrlimit(RLIMIT_NOFILE)
+		// does not fail with a valid address. Kept for the non-unix
+		// stub and defensive symmetry; not testable without fault
+		// injection.
+		return
+	}
+	want := uint64(l.cfg.OpenFilesCacheCapacity) + fdHeadroom
+	if limit < want {
+		log.Warningf("file descriptor limit %d below open files "+
+			"cache %d + headroom %d; raise RLIMIT_NOFILE or expect "+
+			"'too many open files' failures", limit,
+			l.cfg.OpenFilesCacheCapacity, fdHeadroom)
+	}
+}
+
+// CacheCapacities returns the shared cache capacities in effect:
+// block cache in bytes and table file handles. A zero means the
+// corresponding cache is not shared (disabled, or an explicit cacher
+// was provided) and each database uses its private leveldb default.
+func (l *Database) CacheCapacities() (blockCacheBytes, openFiles int) {
+	return l.cfg.BlockCacheCapacity, l.cfg.OpenFilesCacheCapacity
 }
 
 func (l *Database) openRawDB(name string, blockSize int64) error {
@@ -193,11 +315,19 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	}
 	cfg.Home = h
 
+	// Work on a private copy: installing shared cachers must not
+	// mutate the caller's configuration. Reusing a Config across a
+	// close/reopen cycle would otherwise resurrect the previous
+	// instance's caches instead of constructing fresh ones.
+	cfgCopy := *cfg
+	cfgCopy.DBOptions = maps.Clone(cfg.DBOptions)
 	l := &Database{
-		cfg:     cfg,
+		cfg:     &cfgCopy,
 		pool:    make(Pool),
 		rawPool: make(RawPool),
 	}
+	l.installSharedCaches()
+	l.checkFileLimit()
 
 	unwind := true
 	defer func() {
@@ -241,6 +371,10 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	err = l.openDB(ZKDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", ZKDB, err)
+	}
+	err = l.openDB(OrdinalDB)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", OrdinalDB, err)
 	}
 	err = l.openDB(MetadataDB)
 	if err != nil {
