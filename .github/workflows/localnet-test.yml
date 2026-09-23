@@ -24,6 +24,7 @@ jobs:
     strategy:
       matrix:
         go-version: [ "1.26.x" ]
+        proposer_mode: ["l2oo", "fault"]
         gethl1:
           - "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     steps:
@@ -112,6 +113,7 @@ jobs:
       - name: "run localnet"
         env:
           LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
+          PROPOSER_MODE: ${{ matrix.proposer_mode }}
         run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
 
       - name: "remove more dangling"
@@ -143,6 +145,8 @@ jobs:
             synctest:latest
 
       - name: "get localnet stats"
+        env:
+          PROPOSER_MODE: ${{ matrix.proposer_mode }}
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
         run: go test -timeout 30m -v .

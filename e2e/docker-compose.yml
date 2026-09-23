@@ -261,6 +261,9 @@ services:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
       OP_GETH_L1_RPC: "http://geth-l1:8545"
+      PROPOSER_MODE: ${PROPOSER_MODE:-fault}
+      L2OO_SUBMISSION_INTERVAL: ${L2OO_SUBMISSION_INTERVAL:-120}
+      L2OO_FINALIZATION_PERIOD_SECONDS: ${L2OO_FINALIZATION_PERIOD_SECONDS:-4}
     working_dir: "/tmp"
     command:
       - "sh"
@@ -289,6 +292,8 @@ services:
       bitcoind-initialblocks:
         condition: "service_completed_successfully"
       op-geth-l2-setup:
+        condition: "service_completed_successfully"
+      l2oo-deploy:
         condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
@@ -741,10 +746,15 @@ services:
         condition: "service_healthy"
       op-node:
         condition: "service_started"
+      l2oo-deploy:
+        condition: "service_completed_successfully"
     healthcheck:
       start_period: 180s
     environment:
       ADMIN_PRIVATE_KEY: ${ADMIN_PRIVATE_KEY}
+      # "fault" proposes to the DisputeGameFactory, "l2oo" proposes to the
+      # L2OutputOracle deployed by l2oo-deploy
+      PROPOSER_MODE: ${PROPOSER_MODE:-fault}
     entrypoint:
       - sh
     command:
@@ -752,6 +762,27 @@ services:
     volumes:
       - shared-dir:/shared-dir
       - ./proposer-entrypoint.sh:/proposer-entrypoint.sh
+    networks:
+      e2e:
+
+  # deploys the L2OutputOracle and upgrades the OptimismPortalProxy to the
+  # legacy OptimismPortal when PROPOSER_MODE=l2oo, see deploy-l2oo.sh
+  l2oo-deploy:
+    image: optimism-stack:latest
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+    environment:
+      ADMIN_PRIVATE_KEY: ${ADMIN_PRIVATE_KEY}
+      PROPOSER_MODE: ${PROPOSER_MODE:-fault}
+    entrypoint:
+      - sh
+    command:
+      - /deploy-l2oo.sh
+    volumes:
+      - shared-dir:/shared-dir
+      - ./deploy-l2oo.sh:/deploy-l2oo.sh
+      - ./l2oo:/l2oo:ro
     networks:
       e2e:
 
