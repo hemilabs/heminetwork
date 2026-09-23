@@ -566,6 +566,175 @@ impl TrustDB {
         Ok((it, *cbh, lbh, headers.len()))
     }
 
+    /// Header-only, TIP-NEUTRAL insert: persists `headers` and their height-hash index
+    /// entries WITHOUT reading or writing the canonical tip, and without computing an
+    /// [`InsertType`].
+    ///
+    /// This is the STAGING half of a staging/commit split. A consumer that must make a
+    /// batch's headers resolvable by hash at execution time, while leaving fork choice —
+    /// and therefore the canonical tip — to an explicit, later
+    /// [`block_header_set_canonical_tip`](Self::block_header_set_canonical_tip), calls this
+    /// and then that. `block_headers_insert` cannot serve that split: it decides and writes
+    /// the tip in the same call, and once a batch is present it returns
+    /// [`TrustDBError::Duplicate`] BEFORE both the tip write and the hook loop, so no
+    /// subsequent call can set that batch's tip.
+    ///
+    /// Deliberate differences from [`block_headers_insert`](Self::block_headers_insert):
+    /// * **No tip read.** `block_headers_insert` requires `BHS_CANONICAL_TIP_KEY` to be
+    ///   present and fails `NotFound("best block header")` otherwise. A header-only insert
+    ///   has no use for the tip, so that failure mode does not exist here.
+    /// * **No tip write**, on any arm, whatever work the batch accumulates.
+    /// * **Idempotent:** an all-present batch returns `Ok(0)`, not `Err(Duplicate)`.
+    ///   Re-staging the same batch (re-execution, payload re-validation, a reorg back onto
+    ///   the same branch) is normal, not an error. As in `block_headers_insert`, the
+    ///   already-present PREFIX is skipped and only the remainder is written; on the
+    ///   all-present path nothing is written and `hooks` do NOT run.
+    ///
+    /// Cumulative difficulty is accumulated onto each stored row exactly as
+    /// `block_headers_insert` does — that value is what later fork choice reads, so it must
+    /// not diverge between the two doors.
+    ///
+    /// Returns the number of headers actually written.
+    pub fn block_headers_insert_header_only(
+        &self,
+        headers: &[Header],
+        hooks: &[BatchHook],
+    ) -> Result<usize> {
+        if headers.is_empty() {
+            return Err(TrustDBError::InvalidParams(
+                "block headers insert header only: empty header set".to_string(),
+            ));
+        }
+
+        // Prevent other calls that change the inner state of the DB
+        // from running concurrently.
+        let _guard = self.update_mtx.lock().unwrap();
+
+        let batch = self.db.transaction();
+
+        // Skip block headers we already have, exactly as `block_headers_insert` does.
+        let mut x: usize = 0;
+        for rbh in headers {
+            let hash = rbh.block_hash();
+            let missing_hash = batch
+                .get_pinned_cf(self.get_cf(&HeadersCF), hash)?
+                .is_none();
+            if missing_hash {
+                break;
+            }
+            x += 1;
+        }
+
+        let headers = &headers[x..];
+        if headers.is_empty() {
+            // Idempotent, NOT `Duplicate`: see the doc comment. The transaction is dropped
+            // uncommitted, so nothing is written and no hook runs.
+            return Ok(0);
+        }
+
+        // Ensure contiguity of new headers.
+        let mut prev_bhh = headers[0].prev_blockhash;
+        for (i, rbh) in headers.iter().enumerate() {
+            let hash = rbh.block_hash();
+            if rbh.prev_blockhash != prev_bhh {
+                return Err(TrustDBError::InvalidParams(format!(
+                    "header with hash {} at index {} does not connect to \
+					previous header with hash {} at index {}",
+                    hash,
+                    x + i,
+                    prev_bhh,
+                    x + i - 1
+                )));
+            }
+            prev_bhh = hash
+        }
+
+        let pbh = self.block_header_by_hash_tx(&batch, headers[0].prev_blockhash)?;
+
+        let mut cdiff = pbh.difficulty;
+        let mut height = pbh.height;
+
+        for bh in headers {
+            let bhash = bh.block_hash();
+
+            // pre set values because we start with previous value
+            height += 1;
+            cdiff = cdiff
+                .checked_add(U256::from_be_bytes(bh.work().to_be_bytes()))
+                .ok_or(TrustDBError::Other(
+                    "work accumulation overflow".to_string(),
+                ))?;
+
+            // Store height_hash for future reference
+            let hh_key = TrustDB::height_hash_to_key(height, bhash);
+            let missing_hh = batch
+                .get_pinned_cf(self.get_cf(&HeightHashCF), hh_key)?
+                .is_none();
+            if missing_hh {
+                batch.put_cf(self.get_cf(&HeightHashCF), hh_key, [])?;
+            }
+
+            let sbh = BlockHeader {
+                hash: bhash,
+                difficulty: cdiff,
+                header: *bh,
+                height,
+            };
+
+            let ebh: EncodedHeader = (&sbh).into();
+            batch.put_cf(self.get_cf(&HeadersCF), bhash, ebh)?;
+        }
+
+        for hook in hooks {
+            batch.put_cf(self.get_cf(hook.0), hook.1, hook.2)?;
+        }
+
+        batch.commit()?;
+        Ok(headers.len())
+    }
+
+    /// Set the canonical tip to an ALREADY-STORED header, atomically with `hooks`.
+    ///
+    /// The COMMIT half of the staging/commit split described on
+    /// [`block_headers_insert_header_only`](Self::block_headers_insert_header_only): the
+    /// caller owns fork choice and declares the resulting tip, rather than having this
+    /// crate infer it from accumulated work. That is the same posture
+    /// [`block_headers_remove`](Self::block_headers_remove) already takes with its
+    /// caller-declared `tip_after_removal`; this is the symmetric insert-side door.
+    ///
+    /// `hash` MUST already be present — the header row is read INSIDE this transaction and
+    /// a missing row is [`TrustDBError::NotFound`]. That check is load-bearing: a tip row
+    /// naming a header with no corresponding header row would make by-height reads panic.
+    ///
+    /// `hooks` are applied in the SAME transaction as the tip write, so a caller can move
+    /// the tip and an associated cursor atomically or not at all.
+    ///
+    /// Returns the header the tip now names.
+    pub fn block_header_set_canonical_tip(
+        &self,
+        hash: bitcoin::BlockHash,
+        hooks: &[BatchHook],
+    ) -> Result<BlockHeader> {
+        // Prevent other calls that change the inner state of the DB
+        // from running concurrently.
+        let _guard = self.update_mtx.lock().unwrap();
+
+        let batch = self.db.transaction();
+
+        // NotFound when the row is absent — the caller must have staged it first.
+        let bh = self.block_header_by_hash_tx(&batch, hash)?;
+
+        let ebh: EncodedHeader = (&bh).into();
+        batch.put_cf(self.get_cf(&HeadersCF), BHS_CANONICAL_TIP_KEY, ebh)?;
+
+        for hook in hooks {
+            batch.put_cf(self.get_cf(hook.0), hook.1, hook.2)?;
+        }
+
+        batch.commit()?;
+        Ok(bh)
+    }
+
     /// BlockHeadersRemove decodes and removes the passed blockheaders into the
     /// database. Additionally it updates the canonical height/hash.
     /// On return it informs the caller about the removal type which is self-evident
