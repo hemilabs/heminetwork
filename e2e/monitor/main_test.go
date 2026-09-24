@@ -76,6 +76,12 @@ func testingFork() bool {
 	return os.Getenv("TESTING_MAINNET_FORK") == "true" || os.Getenv("TESTING_FORK") == "true"
 }
 
+// testingL2OO returns true when the localnet op-proposer was started with
+// PROPOSER_MODE=l2oo and thus proposes output roots to the L2OutputOracle.
+func testingL2OO() bool {
+	return os.Getenv("PROPOSER_MODE") == "l2oo"
+}
+
 func l1Endpoint() string {
 	if testingFork() {
 		return "http://localhost:9988"
@@ -169,10 +175,16 @@ func l2ChainId() *big.Int {
 }
 
 func addressAt(t *testing.T, path string) common.Address {
+	return addressAtFile(t, path, "/shared-dir/state.json")
+}
+
+// addressAtFile returns the address at the jq path in a json file in the
+// localnet shared-dir.
+func addressAtFile(t *testing.T, path string, file string) common.Address {
 	cmd := exec.Command(
 		"docker",
 		"exec",
-		"e2e-op-geth-l2-1", "jq", "-r", "-j", path, "/shared-dir/state.json")
+		"e2e-op-geth-l2-1", "jq", "-r", "-j", path, file)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -188,12 +200,17 @@ func disputeGameFactory(t *testing.T) common.Address {
 	return a
 }
 
-func l2OutputOracle() common.Address {
+func l2OutputOracle(t *testing.T) common.Address {
 	if testingMainnetFork() {
 		return common.HexToAddress("0x6daF3a3497D8abdFE12915aDD9829f83A79C0d51")
 	}
 
-	return common.HexToAddress("0x032d1e1dd960a4b027a9a35ff8b2b672e333bc27")
+	if testingFork() {
+		return common.HexToAddress("0x032d1e1dd960a4b027a9a35ff8b2b672e333bc27")
+	}
+
+	// deployed by e2e/deploy-l2oo.sh
+	return addressAtFile(t, ".l2OutputOracleProxy", "/shared-dir/l2oo.json")
 }
 
 func l1StandardBridge(t *testing.T) common.Address {
@@ -409,10 +426,13 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 
 			bridgeERC20FromL1ToL2(t, ctx, l1Address, l2Address, privateKey, l1Client, l2ClientToUse)
 
-			if testingFork() {
+			if testingFork() || testingL2OO() {
+				// withdrawals are proven against the L2OutputOracle
 				bridgeERC20FromL2ToL1Legacy(t, ctx, l1Address, l2Address, privateKey, l1Client, l2ClientToUse)
 				bridgeEthL2ToL1Legacy(t, ctx, l1Client, l2ClientToUse, privateKey)
-				return
+				if testingFork() {
+					return
+				}
 			} else {
 				bridgeERC20FromL2ToL1(t, ctx, l1Address, l2Address, privateKey, l1Client, l2ClientToUse)
 				bridgeEthL2ToL1(t, ctx, l1Client, l2ClientToUse, privateKey)
@@ -603,6 +623,166 @@ func sendTransaction(t *testing.T, ctx context.Context, rpcUrl string, from *com
 	t.Logf("the hash is: %s", resParse.Result)
 
 	return resParse.Result, nil
+}
+
+// TestL2OutputOracleProposals ensures that op-proposer, when run with
+// PROPOSER_MODE=l2oo, proposes output roots to the L2OutputOracle deployed by
+// e2e/deploy-l2oo.sh and that the proposed roots match op-node's.
+func TestL2OutputOracleProposals(t *testing.T) {
+	if !testingL2OO() || testingFork() {
+		t.Skip("PROPOSER_MODE is not l2oo")
+	}
+
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+
+	l1Client, err := ethclient.Dial(l1Endpoint())
+	if err != nil {
+		t.Fatalf("could not dial eth l1 %s", err)
+	}
+
+	ooproxy := l2OutputOracle(t)
+	t.Logf("assuming L2OutputOracle is at %s", ooproxy)
+
+	oracle, err := bindings.NewL2OutputOracleCaller(ooproxy, l1Client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	proposer, err := oracle.Proposer(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedProposer := common.HexToAddress("0x78697c88847dfbbb40523e42c1f2e28a13a170be")
+	if proposer != expectedProposer {
+		t.Fatalf("unexpected proposer %s, expected %s", proposer, expectedProposer)
+	}
+
+	// e2e/deploy-l2oo.sh upgrades the OptimismPortalProxy to the legacy
+	// OptimismPortal so that withdrawals are proven against the
+	// L2OutputOracle
+	portal, err := bindings.NewOptimismPortalCaller(optimismPortalProxy(t), l1Client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	portalOracle, err := portal.L2Oracle(&bind.CallOpts{Context: ctx})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if portalOracle != ooproxy {
+		t.Fatalf("unexpected OptimismPortal L2OutputOracle %s, expected %s", portalOracle, ooproxy)
+	}
+
+	// wait for at least 2 outputs so that we know the proposer is
+	// continuously proposing
+	var nextOutputIndex *big.Int
+	for {
+		nextOutputIndex, err = oracle.NextOutputIndex(&bind.CallOpts{Context: ctx})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("next output index is %d", nextOutputIndex)
+
+		if nextOutputIndex.Cmp(big.NewInt(2)) >= 0 {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for output proposals: %s", ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
+	}
+
+	latestOutputIndex := new(big.Int).Sub(nextOutputIndex, big.NewInt(1))
+	output, err := oracle.GetL2Output(&bind.CallOpts{Context: ctx}, latestOutputIndex)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("output %d is at l2 block %d with root %x", latestOutputIndex, output.L2BlockNumber, output.OutputRoot)
+
+	checkL2OOOutputRoot(t, ctx, output)
+}
+
+// logLatestOutputRoot starts a goroutine that, every 20 seconds until stop
+// is called, logs the latest output proposed to the L2OutputOracle together
+// with its L2 block number.  It is meant to be called while waiting for an
+// output root to be published, so progress is visible.
+func logLatestOutputRoot(t *testing.T, ctx context.Context, oracle *bindings.L2OutputOracleCaller) (stop func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				nextOutputIndex, err := oracle.NextOutputIndex(&bind.CallOpts{Context: ctx})
+				if err != nil {
+					t.Logf("failed to fetch next output index: %v", err)
+					continue
+				}
+				if nextOutputIndex.Sign() <= 0 {
+					t.Logf("no output roots have been proposed yet")
+					continue
+				}
+				latestOutputIndex := new(big.Int).Sub(nextOutputIndex, big.NewInt(1))
+				output, err := oracle.GetL2Output(&bind.CallOpts{Context: ctx}, latestOutputIndex)
+				if err != nil {
+					t.Logf("failed to fetch latest output: %v", err)
+					continue
+				}
+				t.Logf("latest output %d is at l2 block %d with root %x", latestOutputIndex, output.L2BlockNumber, output.OutputRoot)
+			}
+		}
+	}()
+	return cancel
+}
+
+// checkL2OOOutputAfter ensures that the output proposed to the L2OutputOracle
+// for l2BlockNumber (the first output at or after it) matches op-node's.  It
+// must only be called once that output has been published.
+func checkL2OOOutputAfter(t *testing.T, ctx context.Context, oracle *bindings.L2OutputOracleCaller, l2BlockNumber *big.Int) {
+	output, err := oracle.GetL2OutputAfter(&bind.CallOpts{Context: ctx}, l2BlockNumber)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("output for l2 block %d is at l2 block %d with root %x", l2BlockNumber, output.L2BlockNumber, output.OutputRoot)
+
+	checkL2OOOutputRoot(t, ctx, output)
+}
+
+// checkL2OOOutputRoot ensures that an output proposed to the L2OutputOracle
+// matches the output root reported by the sequencing op-node.
+func checkL2OOOutputRoot(t *testing.T, ctx context.Context, output bindings.TypesOutputProposal) {
+	rollupClient, err := rpc.DialContext(ctx, "http://localhost:8548")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rollupClient.Close()
+
+	var outputAtBlock struct {
+		OutputRoot common.Hash `json:"outputRoot"`
+	}
+	err = rollupClient.CallContext(ctx, &outputAtBlock, "optimism_outputAtBlock",
+		fmt.Sprintf("%#x", output.L2BlockNumber))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if outputAtBlock.OutputRoot != common.Hash(output.OutputRoot) {
+		t.Fatalf("output root mismatch at l2 block %d: oracle %x, op-node %s",
+			output.L2BlockNumber, output.OutputRoot, outputAtBlock.OutputRoot)
+	}
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
@@ -2317,7 +2497,7 @@ func bridgeEthL2ToL1Legacy(t *testing.T, ctx context.Context, l1Client *ethclien
 
 	t.Logf("waiting for output root to be published")
 
-	ooproxy := l2OutputOracle()
+	ooproxy := l2OutputOracle(t)
 
 	t.Logf("assuming L2OutputOracle is at %s", ooproxy)
 
@@ -2333,6 +2513,8 @@ func bridgeEthL2ToL1Legacy(t *testing.T, ctx context.Context, l1Client *ethclien
 
 	t.Logf("latest number from output oracle is %d", num)
 
+	stopLogging := logLatestOutputRoot(t, ctx, oracle)
+
 	var blockNumber uint64
 
 	for range 30 {
@@ -2342,8 +2524,15 @@ func bridgeEthL2ToL1Legacy(t *testing.T, ctx context.Context, l1Client *ethclien
 		}
 	}
 
+	stopLogging()
+
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if testingL2OO() {
+		// the proposed output must match op-node's
+		checkL2OOOutputAfter(t, ctx, oracle, receipt.BlockNumber)
 	}
 
 	receiptCl := l2Client
@@ -2569,7 +2758,7 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 
 	t.Logf("waiting for output root to be published")
 
-	ooproxy := l2OutputOracle()
+	ooproxy := l2OutputOracle(t)
 
 	t.Logf("assuming L2OutputOracle is at %s", ooproxy)
 
@@ -2577,6 +2766,8 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	stopLogging := logLatestOutputRoot(t, ctx, oracle)
 
 	var blockNumber uint64
 
@@ -2586,8 +2777,14 @@ func bridgeERC20FromL2ToL1Legacy(t *testing.T, ctx context.Context, l1Address co
 			break
 		}
 	}
+	stopLogging()
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	if testingL2OO() {
+		// the proposed output must match op-node's
+		checkL2OOOutputAfter(t, ctx, oracle, receipt.BlockNumber)
 	}
 
 	receiptCl := l2Client

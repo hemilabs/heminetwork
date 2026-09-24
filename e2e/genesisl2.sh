@@ -81,6 +81,22 @@ echo "$(jq 'del(.customGasTokenAddress)' /shared-dir/deploy-config.json)" > /sha
 echo "$(jq '.operatorFeeVaultRecipient = "0x78697c88847dfbbb40523e42c1f2e28a13a170be"' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 echo "$(jq '.operatorFeeVaultWithdrawalNetwork = 1' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 
+# L2OutputOracle parameters, only when op-proposer proposes to an
+# L2OutputOracle (PROPOSER_MODE=l2oo).  op-deployer does not deploy an
+# L2OutputOracle, these are read by deploy-l2oo.sh which deploys one after L1
+# is running.  The values match the deploy-config.json used before the move to
+# op-deployer, except for the submission interval (was 120) and the starting
+# timestamp (was 0) which is set to the L2 genesis timestamp.
+if [ "${PROPOSER_MODE:-fault}" = "l2oo" ]; then
+	L2_GENESIS_TIMESTAMP=$(printf '%d' "$(jq -r '.timestamp' /shared-dir/genesis.json)")
+	echo "$(jq ".l2OutputOracleSubmissionInterval = ${L2OO_SUBMISSION_INTERVAL:-10}" /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+	echo "$(jq ".l2OutputOracleStartingTimestamp = $L2_GENESIS_TIMESTAMP" /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+	echo "$(jq '.l2OutputOracleStartingBlockNumber = 0' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+	echo "$(jq ".l2OutputOracleProposer = \"$MY_ADDRESS\"" /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+	echo "$(jq '.l2OutputOracleChallenger = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+	echo "$(jq ".finalizationPeriodSeconds = ${L2OO_FINALIZATION_PERIOD_SECONDS:-4}" /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+fi
+
 /git/optimism/op-deployer/bin/op-deployer inspect l1 --workdir .deployer 901 > /shared-dir/l1deployments.json
 
 echo "$(jq -r '.l1StateDump' .deployer/state.json)" > /shared-dir/l1StateDump.bin
