@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork/v2
 
 go 1.26
 
-toolchain go1.26.6
+toolchain go1.27.1
 
 require (
 	codeberg.org/miekg/dns v0.5.26
