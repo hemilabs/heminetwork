@@ -213,9 +213,9 @@ services:
     ports:
       - "8545:8545"
     working_dir: "/tmp/geth"
-    # depends_on:
-    #   geth-l1-setup:
-    #     condition: "service_completed_successfully"
+    depends_on:
+      geth-l1-setup:
+        condition: "service_completed_successfully"
     command:
       - "--dev"
       - "--dev.period"
