@@ -26,10 +26,10 @@ until curl --silent --fail $L1_RPC -X 'POST' -H 'Content-Type: application/json'
 
 # the L2OutputOracle parameters are set in the deploy config by genesisl2.sh
 DEPLOY_CONFIG=/shared-dir/deploy-config.json
-export L2OO_SUBMISSION_INTERVAL='0x78'
-export L2OO_STARTING_TIMESTAMP='0x0'
-export L2OO_STARTING_BLOCK_NUMBER='0x0'
-export L2OO_L2_BLOCK_TIME='0x1'
+export L2OO_SUBMISSION_INTERVAL=$(jq -r '.l2OutputOracleSubmissionInterval' $DEPLOY_CONFIG)
+export L2OO_STARTING_TIMESTAMP=$(jq -r '.l2OutputOracleStartingTimestamp' $DEPLOY_CONFIG)
+export L2OO_STARTING_BLOCK_NUMBER=$(jq -r '.l2OutputOracleStartingBlockNumber' $DEPLOY_CONFIG)
+export L2OO_L2_BLOCK_TIME=$(jq -r '.l2BlockTime' $DEPLOY_CONFIG)
 export L2OO_PROPOSER=$(jq -r '.l2OutputOracleProposer' $DEPLOY_CONFIG)
 export L2OO_CHALLENGER=$(jq -r '.l2OutputOracleChallenger' $DEPLOY_CONFIG)
 export L2OO_FINALIZATION_PERIOD_SECONDS=$(jq -r '.finalizationPeriodSeconds' $DEPLOY_CONFIG)
