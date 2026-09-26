@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,6 +59,7 @@ const (
 var (
 	abort      = retries - 1
 	btcAddress = os.Getenv("BTC_ADDRESS")
+	eipMtx = sync.Mutex{}
 )
 
 func testingMainnetFork() bool {
@@ -361,6 +363,33 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 			if err != nil {
 				t.Fatal(err)
 			}
+
+			func() {
+				// some of these may conflict with each other if they're in the
+				// same block, ensure they don't collide
+				eipMtx.Lock()
+				defer eipMtx.Unlock() 
+
+				// check for the existence of EIP-7976, do not exhaustively test it
+				EIP7976_RejectsInsufficientGasLimit(t, privateKey)
+	
+				// similarly check for the existence of EIP-7981
+				EIP7981_RejectsInsufficientGasLimit(t, privateKey)
+	
+				// check for the existence of the remaining execution-layer
+				// Glamsterdam (EIP-7773) EIPs, do not exhaustively test them
+				EIP2780_SelfTransferIntrinsic(t, privateKey)
+				EIP7708_NativeTransferLog(t, privateKey)
+				EIP7778_BlockGasIgnoresRefunds(t, privateKey)
+				EIP7843_Slotnum(t, privateKey)
+				EIP7928_BlockAccessListHash(t, privateKey)
+				EIP7954_LargerMaxCodeSize(t, privateKey)
+				EIP7997_FactoryCreate2(t, privateKey)
+				EIP8024_Exchange(t, privateKey)
+				EIP8037_NewAccountCost(t, privateKey)
+				EIP8038_StorageWriteCost(t, privateKey)
+				EIP8246_SelfDestructKeepsBalance(t, privateKey)
+			}() 
 
 			invalidTxidRetries := 10
 			for i := range invalidTxidRetries {
@@ -1056,8 +1085,8 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 			t.Fatal(err)
 		}
 		auth.Nonce = big.NewInt(int64(nonce))
-		auth.Value = big.NewInt(0)      // in wei
-		auth.GasLimit = uint64(3000000) // in units
+		auth.Value = big.NewInt(0)       // in wei
+		auth.GasLimit = uint64(12000000) // in units
 		auth.GasPrice = gasPrice
 
 		address, tx, _, err = mybindings.DeployTesttoken(auth, l1Client)
@@ -1210,6 +1239,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			}
 			continue
 		}
+		t.Logf("l1 -> l2 eth bridge; gas used %d, calldata length %d", receipt.GasUsed, len(tx.Data()))
 
 		if receipt.Status == types.ReceiptStatusFailed {
 			t.Fatalf("receipt status is %d (failed), logs: %v", types.ReceiptStatusFailed, receipt.Logs)
