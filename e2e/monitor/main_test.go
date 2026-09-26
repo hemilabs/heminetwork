@@ -58,6 +58,7 @@ const (
 var (
 	abort      = retries - 1
 	btcAddress = os.Getenv("BTC_ADDRESS")
+	eipMtx = sync.Mutex{}
 )
 
 func testingMainnetFork() bool {
@@ -249,6 +250,7 @@ func game(t *testing.T) common.Address {
 // after 5 minutes and check that it has progressed at least to a certain
 // point
 func TestMonitor(t *testing.T) {
+	t.Parallel()
 
 	// somewhat arbitrary; we should be able to get to 24 pop txs mined in a
 	// reasonable amount of time
@@ -313,6 +315,7 @@ func TestMonitor(t *testing.T) {
 }
 
 func TestL1L2Comms(t *testing.T) {
+	t.Parallel()
 	testL1L2Comms(t, l1Endpoint(), forkedL2Endpoint(), "http://localhost:18546", "http://localhost:28546", "http://localhost:38546")
 }
 
@@ -344,6 +347,7 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
 			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Minute)
 			defer cancel()
@@ -359,25 +363,32 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				t.Fatal(err)
 			}
 
-			// check for the existence of EIP-7976, do not exhaustively test it
-			EIP7976_RejectsInsufficientGasLimit(t, privateKey)
+			func() {
+				// some of these may conflict with each other if they're in the
+				// same block, ensure they don't collide
+				eipMtx.Lock()
+				defer eipMtx.Unlock() 
 
-			// similarly check for the existence of EIP-7981
-			EIP7981_RejectsInsufficientGasLimit(t, privateKey)
-
-			// check for the existence of the remaining execution-layer
-			// Glamsterdam (EIP-7773) EIPs, do not exhaustively test them
-			EIP2780_SelfTransferIntrinsic(t, privateKey)
-			EIP7708_NativeTransferLog(t, privateKey)
-			EIP7778_BlockGasIgnoresRefunds(t, privateKey)
-			EIP7843_Slotnum(t, privateKey)
-			EIP7928_BlockAccessListHash(t, privateKey)
-			EIP7954_LargerMaxCodeSize(t, privateKey)
-			EIP7997_FactoryCreate2(t, privateKey)
-			EIP8024_Exchange(t, privateKey)
-			EIP8037_NewAccountCost(t, privateKey)
-			EIP8038_StorageWriteCost(t, privateKey)
-			EIP8246_SelfDestructKeepsBalance(t, privateKey)
+				// check for the existence of EIP-7976, do not exhaustively test it
+				EIP7976_RejectsInsufficientGasLimit(t, privateKey)
+	
+				// similarly check for the existence of EIP-7981
+				EIP7981_RejectsInsufficientGasLimit(t, privateKey)
+	
+				// check for the existence of the remaining execution-layer
+				// Glamsterdam (EIP-7773) EIPs, do not exhaustively test them
+				EIP2780_SelfTransferIntrinsic(t, privateKey)
+				EIP7708_NativeTransferLog(t, privateKey)
+				EIP7778_BlockGasIgnoresRefunds(t, privateKey)
+				EIP7843_Slotnum(t, privateKey)
+				EIP7928_BlockAccessListHash(t, privateKey)
+				EIP7954_LargerMaxCodeSize(t, privateKey)
+				EIP7997_FactoryCreate2(t, privateKey)
+				EIP8024_Exchange(t, privateKey)
+				EIP8037_NewAccountCost(t, privateKey)
+				EIP8038_StorageWriteCost(t, privateKey)
+				EIP8246_SelfDestructKeepsBalance(t, privateKey)
+			}() 
 
 			invalidTxidRetries := 10
 			for i := range invalidTxidRetries {
@@ -650,6 +661,7 @@ func TestL2OutputOracleProposals(t *testing.T) {
 		t.Skip("PROPOSER_MODE is not l2oo")
 	}
 
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 
@@ -802,6 +814,7 @@ func checkL2OOOutputRoot(t *testing.T, ctx context.Context, output bindings.Type
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
