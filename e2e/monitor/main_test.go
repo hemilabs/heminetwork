@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
