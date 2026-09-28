@@ -79,6 +79,8 @@ func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, 
 	return i.fixupHook(ctx, block, cache.Map())
 }
 
+func (i *utxoIndexer) beforeWind(_, _ uint64) {}
+
 func (i *utxoIndexer) onSyncComplete() {
 	if i.syncCompleteHook != nil {
 		i.syncCompleteHook()

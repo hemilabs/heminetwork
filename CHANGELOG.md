@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make `CheckBlockSanity` unconditional on block insert, removing the
   opt-in `BlockSanity` config gate
   ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
+- Add `TBC_ORDINAL_VERIFY_BIGO` (default `false`): debug cross-check of
+  every consumed ordinal 'O' acceleration value against the tx index;
+  a value mismatch means a corrupt ordinal index and panics with
+  reindex instructions. Slow; enable only when soaking changes to the
+  'O' write paths
+  ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
 
 - Add `BlockRawByHash` to DB interface and `lazyBlock` type for zero-copy
   per-tx block access without full deserialization
@@ -83,6 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   P2PKH, P2WPKH, and BIP-86 P2TR addresses from a single compressed
   public key and indexes the key under all three
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
+- Add ordinal indexer to TBC: scans block witnesses for Bitcoin
+  inscriptions (cursed, reinscriptions, parent-child, delegation) at
+  index time and derives sat numbers on demand at query time. Adds a
+  new LevelDB "ordinals" database (DB version 6 → 7), an output value
+  LRU cache (`TBC_ORDINAL_OUTPUT_CACHE_SIZE`, default 256 MB), and the
+  `TBC_REQUEST_TIMEOUT` config option (default 120s when the indexer is
+  enabled, 10s otherwise)
+  ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
 - Add `TxByID` to the `gozer.Gozer` interface with `tbcGozer`
   implementation backed by TBC RPC
   ([#971](https://github.com/hemilabs/heminetwork/pull/971)).
@@ -99,6 +113,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GetTSSKey` / `PurgeTSSKey` / `LookupTSSKeyByAddr` interface methods.
 
 ### Changed
+
+- All leveldb databases now share one managed 512 MiB block cache and
+  one 4096-handle table file pool (previously 8 MiB and 500 handles
+  private per database); write-heavy databases get larger write buffers
+  (ordinals 128 MiB, transactions/outputs 64 MiB) and 8 MiB tables
+  (ordinals, transactions). Steady-state memory floor rises roughly
+  1 GiB; the ordinals database uses 16-bit bloom filters (existing
+  tables remain readable and convert via compaction); capacities are
+  logged at startup and a warning fires when
+  RLIMIT_NOFILE cannot cover the file pool. Set `GOMEMLIMIT` on
+  memory-constrained hosts. Rolling back to an older binary after the
+  table-size change is safe: readers are size-agnostic and compaction
+  converges table sizes over time
+  ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
+- Optimize the ordinal indexer's block scan: warm parent (commit)
+  transactions once per block through a deduplicating producer/consumer
+  pipeline (`TBC_ORDINAL_WARM`, default `true`), prefetch each block's
+  'O' acceleration entries in one 128-wide parallel pass, read only the
+  needed transaction bytes via a `TxLoc`-guided ranged read instead of
+  the whole block (legacy pre-v6 entries keep the whole-block fallback),
+  and bound flushes by bytes (~1 GiB) as well as entry count, writing
+  them in chunks inside one atomic transaction to stop unbounded memory
+  growth and quadratic batch copying on inscription-dense ranges
+  ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
+- Add read-only tbcd database opens (`Config.SetReadOnly`) and the
+  env-gated `TestWindReplay` diagnostic, which replays chosen blocks
+  through a full ordinal wind against a read-only database for
+  controlled measurement of slow blocks
+  ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
+
 
 - `BlockTxUpdate` uses stack-allocated reusable buffers instead of slicing
   loop variables, avoiding potential data integrity issues
@@ -158,6 +202,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   effective genesis is not retarget-aligned; the first retarget boundary
   now skips difficulty verification when ancestor depth is insufficient
   ([#1117](https://github.com/hemilabs/heminetwork/pull/1117)).
+- Fix two ordinal indexer bugs: the write cache ratcheted memory by
+  retaining its high-water bucket arrays across flushes forever (Go
+  runtime Sys climbed 3.4 GiB to 7.0 GiB during a dense-zone reindex),
+  now released after each flush; and a nil-pointer panic when a parent
+  transaction's index entry predates the v6 `TxLoc` format, now handled
+  by the block-scan fallback
+  ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
 
 - Fix typos across the codebase
   ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733),

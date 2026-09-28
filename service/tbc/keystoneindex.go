@@ -67,6 +67,8 @@ func (i *keystoneIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ 
 	return nil
 }
 
+func (i *keystoneIndexer) beforeWind(_, _ uint64) {}
+
 func (i *keystoneIndexer) onSyncComplete() {}
 
 func (i *keystoneIndexer) readCacheInfo() string { return "" }
