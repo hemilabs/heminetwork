@@ -18,7 +18,7 @@ serde_json = "=1.0.151"
 thiserror = "=2.0.20"
 tokio = { version = "=1.53.0", features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 tokio-tungstenite = { version = "=0.30.0", features = ["rustls-tls-native-roots"] }
-tokio-util = "=0.7.18"
+tokio-util = "=0.7.19"
 tungstenite = "=0.30.0"
 
 [dev-dependencies]
