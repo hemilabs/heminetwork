@@ -103,11 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add multiple RPC commands to regular and authenticated TBC routes ([#1026](https://github.com/hemilabs/heminetwork/pull/1026)).
 - Add maximum fee configuration to `popmd` ([#1037](https://github.com/hemilabs/heminetwork/pull/1037)).
 - Add `continuum` TSS peer mesh with keygen, signing, and resharing
-  ceremonies, secp256k1-signed wire messages, authenticated
-  NaCl-encrypted peer-to-peer transport with multi-hop routing, DNS
-  seeding, coordinator election, a loopback-only admin listener
-  (`TRF_ADMIN_LISTEN_ADDRESS`), and `hemictl` ceremony management
-  commands. The `continuum` protocol version is now 2
+  ceremonies, encrypted multi-hop peer transport, and `hemictl` ceremony
+  management commands
   ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 - Add external ECDSA and schnorr signature injection to `bitcoin/wallet`,
   enabling threshold signature committees, hardware wallets, and PSBT flows
