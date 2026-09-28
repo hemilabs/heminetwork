@@ -35,14 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   challenge-response for peers without a direct session. Bindings are
   immutable — the X25519 key is derived deterministically from the
   secp256k1 identity key, so a conflicting binding is rejected and
-  exported as `continuum_peer_key_conflicts_total`.
+  exported as `continuum_peer_key_conflicts_total`
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 
 ### Breaking Changes
 
 - `continuum` protocol version is now 2 and does not interoperate with
   version 1 nodes. The handshake binds the announced X25519 key into
   the challenge signature and requires it to be present and well
-  formed, and gossip peer records no longer carry key material.
+  formed, and gossip peer records no longer carry key material
+  ([#796](https://github.com/hemilabs/heminetwork/pull/796)).
 - `BlockHashByTxId` now returns `(*chainhash.Hash, wire.TxLoc, error)`;
   callers that only need the hash use `bh, _, err :=`
   ([#1052](https://github.com/hemilabs/heminetwork/pull/1052)).
