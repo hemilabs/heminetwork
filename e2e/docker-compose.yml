@@ -241,6 +241,10 @@ services:
       - --http.api=web3,debug,eth,txpool,net,engine,miner
       - --ws.api=debug,eth,txpool,net,engine,miner
       - --rpc.txfeecap=0
+      # keep the 200M block gas limit set in genesisl2.sh (geth would move it
+      # towards its default) and allow estimating gas up to it
+      - --miner.gaslimit=200000000
+      - --rpc.gascap=200000000
     volumes:
       - "shared-dir:/shared-dir"
       - "./e2e/keystore:/tmp/keystore:ro"
