@@ -613,12 +613,13 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 func (s *Server) fetchOPParallel(ctx context.Context, c chan struct{}, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
 	defer w.Done()
 	if c != nil {
-		defer func() {
-			select {
-			case <-ctx.Done():
-			case c <- struct{}{}:
-			}
-		}()
+		// Always return the slot, even on cancellation. Dropped slots
+		// fail the "channel not empty" check in fixupCacheChannel or,
+		// once all are gone, block its "<-c" forever, leaving
+		// s.indexing stuck. The send
+		// cannot block: we return only the slot we took, and before
+		// w.Done(), so all slots are back before close(c).
+		defer func() { c <- struct{}{} }()
 	}
 
 	sh, err := s.db.ScriptHashByOutpoint(ctx, op)
@@ -726,7 +727,10 @@ func (s *Server) fixupCacheChannel(ctx context.Context, b *btcutil.Block, utxos 
 	for i := 0; i < slots; i++ {
 		select {
 		case <-ctx.Done():
-			return nil
+			// Don't return nil; the caller would flush a utxo set
+			// missing its delete entries and advance the index hash.
+			// syncBlocks ignores context.Canceled.
+			return ctx.Err()
 		case c <- struct{}{}:
 		default:
 			return errors.New("shouldn't happen")
@@ -1908,6 +1912,9 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 		s.indexing = false
 		s.mtx.Unlock()
 
+		// Apply headers that arrived while we were indexing.
+		go s.replayDeferredHeaders(ctx)
+
 		// Get block headers
 		s.pm.All(ctx, s.headersPeer)
 	}()
@@ -2097,6 +2104,9 @@ func (s *Server) SyncIndexersToBest(ctx context.Context) error {
 		s.mtx.Lock()
 		s.indexing = false
 		s.mtx.Unlock()
+
+		// Apply headers that arrived while we were indexing.
+		go s.replayDeferredHeaders(ctx)
 	}()
 
 	// NOTE: the way this code works today is that it will ALWAYS reindex

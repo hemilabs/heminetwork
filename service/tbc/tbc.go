@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -54,6 +55,63 @@ const (
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
+	// maxInvBlockScan bounds the block entries handleInv looks up per inv
+	// message; see handleInv.
+	maxInvBlockScan = defaultPendingBlocks
+
+	// maxDeferredHeaderMsgs bounds how many headers messages are held while
+	// the indexers run. wire.MaxBlockHeadersPerMsg is 2000 and each decoded
+	// header costs 112 bytes (a 104 byte wire.BlockHeader plus its pointer),
+	// so 16 full messages retain ~3.4MiB.
+	maxDeferredHeaderMsgs = 16
+
+	// maxDeferredPerPeer bounds how many of those slots a single peer
+	// (keyed by host) may hold, so one peer flooding headers while indexing
+	// cannot push every honest reply onto the hash-only fallback.
+	maxDeferredPerPeer = 2
+
+	// maxInvBlocks bounds s.invBlocks.
+	//
+	// invBlocks holds announced block hashes we may lack: block invs whose
+	// header is unknown (handleInv, at any time) and the last header of each
+	// batch received while indexing (handleHeaders). Only the syncBlocks
+	// drain removes entries, and it runs
+	// only with AutoIndex set and once we are synced, so without a cap the
+	// map grows for all of IBD, and forever on op-geth's embedded node, which
+	// runs with AutoIndex=false.
+	//
+	// Evicting an entry costs latency, never data. The drain only uses the
+	// map to decide whether to ask every peer what follows our tip, which the
+	// periodic refresh asks anyway every headerRefreshInterval. Eviction can
+	// suppress a drain but never cause one. 8192 is ~57 days of mainnet
+	// blocks, about 0.6MiB at the cap.
+	maxInvBlocks = 8192
+
+	// maxLocatorPerHeight and maxLocatorEntries bound a getheaders block
+	// locator. See getHeadersByHeights.
+	//
+	// Bitcoin Core disconnects a peer whose locator exceeds MAX_LOCATOR_SZ
+	// (101). Mainnet has no height with more than 2 siblings, but the store
+	// can still hold cheap difficulty-1 siblings inserted through the
+	// external header paths (AddExternalHeaders, BlockHeadersInsert) or by
+	// older versions that did not run verifyHeaderContext on P2P headers.
+	// previousCheckpointHeight is a fixed anchor, so siblings planted there
+	// would inflate every refresh, across restarts, and get us disconnected
+	// by every Core peer.
+	//
+	// Current callers produce at most 9 entries (the lead plus four heights
+	// at 2 each); 16 is a backstop.
+	maxLocatorPerHeight = 2
+	maxLocatorEntries   = 16
+
+	// drainFanoutInterval bounds how often the syncBlocks drain may ask
+	// every peer for headers. See drainFanoutDue.
+	drainFanoutInterval = time.Second
+
+	// mempoolFanoutInterval bounds how often handleHeaders' empty branch
+	// asks every peer for its mempool. See mempoolFanoutDue.
+	mempoolFanoutInterval = 5 * time.Minute
+
 	defaultMaxCachedKeystones = 1024 // number of cached keystones prior to flush
 
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
@@ -66,6 +124,20 @@ const (
 
 	defaultMempoolAge = 2 * 7 * 24 * time.Hour // two weeks
 )
+
+// headerRefreshInterval is how often we ask every peer what follows our
+// canonical tip, regardless of what else is happening.
+//
+// Header acquisition is otherwise event driven, and BlocksMissing is built from
+// header inserts, so a node idle behind a header gap never learns of the
+// headers it is missing. This timer is the backstop.
+//
+// It must be a timer. Issuing the request off the back of a headers reply
+// loops: a peer that agrees we are at the tip replies with an empty headers
+// message, which kicks syncBlocks, which asks again.
+//
+// This is a var only so tests can shorten it.
+var headerRefreshInterval = 60 * time.Second
 
 var (
 	log = loggo.GetLogger(appName)
@@ -186,8 +258,8 @@ type Server struct {
 	// broadcast
 	broadcast map[chainhash.Hash]*wire.MsgTx
 
-	// missed block inventories during indexing
-	invBlocks []*chainhash.Hash
+	// announced block hashes we may lack; bounded by maxInvBlocks
+	invBlocks map[chainhash.Hash]struct{}
 
 	// bitcoin network
 	wireNet     wire.BitcoinNet
@@ -201,6 +273,26 @@ type Server struct {
 	pings  *ttl.TTL // outstanding pings
 
 	indexing bool // when set we are indexing
+
+	// deferredHeaders holds headers messages that arrived while indexing,
+	// applied by replayDeferredHeaders once the indexers finish.
+	deferredHeaders []deferredHeaderMsg
+
+	// deferredEmpty records that at least one empty headers message was
+	// swallowed by the quiesce branch. See replayDeferredHeaders.
+	deferredEmpty bool
+
+	// drainFanout is when the syncBlocks drain last asked every peer for
+	// headers. See drainFanoutDue.
+	drainFanout time.Time
+
+	// drainRetryPending is set while a delayed drain fan-out, armed by a
+	// rate-limited drain, is outstanding. See syncBlocks.
+	drainRetryPending bool
+
+	// mempoolFanout is when handleHeaders' empty branch last asked every
+	// peer for its mempool. See mempoolFanoutDue.
+	mempoolFanout time.Time
 
 	db tbcd.Database
 
@@ -258,7 +350,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		sessions:        make(map[string]*tbcWs),
 		requestTimeout:  defaultRequestTimeout,
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
-		invBlocks:       make([]*chainhash.Hash, 0, 16),
+		invBlocks:       make(map[chainhash.Hash]struct{}, 16),
 		promPollVerbose: false,
 	}
 
@@ -350,15 +442,277 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
+// deferredHeaderMsg is a headers message that arrived while the indexers were
+// running, kept so it can be applied afterwards instead of discarded.
+type deferredHeaderMsg struct {
+	p   *rawpeer.RawPeer
+	msg *wire.MsgHeaders
+	// last is msg's final header hash, the dedupe key.
+	last chainhash.Hash
+}
+
+// peerHost returns a peer's remote host without its port, for use as a
+// per-peer resource key. Ports cost an attacker nothing, so a key that
+// includes one is not a per-peer key at all. Falls back to the full string
+// when there is no port to split, so an unexpected format still groups
+// consistently rather than becoming unique per call.
+func peerHost(p *rawpeer.RawPeer) string {
+	addr := p.String()
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
+}
+
+// deferHeadersUnlocked buffers a headers message that arrived while the
+// indexers were running, so it can be applied afterwards instead of discarded.
+// Caller must hold s.mtx.
+//
+// Messages are deduped on their last header hash, since a refresh tick asks
+// every peer the same question and most replies are identical. Keying on the
+// last header rather than the first keeps a fork that diverges past our tip.
+// Each peer host may hold at most maxDeferredPerPeer slots, so one flooder
+// cannot own the buffer.
+func (s *Server) deferHeadersUnlocked(p *rawpeer.RawPeer, msg *wire.MsgHeaders) {
+	n := len(msg.Headers)
+	if n == 0 {
+		return
+	}
+	// msg must be a contiguous chain (see verifyHeaderBatchShape); callers
+	// check that before taking s.mtx or pass messages that already came out
+	// of this buffer. The dedupe below prefers the longer message, and
+	// without contiguity a peer could prepend garbage to the public tip
+	// header and displace an honest answer. Each hash in a contiguous chain
+	// is committed to by the next header's PrevBlock, so longer means more
+	// real data.
+	last := msg.Headers[n-1].BlockHash()
+
+	// Key the per-peer tally on the host, not the peer pointer, which resets
+	// on reconnect. Two honest nodes behind one address share a quota, which
+	// costs them at most a fallback to the hash-only path.
+	addr := peerHost(p)
+	mine := 0
+	dup := -1
+	for k := range s.deferredHeaders {
+		if s.deferredHeaders[k].last.IsEqual(&last) {
+			dup = k
+		}
+		if s.deferredHeaders[k].p != nil && peerHost(s.deferredHeaders[k].p) == addr {
+			mine++
+		}
+	}
+
+	// Same answer already held: keep the longer message. The last header of
+	// an honest answer is the public network tip, so refusing the newcomer
+	// would let a peer claim the key with a 1-header stub and bounce every
+	// real answer.
+	//
+	// The longer data always wins, but the slot only moves to this peer if
+	// that respects the per-host cap; otherwise dedupe would be a way
+	// around maxDeferredPerPeer.
+	if dup >= 0 {
+		held := s.deferredHeaders[dup].p
+		if n > len(s.deferredHeaders[dup].msg.Headers) {
+			owner := held
+			if (held != nil && peerHost(held) == addr) || mine < maxDeferredPerPeer {
+				owner = p
+			}
+			s.deferredHeaders[dup] = deferredHeaderMsg{p: owner, msg: msg, last: last}
+		}
+		return
+	}
+
+	if mine >= maxDeferredPerPeer {
+		return
+	}
+
+	if len(s.deferredHeaders) >= maxDeferredHeaderMsgs {
+		// Buffer full. A host holding nothing may take a slot from the
+		// host holding the most; otherwise 8 hosts at 2 slots each
+		// would lock out every other peer for the whole indexing pass.
+		if mine > 0 {
+			return
+		}
+		victim := s.greediestDeferredSlotUnlocked()
+		if victim < 0 {
+			return
+		}
+		s.deferredHeaders = slices.Delete(s.deferredHeaders, victim, victim+1)
+	}
+
+	s.deferredHeaders = append(s.deferredHeaders,
+		deferredHeaderMsg{p: p, msg: msg, last: last})
+}
+
+// greediestDeferredSlotUnlocked returns the index of a slot to evict, or -1 if
+// the buffer is empty. Callers must hold s.mtx.
+//
+// It prefers the host holding the most slots, since that is what a flooder
+// looks like. If every host holds one slot it falls through to the last slot,
+// so an honest newcomer still gets in. Anything evicted is still covered by
+// invBlocks, the drain and the periodic refresh.
+//
+// Among the greediest host's slots it takes the newest, because
+// requeueDeferredHeadersUnreplayed seats an unreplayed remainder at the front
+// and evicting it would undo the requeue.
+func (s *Server) greediestDeferredSlotUnlocked() int {
+	counts := make(map[string]int, len(s.deferredHeaders))
+	for k := range s.deferredHeaders {
+		if s.deferredHeaders[k].p == nil {
+			// A slot with no peer belongs to nobody; take it first.
+			return k
+		}
+		counts[peerHost(s.deferredHeaders[k].p)]++
+	}
+
+	best, bestCount := -1, 1
+	for k := range s.deferredHeaders {
+		// >= so that, among hosts tied at the maximum, the LAST slot wins.
+		if c := counts[peerHost(s.deferredHeaders[k].p)]; c >= bestCount {
+			best, bestCount = k, c
+		}
+	}
+	return best
+}
+
+// replayDeferredHeaders applies headers messages that arrived while the
+// indexers were running. It must NOT be called while holding s.mtx, since
+// handleHeaders takes it.
+func (s *Server) replayDeferredHeaders(ctx context.Context) {
+	s.mtx.Lock()
+	dh := s.deferredHeaders
+	// Fresh slice, not dh[:0]: the messages below are handled after the
+	// unlock while peer goroutines may append.
+	s.deferredHeaders = nil
+	// An empty headers message carries no data, only the syncBlocks kick
+	// from handleHeaders' empty branch, which turns BlocksMissing into
+	// getdata. The quiesce branch records that one was seen and we re-issue
+	// the kick once here, not once per message, so it cannot feed itself.
+	kick := s.deferredEmpty
+	s.deferredEmpty = false
+	s.mtx.Unlock()
+
+	if len(dh) != 0 {
+		log.Debugf("replaying %v deferred headers messages", len(dh))
+	}
+	for k := range dh {
+		// Bail on shutdown. Cancellation aborts the indexing pass,
+		// which fires this replay, and neither is in s.wg, so inserts
+		// could land after dbClose and fail with leveldb.ErrClosed.
+		// XXX track the indexer and this replay in s.wg.
+		if ctx.Err() != nil {
+			log.Debugf("replay deferred headers: %v", ctx.Err())
+			return
+		}
+		// Hand handleHeaders a private copy of the message struct.
+		// BlockHeadersInsert reslices msg.Headers in place and a
+		// message can be owned by two replays at once. Nothing writes
+		// into the backing array, so copying the slice header is
+		// enough.
+		mc := *dh[k].msg
+		err := s.handleHeaders(ctx, dh[k].p, &mc)
+		if errors.Is(err, ErrAlreadyIndexing) {
+			// Indexing restarted underneath us. Put the unreplayed
+			// remainder back at the front of the buffer, in order.
+			// Continuing would re-buffer it behind newer arrivals,
+			// where a later segment could replay before its parent,
+			// and the per-peer cap could drop it entirely.
+			s.requeueDeferredHeadersUnreplayed(ctx, dh[k:])
+			break
+		}
+		if err != nil {
+			log.Debugf("replay deferred headers %v: %v", dh[k].p, err)
+		}
+	}
+
+	// Fire the kick LAST. Firing it first lets syncBlocks start indexing
+	// again, and the replay above would re-buffer everything instead of
+	// applying it. Gate on blksMissing: the indexers have just finished,
+	// and an ungated kick would start a pointless indexing pass on an idle
+	// synced node.
+	if kick && ctx.Err() == nil && s.blksMissing(ctx) {
+		go s.syncBlocks(ctx)
+	}
+}
+
+// requeueDeferredHeadersUnreplayed puts an unreplayed remainder back at the
+// front of the deferred buffer, ahead of whatever arrived during the replay.
+// Must NOT be called while holding s.mtx.
+//
+// If indexing has already finished by the time the remainder is seated, it
+// starts a replay itself, since the finished pass's replay may have run before
+// the remainder was back in the buffer. Each such replay is paid for by one
+// indexing pass, so this cannot loop. Concurrent replays are race-free but not
+// order-preserving; anything dropped is re-fetched by the drain and the
+// periodic refresh.
+func (s *Server) requeueDeferredHeadersUnreplayed(ctx context.Context, rem []deferredHeaderMsg) {
+	if len(rem) == 0 {
+		return
+	}
+
+	s.mtx.Lock()
+	idle := s.requeueDeferredHeadersUnlocked(rem)
+	s.mtx.Unlock()
+
+	if idle && ctx.Err() == nil {
+		go s.replayDeferredHeaders(ctx)
+	}
+}
+
+// requeueDeferredHeadersUnlocked seats rem and reports whether indexing was
+// idle at that moment. Callers must hold s.mtx.
+func (s *Server) requeueDeferredHeadersUnlocked(rem []deferredHeaderMsg) (idle bool) {
+	// rem came out of this same buffer, so it is already deduped, already
+	// within maxDeferredPerPeer and no longer than maxDeferredHeaderMsgs.
+	// Seat it unconditionally; re-running admission could drop it.
+	arrived := s.deferredHeaders
+	s.deferredHeaders = make([]deferredHeaderMsg, len(rem), maxDeferredHeaderMsgs)
+	copy(s.deferredHeaders, rem)
+	// Not protected from the fair-share eviction below: that only runs on a
+	// FULL buffer, which honest tip-anchored answers do not produce (they
+	// dedupe to about one slot). Anything evicted is re-fetched by the drain
+	// and the periodic refresh.
+
+	// What arrived during the replay goes behind it, under the normal
+	// admission rules, so dedupe and the per-peer cap still hold afterwards.
+	// This also drops the copy of rem[0] that the quiesce branch just
+	// appended, since deferHeadersUnlocked dedupes on the last header hash.
+	for k := range arrived {
+		s.deferHeadersUnlocked(arrived[k].p, arrived[k].msg)
+	}
+	return !s.indexing
+}
+
+// invInsertUnlocked records an announced block hash we do not have.
+//
+// It returns true if h was inserted. Callers must hold s.mtx.
+//
+// At the cap the new hash is admitted and an arbitrary old one is evicted. The
+// drain re-checks which entries are still missing, so which old entry leaves
+// does not matter. Dropping the new hash instead could hide that we are behind:
+// a full map whose entries have all since been satisfied filters empty and the
+// drain stays silent.
 func (s *Server) invInsertUnlocked(h chainhash.Hash) bool {
-	for k := range s.invBlocks {
-		if s.invBlocks[k].IsEqual(&h) {
-			return false
+	if _, ok := s.invBlocks[h]; ok {
+		return false
+	}
+
+	// NewServer makes the map, but a Server built as a struct literal (as
+	// in tests) would panic on the write below.
+	if s.invBlocks == nil {
+		s.invBlocks = make(map[chainhash.Hash]struct{}, 16)
+	}
+
+	if len(s.invBlocks) >= maxInvBlocks {
+		// Evict an arbitrary, not uniformly random, entry.
+		for k := range s.invBlocks {
+			delete(s.invBlocks, k)
+			break
 		}
 	}
 
 	// Not found, thus return true for inserted
-	s.invBlocks = append(s.invBlocks, &h)
+	s.invBlocks[h] = struct{}{}
 	return true
 }
 
@@ -388,22 +742,66 @@ func (s *Server) getHeadersByHashes(ctx context.Context, p *rawpeer.RawPeer, has
 	return nil
 }
 
-func (s *Server) getHeadersByHeights(ctx context.Context, p *rawpeer.RawPeer, heights ...uint64) error {
+// getHeadersByHeights builds a block locator and asks p for what follows it.
+//
+// lead, when non-nil, is a hash the caller knows is on our canonical chain (in
+// practice BlockHeaderBest's). It is seeded first and unconditionally.
+//
+// That matters because the rest of the locator is discovered through
+// BlockHeadersByHeight, which returns every sibling at a height sorted by raw
+// hash bytes, and maxLocatorPerHeight then keeps only the first two. An
+// attacker who can store low-difficulty siblings (via AddExternalHeaders or
+// BlockHeadersInsert, or before P2P headers were difficulty checked) can grind
+// them to sort ahead of the real hash and push it out of the locator. The peer
+// then matches nothing and replies from genesis on every refresh. Seeding the
+// known-canonical tip gives the peer something of ours to match, so a poisoned
+// deeper anchor only wastes entries.
+func (s *Server) getHeadersByHeights(ctx context.Context, p *rawpeer.RawPeer, lead *chainhash.Hash, heights ...uint64) error {
 	log.Tracef("getHeadersByHeights %v %v", p, heights)
 	defer log.Tracef("getHeadersByHeights exit %v %v", p, heights)
 
 	ghs := wire.NewMsgGetHeaders()
+	if lead != nil {
+		if err := ghs.AddBlockLocatorHash(lead); err != nil {
+			return fmt.Errorf("add lead locator hash: %w", err)
+		}
+	}
 	for _, height := range heights {
+		// Bail on shutdown. Callers (headersPeer, handlePeer) are not
+		// in s.wg, so a store read may land after dbClose and fail
+		// with leveldb.ErrClosed.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Skip, do not break. Callers derive heights by subtraction
+		// (tip-1000, tip-1999), which underflows on a low node, and
+		// breaking there would drop the remaining anchors, including
+		// the checkpoint. The store rejects an underflowed height.
 		bhs, err := s.BlockHeadersByHeight(ctx, height)
 		if err != nil {
-			break
+			continue
 		}
+		perHeight := 0
 		for _, bh := range bhs {
-			hash := bh.BlockHash()
-			err = ghs.AddBlockLocatorHash(&hash)
-			if err != nil {
+			if perHeight >= maxLocatorPerHeight ||
+				len(ghs.BlockLocatorHashes) >= maxLocatorEntries {
 				break
 			}
+			hash := bh.BlockHash()
+			// Skip duplicates. The lead hash reappears here,
+			// and on a short chain several heights collapse
+			// onto the same header (e.g. genesis). Repeats
+			// waste bytes and count against the peer's
+			// locator size limit.
+			if slices.ContainsFunc(ghs.BlockLocatorHashes,
+				func(h *chainhash.Hash) bool { return h.IsEqual(&hash) }) {
+				continue
+			}
+			if err = ghs.AddBlockLocatorHash(&hash); err != nil {
+				break
+			}
+			perHeight++
 		}
 	}
 
@@ -454,6 +852,44 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
 }
 
+// drainFanoutDue rate limits the syncBlocks drain's getheaders fan out to one
+// per drainFanoutInterval.
+//
+// syncBlocks is kicked by empty headers messages, which a peer can send for
+// free. We limit the fan out rather than the kick because the kick also
+// starts block download, which must not wait on a rate limit.
+func (s *Server) drainFanoutDue() bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	now := time.Now()
+	if now.Sub(s.drainFanout) < drainFanoutInterval {
+		return false
+	}
+	s.drainFanout = now
+	return true
+}
+
+// mempoolFanoutDue rate limits handleHeaders' empty-branch mempool fan out to
+// one per mempoolFanoutInterval.
+//
+// The fan out is per reply but asks every peer, so a getheaders round to N
+// peers sends N^2 mempool messages. btcd (v0.24.2) charges 33 transient ban
+// score per mempool message against a BanThreshold of 100, so a burst of four
+// gets us banned. The score halves every 60s, so one message per
+// headerRefreshInterval settles at 66, over btcd's warn threshold; one per
+// mempoolFanoutInterval settles near 34.
+func (s *Server) mempoolFanoutDue() bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	now := time.Now()
+	if !s.mempoolFanout.IsZero() && now.Sub(s.mempoolFanout) < mempoolFanoutInterval {
+		return false
+	}
+	s.mempoolFanout = now
+	return true
+}
+
 func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	log.Tracef("mempoolPeer %v", p)
 	defer log.Tracef("mempoolPeer %v exit", p)
@@ -478,12 +914,23 @@ func (s *Server) headersPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	log.Tracef("headersPeer %v", p)
 	defer log.Tracef("headersPeer %v exit", p)
 
+	// pm.All runs us untracked, so Run may close the store while we are
+	// here and store calls fail with leveldb.ErrClosed. Bail on shutdown.
+	if ctx.Err() != nil {
+		return
+	}
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		log.Errorf("headers peer block header best: %v %v", p, err)
 		return
 	}
-	if err = s.getHeadersByHashes(ctx, p, bhb.BlockHash()); err != nil {
+	// A multi-hash locator, the same shape handlePeer builds on connect. A
+	// peer that does not recognise a lone tip hash answers from genesis, so
+	// a lagging or forked peer would send 2000 duplicate headers on every
+	// refresh and never teach us about the fork.
+	err = s.getHeadersByHeights(ctx, p, &bhb.Hash, bhb.Height, bhb.Height-1000,
+		bhb.Height-1999, previousCheckpointHeight(bhb.Height, s.checkpoints))
+	if err != nil {
 		log.Errorf("headers peer sync indexers: %v", err)
 		return
 	}
@@ -550,6 +997,28 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 	return nil
 }
 
+// acceptPeerHeight returns true if a peer's advertised best block height is
+// at or above our indexed block frontier. See peerHeightAcceptable.
+func acceptPeerHeight(remoteLast int32, frontier uint64) bool {
+	return uint64(remoteLast) >= frontier
+}
+
+// peerHeightAcceptable reports whether a peer advertising remoteLast as its
+// best block height is worth keeping. The threshold is our indexed block
+// frontier (the UTXO index height), not the header tip: the tip routinely
+// leads block download (headers-first IBD, op-geth calling
+// BlockHeadersInsert), and gating on it rejects the peers holding the bodies
+// we need. The indexed height only advances on blocks we processed, so it
+// never runs ahead of the live chain. A peer that cannot serve the bodies we
+// request is dropped by blockExpired.
+func (s *Server) peerHeightAcceptable(ctx context.Context, remoteLast int32) (bool, error) {
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		return false, err
+	}
+	return acceptPeerHeight(remoteLast, utxoHH.Height), nil
+}
+
 func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	log.Tracef("handlePeer %v", p)
 
@@ -585,18 +1054,22 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 		readError = err
 		return fmt.Errorf("peer remote version: %w", err)
 	}
-	if uint64(remoteVersion.LastBlock) < bhb.Height {
-		// Disconnect for now. We only want more or less synced peers.
+	accept, err := s.peerHeightAcceptable(ctx, remoteVersion.LastBlock)
+	if err != nil {
 		readError = err
-		return fmt.Errorf("remote peer height below ours")
-	} else {
-		err := s.getHeadersByHeights(ctx, p,
-			bhb.Height, bhb.Height-1000, bhb.Height-1999,
-			previousCheckpointHeight(bhb.Height, s.checkpoints))
-		if err != nil {
-			readError = err
-			return fmt.Errorf("handle peer heights: %w", err)
-		}
+		return fmt.Errorf("utxo index hash: %w", err)
+	}
+	if !accept {
+		// Skip peers behind our indexed frontier: they cannot serve a block
+		// we still need. Set readError so the Disconnected line records why.
+		readError = errors.New("remote peer height below our indexed frontier")
+		return readError
+	}
+	if err := s.getHeadersByHeights(ctx, p, &bhb.Hash,
+		bhb.Height, bhb.Height-1000, bhb.Height-1999,
+		previousCheckpointHeight(bhb.Height, s.checkpoints)); err != nil {
+		readError = err
+		return fmt.Errorf("handle peer heights: %w", err)
 	}
 
 	// Get p2p information.
@@ -908,6 +1381,11 @@ func (s *Server) handleAddrV2(_ context.Context, p *rawpeer.RawPeer, msg *wire.M
 
 	peers := make([]string, 0, len(msg.AddrList))
 	for _, a := range msg.AddrList {
+		if a.Addr == nil {
+			// Truncated addrv2 entry decodes with a nil Addr; skip it
+			// rather than nil-deref and crash the process.
+			continue
+		}
 		addr := net.JoinHostPort(a.Addr.String(), strconv.Itoa(int(a.Port)))
 		if len(addr) < 7 {
 			// 0.0.0.0
@@ -958,8 +1436,10 @@ func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch chain
 			Hash: ch,
 		})
 
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
+	// Do not hold s.mtx across the write. It can block for
+	// defaultCmdTimeout against a peer that stops reading its socket,
+	// stalling every other user of the mutex. getData is local and
+	// rawpeer.Write serializes on its own mutex.
 	err := p.Write(defaultCmdTimeout, getData)
 	if err != nil {
 		if !errors.Is(err, net.ErrClosed) &&
@@ -1042,10 +1522,10 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("block header by hash: %w", err)
 	}
+	// isCanonical's error is deliberately ignored, as in upstream main
+	// (heminetwork PR #659). On error canonical is false, so the block is
+	// dropped from blocks missing instead of blockExpired killing the peer.
 	canonical, _ := s.isCanonical(ctx, bhX)
-	if err != nil {
-		return fmt.Errorf("is canonical: %v %w", hash, err)
-	}
 
 	if !canonical {
 		log.Infof("Deleting from blocks missing database: %v %v %v",
@@ -1231,6 +1711,16 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				return
 
 			default:
+				// Don't panic on errors caused by our own
+				// shutdown. This goroutine is not in s.wg,
+				// so it can outlive Run closing the store,
+				// and some of the resulting errors (e.g.
+				// goleveldb's unexported errTransactionDone)
+				// cannot be matched above.
+				if ctx.Err() != nil {
+					log.Debugf("sync blocks during shutdown: %v", err)
+					return
+				}
 				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
 
@@ -1238,33 +1728,83 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			if s.Synced(ctx).Synced {
 				s.mtx.Lock()
 				ib := s.invBlocks
-				s.invBlocks = make([]*chainhash.Hash, 0, 16)
+				// Fresh map, not clear(s.invBlocks): ib is read
+				// below after the unlock while peer goroutines
+				// keep inserting via invInsertUnlocked.
+				s.invBlocks = make(map[chainhash.Hash]struct{}, 16)
 				s.mtx.Unlock()
 
-				// Fixup ib array to not ask for block headers
-				// we already have.
-				ib = slices.DeleteFunc(ib, func(h *chainhash.Hash) bool {
-					_, _, err := s.BlockHeaderByHash(ctx, *h)
-					return err == nil
-				})
+				// Count announcements whose headers we still
+				// lack. Only the count is used; the fan-out
+				// below asks for what follows our tip, never
+				// for these hashes.
+				missed := 0
+				for h := range ib {
+					if _, _, err := s.BlockHeaderByHash(ctx, h); err != nil {
+						missed++
+					}
+				}
 
 				// Flush out blocks we saw during quiece.
-				log.Debugf("download missed block headers %v", len(ib))
+				log.Debugf("download missed block headers %v", missed)
 
-				if len(ib) == 0 {
+				// This MUST stay gated on missed != 0. A peer
+				// at our tip answers getheaders with an empty
+				// headers message, which handleHeaders turns
+				// into another syncBlocks call that lands
+				// here, so an ungated fan-out loops forever on
+				// an idle node.
+				if missed == 0 {
 					log.Debugf("nothing to do")
 					return
 				}
 
-				hp := func(ctx context.Context, p *rawpeer.RawPeer) {
-					if err = s.getHeadersByHashes(ctx, p, ib...); err != nil {
-						log.Errorf("missed block headers: %v %v",
-							p, err)
-						return
+				// Rate limit the fan-out here, after the
+				// have-filter, so a drain with nothing to do
+				// never burns the token. A suppressed fan-out
+				// is deferred, not lost: arm a single delayed
+				// fan-out for when the window reopens. It asks
+				// the same tip-anchored question, so it needs
+				// none of the hashes.
+				if !s.drainFanoutDue() {
+					s.mtx.Lock()
+					if !s.drainRetryPending {
+						s.drainRetryPending = true
+						wait := max(0, drainFanoutInterval-time.Since(s.drainFanout))
+						time.AfterFunc(wait, func() {
+							s.mtx.Lock()
+							s.drainRetryPending = false
+							s.mtx.Unlock()
+							// Skip if another fan-out
+							// took the token first; it
+							// asked the same question.
+							if ctx.Err() == nil && s.drainFanoutDue() {
+								s.pm.All(ctx, s.headersPeer)
+							}
+						})
 					}
+					s.mtx.Unlock()
+					log.Debugf("drain fan-out rate limited, %v missing", missed)
+					return
 				}
-				s.pm.All(ctx, hp)
+
+				// Ask every peer for the headers that follow
+				// our canonical tip, not for the announced
+				// hashes. A locator of hashes we lack makes
+				// peers answer with their children, which do
+				// not connect, and a locator of more than 101
+				// entries gets us disconnected by Bitcoin Core.
+				//
+				// pm.All, not pm.AllBlock, so one wedged peer
+				// cannot stall this goroutine for
+				// defaultCmdTimeout. If no request gets out,
+				// the periodic header refresh in Run asks
+				// again within headerRefreshInterval.
+				s.pm.All(ctx, s.headersPeer)
 			} else {
+				// Not synced: deliberately not rate limited.
+				// Sharing drainFanoutDue's token would let
+				// these calls starve the synced drain above.
 				log.Debugf("handle all")
 				s.pm.All(ctx, s.headersPeer)
 			}
@@ -1538,17 +2078,40 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
+	// Check contiguity once, outside s.mtx: it costs a double-SHA256 per
+	// header, the quiesce branch needs it to decide whether to buffer the
+	// message, and validation below reuses it.
+	shapeErr := verifyHeaderBatchShape(msg.Headers)
+
 	// When quiesced do not handle headers but do cache them.
 	s.mtx.Lock()
 	if s.indexing {
-		x := len(s.invBlocks)
-		for k := range msg.Headers {
-			s.invInsertUnlocked(msg.Headers[k].BlockHash())
+		// Record only the last header hash. A valid batch is a
+		// chain, so its tip is enough to note that we are behind;
+		// the drain's have-filter works out the rest.
+		if n := len(msg.Headers); n > 0 {
+			if s.invInsertUnlocked(msg.Headers[n-1].BlockHash()) {
+				log.Debugf("handleHeaders indexing %v %v",
+					len(msg.Headers), len(s.invBlocks))
+			}
 		}
-		if len(s.invBlocks) != x {
-			log.Debugf("handleHeaders indexing %v %v",
-				len(msg.Headers), len(s.invBlocks))
+
+		// An empty headers message means the peer thinks we are at the
+		// tip. There is nothing to buffer, but outside quiesce it kicks
+		// syncBlocks, which downloads missing blocks. Record it so the
+		// replay issues at most one kick for the whole pass.
+		if len(msg.Headers) == 0 {
+			s.deferredEmpty = true
 		}
+
+		// Buffer the header data, not just the hash, so it is applied
+		// once indexing finishes. Otherwise recovery depends on a
+		// later answer happening to arrive between indexing passes,
+		// which may never happen with a busy indexer.
+		if shapeErr == nil {
+			s.deferHeadersUnlocked(p, msg)
+		}
+
 		s.mtx.Unlock()
 		return ErrAlreadyIndexing
 	}
@@ -1565,7 +2128,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 					p, bhb.HH())
 			}
 		} else {
-			if s.cfg.MempoolEnabled && s.Synced(ctx).Synced {
+			if s.cfg.MempoolEnabled && s.Synced(ctx).Synced &&
+				s.mempoolFanoutDue() {
 				// Start building the mempool.
 				s.pm.All(ctx, s.mempoolPeer)
 			}
@@ -1573,6 +2137,11 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 
 		// Always call syncBlocks, it either downloads more blocks or
 		// kicks of indexing.
+		//
+		// Not rate limited: this (or its deferred replay) is what
+		// starts block download, as handleBlock's kick needs a block
+		// to arrive first. The synced drain's getheaders fan-out is
+		// rate limited inside syncBlocks instead.
 		go s.syncBlocks(ctx)
 
 		return nil
@@ -1609,8 +2178,27 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	if err := s.verifyHeadersPoW(msg.Headers); err != nil {
 		return fmt.Errorf("handle headers %v: %w", p, err)
 	}
-	if err := verifyHeaderBatchShape(msg.Headers); err != nil {
+	// Contiguity must be checked before the context gate below. It lets the
+	// gate treat a stored tip as proof that the whole batch is stored;
+	// otherwise a crafted batch [garbage, known_tip] would skip the context
+	// check.
+	if err := shapeErr; err != nil {
 		return fmt.Errorf("handle headers %v: %w", p, err)
+	}
+	// The context check is expensive: a retarget-boundary header walks ~2015
+	// ancestors. Skip it when the batch tip is already stored, since then
+	// every header in the batch is too and the insert admits nothing new.
+	// This stops a peer from cheaply replaying a known boundary header to
+	// force that walk. PoW and contiguity above still run on every message.
+	//
+	// verifyHeaderContext is a no-op on PoWNoRetargeting networks, so skip
+	// the tip lookup there as well.
+	if !s.chainParams.PoWNoRetargeting {
+		if _, err := s.db.BlockHeaderByHash(ctx, msg.Headers[len(msg.Headers)-1].BlockHash()); err != nil {
+			if err := s.verifyHeaderContext(ctx, msg.Headers); err != nil {
+				return fmt.Errorf("handle headers context %v: %w", p, err)
+			}
+		}
 	}
 
 	// When running in normal (not External Header) mode, do not set
@@ -1724,6 +2312,11 @@ func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeader
 	if err := verifyHeaderBatchShape(headers.Headers); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0, err
 	}
+	// Difficulty is deliberately not checked here nor in AddExternalHeaders.
+	// Both are driven by op-geth, which does its own hVM difficulty
+	// enforcement and expects TBC to trust what it pushes; checking here
+	// would reject headers op-geth considers valid. Untrusted headers arrive
+	// via handleHeaders, which checks PoW and verifyHeaderContext.
 	return s.db.BlockHeadersInsert(ctx, headers, nil)
 }
 
@@ -1878,7 +2471,16 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 	log.Tracef("handleInv (%v)", p)
 	defer log.Tracef("handleInv exit (%v)", p)
 
-	var txsFound bool
+	// Bound the header lookups an adversarial inv can force: a block inv
+	// may carry up to 50000 entries, each costing a BlockHeaderByHash read.
+	// We never send getblocks, so real block invs are small tip
+	// announcements far below maxInvBlockScan. Anything dropped past the cap
+	// is recovered by the periodic header refresh.
+
+	var (
+		txsFound     bool
+		blockScanned int
+	)
 
 	for _, v := range msg.InvList {
 		switch v.Type {
@@ -1889,10 +2491,24 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 			// at a time while taking a mutex.
 			txsFound = true
 		case wire.InvTypeBlock:
+			// Past the cap, skip the lookup but keep scanning so
+			// trailing tx invs are still seen.
+			if blockScanned++; blockScanned > maxInvBlockScan {
+				if blockScanned == maxInvBlockScan+1 {
+					log.Debugf("handleInv (%v): block scan truncated at %v of %v entries",
+						p, maxInvBlockScan, len(msg.InvList))
+				}
+				continue
+			}
 			// Make sure we haven't seen block header yet.
+			//
+			// Skip only this entry. Peers batch announcements in
+			// ascending height order, so a known hash is often
+			// followed by ones we still need, and those are not
+			// re-announced.
 			_, _, err := s.BlockHeaderByHash(ctx, v.Hash)
 			if err == nil {
-				return nil
+				continue
 			}
 			if s.invInsert(v.Hash) {
 				log.Debugf("inventory block: %v", v.Hash)
@@ -1939,16 +2555,22 @@ func (s *Server) handleGetData(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		case wire.InvTypeError:
 			log.Errorf("get data error: %v", v.Hash)
 		case wire.InvTypeTx:
+			// Copy under the lock and write outside it, otherwise
+			// a peer that stops reading its socket stalls every
+			// s.mtx writer for defaultCmdTimeout.
 			s.mtx.RLock()
-			if tx, ok := s.broadcast[v.Hash]; ok {
+			tx, ok := s.broadcast[v.Hash]
+			var txc *wire.MsgTx
+			if ok {
+				txc = tx.Copy()
+			}
+			s.mtx.RUnlock()
+			if ok {
 				log.Debugf("handleGetData %v", spew.Sdump(msg))
-				txc := tx.Copy()
-				err := p.Write(defaultCmdTimeout, txc)
-				if err != nil {
+				if err := p.Write(defaultCmdTimeout, txc); err != nil {
 					log.Errorf("write tx: %v", err)
 				}
 			}
-			s.mtx.RUnlock()
 		case wire.InvTypeBlock:
 			log.Infof("get data block: %v", v.Hash)
 		case wire.InvTypeFilteredBlock:
@@ -1964,6 +2586,156 @@ func (s *Server) handleGetData(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		}
 	}
 
+	return nil
+}
+
+var paramsIdentityKey = []byte("paramsidentity")
+
+// paramsIdentity is a stable fingerprint of the Bitcoin network/params this
+// server is configured for. verifyDatadirIdentity stamps it into a mainnet
+// datadir and refuses to start on a stamp for other params.
+func (s *Server) paramsIdentity() []byte {
+	p := s.chainParams
+	h := sha256.New()
+	// PowLimit (the big.Int the proof-of-work checks actually use) as well as
+	// its compact PowLimitBits: a params set can change one without the other.
+	fmt.Fprintf(h, "net=%s;magic=%d;genesis=%s;powbits=%08x;powlimit=%s;reducemin=%t;noretarget=%t;timespan=%d;perblock=%d",
+		p.Name, s.wireNet, p.GenesisHash, p.PowLimitBits, p.PowLimit.Text(16),
+		p.ReduceMinDifficulty, p.PoWNoRetargeting, p.TargetTimespan, p.TargetTimePerBlock)
+	return h.Sum(nil)
+}
+
+// verifyDatadirIdentity refuses to start when the datadir was built for a
+// different Bitcoin network/params than the one configured.
+//
+// Once written, the params-identity stamp is authoritative: a matching stamp
+// means the datadir was verified when stamped, so none of the checks below are
+// re-run. op-geth may later push a tip that is not held to our PowLimit, so
+// re-checking on every restart would brick a correct node. A stamp for other
+// params is refused.
+//
+// An unstamped (legacy or fresh) datadir is checked once, then stamped:
+//
+//  1. The stored canonical tip must meet the configured network's proof-of-work
+//     limit. This catches a wrong-params datadir even when the genesis hash
+//     matches (e.g. a trivial-PoW datadir reusing the mainnet genesis).
+//     Exception: a failing tip is accepted when a real mainnet checkpoint at
+//     or below it is stored (see below).
+//  2. The configured genesis must be present, so a legacy datadir built for a
+//     different network whose tip merely happens to meet our PowLimit is not
+//     blessed.
+//  3. The indexed frontier (utxo, tx and keystone index heads) must meet it
+//     too. A trivial-PoW chain later extended with real-PoW headers still
+//     carries trivial-PoW headers the indexers already consumed, and the
+//     frontier is what peer acceptance and block download key on. The same
+//     checkpoint exception as the tip's applies.
+func (s *Server) verifyDatadirIdentity(ctx context.Context) error {
+	// Mainnet only. Test networks (localnet, upgradetest) use synthetic,
+	// unmined headers that legitimately fail a real PowLimit check, so
+	// checking there would reject valid test datadirs.
+	if s.cfg.Network != "mainnet" {
+		return nil
+	}
+
+	want := s.paramsIdentity()
+	got, err := s.db.MetadataGet(ctx, paramsIdentityKey)
+	if err == nil {
+		if !bytes.Equal(got, want) {
+			return fmt.Errorf("datadir network mismatch: this datadir is stamped for a "+
+				"different params set than the configured network %q. Refusing to start; "+
+				"wipe the datadir or fix --tbc.network", s.cfg.Network)
+		}
+		return nil
+	}
+	if !errors.Is(err, database.ErrNotFound) {
+		return fmt.Errorf("datadir identity get: %w", err)
+	}
+
+	// Unstamped: verify before stamping.
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return fmt.Errorf("datadir identity best header: %w", err)
+	}
+	if err := s.datadirHeaderMeetsPowLimit(bhb, "the stored canonical tip"); err != nil {
+		// A failing tip alone does not prove a wrong network, since
+		// op-geth headers are not PoW-checked. Accept it when a real
+		// checkpoint at or below the tip is stored: a suffix mined at a
+		// trivial target has trivial work, so the first real header
+		// reorgs it away. (A header planted with inflated claimed Bits
+		// is not outweighed, but this check does not make that worse.)
+		if !s.datadirHasCheckpoint(ctx, bhb.Height) {
+			return err
+		}
+	}
+	if _, _, err := s.BlockHeaderByHash(ctx, *s.chainParams.GenesisHash); err != nil {
+		return fmt.Errorf("datadir network mismatch: configured genesis %v is "+
+			"absent from this datadir (built for a different network?); refusing "+
+			"to start: %w", s.chainParams.GenesisHash, err)
+	}
+	for _, idx := range []struct {
+		name string
+		head func(context.Context) (*HashHeight, error)
+	}{
+		{"the utxo index head", s.UtxoIndexHash},
+		{"the tx index head", s.TxIndexHash},
+		{"the keystone index head", s.KeystoneIndexHash},
+	} {
+		hh, err := idx.head(ctx)
+		if err != nil {
+			return fmt.Errorf("datadir identity %v: %w", idx.name, err)
+		}
+		if hh.Hash == (chainhash.Hash{}) || hh.Hash.IsEqual(s.chainParams.GenesisHash) {
+			continue // never indexed, or indexed only to genesis
+		}
+		bh, err := s.db.BlockHeaderByHash(ctx, hh.Hash)
+		if err != nil {
+			return fmt.Errorf("datadir network mismatch: %v %v is not a stored "+
+				"header; refusing to start: %w", idx.name, hh.Hash, err)
+		}
+		if err := s.datadirHeaderMeetsPowLimit(bh, idx.name); err != nil {
+			// Same checkpoint exception as the tip. A trivial-PoW suffix
+			// is reorged away at any depth and the indexers unwind with it.
+			if !s.datadirHasCheckpoint(ctx, bh.Height) {
+				return err
+			}
+		}
+	}
+	if err := s.db.MetadataPut(ctx, paramsIdentityKey, want); err != nil {
+		return fmt.Errorf("datadir identity stamp: %w", err)
+	}
+	return nil
+}
+
+// datadirHasCheckpoint reports whether any non-genesis checkpoint at or below
+// height is stored as a header at its checkpoint height.
+func (s *Server) datadirHasCheckpoint(ctx context.Context, height uint64) bool {
+	for _, cp := range s.checkpoints { // sorted high to low
+		if cp.height == 0 || cp.height > height {
+			continue
+		}
+		if bh, err := s.db.BlockHeaderByHash(ctx, cp.hash); err == nil && bh.Height == cp.height {
+			return true
+		}
+	}
+	return false
+}
+
+// datadirHeaderMeetsPowLimit fails closed, with the datadir-mismatch error, when
+// bh does not meet the configured network's proof-of-work limit.
+func (s *Server) datadirHeaderMeetsPowLimit(bh *tbcd.BlockHeader, what string) error {
+	wbh, err := bh.Wire()
+	if err != nil {
+		return fmt.Errorf("datadir identity decode %v: %w", what, err)
+	}
+	if err := blockchain.CheckBlockHeaderSanity(wbh, s.chainParams.PowLimit,
+		deterministicTimeSource{}, blockchain.BFNone); err != nil {
+		return fmt.Errorf("datadir network mismatch: %v %v does "+
+			"not meet the configured network %q proof-of-work limit -- this datadir was "+
+			"probably built for a different network/params. Refusing to start. Check "+
+			"--tbc.network; if it is correct, do not wipe this datadir -- report this "+
+			"error. underlying: %w",
+			what, bh.Hash, s.cfg.Network, err)
+	}
 	return nil
 }
 
@@ -2750,7 +3522,12 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 			return
 		default:
 		}
-		panic(err)
+		// Don't panic. The database may already be closed (ErrClosed) and
+		// op-geth calls Synced with its own ctx, which is not cancelled at
+		// shutdown. Report not synced instead.
+		log.Errorf("synced: block header best: %v", err)
+		si.Synced = false
+		return
 	}
 	// Ensure we have genesis or the Synced flag will be true if metadata
 	// does not exist.
@@ -2783,7 +3560,13 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	// expensive check
 	bm, err := s.db.BlocksMissing(ctx, maxMissing)
 	if err != nil {
-		panic(err)
+		// Don't panic. Synced is called from peer goroutines and directly
+		// by op-geth, so a damaged blocks-missing index or transient read
+		// error would kill the process. Report not synced instead; that
+		// resolves on the next successful read.
+		log.Errorf("synced: blocks missing: %v", err)
+		si.Synced = false
+		return
 	}
 	if len(bm) >= maxMissing {
 		// -1 is sentinel meaning > 64
@@ -3076,6 +3859,11 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	}
 
+	// On mainnet, refuse to run against a datadir built for other params.
+	if err := s.verifyDatadirIdentity(ctx); err != nil {
+		return err
+	}
+
 	// HTTP server
 	httpErrCh := make(chan error)
 	if s.cfg.ListenAddress != "" {
@@ -3201,6 +3989,20 @@ func (s *Server) Run(pctx context.Context) error {
 				case <-time.After(13 * time.Second):
 				}
 				s.pm.All(ctx, s.pingPeer)
+			}
+		}()
+
+		// header refresh loop; see headerRefreshInterval.
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(headerRefreshInterval):
+				}
+				s.pm.All(ctx, s.headersPeer)
 			}
 		}()
 	}
