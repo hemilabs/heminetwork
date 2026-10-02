@@ -167,10 +167,10 @@ const (
 	// is capped by handshakeSem.
 	maxHandshakesPerIP = 2
 
-	// envelopeRateLimit caps the number of EncryptedPayload
-	// messages accepted from a single sender identity per
-	// minute.  Prevents signature verification amplification
-	// attacks where an attacker floods unique envelopes.
+	// envelopeRateLimit caps how many verified, correctly-addressed
+	// EncryptedPayload messages one sender may send per envelopeRateTTL.
+	// It is a per-sender message-rate limit, not a bound on Verify cost
+	// (see decryptPayload).
 	envelopeRateLimit = 199
 	envelopeRateTTL   = 61 * time.Second
 
@@ -432,9 +432,9 @@ type Server struct {
 	// table so they cannot miss a bind that lands in between.
 	keyBound chan struct{}
 
-	// Per-sender envelope rate counter — limits how many
-	// EncryptedPayload messages are accepted from one sender
-	// before signature verification is skipped.
+	// Per-sender envelope rate counter.  Counted only after Verify and
+	// OpenBox (see decryptPayload), so forgeries and replays addressed
+	// elsewhere never touch it.
 	envelopeRates *ttl.TTL
 
 	// Message deduplication — prevents forwarding loops in
@@ -1914,27 +1914,10 @@ func (s *Server) SendEncrypted(dest Identity, cmd any) error {
 func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 	log.Tracef("decryptPayload sender %v type %v", ep.Sender, ep.InnerType)
 
-	// Per-sender envelope rate gate (F3): limit how many
-	// envelopes we accept from one sender before paying the
-	// secp256k1 Verify cost (~200μs).  Prevents signature
-	// verification amplification via forged envelopes.
-	if s.envelopeRates != nil {
-		key := ep.Sender.String()
-		if v, _, err := s.envelopeRates.Get(key); err == nil {
-			count := v.(*atomic.Int64)
-			if count.Add(1) > int64(envelopeRateLimit) {
-				s.envRateDrops.Add(1)
-				return nil, fmt.Errorf("envelope rate limited: %v", ep.Sender)
-			}
-		} else {
-			counter := new(atomic.Int64)
-			counter.Store(1)
-			s.envelopeRates.Put(context.Background(), envelopeRateTTL,
-				key, counter, nil, nil)
-		}
-	}
-
-	// Verify sender signature before touching the box.
+	// Verify the sender signature first.  Everything below is keyed on or
+	// attributed to ep.Sender, which is attacker-chosen until the signature
+	// is checked (H-10: counting an envelope before Verify lets a peer
+	// exhaust a victim's rate budget with forgeries stamped ep.Sender=victim).
 	hash := hashEncryptedPayload(&ep.EphemeralPub, &ep.Nonce, ep.Sender, ep.InnerType, ep.Ciphertext)
 	if _, err := Verify(hash, ep.Sender, ep.Signature); err != nil {
 		return nil, fmt.Errorf("envelope signature: %w", err)
@@ -1949,6 +1932,28 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 	plaintext, err := OpenBox(ep, recipientPriv)
 	if err != nil {
 		return nil, err
+	}
+
+	// Per-sender envelope rate gate (F3).  Count only now, after Verify (the sender
+	// signed these bytes) and OpenBox (the box was sealed to us): a forgery
+	// fails Verify and a replay addressed elsewhere fails OpenBox, so neither
+	// reaches this point.  This limits a verified sender's message rate; it does
+	// not bound Verify cost (ep.Sender rotation defeats a per-sender counter),
+	// which is peerLimiter's job.
+	if s.envelopeRates != nil {
+		key := ep.Sender.String()
+		if v, _, err := s.envelopeRates.Get(key); err == nil {
+			count := v.(*atomic.Int64)
+			if count.Add(1) > int64(envelopeRateLimit) {
+				s.envRateDrops.Add(1)
+				return nil, fmt.Errorf("envelope rate limited: %v", ep.Sender)
+			}
+		} else {
+			counter := new(atomic.Int64)
+			counter.Store(1)
+			s.envelopeRates.Put(context.Background(), envelopeRateTTL,
+				key, counter, nil, nil)
+		}
 	}
 
 	// Replay protection analysis.
@@ -1982,11 +1987,14 @@ func (s *Server) decryptPayload(ep *EncryptedPayload) (any, error) {
 	//    idempotent — duplicate results for a completed ceremony
 	//    are logged and dropped.
 	//
-	// If a future protocol change routes non-idempotent encrypted
-	// commands through the mesh, add a per-sender nonce registry
-	// here: reject if (Sender, Nonce) was already seen.  The NaCl
-	// box nonce is random per SealBox and invariant across replays,
-	// so collision == replay.
+	// Same-recipient replay: a victim's own genuine envelope to this
+	// node, re-injected, still verifies and decrypts, so it refreshes
+	// the victim's rate bucket (left to M-10).  If a future protocol
+	// change routes non-idempotent encrypted commands through the mesh,
+	// add a per-sender nonce registry ahead of the rate gate above:
+	// reject if (Sender, Nonce) was already seen.  The NaCl box nonce is
+	// random per SealBox and invariant across replays, so collision ==
+	// replay.
 
 	// Decode using the InnerType hint.
 	ct, ok := str2pt[ep.InnerType]
