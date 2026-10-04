@@ -16,10 +16,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -83,8 +85,9 @@ const (
 	pingTimeout = 13 * time.Second
 
 	// maintainInterval is how often the server checks whether it
-	// needs to dial additional peers.  Prime, distinct from ping.
-	maintainInterval = 67 * time.Second
+	// needs to dial additional peers.  peerTTL/3 (~22s) gives several
+	// redial ticks within a peer row's lifetime.
+	maintainInterval = peerTTL / 3
 
 	// seenTTL is the duration a message hash stays in the dedup
 	// cache.  Prime, ~1 minute.  After expiry the same message
@@ -287,13 +290,13 @@ type Config struct {
 	PingInterval            time.Duration // 0 uses default (61s)
 	PingTimeout             time.Duration // 0 uses default (19s)
 	InitialPingTimeout      time.Duration // 0 uses default (5s); increase for slow CI
-	MaintainInterval        time.Duration // 0 uses default (67s)
+	MaintainInterval        time.Duration // 0 uses default (peerTTL/3, ~22s)
 	PprofListenAddress      string
 	PreParamsTimeout        time.Duration // 0 uses default (1m); increase for slow CI
 	PrivateKey              string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
-	Seeds                   []string      // DNS seed hostnames, format host:port
+	Seeds                   []string      // DNS seed hostnames (host:port); ignored when Connect is set, at startup and in recovery
 	MaxPeers                int           // 0 uses default (256)
 	AdminListenAddress      string        // empty = no admin listener
 	CeremonyTimeout         time.Duration // 0 uses default (13m)
@@ -392,15 +395,30 @@ type Server struct {
 	// cycling connections to monopolize handshake slots.
 	connCooldown *ttl.TTL
 
-	// dnsLookups rate-limits DNS verification per remote IP.
-	// Prevents attackers from forcing unbounded TXT queries by
-	// repeatedly connecting.  Keyed by IP string, TTL of 60s.
+	// dnsLookups rate-limits DNS verification per remote IP, and caches a
+	// verified inbound identity so a same-identity reconnect is not refused.
+	// Keyed by a namespaced IP string (inbound "" vs outbound "out|", so an
+	// outbound dial cannot consume a peer's inbound token), ~59s TTL.
 	dnsLookups *ttl.TTL
 
 	// Peer tracking
 	peers    map[Identity]*PeerRecord // all known peers
 	peersTTL *ttl.TTL                 // expiry for known peers
 	pings    *ttl.TTL                 // unanswered ping timeout
+
+	// Recovery state for reconnecting after an outage expires s.peers
+	// (connectRandom dials only from s.peers). Recovery dials ONLY trusted
+	// static config (cfg.Connect, or cfg.Seeds when no Connect is configured):
+	// connectID maps a configured Connect address to the identity last
+	// authenticated there so recovery skips a Connect peer that still has a live
+	// session; connectSelfAt records when a Connect address last resolved to
+	// ourselves, so recovery suppresses that anchor for only peerTTL (a stale
+	// self-landing from a transient round-robin/LB/spoof then retries rather
+	// than dropping the anchor until restart); lastRecoverySeed rate-limits the
+	// DNS seed re-run to once per peerTTL. All guarded by mtx.
+	connectID        map[string]Identity
+	connectSelfAt    map[string]time.Time
+	lastRecoverySeed time.Time
 
 	// Per-identity message rate limiters, keyed by peer Identity.
 	// Held across sessions so a reconnect does not hand the peer a
@@ -1119,9 +1137,9 @@ func (s *Server) handle(ctx context.Context, id *Identity, t *Transport, admin b
 
 // pingLoop sends periodic PingRequest heartbeats to the peer.  It exits
 // when ctx is cancelled (handle() returned) or a write fails.
-// After each ping, a TTL is armed; if no pong arrives before it
-// expires, pingExpired closes the transport which breaks the blocked
-// read in handle().
+// Before each ping a TTL is armed (sized to include the write's own
+// budget); if no pong arrives before it expires, pingExpired closes the
+// transport, breaking the blocked read in handle().
 func (s *Server) pingLoop(ctx context.Context, id *Identity, t *Transport) {
 	defer s.wg.Done()
 
@@ -1142,20 +1160,24 @@ func (s *Server) pingLoop(ctx context.Context, id *Identity, t *Transport) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Cancel any previous unanswered ping.
+			// Cancel any previous unanswered ping, then arm the timeout
+			// BEFORE sending: a pong can race in and Cancel between the
+			// write and an arm-after-write, leaving a timer nothing cancels
+			// so pingExpired would close an honest session. Add writeTimeout
+			// to the budget since the timer now also covers the write itself,
+			// so a congested peer that still answers is not dropped.
 			_ = s.pings.Cancel(*id)
+			s.pings.Put(ctx, timeout+writeTimeout, *id, t, s.pingExpired, nil)
 
 			err := t.Write(s.secret.Identity, PingRequest{
 				OriginTimestamp: time.Now().Unix(),
 			})
 			if err != nil {
+				// No pong is coming; disarm so pingExpired does not fire.
+				_ = s.pings.Cancel(*id)
 				log.Debugf("ping %v failed: %v", id, err)
 				return
 			}
-
-			// Arm timeout — pingExpired closes the transport
-			// if no pong arrives.
-			s.pings.Put(ctx, timeout, *id, t, s.pingExpired, nil)
 		}
 	}
 }
@@ -1211,6 +1233,18 @@ func (s *Server) maintainConnections(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	// When below PeersWanted, dial from two sources: recoverConnections (trusted
+	// static config — cfg.Connect anchors, or Seeds when no Connect — which
+	// gossip cannot steer) and connectRandom (gossip-learned peers from the peer
+	// table, which expires after an outage and on an island holds only peers we
+	// already have). INVARIANT: an anchor or seed dial never shares a tick with
+	// connectRandom. Otherwise an attacker gossiping decoy peers at a Connect
+	// anchor's IP could, in the same tick as the anchor dial, take the anchor's
+	// per-source handshake slots and starve recovery. Even ticks run recovery
+	// first and fall through to connectRandom only when recovery dispatched
+	// nothing (all anchors live); odd ticks run connectRandom. Recovery goes
+	// first so an outage heals promptly; tick advances only while below target.
+	tick := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -1222,7 +1256,18 @@ func (s *Server) maintainConnections(ctx context.Context) {
 			s.mtx.RUnlock()
 
 			if active < want {
-				s.connectRandom(ctx)
+				// Alternate so gossip decoys never share a tick with the anchor
+				// dial, but when recovery dispatched nothing (all anchors live)
+				// fall through to connectRandom so gossip mesh-fill is not
+				// needlessly halved.
+				if tick%2 == 0 {
+					if !s.recoverConnections(ctx) {
+						s.connectRandom(ctx)
+					}
+				} else {
+					s.connectRandom(ctx)
+				}
+				tick++
 			}
 		}
 	}
@@ -1276,7 +1321,7 @@ func (s *Server) seed(ctx context.Context) {
 			addr := net.JoinHostPort(ip, port)
 			log.Infof("seed resolved %v -> %v", v, addr)
 			s.wg.Add(1)
-			go s.connectPeer(ctx, addr, gossipAddr)
+			go s.connectPeer(ctx, addr, gossipAddr, nil, dialSeed)
 		}
 	}
 }
@@ -1332,14 +1377,25 @@ func isHostname(host string) bool {
 }
 
 // dnsRateLimited returns true if the remote IP has exceeded the DNS
-// lookup rate limit.  Keyed by IP string with a 60s TTL — each IP
-// gets one lookup attempt per minute.  The handshake semaphore limits
-// concurrency; this limits frequency.
+// lookup rate limit in the inbound namespace.  Keyed by IP string with a
+// ~60s TTL — each IP gets one lookup attempt per minute.  The handshake
+// semaphore limits concurrency; this limits frequency.
 func (s *Server) dnsRateLimited(remoteAddr net.Addr) bool {
+	return s.dnsRateLimitedNS(remoteAddr, "")
+}
+
+// dnsRateLimitedNS is dnsRateLimited within a key namespace.  Outbound gossip
+// dials use a separate namespace ("out|") from inbound verification (""), so an
+// outbound dial to a peer's IP cannot consume the inbound token that same peer
+// needs to reconnect — otherwise a gossip attacker could make us dial a
+// victim's IP and thereby lock the victim's own inbound reconnect out of a
+// DNSAll node (both paths previously shared one bare-IP key).
+func (s *Server) dnsRateLimitedNS(remoteAddr net.Addr, ns string) bool {
 	host, _, err := net.SplitHostPort(remoteAddr.String())
 	if err != nil {
 		return false
 	}
+	host = ns + host
 	if _, _, err := s.dnsLookups.Get(host); err == nil {
 		return true // already looked up recently
 	}
@@ -1362,7 +1418,10 @@ func (s *Server) dnsRateLimited(remoteAddr net.Addr) bool {
 //
 // In forward mode, IP-only peers are rejected — only nodes that
 // advertise a verifiable hostname in gossip are accepted.
-func (s *Server) verifyOutboundDNS(ctx context.Context, dialTarget string, remoteAddr net.Addr, id Identity) error {
+// limit gates the per-IP DNS rate limiter: pass true for an untrusted (gossip)
+// dial and false for a trusted Connect/Seed dial, so a flood of gossip lookups
+// to a configured peer's IP cannot deny the trusted dial its verification.
+func (s *Server) verifyOutboundDNS(ctx context.Context, dialTarget string, remoteAddr net.Addr, id Identity, limit bool) error {
 	if s.cfg.DNS == DNSOff {
 		return nil
 	}
@@ -1376,7 +1435,7 @@ func (s *Server) verifyOutboundDNS(ctx context.Context, dialTarget string, remot
 		// Forward verification — available in forward and all modes.
 		switch s.cfg.DNS {
 		case DNSForward, DNSAll:
-			if s.dnsRateLimited(remoteAddr) {
+			if limit && s.dnsRateLimitedNS(remoteAddr, "out|") {
 				return fmt.Errorf("dns rate limited: %v", remoteAddr)
 			}
 			return s.verifyDNSIdentity(ctx, host, id)
@@ -1389,7 +1448,7 @@ func (s *Server) verifyOutboundDNS(ctx context.Context, dialTarget string, remot
 	case DNSForward:
 		return fmt.Errorf("dns forward: rejecting IP-only peer %v", dialTarget)
 	case DNSReverse, DNSAll:
-		if s.dnsRateLimited(remoteAddr) {
+		if limit && s.dnsRateLimitedNS(remoteAddr, "out|") {
 			return fmt.Errorf("dns rate limited: %v", remoteAddr)
 		}
 		ok, err := VerifyRemoteDNSIdentity(ctx, s.dnsResolver(), remoteAddr, id)
@@ -1420,6 +1479,23 @@ func (s *Server) verifyInboundDNS(ctx context.Context, remoteAddr net.Addr, id I
 	}
 	switch s.cfg.DNS {
 	case DNSReverse, DNSAll:
+		host, _, _ := net.SplitHostPort(remoteAddr.String())
+		// Serve a same-identity reconnect from the cached positive result
+		// instead of rate-limiting it: the per-IP limiter otherwise refuses a
+		// legitimate peer that reconnects from the same IP within the window.
+		// Safe because the identity is already crypto-authenticated by the
+		// handshake (reverse DNS is defense-in-depth), and the entry is written
+		// only after a successful verify. A new or different identity from that
+		// IP is still rate-limited and verified. (The related cross-direction
+		// starvation — an outbound dial burning this inbound token — is
+		// prevented by the "out|" namespace split in dnsRateLimitedNS.)
+		if host != "" && s.dnsLookups != nil {
+			if v, _, err := s.dnsLookups.Get(host); err == nil {
+				if vid, ok := v.(Identity); ok && vid == id {
+					return nil
+				}
+			}
+		}
 		if s.dnsRateLimited(remoteAddr) {
 			return fmt.Errorf("dns rate limited: %v", remoteAddr)
 		}
@@ -1430,13 +1506,18 @@ func (s *Server) verifyInboundDNS(ctx context.Context, remoteAddr net.Addr, id I
 		if !ok {
 			return fmt.Errorf("dns reverse identity mismatch: %v", remoteAddr)
 		}
+		// Cache the verified identity for this IP so the next same-identity
+		// reconnect is served above rather than refused by the limiter.
+		if host != "" && s.dnsLookups != nil {
+			s.dnsLookups.Put(context.Background(), 59*time.Second, host, id, nil, nil)
+		}
 	}
 	return nil
 }
 
 // connectRandom picks a random known peer that has no active session
 // and dials it.  Errors are logged, not fatal.
-func (s *Server) connectRandom(ctx context.Context) {
+func (s *Server) connectRandom(ctx context.Context) int {
 	s.mtx.RLock()
 	gap := s.cfg.PeersWanted - len(s.sessions)
 	candidates := make([]PeerRecord, 0, len(s.peers))
@@ -1464,7 +1545,7 @@ func (s *Server) connectRandom(ctx context.Context) {
 	s.mtx.RUnlock()
 
 	if gap <= 0 || len(candidates) == 0 {
-		return
+		return 0
 	}
 
 	// Shuffle to avoid topology clustering using crypto/rand.
@@ -1489,9 +1570,160 @@ func (s *Server) connectRandom(ctx context.Context) {
 		pr := candidates[i]
 		log.Infof("maintainConnections: dialing %v at %v",
 			pr.Identity, pr.Address)
+		id := pr.Identity
 		s.wg.Add(1)
-		go s.connectPeer(ctx, pr.Address, "")
+		go s.connectPeer(ctx, pr.Address, "", &id, dialGossip)
 	}
+	return gap
+}
+
+// dialSource tags where connectPeer's address came from, which decides how (and
+// whether) a successful dial is remembered for later recovery.
+type dialSource int
+
+const (
+	dialGossip  dialSource = iota // gossip-advertised or admin-added (untrusted) target
+	dialSeed                      // resolved from a configured DNS seed
+	dialConnect                   // a configured Connect peer
+)
+
+// canonAddr normalizes a dial address string for stable comparison: a valid
+// ip:port is canonicalized (leading-zero ports, IPv4-mapped forms) and a
+// hostname is lowercased. It returns "" if addr is not a valid host:port. It is
+// used to key connectID by a configured Connect address.
+func canonAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+	pn, err := strconv.Atoi(port)
+	if err != nil || pn < 1 || pn > 65535 {
+		return ""
+	}
+	port = strconv.Itoa(pn)
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return net.JoinHostPort(ip.Unmap().String(), port)
+	}
+	return net.JoinHostPort(strings.ToLower(host), port)
+}
+
+// rememberConnect records the identity last authenticated at a configured
+// Connect address, so recovery can skip Connect peers that currently have a
+// live session instead of redialing them every tick. The map is bounded by the
+// static size of cfg.Connect.
+func (s *Server) rememberConnect(addr string, id Identity) {
+	canon := canonAddr(addr)
+	if canon == "" {
+		canon = addr
+	}
+	s.mtx.Lock()
+	if s.connectID == nil {
+		s.connectID = make(map[string]Identity)
+	}
+	s.connectID[canon] = id
+	// Track self-landings so connectAnchors can time-bound (not permanently
+	// drop) a Connect address that resolved to us; a real peer there clears it.
+	if id == s.secret.Identity {
+		if s.connectSelfAt == nil {
+			s.connectSelfAt = make(map[string]time.Time)
+		}
+		s.connectSelfAt[canon] = time.Now()
+	} else {
+		delete(s.connectSelfAt, canon)
+	}
+	s.mtx.Unlock()
+}
+
+// connectAnchors returns configured Connect addresses with no live session,
+// canonicalized. cfg.Connect is operator-provided trust-anchor config and the
+// sole recovery dial source (gossip cannot steer it), redialed by
+// recoverConnections while the session count is below PeersWanted. An
+// already-connected Connect peer is skipped (by the identity we authenticated
+// there, not by the gossip-rewritable peer table) so recovery does not churn
+// it, and a Connect address that resolved to us is suppressed for ~peerTTL.
+func (s *Server) connectAnchors() []string {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	out := make([]string, 0, len(s.cfg.Connect))
+	seen := make(map[string]struct{}, len(s.cfg.Connect))
+	for _, a := range s.cfg.Connect {
+		canon := canonAddr(a)
+		if canon == "" {
+			canon = a
+		}
+		if canon == s.listenAddress {
+			continue
+		}
+		// In forward mode an IP-literal anchor can never pass TXT
+		// verification, so dialing it every tick is pure churn; skip it
+		// (reverse/all verify IPs, so they are kept).
+		if s.cfg.DNS == DNSForward {
+			if host, _, err := net.SplitHostPort(canon); err == nil && !isHostname(host) {
+				continue
+			}
+		}
+		if _, dup := seen[canon]; dup {
+			continue
+		}
+		seen[canon] = struct{}{}
+		if id, ok := s.connectID[canon]; ok {
+			if id == s.secret.Identity {
+				// A Connect address that resolved to us. Suppress it for only
+				// peerTTL so a transient self-landing (round-robin/LB/spoof)
+				// retries instead of dropping the anchor until restart.
+				if time.Since(s.connectSelfAt[canon]) < peerTTL {
+					continue
+				}
+			} else if _, live := s.sessions[id]; live {
+				continue
+			}
+		}
+		out = append(out, canon)
+	}
+	return out
+}
+
+// recoverConnections re-establishes peers after an outage expires s.peers
+// (connectRandom dials only from s.peers). It redials ONLY trusted static
+// config so no gossip-supplied or runtime-learned address can steer or flush
+// recovery: every not-yet-connected cfg.Connect anchor, or — when no Connect is
+// configured — a rate-limited DNS seed round (matching startup, where Connect
+// takes precedence over Seeds). A node with neither Connect nor Seeds has no
+// gossip-independent recovery source and relies on inbound connections;
+// operators of eclipse-sensitive nodes should configure Connect or Seeds. It
+// returns true if it dispatched work (an anchor dial or a due seed round), so
+// the caller can fall through to connectRandom on a tick where recovery had
+// nothing to do.
+func (s *Server) recoverConnections(ctx context.Context) bool {
+	dispatched := false
+	for _, addr := range s.connectAnchors() {
+		log.Infof("recoverConnections: dialing Connect anchor %v", addr)
+		dispatched = true
+		s.wg.Add(1)
+		go s.connectPeer(ctx, addr, "", nil, dialConnect)
+	}
+
+	// Seeds are a fallback only when no Connect is configured (Connect takes
+	// precedence, as at startup). Re-resolve at most once per peerTTL so a
+	// sustained outage does not spam DNS every maintain tick. seed() can block
+	// on lookups, so run it in the background.
+	if len(s.cfg.Connect) == 0 && len(s.cfg.Seeds) > 0 {
+		s.mtx.Lock()
+		due := s.lastRecoverySeed.IsZero() || time.Since(s.lastRecoverySeed) >= peerTTL
+		if due {
+			s.lastRecoverySeed = time.Now()
+		}
+		s.mtx.Unlock()
+		if due {
+			dispatched = true
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				s.seed(ctx)
+			}()
+		}
+	}
+	return dispatched
 }
 
 // tcpKeepAlive enables TCP keepalive on conn with the given period.
@@ -1519,7 +1751,13 @@ func tcpKeepAlive(conn net.Conn, period time.Duration) {
 // for DNS verification.  When empty, addr is used for both.  seed()
 // passes a hostname:port gossipAddr in forward/all mode so the mesh
 // gossips hostnames instead of resolved IPs.
-func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
+//
+// expect, when non-nil, is the identity a gossip PeerRecord claims at addr
+// (passed by connectRandom); a mismatch is rejected so a lying record cannot
+// get us to treat an attacker as someone else.  src tags the address
+// provenance; only a dialConnect success records its authenticated identity in
+// connectID (used to skip a live, or recently self-landing, anchor).
+func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string, expect *Identity, src dialSource) {
 	defer s.wg.Done()
 
 	log.Debugf("connectPeer: %v", addr)
@@ -1568,23 +1806,58 @@ func (s *Server) connectPeer(ctx context.Context, addr, gossipAddr string) {
 		return
 	}
 
-	// Defense-in-depth: reject self even if the address didn't
-	// match (e.g. hostname resolved to our IP, NAT hairpin).
-	if *them == s.secret.Identity {
-		log.Warningf("connectPeer: connected to self at %v", addr)
-		return
-	}
-
-	// DNS verification based on peer address from gossip.
-	// Hostname addresses get forward TXT verification.
-	// IP addresses get reverse DNS verification (if enabled).
+	// recordAddr is the verifiable address (a gossip hostname in forward mode),
+	// used for DNS verification and as the connectID key.
 	recordAddr := gossipAddr
 	if recordAddr == "" {
 		recordAddr = addr
 	}
-	if err := s.verifyOutboundDNS(ctx, recordAddr, conn.RemoteAddr(), *them); err != nil {
+
+	// Defense-in-depth: reject self even if the address didn't match (e.g.
+	// hostname resolved to our IP, NAT hairpin). For a Connect anchor that turns
+	// out to be a self-alias, record our own identity at it first so
+	// connectAnchors suppresses it for ~peerTTL instead of redialing every tick.
+	if *them == s.secret.Identity {
+		if src == dialConnect {
+			s.rememberConnect(recordAddr, *them)
+		}
+		log.Warningf("connectPeer: connected to self at %v", addr)
+		return
+	}
+
+	// Reject an identity mismatch when the caller expected a specific peer.
+	if expect != nil && *them != *expect {
+		log.Warningf("connectPeer: %v answered as %v, expected %v", addr, them, expect)
+		return
+	}
+
+	// Skip a redundant re-handshake of a peer we are already connected to (e.g.
+	// a rate-limited seed round redialing a live seed peer). Connect anchors are
+	// already filtered by connectAnchors' live-session check.
+	if src != dialConnect {
+		s.mtx.RLock()
+		_, live := s.sessions[*them]
+		s.mtx.RUnlock()
+		if live {
+			return
+		}
+	}
+
+	// DNS verification based on the dial target. Hostname addresses get forward
+	// TXT verification; IP addresses get reverse DNS (if enabled). Only an
+	// untrusted gossip dial consumes the per-IP DNS rate-limit token, so a decoy
+	// gossip dial to a Connect anchor's IP cannot block the trusted anchor dial.
+	if err := s.verifyOutboundDNS(ctx, recordAddr, conn.RemoteAddr(), *them, src == dialGossip); err != nil {
 		log.Warningf("connectPeer dns %v: %v", recordAddr, err)
 		return
+	}
+
+	// A configured Connect anchor is recorded BEFORE newSession so that even a
+	// duplicate-session result (an inbound session to this peer already exists)
+	// still teaches connectAnchors the identity at this address — otherwise the
+	// anchor is redialed every tick forever.
+	if src == dialConnect {
+		s.rememberConnect(recordAddr, *them)
 	}
 
 	if err := s.newSession(them, transport); err != nil {
@@ -2301,7 +2574,7 @@ func (s *Server) handlePeerAdd(ctx context.Context, addr string) PeerAddResponse
 		}
 	}
 	s.wg.Add(1)
-	go s.connectPeer(ctx, addr, "")
+	go s.connectPeer(ctx, addr, "", nil, dialGossip)
 	return PeerAddResponse{
 		Accepted: true,
 	}
@@ -3207,20 +3480,25 @@ func (s *Server) connect(ctx context.Context, c string) bool {
 	// a reachability failure, so nothing below is worth retrying.
 	reached = true
 
-	// Defense-in-depth: reject self even if the address didn't
-	// match (e.g. hostname resolved to our IP, NAT hairpin).
+	// Defense-in-depth: reject self even if the address didn't match (e.g.
+	// hostname resolved to our IP, NAT hairpin). Record our own identity at a
+	// self-alias Connect address so recovery suppresses it for ~peerTTL.
 	if *them == s.secret.Identity {
+		s.rememberConnect(c, *them)
 		log.Warningf("connect: connected to self at %v", c)
 		return reached
 	}
 
-	// DNS verification based on the dial target.
-	// Hostname targets get forward TXT verification.
-	// IP targets get reverse DNS verification (if enabled).
-	if err := s.verifyOutboundDNS(ctx, c, conn.RemoteAddr(), *them); err != nil {
+	// DNS verification based on the dial target. This is a configured Connect
+	// peer (trusted), so it does not consume the per-IP DNS rate-limit token.
+	if err := s.verifyOutboundDNS(ctx, c, conn.RemoteAddr(), *them, false); err != nil {
 		log.Warningf("connect dns %v: %v", c, err)
 		return reached
 	}
+
+	// Record the identity at this Connect address BEFORE newSession so a
+	// duplicate (inbound-first) session still suppresses its recovery redial.
+	s.rememberConnect(c, *them)
 
 	if err := s.newSession(them, transport); err != nil {
 		// Duplicate session is transient (peer reconnected before
@@ -3620,6 +3898,11 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go s.connectAll(ctx)
 	} else if len(s.cfg.Seeds) != 0 {
+		// Stamp the seed clock so recovery's rate-limited re-seed does not
+		// fire immediately on top of this startup seed.
+		s.mtx.Lock()
+		s.lastRecoverySeed = time.Now()
+		s.mtx.Unlock()
 		s.seed(ctx)
 	}
 
@@ -3718,6 +4001,7 @@ func (s *Server) handleIncomingConnection(ctx context.Context, conn net.Conn, hs
 	// Insert into sessions
 	if err := s.newSession(id, transport); err != nil {
 		log.Errorf("session %v: %v", conn.RemoteAddr(), err)
+		transport.Close()
 		return
 	}
 	s.rebuildRoutes()

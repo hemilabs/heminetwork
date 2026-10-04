@@ -181,7 +181,10 @@ func sanitizeSessions(sessions []Identity) []Identity {
 	}
 	var zero Identity
 	seen := make(map[Identity]struct{}, len(sessions))
-	out := make([]Identity, 0, len(sessions))
+	// Allocate the output no larger than the stored cap, so a short
+	// slice never pins an attacker-sized backing array (the length
+	// cap below is not enough on its own).
+	out := make([]Identity, 0, min(len(sessions), maxPeerSessions))
 	for _, id := range sessions {
 		if id == zero {
 			continue

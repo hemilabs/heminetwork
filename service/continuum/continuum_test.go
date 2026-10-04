@@ -1363,7 +1363,7 @@ func TestDNSForwardRejectsIPPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
-	err = s.verifyOutboundDNS(t.Context(), "127.0.0.1:12345", addr, id.Identity)
+	err = s.verifyOutboundDNS(t.Context(), "127.0.0.1:12345", addr, id.Identity, true)
 	if err == nil {
 		t.Fatal("expected error for IP-only peer in forward mode")
 	}
@@ -1423,7 +1423,7 @@ func TestDNSForwardWithValidHostname(t *testing.T) {
 	// Verify A can forward-verify B's hostname.
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
 	err = serverA.verifyOutboundDNS(ctx, "nodeB."+domain+":12345", addr,
-		serverB.Identity())
+		serverB.Identity(), true)
 	if err != nil {
 		t.Fatalf("forward verify should pass: %v", err)
 	}
@@ -1434,7 +1434,7 @@ func TestDNSForwardWithValidHostname(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = serverA.verifyOutboundDNS(ctx, "nodeB."+domain+":12345", addr,
-		wrongSecret.Identity)
+		wrongSecret.Identity, true)
 	if err == nil {
 		t.Fatal("expected error for identity mismatch")
 	}
@@ -3746,7 +3746,7 @@ func TestConnectPeerSkipsSelf(t *testing.T) {
 	s.wg.Add(1)
 	done := make(chan struct{})
 	go func() {
-		s.connectPeer(t.Context(), "127.0.0.1:45067", "")
+		s.connectPeer(t.Context(), "127.0.0.1:45067", "", nil, dialGossip)
 		close(done)
 	}()
 
@@ -3775,7 +3775,7 @@ func TestConnectPeerDialError(t *testing.T) {
 	s.wg.Add(1)
 	done := make(chan struct{})
 	go func() {
-		s.connectPeer(ctx, "127.0.0.1:1", "")
+		s.connectPeer(ctx, "127.0.0.1:1", "", nil, dialGossip)
 		close(done)
 	}()
 
@@ -4437,7 +4437,7 @@ func TestConnectPeerKXError(t *testing.T) {
 		cfg:      &Config{PeersWanted: 8},
 	}
 	s.wg.Add(1)
-	s.connectPeer(ctx, ln.Addr().String(), "")
+	s.connectPeer(ctx, ln.Addr().String(), "", nil, dialGossip)
 	// Must not panic.  KX error is logged.
 }
 
@@ -4480,7 +4480,7 @@ func TestConnectPeerDNSForwardRejectsIP(t *testing.T) {
 		},
 	}
 	s.wg.Add(1)
-	s.connectPeer(ctx, addrB, "")
+	s.connectPeer(ctx, addrB, "", nil, dialGossip)
 	// connectPeer should reject — IP-only peer in forward mode.
 
 	// A should have no sessions.
@@ -4592,7 +4592,7 @@ func TestConnectPeerHandshakeError(t *testing.T) {
 		cfg:      &Config{PeersWanted: 8},
 	}
 	s.wg.Add(1)
-	s.connectPeer(ctx, ln.Addr().String(), "")
+	s.connectPeer(ctx, ln.Addr().String(), "", nil, dialGossip)
 	// connectPeer logs "handshake" error and returns.
 }
 
@@ -4661,7 +4661,7 @@ func TestConnectPeerDNSVerifyError(t *testing.T) {
 		},
 	}
 	s.wg.Add(1)
-	s.connectPeer(ctx, addrB, "")
+	s.connectPeer(ctx, addrB, "", nil, dialGossip)
 	// connectPeer rejects — IP-only target in forward mode.
 
 	s.mtx.RLock()
@@ -12562,7 +12562,7 @@ func TestVerifyOutboundDNSHostnameNonForward(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
-	err = s.verifyOutboundDNS(t.Context(), "node.example.com:9090", addr, secret.Identity)
+	err = s.verifyOutboundDNS(t.Context(), "node.example.com:9090", addr, secret.Identity, true)
 	if err != nil {
 		t.Fatalf("expected nil, got: %v", err)
 	}
@@ -12587,12 +12587,13 @@ func TestVerifyOutboundDNSIPRateLimited(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Fill the rate limiter.
+	// Fill the OUTBOUND rate limiter: verifyOutboundDNS keys it under the
+	// "out|" namespace (separate from the inbound bare-IP key).
 	for i := 0; i < 10; i++ {
-		_ = s.dnsRateLimited(addr)
+		_ = s.dnsRateLimitedNS(addr, "out|")
 	}
 
-	err = s.verifyOutboundDNS(t.Context(), "10.0.0.1:9090", addr, secret.Identity)
+	err = s.verifyOutboundDNS(t.Context(), "10.0.0.1:9090", addr, secret.Identity, true)
 	if err == nil {
 		t.Fatal("expected rate limit error")
 	}
@@ -12779,7 +12780,7 @@ func TestVerifyOutboundDNSIPReverseMismatch(t *testing.T) {
 	addr := &net.TCPAddr{IP: nodeIP, Port: 9090}
 	wrongID := Identity{0xFF}
 
-	err = s.verifyOutboundDNS(ctx, nodeIP.String()+":9090", addr, wrongID)
+	err = s.verifyOutboundDNS(ctx, nodeIP.String()+":9090", addr, wrongID, true)
 	if err == nil {
 		t.Fatal("expected mismatch error")
 	}
@@ -12814,7 +12815,7 @@ func TestVerifyOutboundDNSIPReverseSuccess(t *testing.T) {
 	}
 	addr := &net.TCPAddr{IP: nodeIP, Port: 9090}
 
-	err = s.verifyOutboundDNS(ctx, nodeIP.String()+":9090", addr, nodeID)
+	err = s.verifyOutboundDNS(ctx, nodeIP.String()+":9090", addr, nodeID, true)
 	if err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
@@ -12839,13 +12840,19 @@ func TestVerifyOutboundDNSHostnameRateLimited(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Fill the OUTBOUND rate limiter ("out|" namespace) so the hostname path
+	// is rate-limited before any TXT lookup — this must test the limiter, not
+	// pass vacuously on a lookup failure.
 	for i := 0; i < 10; i++ {
-		_ = s.dnsRateLimited(addr)
+		_ = s.dnsRateLimitedNS(addr, "out|")
 	}
 
-	err = s.verifyOutboundDNS(t.Context(), "node.example.com:9090", addr, secret.Identity)
+	err = s.verifyOutboundDNS(t.Context(), "node.example.com:9090", addr, secret.Identity, true)
 	if err == nil {
 		t.Fatal("expected rate limit error")
+	}
+	if !strings.Contains(err.Error(), "rate limited") {
+		t.Fatalf("expected rate limit error, got: %v", err)
 	}
 }
 
@@ -12945,7 +12952,7 @@ func TestVerifyOutboundDNSSplitHostPortError(t *testing.T) {
 	addr := &net.TCPAddr{IP: net.IPv4(10, 0, 0, 1), Port: 9090}
 	// The host "example.com" is a hostname, so forward mode kicks in.
 	// Without a DNS server it'll fail, but that tests the path.
-	_ = s.verifyOutboundDNS(t.Context(), "example.com", addr, secret.Identity)
+	_ = s.verifyOutboundDNS(t.Context(), "example.com", addr, secret.Identity, true)
 }
 
 // TestNewTransportLoopbackSkipsDNS verifies that newTransport skips DNS

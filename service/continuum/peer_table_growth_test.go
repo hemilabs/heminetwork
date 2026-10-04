@@ -792,7 +792,8 @@ func TestPeerTableLiveSessionKeptAlive(t *testing.T) {
 					return
 				}
 				if req, ok := cmd.(*PingRequest); ok {
-					time.Sleep(time.Second) // let pingLoop arm its timeout before the pong cancels it (Write-then-Put)
+					// Answer instantly: the production pingLoop arms its timeout BEFORE the
+					// write, so an instant pong cannot race ahead of the arm.
 					if err := cli.Write(id, PingResponse{OriginTimestamp: req.OriginTimestamp}); err != nil {
 						return
 					}
