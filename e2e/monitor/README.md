@@ -75,10 +75,22 @@ The following environment variables are read by `docker compose up`:
 
 The op-nodes do not trust the L1 RPC (no `--l1.trustrpc`) and are not told
 when the L1 activates Glamsterdam, as in production.  Each of the four
-accesses the L1 in a different way, see `e2e/docker-compose.yml`.  The L1
-runs in dev mode: it never reorgs on its own, its `slotNumber` header field
-is always 0 (non-zero slot numbers are covered by the unit tests of op-geth
-and op-node), and `safe` is its head.
+accesses the L1 in a different way, see `e2e/docker-compose.yml`.
+
+The L1 comes in two flavours, selected with `L1_CONSENSUS`:
+
+* `dev` (default): geth simulates the consensus layer.  It never reorgs on
+  its own, its `slotNumber` header field is always 0, and `safe` is its head.
+* `prysm`: a Prysm beacon node and validator client drive geth over the
+  engine API (`docker compose --profile prysm`, see `e2e/prysm`).  The L1
+  has real slots and finality, a real Beacon API that the op-nodes fetch
+  blobs from, and activates the Gloas fork on the consensus layer together
+  with Amsterdam on the execution layer.  `L1_AMSTERDAM_OFFSET_SECONDS` must
+  be a multiple of the 96 second epoch, and `OP_NODE_L1_BEACON`,
+  `OP_NODE_FULL_SYNC_L1_BEACON` and `BATCHER_L1_RPC` point the op-nodes at
+  the beacon node (`http://prysm-beacon:3500`) and the batcher at geth
+  (`http://geth-l1:8545`).  The tests check that the slot numbers in the L1
+  headers are the beacon chain's; the L1 reorg test is skipped.
 
 Some tests restart services, reorg the L1 and look at all logs.  They are
 skipped unless `HEMI_E2E_POST_RUN=true` is set and are run after everything

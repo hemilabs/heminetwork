@@ -199,6 +199,13 @@ jq --arg addr "0x000064D678505ad48F8cCb093BC65613800E8282" \
 
 echo "$(jq --argjson timestamp "$(jq '.timestamp' /shared-dir/genesis.json)" '.timestamp = $timestamp' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 
+# With a geth + Prysm proof-of-stake L1 (L1_CONSENSUS=prysm), generate the
+# Prysm chain config with Gloas at the Amsterdam time and the beacon genesis
+# state, see e2e/prysm.  This rewrites l1genesis.json the way prysmctl needs it.
+if [ "${L1_CONSENSUS:-dev}" = "prysm" ]; then
+	sh /tmp/prysm/generate-genesis.sh
+fi
+
 cat /shared-dir/l1genesis.json
 
 # The op-nodes are given the L1 chain config without the Glamsterdam

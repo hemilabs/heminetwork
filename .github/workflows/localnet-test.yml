@@ -26,6 +26,9 @@ jobs:
     env:
       DOCKERFILE_NAME: ./e2e/optimism-stack.Dockerfile
       DOCKER_IMAGE_TAG: optimism-stack:latest
+      # the Prysm services of the localnet are behind a compose profile
+      COMPOSE_PROFILES: ${{ matrix.compose_profiles }}
+      L1_CONSENSUS: ${{ matrix.l1_consensus }}
     strategy:
       # the configurations are independent, let each of them finish
       fail-fast: false
@@ -35,6 +38,9 @@ jobs:
         gethl1:
           # the release that Sepolia runs through the Glamsterdam activation
           - "ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64"
+        # dev: geth simulates the consensus layer; prysm: a Prysm beacon node
+        # and validator drive geth, see e2e/prysm
+        l1_consensus: ["dev"]
         include:
           # op-batcher publishes batches as blobs with one proposer mode and
           # as calldata with the other, so that both are tested without
@@ -43,6 +49,19 @@ jobs:
             batcher_da: "blobs"
           - proposer_mode: "fault"
             batcher_da: "calldata"
+          # The production combination (L2OutputOracle, blobs) once more on
+          # an L1 with a real Prysm consensus layer: real slots, finality and
+          # Beacon API, and the Gloas fork together with Amsterdam.  Its
+          # Glamsterdam activation is 6 epochs of 96 seconds after genesis.
+          - go-version: "1.26.x"
+            proposer_mode: "l2oo"
+            gethl1: "ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64"
+            l1_consensus: "prysm"
+            batcher_da: "blobs"
+            compose_profiles: "prysm"
+            l1_amsterdam_offset: "576"
+            op_node_l1_beacon: "http://prysm-beacon:3500"
+            batcher_l1_rpc: "http://geth-l1:8545"
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -137,8 +156,13 @@ jobs:
           LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
           BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
-          L1_AMSTERDAM_OFFSET_SECONDS: "420"
-        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
+          L1_AMSTERDAM_OFFSET_SECONDS: ${{ matrix.l1_amsterdam_offset || '420' }}
+          OP_NODE_L1_BEACON: ${{ matrix.op_node_l1_beacon }}
+          OP_NODE_FULL_SYNC_L1_BEACON: ${{ matrix.op_node_l1_beacon }}
+          BATCHER_L1_RPC: ${{ matrix.batcher_l1_rpc }}
+        # a Prysm L1 finalizes its first epochs a few minutes after it comes
+        # up, which the late services wait for
+        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout ${{ matrix.l1_consensus == 'prysm' && '900' || '600' }}
 
       - name: "remove more dangling"
         run: docker system prune -f
