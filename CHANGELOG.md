@@ -172,6 +172,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix `tbc` downloading many blocks more than once during initial block
+  download. A block left the in-flight set before it left blocks
+  missing, so it was requested again while it was being inserted
+  ([#1196](https://github.com/hemilabs/heminetwork/pull/1196)).
 - Fix `tbc` rejecting every peer when its best header is ahead of the
   live chain. `handlePeer` gated peer acceptance on the best *header*
   height, but the header tip routinely leads block download (headers-
