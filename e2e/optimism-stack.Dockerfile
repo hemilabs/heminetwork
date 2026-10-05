@@ -4,8 +4,8 @@
 
 # increment me to break the cache: 2
 
-ARG OP_GETH_COMMIT=8e723c049b37ae7c2a82f2d3bf899065042382a6
-ARG OPTIMISM_COMMIT=0eb8e16f5197d35ce378fcc3297f1115398ea1aa
+ARG OP_GETH_COMMIT=c1771608d7edd4224b05e9d224056984f87c1f5d
+ARG OPTIMISM_COMMIT=aa1fd521b673402bf01010dc505174a4b29115ce
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken
