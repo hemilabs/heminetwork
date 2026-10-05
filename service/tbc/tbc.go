@@ -1946,11 +1946,19 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 
 	block := btcutil.NewBlock(msg)
 	bhs := block.Hash().String()
-	// Not an error due to normal racing conditions.
-	_, _ = s.blocks.Delete(bhs) // remove block from ttl regardless of insert result
+
+	// Keep the block marked as being downloaded until it is inserted.
+	// It stays in blocks missing until the insert commits, and a
+	// syncBlocks run in between would request it again from another
+	// peer.  Replace the entry without the expiry callback so that a
+	// slow insert does not expire it and close this peer.
+	s.blocks.Put(ctx, defaultBlockPendingTimeout, bhs, p, nil, nil)
 
 	// Whatever happens, kick cache in the nuts on the way out.
 	defer func() {
+		// Not an error due to normal racing conditions.
+		_, _ = s.blocks.Delete(bhs) // regardless of insert result
+
 		// kick cache
 		go s.syncBlocks(ctx)
 	}()
