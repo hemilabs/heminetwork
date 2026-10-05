@@ -24,6 +24,11 @@ PROJECT="/tmp/l2oo"
 
 until curl --silent --fail $L1_RPC -X 'POST' -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0", "id":1, "method": "net_version", "params": []}'; do sleep 3; done
 
+# Wait for the first L1 block.  Until geth has indexed one it answers a
+# request for the receipt of a pending transaction with "transaction
+# indexing is in progress", which forge gives up on.
+until [ "$(curl --silent --fail $L1_RPC -X 'POST' -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0", "id":1, "method": "eth_blockNumber", "params": []}' | jq -r '.result // "0x0"')" != "0x0" ]; do sleep 1; done
+
 # the L2OutputOracle parameters are set in the deploy config by genesisl2.sh
 DEPLOY_CONFIG=/shared-dir/deploy-config.json
 export L2OO_SUBMISSION_INTERVAL=$(jq -r '.l2OutputOracleSubmissionInterval' $DEPLOY_CONFIG)

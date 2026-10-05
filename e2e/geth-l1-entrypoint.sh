@@ -16,7 +16,10 @@ dev)
 	MODE="--dev --dev.period 3 --nodiscover --maxpeers=0"
 	;;
 prysm)
-	MODE="--authrpc.addr=0.0.0.0 --authrpc.port=8551 --authrpc.jwtsecret=/tmp/jwt.hex --nodiscover --maxpeers=0"
+	# --miner.gasprice=1 is what dev mode sets: without it geth only
+	# includes transactions that tip at least 0.001 gwei, and the tools of
+	# the localnet tip 1 wei when the blocks before were empty
+	MODE="--authrpc.addr=0.0.0.0 --authrpc.port=8551 --authrpc.jwtsecret=/tmp/jwt.hex --nodiscover --maxpeers=0 --miner.gasprice=1"
 	;;
 *)
 	echo "unknown L1_CONSENSUS: $L1_CONSENSUS (expected dev or prysm)" >&2
