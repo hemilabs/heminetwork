@@ -348,6 +348,7 @@ type Server struct {
 	} // periodically updated by promPoll
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
+	bm            *blockMetrics
 
 	// HTTP/WebSockets
 	httpListener   net.Listener
@@ -398,6 +399,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			Name:      "rpc_calls_total",
 			Help:      "The total number of successful RPC commands",
 		}),
+		bm:              newBlockMetrics(cfg.PrometheusNamespace),
 		sessions:        make(map[string]*tbcWs),
 		requestTimeout:  requestTimeout,
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
@@ -820,6 +822,18 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	}
 }
 
+// logIndexer logs the position of an indexer.  IndexerAt can fail, for
+// example when the database closes during startup, and its header is
+// nil then.
+func logIndexer(ctx context.Context, name string, i Indexer) {
+	bh, err := i.IndexerAt(ctx)
+	if err != nil {
+		log.Errorf("%v index: %v", name, err)
+		return
+	}
+	log.Infof("%v index %v @ %v", name, bh.Height, bh.Hash)
+}
+
 func (s *Server) Running() bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
@@ -851,6 +865,13 @@ func (s *Server) promRunning() float64 {
 		return 1
 	}
 	return 0
+}
+
+func (s *Server) promBlocksPending() float64 {
+	if s.blocks == nil {
+		return 0 // External Header Mode
+	}
+	return float64(s.blocks.Len())
 }
 
 func (s *Server) promBlocksMissing() float64 {
@@ -1234,6 +1255,7 @@ func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block chainhas
 	}
 	s.blocks.Put(ctx, defaultBlockPendingTimeout, block.String(), rp,
 		s.blockExpired, nil)
+	s.bm.blockRequested()
 	// Not an error. Checking and logging this will fill up logs with EOF.
 	//nolint:errcheck // Error is intentionally ignored.
 	go s.downloadBlock(ctx, rp, block)
@@ -1350,6 +1372,7 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 		return
 	default:
 	}
+	s.bm.blockExpired(err != nil)
 	go s.syncBlocks(ctx)
 }
 
@@ -1983,6 +2006,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	if err != nil {
 		return fmt.Errorf("database block insert %v: %w", bhs, err)
 	} else {
+		s.bm.blockInserted()
 		log.Infof("Insert block %v at %v txs %v %v", bhs, height,
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
@@ -3317,6 +3341,14 @@ func (s *Server) Collectors() []prometheus.Collector {
 		// Naming: https://prometheus.io/docs/practices/naming/
 		s.promCollectors = []prometheus.Collector{
 			s.cmdsProcessed,
+			s.bm.inserted,
+			s.bm.requested,
+			s.bm.expired,
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "blocks_pending",
+				Help:      "Number of block downloads in flight",
+			}, s.promBlocksPending),
 			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "block_height",
@@ -3743,21 +3775,16 @@ func (s *Server) Run(pctx context.Context) error {
 		log.Infof("Genesis: %v", s.g.chain.GenesisHash) // XXX make debug
 		log.Infof("Starting block headers sync at %v height: %v time %v",
 			bhb, bhb.Height, bhb.Timestamp())
-		utxoBH, _ := s.ui.IndexerAt(ctx)
-		log.Infof("Utxo index %v @ %v", utxoBH.Height, utxoBH.Hash)
-		txBH, _ := s.ti.IndexerAt(ctx)
-		log.Infof("Tx index %v @ %v", txBH.Height, txBH.Hash)
+		logIndexer(ctx, "Utxo", s.ui)
+		logIndexer(ctx, "Tx", s.ti)
 		if s.cfg.HemiIndex {
-			hemiBH, _ := s.ki.IndexerAt(ctx)
-			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
+			logIndexer(ctx, "Keystone", s.ki)
 		}
 		if s.cfg.ZKIndex {
-			bh, _ := s.zki.IndexerAt(ctx)
-			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
+			logIndexer(ctx, "ZK utxo", s.zki)
 		}
 		if s.cfg.OrdinalIndex {
-			bh, _ := s.oi.IndexerAt(ctx)
-			log.Infof("Ordinal index %v @ %v", bh.Height, bh.Hash)
+			logIndexer(ctx, "Ordinal", s.oi)
 		}
 
 		// XXX this code really should do something along the lines of
