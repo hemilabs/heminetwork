@@ -174,7 +174,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix `tbc` block download stalling on a low-work header fork. Headers
   that fork off at or below the last checkpoint the best header passed,
-  or that contradict a checkpoint, are now rejected, and the download
+  or that contradict a checkpoint, are now rejected; blocks off the
+  canonical chain are dropped instead of requested; and the download
   window is refilled when a block request expires
   ([#1190](https://github.com/hemilabs/heminetwork/pull/1190)).
 - Fix `tbc` rejecting every peer when its best header is ahead of the
