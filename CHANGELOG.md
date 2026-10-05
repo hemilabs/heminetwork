@@ -177,6 +177,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or that contradict a checkpoint, are now rejected, and the download
   window is refilled when a block request expires
   ([#1190](https://github.com/hemilabs/heminetwork/pull/1190)).
+- Fix `tbc` admitting every peer during initial block download. The peer
+  gate keyed on the indexer height, which stays at genesis until every
+  block is downloaded; it keys on the best header height again, and a
+  negative advertised height is rejected
+  ([#1193](https://github.com/hemilabs/heminetwork/pull/1193)).
 - Fix `tbc` rejecting every peer when its best header is ahead of the
   live chain. `handlePeer` gated peer acceptance on the best *header*
   height, but the header tip routinely leads block download (headers-
