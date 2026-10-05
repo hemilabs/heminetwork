@@ -2906,11 +2906,31 @@ func (s *Server) bindPeerKey(ctx context.Context, id Identity, naclPub []byte) e
 		return fmt.Errorf("bindPeerKey %v: all-zeros NaClPub", id)
 	}
 
+	var evicted bool
 	s.mtx.Lock()
-	defer s.mtx.Unlock()
+	// Unlock, then — only if we evicted a row to make space — rebuild routes,
+	// which must not run under mtx. Deferred so every return path is covered.
+	defer func() {
+		s.mtx.Unlock()
+		if evicted {
+			s.rebuildRoutes()
+		}
+	}()
 
 	pr, ok := s.peers[id]
 	if !ok {
+		// New identity. Cap s.peers so an attacker churning authenticated
+		// sessions cannot grow it without bound through key bindings (addPeer
+		// caps gossip rows; this caps key-bound rows). The handshake callers
+		// bind a live-session peer; the NaClKeyResponse caller binds a committee
+		// peer we may reach only multi-hop (no session). Either way the binder
+		// is inserted AFTER eviction, so it is never the victim — and rejecting
+		// here would lock a real/committee peer out of e2e encryption and stall
+		// TSS ceremonies, so when full we evict one evictable row (never self, a
+		// live session, or a running-ceremony member) instead of rejecting.
+		if s.cfg.MaxPeers > 0 && len(s.peers) >= s.cfg.MaxPeers {
+			evicted = s.evictOneForBindLocked()
+		}
 		pr = &PeerRecord{
 			Identity: id,
 			Version:  ProtocolVersion,
@@ -2934,6 +2954,91 @@ func (s *Server) bindPeerKey(ctx context.Context, id Identity, naclPub []byte) e
 	pr.NaClPub = append([]byte(nil), naclPub...)
 	s.signalKeyBoundLocked()
 	return nil
+}
+
+// evictOneForBindLocked frees one slot so a new key binding can be stored at a
+// full peer table, returning whether it evicted a row. It NEVER evicts self, a
+// peer with a live session, or a member of a currently-running TSS ceremony:
+// committee keys are bound for multi-hop peers we may hold no session with (via
+// NaClKeyResponse) and evicting one mid-ceremony breaks SendEncrypted to it and
+// aborts keygen/sign/reshare. It prefers a gossip-only row (no bound key), then
+// any other sessionless key-bound row (a departed peer, re-fetched by its next
+// handshake or ensurePeerKey). If nothing is evictable (only self, live
+// sessions, and running-ceremony members remain) it admits the binding without
+// evicting rather than drop a protected key. Selection ignores LastSeen, which
+// gossip controls, so an attacker can neither steer eviction toward honest rows
+// nor shield its own; committee membership comes only from the local ceremony
+// initiator, so it cannot be spoofed. Caller holds mtx.
+func (s *Server) evictOneForBindLocked() bool {
+	pinned := s.runningCeremonyMembersLocked()
+	var gossip, keyBound Identity
+	var haveGossip, haveKeyBound bool
+	for id, pr := range s.peers {
+		if id == s.secret.Identity {
+			continue
+		}
+		if _, live := s.sessions[id]; live {
+			continue
+		}
+		if _, isPinned := pinned[id]; isPinned {
+			continue // never evict a running-ceremony committee key
+		}
+		if len(pr.NaClPub) == 0 {
+			gossip, haveGossip = id, true // gossip-only: the preferred victim
+			break
+		}
+		if !haveKeyBound {
+			keyBound, haveKeyBound = id, true // sessionless key-bound: fallback
+		}
+	}
+	var victim Identity
+	switch {
+	case haveGossip:
+		victim = gossip
+	case haveKeyBound:
+		victim = keyBound
+	default:
+		// Only self, live sessions, and running-ceremony committee members
+		// remain. Admit the new binding rather than evict a committee key
+		// mid-ceremony (which would abort the ceremony) or drop a connected peer
+		// from e2e. The overflow is bounded by self + live sessions + the
+		// running-ceremony committee union — all locally sourced (committees
+		// come only from the local initiator), never attacker-inflatable.
+		return false
+	}
+	s.evictPeerLocked(victim)
+	return true
+}
+
+// runningCeremonyMembersLocked returns the identities in the committee of every
+// currently-running ceremony, so bind-time eviction can spare their (often
+// sessionless, multi-hop) e2e keys until the ceremony finishes. Caller holds mtx.
+func (s *Server) runningCeremonyMembersLocked() map[Identity]struct{} {
+	var m map[Identity]struct{}
+	for _, ci := range s.ceremonies {
+		if ci.Status != CeremonyRunning {
+			continue
+		}
+		for _, id := range ci.Committee {
+			if m == nil {
+				m = make(map[Identity]struct{})
+			}
+			m[id] = struct{}{}
+		}
+	}
+	return m
+}
+
+// evictPeerLocked removes a peer row and its expiry/liveness state WITHOUT
+// firing peerExpired (this is a manual eviction, not a timeout). It marks the
+// routing table stale; the caller rebuilds after releasing mtx. Caller holds mtx.
+func (s *Server) evictPeerLocked(id Identity) {
+	delete(s.peers, id)
+	_, _ = s.peersTTL.Delete(id)
+	if s.ponged != nil {
+		delete(s.ponged, id)
+	}
+	s.invalidateRoutes()
 }
 
 // signalKeyBoundLocked wakes every ensurePeerKey waiter.  Callers must

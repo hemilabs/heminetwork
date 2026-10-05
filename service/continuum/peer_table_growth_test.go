@@ -509,41 +509,68 @@ func TestPeerTableBindFloodBounded(t *testing.T) {
 		t.Fatalf("binding fresh identities past a full table retains %.1f bytes each: the overflow is being "+
 			"stored somewhere (a side map, or peersTTL rows) rather than rejected.", per)
 	}
-	// Incumbents: the flood's bound peers (self took one slot, so maxPeers-1 of them) must
-	// survive it, and self itself must never be evicted. A fix that evicts an incumbent or
-	// self hands the table to the attacker or breaks gossip/routing.
-	s.mtx.RLock()
-	for i := 0; i < maxPeers-1; i++ {
-		if pr := s.peers[fakeID(i)]; pr == nil || len(pr.NaClPub) != NaClPubSize {
-			s.mtx.RUnlock()
-			t.Fatalf("bound peer %d was displaced by the fresh-identity flood: the cap must reject new peers, "+
-				"not evict established, key-bound ones.", i)
-		}
+	// keyBound reports whether id is present with its e2e key stored.
+	keyBound := func(id Identity) bool {
+		s.mtx.RLock()
+		defer s.mtx.RUnlock()
+		pr := s.peers[id]
+		return pr != nil && len(pr.NaClPub) == NaClPubSize
 	}
-	if sp := s.peers[s.secret.Identity]; sp == nil || len(sp.NaClPub) != NaClPubSize {
-		s.mtx.RUnlock()
-		t.Fatal("self was evicted by the flood: a cap must never evict the untimed, stale self row.")
+
+	// Self is never evicted (untimed, stale, key-bound); an evictor that drops
+	// self breaks gossip/routing.
+	if !keyBound(s.secret.Identity) {
+		t.Fatal("self was evicted by the flood: a cap must never evict the untimed self row.")
 	}
-	s.mtx.RUnlock()
 	runtime.KeepAlive(s)
 
-	// Gossip-stale the key-bound incumbents (addPeer sets LastSeen verbatim, keeps NaClPub),
-	// then flood fresh ids. A cap that evicts the stalest non-session row must still never
-	// evict a key-bound incumbent.
-	for i := 0; i < maxPeers-1; i++ {
-		s.addPeer(ctx, PeerRecord{Identity: fakeID(i), Version: ProtocolVersion, LastSeen: 1})
+	// Live-session protection + no lockout. The correct cap, at a full table,
+	// evicts a SESSIONLESS row to admit a new key binding — locking a currently
+	// connected peer out of e2e is a worse DoS than the overflow, and a departed
+	// peer's deterministic key is re-derived on reconnect. But it must NEVER
+	// evict a peer that currently HAS a live session, nor self, even when gossip
+	// has staled that peer's LastSeen (an evictor keyed on gossip-controlled
+	// LastSeen would wrongly target it). Set up a protected live peer, gossip-
+	// stale it, flood with sessionless binds, and confirm it (and self) survive.
+	live := fakeID(20_000_000)
+	s.mtx.Lock()
+	s.sessions[live] = &Transport{}
+	s.mtx.Unlock()
+	if err := s.bindPeerKey(ctx, live, fakeNaClPub(20_000_000)); err != nil {
+		t.Fatalf("binding a live peer's key failed: %v", err)
 	}
+	s.addPeer(ctx, PeerRecord{Identity: live, Version: ProtocolVersion, LastSeen: 1}) // gossip-stale it
 	for i := 0; i < maxPeers*10; i++ {
-		bind(30_000_000 + i)
+		bind(30_000_000 + i) // sessionless binds; each evicts a sessionless row
 	}
-	s.mtx.RLock()
-	for i := 0; i < maxPeers-1; i++ {
-		if pr := s.peers[fakeID(i)]; pr == nil || len(pr.NaClPub) != NaClPubSize {
-			s.mtx.RUnlock()
-			t.Fatalf("gossip-staled incumbent %d was evicted: a cap must not evict a key-bound incumbent even when its LastSeen is stale.", i)
-		}
+	if !keyBound(live) {
+		t.Fatal("a peer with a LIVE session was evicted by the flood: eviction must spare live sessions regardless of gossiped LastSeen.")
 	}
-	s.mtx.RUnlock()
+	if !keyBound(s.secret.Identity) {
+		t.Fatal("self was evicted by the flood.")
+	}
+
+	// No lockout: a brand-new peer WITH a live session must bind at the full
+	// table (by evicting a sessionless row), or a real connected peer is locked
+	// out of e2e and TSS ceremonies stall. This is what a reject-when-full cap
+	// gets wrong.
+	newLive := fakeID(21_000_000)
+	s.mtx.Lock()
+	s.sessions[newLive] = &Transport{}
+	s.mtx.Unlock()
+	if err := s.bindPeerKey(ctx, newLive, fakeNaClPub(21_000_000)); err != nil {
+		t.Fatalf("a new live peer could not bind at a full table (%v): a cap must evict a sessionless row, not lock out a connected peer.", err)
+	}
+	if !keyBound(newLive) {
+		t.Fatal("a new live peer's binding was not stored at a full table.")
+	}
+	if n := peerCount(s); n > maxPeers {
+		t.Fatalf("table grew to %d past the live-bind flood with MaxPeers=%d", n, maxPeers)
+	}
+	s.mtx.Lock()
+	delete(s.sessions, live)
+	delete(s.sessions, newLive)
+	s.mtx.Unlock()
 
 	// Positive control: the cap must reject only NEW peers. A known peer must still be
 	// able to bind its key when the table is full, or an over-broad reject breaks real
@@ -655,6 +682,149 @@ func TestPeerTableBindFloodBounded(t *testing.T) {
 		t.Fatal("self evicted by the addPeer-reject flood: a full-table addPeer evictor must not drop self.")
 	}
 }
+
+// TestPeerTableBindFloodSparesCeremonyKeys pins the committee-member protection:
+// a key bound for a RUNNING ceremony's committee member we hold NO session with
+// (ensureCommitteeKeys reaches members multi-hop and binds them via the
+// NaClKeyResponse path) must survive a fresh-identity bind flood -- otherwise
+// SendEncrypted to that member fails mid-ceremony and keygen/sign/reshare
+// aborts. Eviction may take such a row only as a last resort (no other
+// sessionless row exists), which MaxPeers >> committee size prevents. Once the
+// ceremony ends the member is unpinned, so the pin cannot bloat the table.
+func TestPeerTableBindFloodSparesCeremonyKeys(t *testing.T) {
+	const maxPeers = 4
+	s := peerTableServer(t, maxPeers)
+	installSelf(t, s)
+	ctx := context.Background()
+
+	// Two committee members (as a reshare's Old union New) reached multi-hop:
+	// keys bound via the NaClKeyResponse path, no live session.
+	memberA, memberB := fakeID(500), fakeID(501)
+	if err := s.bindPeerKey(ctx, memberA, fakeNaClPub(500)); err != nil {
+		t.Fatalf("binding committee member A failed: %v", err)
+	}
+	if err := s.bindPeerKey(ctx, memberB, fakeNaClPub(501)); err != nil {
+		t.Fatalf("binding committee member B failed: %v", err)
+	}
+	var cid CeremonyID
+	cid[0] = 0xC1
+	s.mtx.Lock()
+	s.ceremonies[cid] = &CeremonyInfo{Status: CeremonyRunning, Committee: []Identity{memberA, memberB}}
+	s.mtx.Unlock()
+
+	flood := func(base int) {
+		for i := 0; i < maxPeers*20; i++ {
+			id := fakeID(base + i)
+			s.mtx.Lock()
+			s.sessions[id] = &Transport{}
+			s.mtx.Unlock()
+			_ = s.bindPeerKey(ctx, id, fakeNaClPub(base+i))
+			_ = s.deleteSession(&id)
+		}
+	}
+	keyBound := func(id Identity) bool {
+		s.mtx.RLock()
+		defer s.mtx.RUnlock()
+		pr := s.peers[id]
+		return pr != nil && len(pr.NaClPub) == NaClPubSize
+	}
+
+	flood(50_000_000)
+	if !keyBound(memberA) || !keyBound(memberB) {
+		t.Fatal("a running-ceremony committee member's e2e key was evicted by a bind flood: SendEncrypted would fail mid-ceremony and abort keygen/sign/reshare (both Old and New reshare members must be spared).")
+	}
+	if n := peerCount(s); n > maxPeers {
+		t.Fatalf("table grew to %d with MaxPeers=%d", n, maxPeers)
+	}
+
+	// When the ceremony leaves Running its members must be UNPINNED -- a pin that
+	// never lapses bloats the table and lets a stale committee shield itself
+	// while a currently-running ceremony's member is forced out instead.
+	s.mtx.Lock()
+	s.ceremonies[cid].Status = CeremonyComplete
+	stillPinned := s.runningCeremonyMembersLocked()
+	s.mtx.Unlock()
+	if _, ok := stillPinned[memberA]; ok {
+		t.Fatal("a completed ceremony's member is still pinned: the pin must lapse when Status leaves CeremonyRunning.")
+	}
+	// A subsequent flood reclaims their now-unpinned rows; the table stays capped.
+	flood(51_000_000)
+	if n := peerCount(s); n > maxPeers {
+		t.Fatalf("table grew to %d after ceremony completion with MaxPeers=%d", n, maxPeers)
+	}
+}
+
+// TestPeerTableSessionlessBindAtFullTableStores pins that a NEW bind with no
+// live session (the NaClKeyResponse / ensureCommitteeKeys path, which reaches
+// committee peers multi-hop) is actually STORED at a full table, not silently
+// dropped. A cap that inserts-then-evicts (evicting the just-inserted row) or
+// rejects the no-session binder reopens the lockout Part C exists to prevent.
+func TestPeerTableSessionlessBindAtFullTableStores(t *testing.T) {
+	const maxPeers = 4
+	s := peerTableServer(t, maxPeers)
+	installSelf(t, s)
+	ctx := context.Background()
+
+	// Fill with sessionless key-bound rows (session held only during the bind).
+	for i := 0; i < maxPeers*5; i++ {
+		id := fakeID(70_000_000 + i)
+		s.mtx.Lock()
+		s.sessions[id] = &Transport{}
+		s.mtx.Unlock()
+		_ = s.bindPeerKey(ctx, id, fakeNaClPub(70_000_000+i))
+		_ = s.deleteSession(&id)
+	}
+
+	// A NEW bind with NO session at the full table must be stored.
+	newID := fakeID(71_000_000)
+	if err := s.bindPeerKey(ctx, newID, fakeNaClPub(71_000_000)); err != nil {
+		t.Fatalf("sessionless bind at a full table errored: %v", err)
+	}
+	if _, ok := s.peerNaClPub(newID); !ok {
+		t.Fatal("a sessionless bind at a full table was not stored: an insert-then-evict or reject-no-session cap reopens the lockout (a multi-hop committee key is lost).")
+	}
+	if n := peerCount(s); n > maxPeers {
+		t.Fatalf("table grew to %d with MaxPeers=%d", n, maxPeers)
+	}
+}
+
+// TestPeerTableEvictPrefersGossipOnly pins that bind-time eviction drops a
+// gossip-only row (no bound key) before a sessionless key-bound one: forgetting
+// a discovery row is cheaper than forgetting an authenticated e2e key. Repeated
+// over many trials because s.peers iteration order is randomized.
+func TestPeerTableEvictPrefersGossipOnly(t *testing.T) {
+	const maxPeers = 3
+	ctx := context.Background()
+	kb := func(s *Server, id Identity) bool {
+		s.mtx.RLock()
+		defer s.mtx.RUnlock()
+		pr := s.peers[id]
+		return pr != nil && len(pr.NaClPub) == NaClPubSize
+	}
+	for trial := 0; trial < 64; trial++ {
+		s := peerTableServer(t, maxPeers)
+		installSelf(t, s) // self occupies one slot
+		gossipOnly := fakeID(90_000_000 + trial)
+		s.addPeer(ctx, PeerRecord{Identity: gossipOnly, Version: ProtocolVersion, LastSeen: time.Now().Unix()})
+		keyID := fakeID(91_000_000 + trial)
+		s.mtx.Lock()
+		s.sessions[keyID] = &Transport{}
+		s.mtx.Unlock()
+		_ = s.bindPeerKey(ctx, keyID, fakeNaClPub(91_000_000+trial))
+		_ = s.deleteSession(&keyID) // table now full: self + gossipOnly + keyID
+
+		// A new sessionless bind must evict the gossip-only row and keep the key.
+		_ = s.bindPeerKey(ctx, fakeID(92_000_000+trial), fakeNaClPub(92_000_000+trial))
+		if peerPresent(s, gossipOnly) {
+			t.Fatalf("trial %d: eviction kept the gossip-only row at a full table", trial)
+		}
+		if !kb(s, keyID) {
+			t.Fatalf("trial %d: eviction dropped the key-bound row instead of the gossip-only one", trial)
+		}
+	}
+}
+
+// TestPeerTableChurnConserved pins that admit-then-expire conserves memory: a fix that
 
 // TestPeerTableChurnConserved pins that admit-then-expire conserves memory: a fix that
 // records each admitted identity in a side store never cleaned on expiry bounds s.peers
