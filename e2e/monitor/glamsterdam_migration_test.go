@@ -1767,7 +1767,18 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 	lastBlock := burnerBlocks[len(burnerBlocks)-1]
 	t.Logf("the %d gas burners are in l1 blocks %v", len(burners), burnerBlocks)
 
-	// the blocks after the burners have a higher base fee
+	// the blocks after the burners have a higher base fee; the block after
+	// the last burner may not exist yet
+	for {
+		if _, err := l1HeaderByNumber(ctx, l1, lastBlock+1); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for l1 block %d: %v", lastBlock+1, ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
 	baseFees := make(map[string]int)
 	var raised uint64
 	for n := firstBlock; n <= lastBlock+1; n++ {
