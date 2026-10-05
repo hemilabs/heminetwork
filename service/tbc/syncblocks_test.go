@@ -196,9 +196,12 @@ func TestBlockExpiredRefill(t *testing.T) {
 				return
 			}
 
-			// Every missing canonical block is requested again; the
-			// fork block never is.
-			want := len(chain)
+			// Every missing block is requested again: 10 canonical
+			// blocks, plus the fork block unless it was dropped.
+			want := len(chain) + 1
+			if tt.fork {
+				want = len(chain)
+			}
 			got := collect(getData, want, 5*time.Second)
 			if len(got) != want {
 				t.Fatalf("requests %v, want %v", len(got), want)
@@ -207,89 +210,11 @@ func TestBlockExpiredRefill(t *testing.T) {
 				t.Fatalf("expired block %v requested %v, want %v",
 					expired, ok, !tt.fork)
 			}
-			if _, ok := got[forkHash]; ok {
-				t.Fatal("fork block requested")
-			}
 			if tt.fork && !a.IsConnected() {
 				t.Fatal("peer closed for a fork block")
 			}
 			if !tt.fork && a.IsConnected() {
 				t.Fatal("peer kept after a canonical block expired")
-			}
-		})
-	}
-}
-
-// TestSyncBlocksDropsForks checks that syncBlocks drops blocks missing
-// entries that are not on the canonical chain without requesting them,
-// and that they do not take a download slot.
-func TestSyncBlocksDropsForks(t *testing.T) {
-	tests := []struct {
-		name    string
-		headers int
-		forks   int
-		want    int // canonical requests
-	}{
-		{"no forks", 10, 0, 10},
-		{"forks below canonical blocks", 10, 3, 10},
-		{"forks do not take slots", 200, 3, defaultPendingBlocks},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s, chain := newSyncServer(t, tt.headers)
-			// A fork off genesis with less work: not canonical.
-			fork := makeChain(tt.forks, chaincfg.RegressionNetParams.GenesisBlock.Header,
-				chaincfg.RegressionNetParams.PowLimitBits, 11*time.Minute)
-			insertHeaders(t, s, fork)
-
-			getData := make(chan chainhash.Hash, 2*defaultPendingBlocks)
-			addPipePeer(t, s, "peer", getData)
-
-			before := blocksMissingCount(t, s)
-			s.syncBlocks(t.Context())
-
-			got := collect(getData, tt.want, 2*time.Second)
-			if len(got) != tt.want {
-				t.Fatalf("requests %v, want %v", len(got), tt.want)
-			}
-			for _, h := range chain[:tt.want] {
-				if _, ok := got[h.BlockHash()]; !ok {
-					t.Fatalf("canonical block %v not requested", h.BlockHash())
-				}
-			}
-			for _, h := range fork {
-				if _, ok := got[h.BlockHash()]; ok {
-					t.Fatalf("fork block %v requested", h.BlockHash())
-				}
-			}
-			if dropped := before - blocksMissingCount(t, s); dropped != tt.forks {
-				t.Fatalf("dropped %v, want %v", dropped, tt.forks)
-			}
-		})
-	}
-}
-
-func TestBlockCanonical(t *testing.T) {
-	s, chain := newSyncServer(t, 10)
-	fork := makeChain(1, chaincfg.RegressionNetParams.GenesisBlock.Header,
-		chaincfg.RegressionNetParams.PowLimitBits, 11*time.Minute)
-	insertHeaders(t, s, fork)
-
-	tests := []struct {
-		name string
-		hash chainhash.Hash
-		want bool
-	}{
-		{"canonical", chain[4].BlockHash(), true},
-		{"tip", chain[9].BlockHash(), true},
-		{"fork", fork[0].BlockHash(), false},
-		{"unknown", chainhash.Hash{0x01}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := s.blockCanonical(t.Context(), tt.hash); got != tt.want {
-				t.Fatalf("blockCanonical %v, want %v", got, tt.want)
 			}
 		})
 	}

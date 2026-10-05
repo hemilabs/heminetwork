@@ -1464,17 +1464,6 @@ func (s *Server) notifyTxOutputs(ctx context.Context, tx *wire.MsgTx, txid chain
 	}
 }
 
-// blockCanonical reports whether the block is on the canonical chain.
-// An error counts as not canonical, as in handleBlockExpired.
-func (s *Server) blockCanonical(ctx context.Context, hash chainhash.Hash) bool {
-	bh, err := s.g.db.BlockHeaderByHash(ctx, hash)
-	if err != nil {
-		return false
-	}
-	canonical, _ := isCanonical(ctx, s.g, bh)
-	return canonical
-}
-
 func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
 	defer log.Tracef("syncBlocks exit")
@@ -1591,16 +1580,6 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		return
 	}
 
-	// A dropped entry does not take a slot.  Run again, after the
-	// lock is released, to fill the slots with the entries that
-	// follow; each run deletes entries, so this ends.
-	var dropped bool
-	defer func() {
-		if dropped && want > 0 {
-			go s.syncBlocks(ctx)
-		}
-	}()
-
 	for k := range bm {
 		if want <= 0 {
 			break
@@ -1610,19 +1589,6 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		hashS := hash.String()
 		if _, _, err := s.blocks.Get(hashS); err == nil {
 			// Already being downloaded.
-			continue
-		}
-		// No peer serves a block that is not on the canonical
-		// chain.  Drop it now instead of after its request expires.
-		if !s.blockCanonical(ctx, *hash) {
-			log.Infof("Deleting from blocks missing database: %v %v",
-				bi.Height, hash)
-			if err := s.g.db.BlockMissingDelete(ctx, int64(bi.Height),
-				*hash); err != nil {
-				log.Errorf("blocks missing delete: %v", err)
-				return
-			}
-			dropped = true
 			continue
 		}
 		want--
