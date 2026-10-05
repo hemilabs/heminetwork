@@ -18,7 +18,13 @@
 //     eth_sendRawTransaction are kept.  op-batcher is pointed at this proxy.
 //   - The few Beacon API endpoints used by op-node, which serve the kept
 //     blobs of an L1 block.  The op-nodes use this as their L1 beacon
-//     endpoint.
+//     endpoint.  It is served twice: on FAKEBEACON_BEACON_ADDRESS the way a
+//     current beacon node answers (blobs from /eth/v1/beacon/blobs, both the
+//     SECONDS_PER_SLOT and SLOT_DURATION_MS spec keys), and on
+//     FAKEBEACON_BEACON_LEGACY_ADDRESS the way an older or a stricter one
+//     does (blobs only from the deprecated /eth/v1/beacon/blob_sidecars, only
+//     the SLOT_DURATION_MS spec key that replaced SECONDS_PER_SLOT), so that
+//     both ways op-node has of fetching blobs and reading the spec are used.
 //
 // The beacon chain it pretends to be has one second slots and the genesis
 // time of the L1 execution chain, so the slot of an L1 block is its timestamp
@@ -68,23 +74,31 @@ const (
 	requestTimeout = 10 * time.Second
 )
 
-// blobStore keeps blobs by their versioned hash.
+// keptBlob is a blob with its KZG commitment, as they were in the sidecar
+// of the transaction that carried it.
+type keptBlob struct {
+	blob       hexutil.Bytes
+	commitment hexutil.Bytes
+}
+
+// blobStore keeps blobs by their versioned hash.  Blobs are never dropped,
+// a localnet run keeps a few hundred of them (128 KiB each).
 type blobStore struct {
 	mtx   sync.RWMutex
-	blobs map[common.Hash]hexutil.Bytes
+	blobs map[common.Hash]keptBlob
 }
 
 func newBlobStore() *blobStore {
-	return &blobStore{blobs: make(map[common.Hash]hexutil.Bytes)}
+	return &blobStore{blobs: make(map[common.Hash]keptBlob)}
 }
 
-func (s *blobStore) put(hash common.Hash, blob []byte) {
+func (s *blobStore) put(hash common.Hash, blob keptBlob) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	s.blobs[hash] = blob
 }
 
-func (s *blobStore) get(hash common.Hash) (hexutil.Bytes, bool) {
+func (s *blobStore) get(hash common.Hash) (keptBlob, bool) {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	blob, ok := s.blobs[hash]
@@ -100,7 +114,7 @@ func (s *blobStore) len() int {
 // sidecarBlobs returns the blobs carried by a raw transaction as submitted
 // with eth_sendRawTransaction, by versioned hash.  It returns nothing if the
 // transaction is not a blob transaction with a sidecar.
-func sidecarBlobs(raw []byte) (map[common.Hash][]byte, error) {
+func sidecarBlobs(raw []byte) (map[common.Hash]keptBlob, error) {
 	if len(raw) == 0 || raw[0] != types.BlobTxType {
 		return nil, nil
 	}
@@ -117,9 +131,12 @@ func sidecarBlobs(raw []byte) (map[common.Hash][]byte, error) {
 		return nil, fmt.Errorf("blob transaction %v has %d blobs but %d commitments",
 			tx.Hash(), len(sidecar.Blobs), len(hashes))
 	}
-	blobs := make(map[common.Hash][]byte, len(hashes))
+	blobs := make(map[common.Hash]keptBlob, len(hashes))
 	for i, hash := range hashes {
-		blobs[hash] = bytes.Clone(sidecar.Blobs[i][:])
+		blobs[hash] = keptBlob{
+			blob:       bytes.Clone(sidecar.Blobs[i][:]),
+			commitment: bytes.Clone(sidecar.Commitments[i][:]),
+		}
 	}
 	return blobs, nil
 }
@@ -208,13 +225,14 @@ type l1Client struct {
 }
 
 // blockByNumber returns the L1 block with the given number, which may be a
-// block tag.  It returns nil if there is no such block.
-func (c *l1Client) blockByNumber(ctx context.Context, number string) (*l1Block, error) {
+// block tag, with its transactions if withTxs is set.  It returns nil if
+// there is no such block.
+func (c *l1Client) blockByNumber(ctx context.Context, number string, withTxs bool) (*l1Block, error) {
 	reqBody, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "eth_getBlockByNumber",
-		"params":  []any{number, true},
+		"params":  []any{number, withTxs},
 	})
 	if err != nil {
 		return nil, err
@@ -249,7 +267,7 @@ func (c *l1Client) blockByNumber(ctx context.Context, number string) (*l1Block, 
 // blockByTime returns the L1 block with exactly the given timestamp.  It
 // returns nil if there is no such block, like for a slot without a block.
 func (c *l1Client) blockByTime(ctx context.Context, timestamp uint64) (*l1Block, error) {
-	head, err := c.blockByNumber(ctx, "latest")
+	head, err := c.blockByNumber(ctx, "latest", false)
 	if err != nil {
 		return nil, err
 	}
@@ -259,16 +277,13 @@ func (c *l1Client) blockByTime(ctx context.Context, timestamp uint64) (*l1Block,
 	if timestamp > uint64(head.Time) {
 		return nil, nil
 	}
-	if timestamp == uint64(head.Time) {
-		return head, nil
-	}
 
 	// Block timestamps strictly increase, binary search for the first block
 	// with a timestamp that is not before the requested one.
 	lo, hi := uint64(0), uint64(head.Number)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
-		block, err := c.blockByNumber(ctx, hexutil.EncodeUint64(mid))
+		block, err := c.blockByNumber(ctx, hexutil.EncodeUint64(mid), false)
 		if err != nil {
 			return nil, err
 		}
@@ -281,7 +296,7 @@ func (c *l1Client) blockByTime(ctx context.Context, timestamp uint64) (*l1Block,
 			hi = mid
 		}
 	}
-	block, err := c.blockByNumber(ctx, hexutil.EncodeUint64(lo))
+	block, err := c.blockByNumber(ctx, hexutil.EncodeUint64(lo), true)
 	if err != nil {
 		return nil, err
 	}
@@ -296,8 +311,20 @@ type beacon struct {
 	l1    *l1Client
 	store *blobStore
 
+	// legacy makes the beacon answer like an older beacon node that only
+	// serves blobs from the deprecated /eth/v1/beacon/blob_sidecars, and
+	// like a stricter one that only serves the SLOT_DURATION_MS spec key.
+	legacy bool
+
 	mtx         sync.Mutex
 	genesisTime *uint64 // L1 genesis timestamp, once known
+}
+
+// blockBlob is a kept blob at its position among the blobs of an L1 block.
+type blockBlob struct {
+	index uint64
+	hash  common.Hash
+	keptBlob
 }
 
 // beaconError is the Beacon API error response.
@@ -326,7 +353,7 @@ func (b *beacon) genesis(ctx context.Context) (uint64, error) {
 	if b.genesisTime != nil {
 		return *b.genesisTime, nil
 	}
-	block, err := b.l1.blockByNumber(ctx, "0x0")
+	block, err := b.l1.blockByNumber(ctx, "0x0", false)
 	if err != nil {
 		return 0, fmt.Errorf("fetch l1 genesis block: %w", err)
 	}
@@ -344,10 +371,15 @@ func (b *beacon) handleVersion(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// handleSpec serves the slot duration.  The consensus specs replaced the
+// SECONDS_PER_SLOT key by SLOT_DURATION_MS; current beacon nodes serve both,
+// the legacy beacon only the new one.
 func (b *beacon) handleSpec(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"data": map[string]string{"SECONDS_PER_SLOT": strconv.Itoa(secondsPerSlot)},
-	})
+	spec := map[string]string{"SLOT_DURATION_MS": strconv.Itoa(secondsPerSlot * 1000)}
+	if !b.legacy {
+		spec["SECONDS_PER_SLOT"] = strconv.Itoa(secondsPerSlot)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": spec})
 }
 
 func (b *beacon) handleGenesis(w http.ResponseWriter, r *http.Request) {
@@ -361,15 +393,47 @@ func (b *beacon) handleGenesis(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// slotBlobs returns the blobs of the L1 block in a slot, in the order they
+// appear in the block, or an error with an HTTP status.
+func (b *beacon) slotBlobs(r *http.Request) ([]blockBlob, int, error) {
+	slot, err := strconv.ParseUint(r.PathValue("block_id"), 10, 64)
+	if err != nil {
+		return nil, http.StatusBadRequest, fmt.Errorf("unsupported block id %q, must be a slot", r.PathValue("block_id"))
+	}
+
+	genesisTime, err := b.genesis(r.Context())
+	if err != nil {
+		return nil, http.StatusServiceUnavailable, err
+	}
+	block, err := b.l1.blockByTime(r.Context(), genesisTime+slot*secondsPerSlot)
+	if err != nil {
+		return nil, http.StatusServiceUnavailable, fmt.Errorf("find l1 block of slot %d: %w", slot, err)
+	}
+	if block == nil {
+		return nil, http.StatusNotFound, fmt.Errorf("no block in slot %d", slot)
+	}
+
+	var blobs []blockBlob
+	for _, tx := range block.Transactions {
+		for _, hash := range tx.BlobVersionedHashes {
+			kept, ok := b.store.get(hash)
+			if !ok {
+				// The transaction was not submitted through the proxy.
+				return nil, http.StatusNotFound, fmt.Errorf("blob %v of l1 block %d (slot %d) is not known", hash, block.Number, slot)
+			}
+			blobs = append(blobs, blockBlob{index: uint64(len(blobs)), hash: hash, keptBlob: kept})
+		}
+	}
+	return blobs, http.StatusOK, nil
+}
+
 // handleBlobs serves GET /eth/v1/beacon/blobs/{block_id}: the blobs of the L1
 // block in a slot, in the order they appear in the block.  Only numeric block
 // ids (slots) are supported.  If versioned_hashes is given, only those blobs
 // are returned.
 func (b *beacon) handleBlobs(w http.ResponseWriter, r *http.Request) {
-	slot, err := strconv.ParseUint(r.PathValue("block_id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "unsupported block id %q, must be a slot",
-			r.PathValue("block_id"))
+	if b.legacy {
+		writeError(w, http.StatusNotFound, "blobs are not served, use /eth/v1/beacon/blob_sidecars")
 		return
 	}
 
@@ -385,44 +449,76 @@ func (b *beacon) handleBlobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	genesisTime, err := b.genesis(r.Context())
+	blobs, status, err := b.slotBlobs(r)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "%v", err)
-		return
-	}
-	block, err := b.l1.blockByTime(r.Context(), genesisTime+slot*secondsPerSlot)
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "find l1 block of slot %d: %v", slot, err)
-		return
-	}
-	if block == nil {
-		writeError(w, http.StatusNotFound, "no block in slot %d", slot)
+		writeError(w, status, "%v", err)
 		return
 	}
 
-	blobs := make([]hexutil.Bytes, 0)
-	for _, tx := range block.Transactions {
-		for _, hash := range tx.BlobVersionedHashes {
-			if _, ok := wanted[hash]; len(wanted) > 0 && !ok {
-				continue
-			}
-			blob, ok := b.store.get(hash)
-			if !ok {
-				// The transaction was not submitted through the proxy.
-				writeError(w, http.StatusNotFound,
-					"blob %v of l1 block %d (slot %d) is not known", hash, block.Number, slot)
-				return
-			}
-			blobs = append(blobs, blob)
+	data := make([]hexutil.Bytes, 0, len(blobs))
+	for _, blob := range blobs {
+		if _, ok := wanted[blob.hash]; len(wanted) > 0 && !ok {
+			continue
 		}
+		delete(wanted, blob.hash)
+		data = append(data, blob.blob)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": blobs})
+	for hash := range wanted {
+		// op-node would only report a count mismatch, say which one
+		writeError(w, http.StatusNotFound, "blob %v is not in the block of slot %s", hash, r.PathValue("block_id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
-// handleBlobSidecars answers the endpoint that was deprecated in favour of
-// handleBlobs.  op-node only falls back to it when fetching blobs failed.
-func (b *beacon) handleBlobSidecars(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusNotFound, "blob sidecars are not served, use /eth/v1/beacon/blobs")
+// handleBlobSidecars serves GET /eth/v1/beacon/blob_sidecars/{block_id}, the
+// endpoint that was deprecated in favour of handleBlobs: the blob sidecars of
+// the L1 block in a slot.  If indices is given, only the sidecars at those
+// positions are returned.  The KZG proof and the signed block header are not
+// looked at by op-node and are left empty.
+func (b *beacon) handleBlobSidecars(w http.ResponseWriter, r *http.Request) {
+	if !b.legacy {
+		writeError(w, http.StatusNotFound, "blob sidecars are not served, use /eth/v1/beacon/blobs")
+		return
+	}
+
+	wanted := make(map[uint64]struct{})
+	for _, values := range r.URL.Query()["indices"] {
+		for _, value := range strings.Split(values, ",") {
+			index, err := strconv.ParseUint(value, 10, 64)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid index %q", value)
+				return
+			}
+			wanted[index] = struct{}{}
+		}
+	}
+
+	blobs, status, err := b.slotBlobs(r)
+	if err != nil {
+		writeError(w, status, "%v", err)
+		return
+	}
+
+	type sidecar struct {
+		Index         string        `json:"index"`
+		Blob          hexutil.Bytes `json:"blob"`
+		KZGCommitment hexutil.Bytes `json:"kzg_commitment"`
+		KZGProof      hexutil.Bytes `json:"kzg_proof"`
+	}
+	data := make([]sidecar, 0, len(blobs))
+	for _, blob := range blobs {
+		if _, ok := wanted[blob.index]; len(wanted) > 0 && !ok {
+			continue
+		}
+		data = append(data, sidecar{
+			Index:         strconv.FormatUint(blob.index, 10),
+			Blob:          blob.blob,
+			KZGCommitment: blob.commitment,
+			KZGProof:      make(hexutil.Bytes, 48),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
 }
 
 func (b *beacon) handler() http.Handler {
@@ -432,7 +528,28 @@ func (b *beacon) handler() http.Handler {
 	mux.HandleFunc("GET /eth/v1/beacon/genesis", b.handleGenesis)
 	mux.HandleFunc("GET /eth/v1/beacon/blobs/{block_id}", b.handleBlobs)
 	mux.HandleFunc("GET /eth/v1/beacon/blob_sidecars/{block_id}", b.handleBlobSidecars)
-	return mux
+	return logRequests(mux)
+}
+
+// statusWriter records the status code written to a response.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+// logRequests logs every request with the status it was answered with, so
+// that the localnet logs show what the op-nodes asked for.
+func logRequests(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		h.ServeHTTP(sw, r)
+		log.Printf("%s %s -> %d", r.Method, r.URL.RequestURI(), sw.status)
+	})
 }
 
 func envOr(key, fallback string) string {
@@ -444,9 +561,10 @@ func envOr(key, fallback string) string {
 
 func run(ctx context.Context) error {
 	var (
-		l1RPCURL      = envOr("FAKEBEACON_L1_RPC_URL", "http://localhost:8545")
-		beaconAddress = envOr("FAKEBEACON_BEACON_ADDRESS", ":5052")
-		rpcAddress    = envOr("FAKEBEACON_RPC_ADDRESS", ":8545")
+		l1RPCURL            = envOr("FAKEBEACON_L1_RPC_URL", "http://localhost:8545")
+		beaconAddress       = envOr("FAKEBEACON_BEACON_ADDRESS", ":5052")
+		beaconLegacyAddress = envOr("FAKEBEACON_BEACON_LEGACY_ADDRESS", ":5053")
+		rpcAddress          = envOr("FAKEBEACON_RPC_ADDRESS", ":8545")
 	)
 
 	l1URL, err := url.Parse(l1RPCURL)
@@ -455,14 +573,14 @@ func run(ctx context.Context) error {
 	}
 
 	store := newBlobStore()
-	b := &beacon{
-		l1:    &l1Client{url: l1RPCURL, client: &http.Client{Timeout: requestTimeout}},
-		store: store,
-	}
+	l1 := &l1Client{url: l1RPCURL, client: &http.Client{Timeout: requestTimeout}}
+	b := &beacon{l1: l1, store: store}
+	legacy := &beacon{l1: l1, store: store, legacy: true}
 
 	servers := map[string]*http.Server{
-		"beacon api":   {Addr: beaconAddress, Handler: b.handler(), ReadHeaderTimeout: requestTimeout},
-		"l1 rpc proxy": {Addr: rpcAddress, Handler: newRPCProxy(l1URL, store), ReadHeaderTimeout: requestTimeout},
+		"beacon api":        {Addr: beaconAddress, Handler: b.handler(), ReadHeaderTimeout: requestTimeout},
+		"legacy beacon api": {Addr: beaconLegacyAddress, Handler: legacy.handler(), ReadHeaderTimeout: requestTimeout},
+		"l1 rpc proxy":      {Addr: rpcAddress, Handler: newRPCProxy(l1URL, store), ReadHeaderTimeout: requestTimeout},
 	}
 
 	errC := make(chan error, len(servers))

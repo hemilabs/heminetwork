@@ -75,10 +75,14 @@ The following environment variables are read by `docker compose up`:
 
 The op-nodes do not trust the L1 RPC (no `--l1.trustrpc`) and are not told
 when the L1 activates Glamsterdam, as in production.  Each of the four
-accesses the L1 in a different way, see `e2e/docker-compose.yml`.
+accesses the L1 in a different way, see `e2e/docker-compose.yml`.  The L1
+runs in dev mode: it never reorgs on its own, its `slotNumber` header field
+is always 0 (non-zero slot numbers are covered by the unit tests of op-geth
+and op-node), and `safe` is its head.
 
-Some tests restart services and look at all logs.  They are skipped unless
-`HEMI_E2E_POST_RUN=true` is set and are run after everything else passed:
+Some tests restart services, reorg the L1 and look at all logs.  They are
+skipped unless `HEMI_E2E_POST_RUN=true` is set and are run after everything
+else:
 
 ```
 go test -timeout 30m -v .

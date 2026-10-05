@@ -50,6 +50,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/holiman/uint256"
 )
 
 const (
@@ -75,6 +76,18 @@ const (
 	// production size.
 	glamsterdamHeavyTxs    = 6
 	glamsterdamHeavyTxSize = 30_000
+
+	// l1MaxTxGas is the gas limit of a single L1 transaction (EIP-7825).
+	l1MaxTxGas uint64 = 1 << 24
+
+	// l1GasBurners transactions that each burn l1MaxTxGas are sent to the
+	// L1 in one block so that its gas used exceeds the target and the base
+	// fee of the following block rises.
+	l1GasBurners = 8
+
+	// opStackContainers are the containers of the OP stack services.
+	batcherContainer  = "e2e-op-batcher-1"
+	proposerContainer = "e2e-op-proposer-1"
 )
 
 // opStackNode is one of the op-node and L2 execution client pairs of the
@@ -466,7 +479,10 @@ func waitForSyncStatus(t *testing.T, ctx context.Context, rollup *rpc.Client, na
 // block that the L1 itself has at that height.  A hash that differs from the
 // L1's means that the op-node does not compute the hash of L1 blocks the way
 // the L1 does.
-func checkOpNodeL1View(t *testing.T, ctx context.Context, l1 *rpc.Client, name string, s *opNodeSyncStatus) {
+//
+// allLabels requires the safe and finalized L1 labels to be known too; they
+// are not right after a start.
+func checkOpNodeL1View(t *testing.T, ctx context.Context, l1 *rpc.Client, name string, s *opNodeSyncStatus, allLabels bool) {
 	t.Helper()
 
 	l1Refs := []struct {
@@ -478,8 +494,8 @@ func checkOpNodeL1View(t *testing.T, ctx context.Context, l1 *rpc.Client, name s
 		// derivation pipeline and the L1 safe and finalized polling
 		{"head_l1", s.HeadL1, true},
 		{"current_l1", s.CurrentL1, true},
-		{"safe_l1", s.SafeL1, false},
-		{"finalized_l1", s.FinalizedL1, false},
+		{"safe_l1", s.SafeL1, allLabels},
+		{"finalized_l1", s.FinalizedL1, allLabels},
 	}
 	for _, r := range l1Refs {
 		if r.ref == (opNodeL1Ref{}) {
@@ -791,6 +807,47 @@ func dockerOutput(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// checkContainerConfig ensures that an op-node container runs with the
+// settings that make the tests meaningful: it must verify what the L1 RPC
+// returns, use a beacon endpoint, and keep its receipt validation.  These
+// are the production settings, and the ones a previous version of the
+// localnet did not use.
+func checkContainerConfig(t *testing.T, ctx context.Context, container string) {
+	t.Helper()
+
+	out, err := dockerOutput(ctx, "inspect", "-f", "{{json .Config.Cmd}}", container)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cmd []string
+	if err := json.Unmarshal([]byte(out), &cmd); err != nil {
+		t.Fatalf("decode the command of %s: %v", container, err)
+	}
+	for _, arg := range cmd {
+		for _, forbidden := range []string{"--l1.trustrpc", "--l1.beacon.ignore", "--hemitrap.enabled"} {
+			if arg == forbidden || strings.HasPrefix(arg, forbidden+"=") {
+				t.Fatalf("%s runs with %s, the tests need op-node to verify the l1 the way it does in production", container, arg)
+			}
+		}
+	}
+}
+
+// checkContainerNotRestarted ensures that docker did not restart a container
+// because its service exited: a service that crashes and recovers after a
+// restart would otherwise go unnoticed.  Restarts asked for by the tests do
+// not count.
+func checkContainerNotRestarted(t *testing.T, ctx context.Context, container string) {
+	t.Helper()
+
+	out, err := dockerOutput(ctx, "inspect", "-f", "{{.RestartCount}}", container)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "0" {
+		t.Fatalf("%s exited and was restarted by docker %s times", container, out)
+	}
+}
+
 func containerStartedAt(ctx context.Context, container string) (time.Time, error) {
 	out, err := dockerOutput(ctx, "inspect", "-f", "{{.State.StartedAt}}", container)
 	if err != nil {
@@ -825,7 +882,28 @@ var opStackLogProblems = []string{
 	"intrinsic gas too low",
 	// op-node and the L2 execution client disagree about an L2 block
 	"invalid block extraData",
+	// op-batcher or op-proposer could not get a transaction accepted by the
+	// L1 or re-estimate its gas; the transaction manager retries with a
+	// re-estimated gas limit after a while, which hides a wrong gas limit
+	// from everything but the logs
+	"unable to publish transaction",
+	"failed to re-estimate gas",
+	// op-batcher fell back to the L1's gas estimate
+	"Failed to calculate batch transaction gas limit",
+	// op-node could not read the beacon spec
+	"beacon spec has neither",
+	"got bad value for seconds per slot",
+	// a service crashed
+	"panic:",
+	"CRIT ",
+	"Application failed",
 }
+
+// maxOpNodeReorgLogs is the most "possible L1 re-org" warnings an op-node may
+// log in a run.  The localnet L1 only reorgs when a test makes it, and then
+// each op-node logs the warning once.  An op-node that computes a different
+// hash than the L1 for every block logs it for every block.
+const maxOpNodeReorgLogs = 8
 
 // opNodeReorgLog matches the warning that op-node logs when a new L1 head is
 // not the child of the previous L1 head it knows.
@@ -847,8 +925,9 @@ func scanOpStackLogs(ctx context.Context, container string) ([]string, error) {
 
 	const maxProblems = 20
 	var (
-		problems []string
-		lines    int
+		problems  []string
+		lines     int
+		reorgLogs int
 	)
 	add := func(reason string, line string) {
 		if len(problems) < maxProblems {
@@ -867,16 +946,19 @@ func scanOpStackLogs(ctx context.Context, container string) ([]string, error) {
 				}
 			}
 			if m := opNodeReorgLog.FindStringSubmatch(line); m != nil {
-				// The localnet L1 is a single node that never reorgs.  A
-				// new head that is not the child of the previous head is
-				// fine if heads were skipped in between.  If it directly
-				// follows the previous head, or is not after it, then
-				// op-node computed a different hash for the previous head
-				// than the one the L1 uses as the parent hash.
+				// A new head that directly follows the previous head but
+				// does not have its hash as parent hash means that op-node
+				// computed a different hash for the previous head than the
+				// one the L1 uses.  The localnet L1 only reorgs when a test
+				// makes it, which op-node sees as a new head at or below the
+				// previous one.
 				oldNumber, _ := strconv.ParseUint(m[2], 10, 64)
 				newNumber, _ := strconv.ParseUint(m[5], 10, 64)
-				if newNumber <= oldNumber+1 {
+				if newNumber == oldNumber+1 {
 					add("l1 head hash mismatch", line)
+				}
+				if reorgLogs++; reorgLogs == maxOpNodeReorgLogs+1 {
+					add(fmt.Sprintf("more than %d l1 re-org warnings", maxOpNodeReorgLogs), line)
 				}
 			}
 		}
@@ -985,13 +1067,15 @@ func TestOpNodesFollowL1AcrossGlamsterdam(t *testing.T) {
 			rollup := dialRPC(t, ctx, node.rollupRPC)
 			l2 := dialRPC(t, ctx, node.l2RPC)
 
+			checkContainerConfig(t, ctx, node.container())
+
+			startedAt, err := containerStartedAt(ctx, node.container())
+			if err != nil {
+				t.Fatal(err)
+			}
 			if node.runsFromL1Genesis {
 				// it must have been running when the L1 migrated, or it
 				// did not have to follow the L1 across the fork
-				startedAt, err := containerStartedAt(ctx, node.container())
-				if err != nil {
-					t.Fatal(err)
-				}
 				if uint64(startedAt.Unix()) >= fork.amsterdamTime {
 					t.Fatalf("%s was (re)started at %s, after the l1 activated Glamsterdam at %s; "+
 						"it was not running across the migration.  Use a fresh localnet, and a larger "+
@@ -1000,6 +1084,11 @@ func TestOpNodesFollowL1AcrossGlamsterdam(t *testing.T) {
 				}
 				t.Logf("%s runs since %s, %d seconds before the l1 activated Glamsterdam",
 					node.container(), startedAt.UTC(), int64(fork.amsterdamTime)-startedAt.Unix())
+			} else {
+				// started by the localnet once the first nodes had
+				// finalized L2 blocks, usually after the fork
+				t.Logf("%s runs since %s, %d seconds after the l1 activated Glamsterdam",
+					node.container(), startedAt.UTC(), startedAt.Unix()-int64(fork.amsterdamTime))
 			}
 
 			// if it already logged that it does not understand the L1 there
@@ -1036,7 +1125,7 @@ func TestOpNodesFollowL1AcrossGlamsterdam(t *testing.T) {
 					}
 				}
 
-				checkOpNodeL1View(t, ctx, l1, node.name, status)
+				checkOpNodeL1View(t, ctx, l1, node.name, status, true)
 
 				// every node derives the same L2 from the L1, without
 				// Glamsterdam header fields
@@ -1087,6 +1176,7 @@ func TestOpNodesFollowL1AcrossGlamsterdam(t *testing.T) {
 				}
 			}
 
+			checkContainerNotRestarted(t, ctx, node.container())
 			checkOpStackLogs(t, ctx, node.container())
 		})
 	}
@@ -1288,8 +1378,12 @@ func TestBatcherPostsAcrossGlamsterdam(t *testing.T) {
 		before, after     int
 		maxZeroBytesAfter int
 		maxSizeAfter      int
+		aroundFork        []uint64
 	)
 	for _, tx := range txs {
+		if tx.block+4 >= uint64(fork.first.Number) && tx.block <= uint64(fork.first.Number)+4 {
+			aroundFork = append(aroundFork, tx.block)
+		}
 		var receipt *l1Receipt
 		if err := l1.CallContext(ctx, &receipt, "eth_getTransactionReceipt", tx.Hash); err != nil || receipt == nil {
 			t.Fatalf("fetch receipt of batcher transaction %s: %v", tx.Hash, err)
@@ -1315,9 +1409,18 @@ func TestBatcherPostsAcrossGlamsterdam(t *testing.T) {
 			t.Fatalf("batcher transaction %s in l1 block %d (on Glamsterdam: %v) with %d bytes of calldata used %d gas, expected %d",
 				tx.Hash, tx.block, tx.glamsterdam, len(tx.Input), receipt.GasUsed, wantGasUsed)
 		}
-		if uint64(tx.Gas) < wantGasUsed {
-			t.Fatalf("batcher transaction %s in l1 block %d has gas limit %d, below the %d gas it used",
-				tx.Hash, tx.block, tx.Gas, wantGasUsed)
+
+		// The batcher does not know when the L1 activates Glamsterdam, it
+		// sets the gas limit that satisfies both the pre-Glamsterdam and
+		// the Glamsterdam calldata floor.  A transaction that the L1
+		// rejected for its gas limit is resent later with the L1's gas
+		// estimate, which is the floor as well; such rejections are found
+		// in the batcher logs below.
+		wantGasLimit := max(txBaseCost+preGlamsterdamFloorPerToken*tokensInCalldata(tx.Input),
+			glamsterdamZeroValueCallBaseGas+floorCost(tx.Input))
+		if uint64(tx.Gas) != wantGasLimit {
+			t.Fatalf("batcher transaction %s in l1 block %d with %d bytes of calldata has gas limit %d, expected %d",
+				tx.Hash, tx.block, len(tx.Input), tx.Gas, wantGasLimit)
 		}
 
 		switch da {
@@ -1345,8 +1448,9 @@ func TestBatcherPostsAcrossGlamsterdam(t *testing.T) {
 		}
 	}
 
-	t.Logf("the batcher posted %d %s transactions before and %d after the l1 activated Glamsterdam at l1 block %d",
-		before, da, after, fork.first.Number)
+	t.Logf("the batcher posted %d %s transactions before and %d after the l1 activated Glamsterdam at l1 block %d; "+
+		"the l1 blocks around the fork with batcher transactions are %v",
+		before, da, after, fork.first.Number, aroundFork)
 
 	if before == 0 {
 		t.Fatalf("the batcher did not post a batch before the l1 activated Glamsterdam at l1 block %d; "+
@@ -1368,6 +1472,239 @@ func TestBatcherPostsAcrossGlamsterdam(t *testing.T) {
 			t.Fatalf("no batch posted on Glamsterdam has more than 125 zero bytes (most: %d), "+
 				"the calldata floor was not exercised with a large batch", maxZeroBytesAfter)
 		}
+	}
+
+	// a gas limit the L1 rejected is only visible in the logs
+	checkContainerNotRestarted(t, ctx, batcherContainer)
+	checkOpStackLogs(t, ctx, batcherContainer)
+}
+
+// sendL1Transaction signs and sends a transaction to the L1 and returns its
+// receipt once it is included.
+func sendL1Transaction(t *testing.T, ctx context.Context, l1Client *ethclient.Client, key *ecdsa.PrivateKey, txdata types.TxData) *types.Receipt {
+	t.Helper()
+
+	tx, err := types.SignNewTx(key, types.LatestSignerForChainID(l1ChainId()), txdata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l1Client.SendTransaction(ctx, tx); err != nil {
+		t.Fatalf("send l1 transaction of type %d: %v", tx.Type(), err)
+	}
+	for deadline := time.Now().Add(2 * time.Minute); ; {
+		receipt, err := l1Client.TransactionReceipt(ctx, tx.Hash())
+		if err == nil {
+			return receipt
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("l1 transaction %s of type %d was not included: %v", tx.Hash(), tx.Type(), err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+// TestOpNodesVerifyL1BlocksWithEverything puts into L1 blocks what the
+// localnet does not otherwise put there and what the op-nodes have to verify
+// on a Glamsterdam L1: set code (type 4) transactions, withdrawals, and a
+// base fee that changes.  It then ensures that every op-node got past those
+// blocks and that the L2 carries the changed base fee.
+func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
+	if testingFork() || testingPostRun() {
+		t.Skip("only run against a fresh localnet")
+	}
+
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Minute)
+	defer cancel()
+
+	fork := l1GlamsterdamFork(t, ctx)
+	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
+	l1Client := ethclient.NewClient(l1)
+
+	// an account of its own, the load account is busy on the L2
+	key, err := crypto.ToECDSA(crypto.Keccak256([]byte("hemi localnet glamsterdam l1 transactions")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	loadKey := glamsterdamLoadKey(t)
+
+	chainID := uint256.MustFromBig(l1ChainId())
+	gasFeeCap := uint256.NewInt(1_000_000_000)
+
+	// fund it from the load account
+	nonce, err := l1Client.PendingNonceAt(ctx, crypto.PubkeyToAddress(loadKey.PublicKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := sendL1Transaction(t, ctx, l1Client, loadKey, &types.DynamicFeeTx{
+		ChainID:   l1ChainId(),
+		Nonce:     nonce,
+		GasTipCap: big.NewInt(1),
+		GasFeeCap: gasFeeCap.ToBig(),
+		Gas:       100_000,
+		To:        &from,
+		Value:     new(big.Int).Mul(big.NewInt(400), big.NewInt(1_000_000_000_000_000_000)),
+	})
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		t.Fatalf("funding %s failed", from)
+	}
+	firstBlock := receipt.BlockNumber.Uint64()
+
+	// A withdrawal in the next L1 block.  The L1 is in dev mode and has no
+	// consensus layer to issue withdrawals, dev_addWithdrawal queues one.
+	if err := l1.CallContext(ctx, nil, "dev_addWithdrawal", &types.Withdrawal{
+		Index: 1, Validator: 1, Address: from, Amount: 1_000_000_000,
+	}); err != nil {
+		t.Fatalf("add a withdrawal to the l1: %v", err)
+	}
+
+	// A set code transaction (EIP-7702) that delegates the account to an
+	// address without code and one that removes the delegation again.
+	for i, delegate := range []common.Address{dummyRecipient, {}} {
+		nonce, err := l1Client.PendingNonceAt(ctx, from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		auth, err := types.SignSetCode(key, types.SetCodeAuthorization{
+			ChainID: *chainID,
+			Address: delegate,
+			Nonce:   nonce + 1, // the authorization is checked after the transaction's own nonce
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipt := sendL1Transaction(t, ctx, l1Client, key, &types.SetCodeTx{
+			ChainID:   chainID,
+			Nonce:     nonce,
+			GasTipCap: uint256.NewInt(1),
+			GasFeeCap: gasFeeCap,
+			Gas:       200_000,
+			To:        from,
+			AuthList:  []types.SetCodeAuthorization{auth},
+		})
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			t.Fatalf("set code transaction %d failed", i)
+		}
+		if receipt.Type != types.SetCodeTxType {
+			t.Fatalf("set code transaction %d has type %d", i, receipt.Type)
+		}
+		code, err := l1Client.CodeAt(ctx, from, receipt.BlockNumber)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (delegate != common.Address{}); (len(code) > 0) != want {
+			t.Fatalf("after set code transaction %d, account %s has code %x, delegated: %v", i, from, code, want)
+		}
+		t.Logf("set code transaction %d is in l1 block %d (delegated to %s)", i, receipt.BlockNumber, delegate)
+	}
+
+	// Transactions that each burn the most gas a transaction may use, all
+	// in one block, so that the block uses more than the gas target and the
+	// base fee of the next block rises.  The code of a burner loops
+	// forever: JUMPDEST PUSH0 JUMP.
+	nonce, err = l1Client.PendingNonceAt(ctx, from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	burners := make([]*types.Transaction, 0, l1GasBurners)
+	for i := range uint64(l1GasBurners) {
+		tx, err := types.SignNewTx(key, types.LatestSignerForChainID(l1ChainId()), &types.DynamicFeeTx{
+			ChainID:   l1ChainId(),
+			Nonce:     nonce + i,
+			GasTipCap: big.NewInt(1),
+			GasFeeCap: gasFeeCap.ToBig(),
+			Gas:       l1MaxTxGas,
+			Data:      []byte{0x5b, 0x5f, 0x56},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l1Client.SendTransaction(ctx, tx); err != nil {
+			t.Fatalf("send gas burner %d: %v", i, err)
+		}
+		burners = append(burners, tx)
+	}
+	var burnerBlocks []uint64
+	for i, tx := range burners {
+		for deadline := time.Now().Add(2 * time.Minute); ; {
+			receipt, err := l1Client.TransactionReceipt(ctx, tx.Hash())
+			if err == nil {
+				if receipt.GasUsed != l1MaxTxGas {
+					t.Fatalf("gas burner %d used %d gas, expected %d", i, receipt.GasUsed, l1MaxTxGas)
+				}
+				burnerBlocks = append(burnerBlocks, receipt.BlockNumber.Uint64())
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("gas burner %d was not included: %v", i, err)
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(time.Second):
+			}
+		}
+	}
+	lastBlock := burnerBlocks[len(burnerBlocks)-1]
+	t.Logf("the %d gas burners are in l1 blocks %v", len(burners), burnerBlocks)
+
+	// the blocks after the burners have a higher base fee
+	baseFees := make(map[string]int)
+	var raised uint64
+	for n := firstBlock; n <= lastBlock+1; n++ {
+		h := mustL1Header(t, ctx, l1, n)
+		if h.BaseFee == nil {
+			t.Fatalf("l1 block %d has no base fee", n)
+		}
+		baseFees[h.BaseFee.String()]++
+		if n > burnerBlocks[0] && h.BaseFee.ToInt().Cmp(mustL1Header(t, ctx, l1, burnerBlocks[0]).BaseFee.ToInt()) > 0 && raised == 0 {
+			raised = n
+		}
+	}
+	if raised == 0 {
+		t.Fatalf("the l1 base fee did not rise after the gas burners (base fees seen: %v)", baseFees)
+	}
+	t.Logf("l1 blocks %d to %d carry base fees %v, the base fee rose in block %d", firstBlock, lastBlock+1, baseFees, raised)
+
+	if firstBlock < uint64(fork.first.Number) {
+		t.Fatalf("l1 block %d is before Glamsterdam (l1 block %d)", firstBlock, fork.first.Number)
+	}
+
+	// every op-node has to get past those blocks, and the L2 blocks with
+	// those L1 origins carry their base fees
+	for _, node := range opStackNodes {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		l2 := dialRPC(t, ctx, node.l2RPC)
+		status := waitForSyncStatus(t, ctx, rollup, node.name,
+			fmt.Sprintf("for it to derive l2 blocks with l1 origins past l1 block %d", lastBlock+1),
+			func(s *opNodeSyncStatus) bool {
+				return s.SafeL2.L1Origin.Number > lastBlock+1
+			})
+		checkOpNodeL1View(t, ctx, l1, node.name, status, true)
+
+		// L1 origins never decrease, binary search for the first L2 block
+		// with the L1 block with the raised base fee as its origin
+		lo, hi := uint64(1), status.SafeL2.Number
+		for lo < hi {
+			mid := lo + (hi-lo)/2
+			if _, attrs := l2L1Attributes(t, ctx, l2, node.name, mid); attrs.number < raised {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		attrs := checkL1AttributesOnL2(t, ctx, l1, l2, node.name, lo)
+		if attrs.number != raised {
+			t.Fatalf("%s: no l2 block has l1 block %d as its origin (l2 block %d has %d)", node.name, raised, lo, attrs.number)
+		}
+		t.Logf("%s: l2 block %d carries the raised base fee %s of l1 block %d", node.name, lo, attrs.baseFee, raised)
+		checkOpStackLogs(t, ctx, node.container())
 	}
 }
 
@@ -1391,65 +1728,159 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 	}
 	defer l1Client.Close()
 
-	// latest returns the L1 timestamp of the latest proposal, 0 if there is
-	// none yet
-	var latest func() (uint64, error)
+	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
+	forkNumber := uint64(fork.first.Number)
+
+	// latest looks at the latest proposal and returns true once it is one
+	// made on Glamsterdam about Glamsterdam L1 blocks, or an error
+	var latest func() (bool, error)
 	if testingL2OO() {
-		oracle, err := bindings.NewL2OutputOracleCaller(l2OutputOracle(t), l1Client)
+		ooproxy := l2OutputOracle(t)
+		oracle, err := bindings.NewL2OutputOracle(ooproxy, l1Client)
 		if err != nil {
 			t.Fatal(err)
 		}
-		latest = func() (uint64, error) {
+		latest = func() (bool, error) {
 			next, err := oracle.NextOutputIndex(&bind.CallOpts{Context: ctx})
 			if err != nil || next.Sign() == 0 {
-				return 0, err
+				return false, err
 			}
-			output, err := oracle.GetL2Output(&bind.CallOpts{Context: ctx}, new(big.Int).Sub(next, big.NewInt(1)))
+			index := new(big.Int).Sub(next, big.NewInt(1))
+			output, err := oracle.GetL2Output(&bind.CallOpts{Context: ctx}, index)
 			if err != nil {
-				return 0, err
+				return false, err
 			}
-			if output.Timestamp.Uint64() >= fork.amsterdamTime {
-				// and it is the output root that op-node has
-				checkL2OOOutputRoot(t, ctx, output)
+			if output.Timestamp.Uint64() < fork.amsterdamTime {
+				t.Logf("the latest proposal (output %d) was included at timestamp %d, before Glamsterdam", index, output.Timestamp)
+				return false, nil
 			}
-			return output.Timestamp.Uint64(), nil
+
+			// The proposal names the L1 block op-node was at, by number and
+			// hash: proposeL2Output(outputRoot, l2BlockNumber, l1BlockHash,
+			// l1BlockNumber).  The L2OutputOracle rejects a proposal whose
+			// hash is not blockhash(l1BlockNumber), so an included proposal
+			// about a Glamsterdam L1 block is the L1 itself agreeing with the
+			// hash that op-node computed for it.
+			events, err := oracle.FilterOutputProposed(&bind.FilterOpts{Context: ctx}, nil, []*big.Int{index}, nil)
+			if err != nil {
+				return false, err
+			}
+			defer events.Close()
+			if !events.Next() {
+				return false, fmt.Errorf("no OutputProposed event for output %d: %v", index, events.Error())
+			}
+			tx, _, err := l1Client.TransactionByHash(ctx, events.Event.Raw.TxHash)
+			if err != nil {
+				return false, err
+			}
+			input := tx.Data()
+			if len(input) != 4+4*32 || hexutil.Encode(input[:4]) != "0x9aaab648" {
+				return false, fmt.Errorf("proposal transaction %s is not a proposeL2Output call (%d bytes, selector %s)",
+					tx.Hash(), len(input), hexutil.Encode(input[:min(4, len(input))]))
+			}
+			var (
+				l1BlockHash   = common.BytesToHash(input[68:100])
+				l1BlockNumber = new(big.Int).SetBytes(input[100:132])
+			)
+			if !l1BlockNumber.IsUint64() {
+				return false, fmt.Errorf("proposal %s names l1 block %s", tx.Hash(), l1BlockNumber)
+			}
+			if l1BlockNumber.Uint64() < forkNumber {
+				t.Logf("the latest proposal (output %d, included at timestamp %d) is about l1 block %d, before Glamsterdam",
+					index, output.Timestamp, l1BlockNumber)
+				return false, nil
+			}
+			canonical := mustL1Header(t, ctx, l1, l1BlockNumber.Uint64())
+			if canonical.Hash != l1BlockHash {
+				return false, fmt.Errorf("proposal %s names l1 block %d as %s but the l1 has %s",
+					tx.Hash(), l1BlockNumber, l1BlockHash, canonical.Hash)
+			}
+
+			// and it is the output root that op-node has
+			checkL2OOOutputRoot(t, ctx, bindings.TypesOutputProposal(output))
+			t.Logf("output %d for l2 block %d was proposed at timestamp %d (%d seconds after the l1 activated Glamsterdam) "+
+				"about l1 block %d %s, which the l1 agrees with",
+				index, output.L2BlockNumber, output.Timestamp, output.Timestamp.Uint64()-fork.amsterdamTime, l1BlockNumber, l1BlockHash)
+			return true, nil
 		}
 	} else {
 		factory, err := bindings.NewDisputeGameFactoryCaller(disputeGameFactory(t), l1Client)
 		if err != nil {
 			t.Fatal(err)
 		}
-		latest = func() (uint64, error) {
+		rollup := dialRPC(t, ctx, opStackNodes[0].rollupRPC)
+		latest = func() (bool, error) {
 			count, err := factory.GameCount(&bind.CallOpts{Context: ctx})
 			if err != nil || count.Sign() == 0 {
-				return 0, err
+				return false, err
 			}
 			game, err := factory.GameAtIndex(&bind.CallOpts{Context: ctx}, new(big.Int).Sub(count, big.NewInt(1)))
 			if err != nil {
-				return 0, err
+				return false, err
 			}
-			return game.Timestamp, nil
+			if game.Timestamp < fork.amsterdamTime {
+				t.Logf("the latest game was created at timestamp %d, before Glamsterdam", game.Timestamp)
+				return false, nil
+			}
+
+			// the root claim of the game is op-node's output root for the
+			// L2 block it is about
+			call := func(selector string) ([]byte, error) {
+				var out hexutil.Bytes
+				err := l1.CallContext(ctx, &out, "eth_call",
+					map[string]string{"to": game.Proxy.Hex(), "data": selector}, "latest")
+				return out, err
+			}
+			rootClaim, err := call("0xbcef3b55") // rootClaim()
+			if err != nil {
+				return false, err
+			}
+			l2BlockNumber, err := call("0x8b85902b") // l2BlockNumber()
+			if err != nil {
+				return false, err
+			}
+			if len(rootClaim) != 32 || len(l2BlockNumber) != 32 {
+				return false, fmt.Errorf("game %s returned %d and %d bytes for rootClaim and l2BlockNumber", game.Proxy, len(rootClaim), len(l2BlockNumber))
+			}
+			var outputAtBlock struct {
+				OutputRoot common.Hash `json:"outputRoot"`
+			}
+			if err := rollup.CallContext(ctx, &outputAtBlock, "optimism_outputAtBlock", hexutil.EncodeBig(new(big.Int).SetBytes(l2BlockNumber))); err != nil {
+				return false, err
+			}
+			if outputAtBlock.OutputRoot != common.BytesToHash(rootClaim) {
+				return false, fmt.Errorf("game %s claims %x for l2 block %d but op-node has %s",
+					game.Proxy, rootClaim, new(big.Int).SetBytes(l2BlockNumber), outputAtBlock.OutputRoot)
+			}
+			t.Logf("game %s for l2 block %d was created at timestamp %d (%d seconds after the l1 activated Glamsterdam) with op-node's output root",
+				game.Proxy, new(big.Int).SetBytes(l2BlockNumber), game.Timestamp, game.Timestamp-fork.amsterdamTime)
+			return true, nil
 		}
 	}
 
-	for {
-		proposedAt, err := latest()
+	var lastErr error
+	for errors := 0; ; {
+		done, err := latest()
 		if err != nil {
-			t.Fatal(err)
-		}
-		if proposedAt >= fork.amsterdamTime {
-			t.Logf("the latest proposal was included in the l1 at timestamp %d, %d seconds after the l1 activated Glamsterdam",
-				proposedAt, proposedAt-fork.amsterdamTime)
-			return
+			// the L1 or op-node RPC may fail now and then
+			if errors++; errors > 5 {
+				t.Fatalf("checking the latest proposal failed %d times, last: %v", errors, err)
+			}
+			lastErr = err
+			t.Logf("checking the latest proposal failed, will retry: %v", err)
+		} else if done {
+			break
 		}
 
-		t.Logf("waiting for a proposal after the l1 activated Glamsterdam (latest at timestamp %d)", proposedAt)
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for a proposal after the l1 activated Glamsterdam: %s", ctx.Err())
+			t.Fatalf("timed out waiting for a proposal about the Glamsterdam l1: %s (last error: %v)", ctx.Err(), lastErr)
 		case <-time.After(10 * time.Second):
 		}
 	}
+
+	checkContainerNotRestarted(t, ctx, proposerContainer)
+	checkOpStackLogs(t, ctx, proposerContainer)
 }
 
 // ---- post-run tests --------------------------------------------------------
@@ -1479,44 +1910,208 @@ func TestPostRunOpStackRestartsOnGlamsterdam(t *testing.T) {
 		verifier  = opStackNodes[1]
 	)
 	sequencerRollup := dialRPC(t, ctx, sequencer.rollupRPC)
-	verifierRollup := dialRPC(t, ctx, verifier.rollupRPC)
 
 	before := waitForSyncStatus(t, ctx, sequencerRollup, sequencer.name, "for it to be on Glamsterdam l1 blocks",
 		func(s *opNodeSyncStatus) bool {
 			return s.SafeL2.L1Origin.Number >= uint64(fork.first.Number)
 		})
 
-	for _, container := range []string{"e2e-op-batcher-1", verifier.container(), sequencer.container()} {
+	fullSync := opStackNodes[3]
+	for _, container := range []string{batcherContainer, proposerContainer, fullSync.container(), verifier.container(), sequencer.container()} {
 		t.Logf("restarting %s", container)
 		if _, err := dockerOutput(ctx, "restart", container); err != nil {
 			t.Fatal(err)
 		}
 	}
 
+	// what the sequencer was at once it came back
+	restarted := waitForSyncStatus(t, ctx, sequencerRollup, sequencer.name, "for it to answer after the restart",
+		func(s *opNodeSyncStatus) bool { return s.UnsafeL2.Number > 0 })
+	if restarted.UnsafeL2.Number < before.SafeL2.Number {
+		t.Fatalf("%s came back with unsafe l2 head %d, below the safe l2 head %d before the restart",
+			sequencer.name, restarted.UnsafeL2.Number, before.SafeL2.Number)
+	}
+
 	// The sequencer has to produce new L2 blocks, the batcher has to post
-	// them to the L1, and both op-nodes have to derive them from the L1:
-	// the safe L2 head has to get past the L2 block that was the unsafe head
-	// before the restarts.
-	target := before.UnsafeL2.Number + 10
+	// them to the L1, and all op-nodes have to derive them from the L1: the
+	// safe L2 head has to get past the L2 block that was the unsafe head
+	// when the sequencer came back.
+	target := restarted.UnsafeL2.Number + 10
 	progressed := func(s *opNodeSyncStatus) bool {
 		return s.UnsafeL2.Number > target &&
 			s.SafeL2.Number > target &&
-			s.HeadL1.Number > before.HeadL1.Number &&
-			s.CurrentL1.Number > before.HeadL1.Number
+			s.HeadL1.Number > restarted.HeadL1.Number+2 &&
+			s.CurrentL1.Number > restarted.HeadL1.Number+2
 	}
 	what := fmt.Sprintf("for it to derive l2 block %d from the l1 after the restart", target)
-	sequencerStatus := waitForSyncStatus(t, ctx, sequencerRollup, sequencer.name, what, progressed)
-	verifierStatus := waitForSyncStatus(t, ctx, verifierRollup, verifier.name, what, progressed)
-
-	checkOpNodeL1View(t, ctx, l1, sequencer.name, sequencerStatus)
-	checkOpNodeL1View(t, ctx, l1, verifier.name, verifierStatus)
+	statuses := make(map[string]*opNodeSyncStatus)
+	for _, node := range []opStackNode{sequencer, verifier, fullSync} {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		statuses[node.name] = waitForSyncStatus(t, ctx, rollup, node.name, what, progressed)
+		checkOpNodeL1View(t, ctx, l1, node.name, statuses[node.name], false)
+	}
 
 	sequencerL2 := dialRPC(t, ctx, sequencer.l2RPC)
-	verifierL2 := dialRPC(t, ctx, verifier.l2RPC)
-	number := min(sequencerStatus.SafeL2.Number, verifierStatus.SafeL2.Number)
-	sequencerHash := l2BlockHash(t, ctx, sequencerL2, sequencer.name, number)
-	if verifierHash := l2BlockHash(t, ctx, verifierL2, verifier.name, number); verifierHash != sequencerHash {
-		t.Fatalf("%s has l2 block %d as %s but the sequencer has %s", verifier.name, number, verifierHash, sequencerHash)
+	for _, node := range []opStackNode{verifier, fullSync} {
+		l2 := dialRPC(t, ctx, node.l2RPC)
+		number := min(statuses[sequencer.name].SafeL2.Number, statuses[node.name].SafeL2.Number)
+		sequencerHash := l2BlockHash(t, ctx, sequencerL2, sequencer.name, number)
+		if hash := l2BlockHash(t, ctx, l2, node.name, number); hash != sequencerHash {
+			t.Fatalf("%s has l2 block %d as %s but the sequencer has %s", node.name, number, hash, sequencerHash)
+		}
+	}
+
+	// the proposer has to propose again
+	l1Client := ethclient.NewClient(l1)
+	proposedAfter := func() (uint64, error) {
+		if testingL2OO() {
+			oracle, err := bindings.NewL2OutputOracleCaller(l2OutputOracle(t), l1Client)
+			if err != nil {
+				return 0, err
+			}
+			next, err := oracle.NextOutputIndex(&bind.CallOpts{Context: ctx})
+			if err != nil || next.Sign() == 0 {
+				return 0, err
+			}
+			output, err := oracle.GetL2Output(&bind.CallOpts{Context: ctx}, new(big.Int).Sub(next, big.NewInt(1)))
+			if err != nil {
+				return 0, err
+			}
+			return output.Timestamp.Uint64(), nil
+		}
+		factory, err := bindings.NewDisputeGameFactoryCaller(disputeGameFactory(t), l1Client)
+		if err != nil {
+			return 0, err
+		}
+		count, err := factory.GameCount(&bind.CallOpts{Context: ctx})
+		if err != nil || count.Sign() == 0 {
+			return 0, err
+		}
+		game, err := factory.GameAtIndex(&bind.CallOpts{Context: ctx}, new(big.Int).Sub(count, big.NewInt(1)))
+		if err != nil {
+			return 0, err
+		}
+		return game.Timestamp, nil
+	}
+	restartedAt, err := containerStartedAt(ctx, proposerContainer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		proposedAt, err := proposedAfter()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if proposedAt > uint64(restartedAt.Unix()) {
+			t.Logf("the proposer proposed again at timestamp %d, %d seconds after its restart", proposedAt, proposedAt-uint64(restartedAt.Unix()))
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for a proposal after the proposer restart (latest at timestamp %d)", proposedAt)
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+// TestPostRunL1ReorgOnGlamsterdam makes the L1 reorg a few blocks while it is
+// on Glamsterdam and ensures that the OP stack follows the new L1 blocks.
+// Short reorgs of the L1 are to be expected with ePBS on the consensus layer
+// side of Glamsterdam.
+func TestPostRunL1ReorgOnGlamsterdam(t *testing.T) {
+	if testingFork() || !testingPostRun() {
+		t.Skip("only run with HEMI_E2E_POST_RUN=true, after the other tests have passed")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
+	defer cancel()
+
+	fork := l1GlamsterdamFork(t, ctx)
+	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
+	sequencer := opStackNodes[0]
+	sequencerRollup := dialRPC(t, ctx, sequencer.rollupRPC)
+
+	// The L1 in dev mode finalizes every 32 blocks; a reorg must not go
+	// below the finalized block, so wait for a head that is well past one.
+	const depth = 3
+	var head *l1Header
+	for {
+		h, err := l1HeaderByTag(ctx, l1, "latest")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if uint64(h.Number)%32 >= depth+2 && uint64(h.Number) > uint64(fork.first.Number)+depth {
+			head = h
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+	before := waitForSyncStatus(t, ctx, sequencerRollup, sequencer.name, "for it to be at the l1 head",
+		func(s *opNodeSyncStatus) bool { return s.HeadL1.Number >= uint64(head.Number)-1 })
+	dropped := mustL1Header(t, ctx, l1, uint64(head.Number)-depth+1)
+
+	t.Logf("rewinding the l1 from block %d to block %d", head.Number, uint64(head.Number)-depth)
+	if err := l1.CallContext(ctx, nil, "debug_setHead", hexutil.EncodeUint64(uint64(head.Number)-depth)); err != nil {
+		t.Fatalf("rewind the l1: %v", err)
+	}
+
+	// the L1 builds new blocks from there, with other hashes
+	var replaced *l1Header
+	for {
+		h, err := l1HeaderByTag(ctx, l1, "latest")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if uint64(h.Number) > uint64(head.Number)+2 {
+			replaced = mustL1Header(t, ctx, l1, uint64(dropped.Number))
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("the l1 did not build new blocks after the rewind: %v", ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+	if replaced.Hash == dropped.Hash {
+		t.Fatalf("l1 block %d is still %s after the rewind", dropped.Number, dropped.Hash)
+	}
+	t.Logf("l1 block %d is now %s, it was %s", dropped.Number, replaced.Hash, dropped.Hash)
+
+	// Every op-node has to notice, drop what it derived from the dropped
+	// blocks, and derive from the new ones: the L1 blocks it refers to must
+	// be the new ones, and its safe L2 head must get past the unsafe L2
+	// head from before the reorg, that is the batcher has to post again.
+	target := before.UnsafeL2.Number
+	for _, node := range opStackNodes {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		status := waitForSyncStatus(t, ctx, rollup, node.name,
+			fmt.Sprintf("for it to follow the l1 past the reorg and derive l2 block %d", target),
+			func(s *opNodeSyncStatus) bool {
+				return s.HeadL1.Number > uint64(head.Number)+2 &&
+					s.CurrentL1.Number > uint64(head.Number) &&
+					s.SafeL2.Number > target &&
+					s.SafeL2.L1Origin.Number > uint64(head.Number)
+			})
+		checkOpNodeL1View(t, ctx, l1, node.name, status, false)
+	}
+
+	sequencerL2 := dialRPC(t, ctx, sequencer.l2RPC)
+	for _, node := range opStackNodes[1:] {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		var status *opNodeSyncStatus
+		if err := rollup.CallContext(ctx, &status, "optimism_syncStatus"); err != nil {
+			t.Fatal(err)
+		}
+		l2 := dialRPC(t, ctx, node.l2RPC)
+		number := status.SafeL2.Number
+		sequencerHash := l2BlockHash(t, ctx, sequencerL2, sequencer.name, number)
+		if hash := l2BlockHash(t, ctx, l2, node.name, number); hash != sequencerHash {
+			t.Fatalf("%s has l2 block %d as %s but the sequencer has %s", node.name, number, hash, sequencerHash)
+		}
 	}
 }
 
@@ -1531,11 +2126,12 @@ func TestPostRunOpStackLogs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 	defer cancel()
 
-	containers := []string{"e2e-op-batcher-1", "e2e-op-proposer-1"}
+	containers := []string{batcherContainer, proposerContainer}
 	for _, node := range opStackNodes {
 		containers = append(containers, node.container())
 	}
 	for _, container := range containers {
+		checkContainerNotRestarted(t, ctx, container)
 		checkOpStackLogs(t, ctx, container)
 	}
 }

@@ -33,7 +33,8 @@ jobs:
         go-version: [ "1.26.x" ]
         proposer_mode: ["l2oo", "fault"]
         gethl1:
-          - "ethereum/client-go:v1.17.6@sha256:6606aa1c7b6354d57581952604e7ab5a49689aeee9aebf668c81b6d3225395f1"
+          # the release that Sepolia runs through the Glamsterdam activation
+          - "ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64"
         include:
           # op-batcher publishes batches as blobs with one proposer mode and
           # as calldata with the other, so that both are tested without
@@ -125,14 +126,18 @@ jobs:
           TAR_SIZE=$(du -hs $LOCALNET_OPTIMISM_STACK_CACHE_FILE | cut -f1)
           echo "Saved compressed tarball size: $TAR_SIZE"
 
-      # The L1 starts before Glamsterdam and activates it 5 minutes after its
-      # genesis (L1_AMSTERDAM_OFFSET_SECONDS in e2e/docker-compose.yml), when
-      # the Hemi stack is up and has been deriving the L2 for a while.
+      # The L1 starts before Glamsterdam and activates it 7 minutes after its
+      # genesis (L1_AMSTERDAM_OFFSET_SECONDS, see e2e/genesisl2.sh), when the
+      # Hemi stack is up and has been deriving the L2 for a few minutes.  The
+      # migration tests fail if the sequencer or the batcher were not up in
+      # time; raise the offset rather than lowering it.
       - name: "run localnet"
+        id: run_localnet
         env:
           LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
           BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
+          L1_AMSTERDAM_OFFSET_SECONDS: "420"
         run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
 
       - name: "remove more dangling"
@@ -171,8 +176,11 @@ jobs:
         # XXX should this be a make command?
         run: go test -timeout 30m -v .
 
-      # These restart services, they are run once everything else passed.
-      - name: "restart the OP stack on Glamsterdam and check its logs"
+      # These restart and reorg services, so they run after everything else.
+      # They also run when the tests above failed, their log sweep shows what
+      # the services complained about.
+      - name: "disturb the OP stack on Glamsterdam and check its logs"
+        if: ${{ !cancelled() && steps.run_localnet.outcome == 'success' }}
         env:
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
           BATCHER_DA_TYPE: ${{ matrix.batcher_da }}

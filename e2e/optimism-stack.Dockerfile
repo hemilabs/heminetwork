@@ -11,7 +11,7 @@
 # op-proposer are linked against the same code that runs as the L2 execution
 # client.
 ARG OP_GETH_COMMIT=f5c491e251ce3c4941c437ee16ababf97655aef4
-ARG OPTIMISM_COMMIT=0b2a85d14f037db6c6f93f28d96efc66a984e608
+ARG OPTIMISM_COMMIT=c950c0d26372cca8fdde47267b0bfe0adc9b207d
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken

@@ -114,8 +114,11 @@ func TestSidecarBlobs(t *testing.T) {
 				t.Fatalf("got %d blobs, want %d", len(got), len(blobs))
 			}
 			for i, hash := range hashes {
-				if !bytes.Equal(got[hash], blobs[i][:]) {
+				if !bytes.Equal(got[hash].blob, blobs[i][:]) {
 					t.Fatalf("blob %d (%v) differs", i, hash)
+				}
+				if len(got[hash].commitment) != 48 {
+					t.Fatalf("blob %d (%v) has a %d byte commitment", i, hash, len(got[hash].commitment))
 				}
 			}
 		})
@@ -246,9 +249,11 @@ func TestRPCProxy(t *testing.T) {
 	proxy := httptest.NewServer(newRPCProxy(l1URL, store))
 	defer proxy.Close()
 
-	raw, hashes := testBlobTx(t, types.BlobSidecarVersion0, testBlob(3))
+	raw, hashes := testBlobTx(t, types.BlobSidecarVersion1, testBlob(3))
 	requests := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"eth_sendRawTransaction","params":[%q]}`, hexutil.Encode(raw)),
+		// a resubmission keeps one entry
 		fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"eth_sendRawTransaction","params":[%q]}`, hexutil.Encode(raw)),
 		// the L1 decides what to do with a blob transaction that cannot be decoded
 		`{"jsonrpc":"2.0","id":1,"method":"eth_sendRawTransaction","params":["0x03c0"]}`,
@@ -289,7 +294,7 @@ func TestRPCProxy(t *testing.T) {
 	if store.len() != 1 {
 		t.Fatalf("%d blobs kept, want 1", store.len())
 	}
-	if blob, ok := store.get(hashes[0]); !ok || !bytes.Equal(blob, testBlob(3)[:]) {
+	if blob, ok := store.get(hashes[0]); !ok || !bytes.Equal(blob.blob, testBlob(3)[:]) {
 		t.Fatalf("blob %v was not kept", hashes[0])
 	}
 }
@@ -364,18 +369,19 @@ func TestBeaconAPI(t *testing.T) {
 	defer l1.Close()
 
 	store := newBlobStore()
-	store.put(hashA, blobA)
-	store.put(hashB, blobB)
+	store.put(hashA, keptBlob{blob: blobA, commitment: make(hexutil.Bytes, 48)})
+	store.put(hashB, keptBlob{blob: blobB, commitment: append(hexutil.Bytes{0xcc}, make(hexutil.Bytes, 47)...)})
 
-	b := &beacon{
-		l1:    &l1Client{url: l1.URL, client: l1.Client()},
-		store: store,
-	}
+	l1c := &l1Client{url: l1.URL, client: l1.Client()}
+	b := &beacon{l1: l1c, store: store}
 	api := httptest.NewServer(b.handler())
 	defer api.Close()
+	legacy := &beacon{l1: l1c, store: store, legacy: true}
+	legacyAPI := httptest.NewServer(legacy.handler())
+	defer legacyAPI.Close()
 
-	get := func(path string) (int, string) {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, api.URL+path, nil)
+	getFrom := func(base string, path string) (int, string) {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+path, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -390,6 +396,7 @@ func TestBeaconAPI(t *testing.T) {
 		}
 		return resp.StatusCode, strings.TrimSpace(string(body))
 	}
+	get := func(path string) (int, string) { return getFrom(api.URL, path) }
 
 	// the L1 is not reachable yet
 	chain.fail = true
@@ -406,7 +413,7 @@ func TestBeaconAPI(t *testing.T) {
 		body   string
 	}{
 		{"/eth/v1/node/version", http.StatusOK, `{"data":{"version":"` + version + `"}}`},
-		{"/eth/v1/config/spec", http.StatusOK, `{"data":{"SECONDS_PER_SLOT":"1"}}`},
+		{"/eth/v1/config/spec", http.StatusOK, `{"data":{"SECONDS_PER_SLOT":"1","SLOT_DURATION_MS":"1000"}}`},
 		{"/eth/v1/beacon/genesis", http.StatusOK, `{"data":{"genesis_time":"1000"}}`},
 
 		// block 2 is in slot 6
@@ -418,7 +425,7 @@ func TestBeaconAPI(t *testing.T) {
 		},
 		{"/eth/v1/beacon/blobs/6?versioned_hashes=" + hashA.Hex() + "," + hashB.Hex(), http.StatusOK, `{"data":["0x0a","0x0b"]}`},
 		// a blob that is not in the block
-		{"/eth/v1/beacon/blobs/6?versioned_hashes=" + hashC.Hex(), http.StatusOK, `{"data":[]}`},
+		{"/eth/v1/beacon/blobs/6?versioned_hashes=" + hashC.Hex(), http.StatusNotFound, ""},
 		// blocks without blobs: the genesis block, the head block
 		{"/eth/v1/beacon/blobs/0", http.StatusOK, `{"data":[]}`},
 		{"/eth/v1/beacon/blobs/15", http.StatusOK, `{"data":[]}`},
@@ -448,11 +455,42 @@ func TestBeaconAPI(t *testing.T) {
 			}
 		}
 	}
+
+	// the legacy beacon serves the same blobs as sidecars and only the new
+	// spec key
+	sidecarA := `{"index":"0","blob":"0x0a","kzg_commitment":"0x` + strings.Repeat("00", 48) + `","kzg_proof":"0x` + strings.Repeat("00", 48) + `"}`
+	sidecarB := `{"index":"1","blob":"0x0b","kzg_commitment":"0xcc` + strings.Repeat("00", 47) + `","kzg_proof":"0x` + strings.Repeat("00", 48) + `"}`
+	legacyTests := []struct {
+		path   string
+		status int
+		body   string
+	}{
+		{"/eth/v1/config/spec", http.StatusOK, `{"data":{"SLOT_DURATION_MS":"1000"}}`},
+		{"/eth/v1/beacon/blobs/6", http.StatusNotFound, ""},
+		{"/eth/v1/beacon/blob_sidecars/6", http.StatusOK, `{"data":[` + sidecarA + `,` + sidecarB + `]}`},
+		{"/eth/v1/beacon/blob_sidecars/6?indices=1", http.StatusOK, `{"data":[` + sidecarB + `]}`},
+		{"/eth/v1/beacon/blob_sidecars/6?indices=1&indices=0", http.StatusOK, `{"data":[` + sidecarA + `,` + sidecarB + `]}`},
+		{"/eth/v1/beacon/blob_sidecars/6?indices=0,1", http.StatusOK, `{"data":[` + sidecarA + `,` + sidecarB + `]}`},
+		{"/eth/v1/beacon/blob_sidecars/6?indices=5", http.StatusOK, `{"data":[]}`},
+		{"/eth/v1/beacon/blob_sidecars/6?indices=x", http.StatusBadRequest, ""},
+		{"/eth/v1/beacon/blob_sidecars/0", http.StatusOK, `{"data":[]}`},
+		{"/eth/v1/beacon/blob_sidecars/7", http.StatusNotFound, ""},
+		{"/eth/v1/beacon/blob_sidecars/12", http.StatusNotFound, ""},
+	}
+	for _, tt := range legacyTests {
+		status, body := getFrom(legacyAPI.URL, tt.path)
+		if status != tt.status {
+			t.Fatalf("legacy GET %s: got %d %s, want %d", tt.path, status, body, tt.status)
+		}
+		if tt.body != "" && body != tt.body {
+			t.Fatalf("legacy GET %s: got %s, want %s", tt.path, body, tt.body)
+		}
+	}
 }
 
 func TestRun(t *testing.T) {
 	// find free ports
-	addresses := make([]string, 2)
+	addresses := make([]string, 3)
 	for i := range addresses {
 		listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 		if err != nil {
@@ -466,6 +504,7 @@ func TestRun(t *testing.T) {
 
 	t.Setenv("FAKEBEACON_BEACON_ADDRESS", addresses[0])
 	t.Setenv("FAKEBEACON_RPC_ADDRESS", addresses[1])
+	t.Setenv("FAKEBEACON_BEACON_LEGACY_ADDRESS", addresses[2])
 	t.Setenv("FAKEBEACON_L1_RPC_URL", "http://127.0.0.1:1")
 
 	ctx, cancel := context.WithCancel(t.Context())
