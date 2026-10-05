@@ -212,6 +212,10 @@ func (cfg *Config) SetUpgradeOpen(x bool) {
 	cfg.upgradeOpen = x
 }
 
+// BlockHeaderCacheCost is the block header cache cost of one header: a
+// rough tbcd.BlockHeader size plus the LRU entry overhead.
+const BlockHeaderCacheCost = 8 + 32 + 80 + 8 + lru.EntryOverhead
+
 func NewConfig(network, home, headerCacheSizeS, blockCacheSizeS string) (*Config, error) {
 	if headerCacheSizeS == "" {
 		headerCacheSizeS = "0"
@@ -347,11 +351,10 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 		welcome = append(welcome, "Block cache: DISABLED")
 	}
 	if cfg.headerCacheSize > 0 {
-		const blockHeaderCost = 8 + 32 + 80 + 8 // rough tbcd.BlockHeader size
 		l.headerCache, err = lru.New[chainhash.Hash, *tbcd.BlockHeader](
 			cfg.headerCacheSize,
 			func(_ chainhash.Hash, _ *tbcd.BlockHeader) int {
-				return blockHeaderCost + lru.EntryOverhead
+				return BlockHeaderCacheCost
 			},
 			0,
 		)
