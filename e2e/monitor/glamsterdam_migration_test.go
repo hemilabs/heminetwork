@@ -1526,33 +1526,33 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
 	l1Client := ethclient.NewClient(l1)
 
-	// an account of its own, the load account is busy on the L2
+	// An account of its own, funded on the L1 by e2e/genesisl2.sh; the
+	// other tests have their own accounts, so there is no nonce race.
 	key, err := crypto.ToECDSA(crypto.Keccak256([]byte("hemi localnet glamsterdam l1 transactions")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	from := crypto.PubkeyToAddress(key.PublicKey)
-	loadKey := glamsterdamLoadKey(t)
 
 	chainID := uint256.MustFromBig(l1ChainId())
 	gasFeeCap := uint256.NewInt(1_000_000_000)
 
-	// fund it from the load account
-	nonce, err := l1Client.PendingNonceAt(ctx, crypto.PubkeyToAddress(loadKey.PublicKey))
+	// a plain transfer first, it marks the first L1 block of this test
+	nonce, err := l1Client.PendingNonceAt(ctx, from)
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt := sendL1Transaction(t, ctx, l1Client, loadKey, &types.DynamicFeeTx{
+	receipt := sendL1Transaction(t, ctx, l1Client, key, &types.DynamicFeeTx{
 		ChainID:   l1ChainId(),
 		Nonce:     nonce,
 		GasTipCap: big.NewInt(1),
 		GasFeeCap: gasFeeCap.ToBig(),
 		Gas:       100_000,
-		To:        &from,
-		Value:     new(big.Int).Mul(big.NewInt(400), big.NewInt(1_000_000_000_000_000_000)),
+		To:        &dummyRecipient,
+		Value:     big.NewInt(1),
 	})
 	if receipt.Status != types.ReceiptStatusSuccessful {
-		t.Fatalf("funding %s failed", from)
+		t.Fatalf("the transfer from %s failed", from)
 	}
 	firstBlock := receipt.BlockNumber.Uint64()
 
@@ -1606,8 +1606,9 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 
 	// Transactions that each burn the most gas a transaction may use, all
 	// in one block, so that the block uses more than the gas target and the
-	// base fee of the next block rises.  The code of a burner loops
-	// forever: JUMPDEST PUSH0 JUMP.
+	// base fee of the next block rises.  A burner is a contract creation
+	// whose code runs out of gas at once by expanding memory to 4 GiB:
+	// PUSH0 PUSH4 0xffffffff MSTORE.
 	nonce, err = l1Client.PendingNonceAt(ctx, from)
 	if err != nil {
 		t.Fatal(err)
@@ -1620,7 +1621,7 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 			GasTipCap: big.NewInt(1),
 			GasFeeCap: gasFeeCap.ToBig(),
 			Gas:       l1MaxTxGas,
-			Data:      []byte{0x5b, 0x5f, 0x56},
+			Data:      []byte{0x5f, 0x63, 0xff, 0xff, 0xff, 0xff, 0x52},
 		})
 		if err != nil {
 			t.Fatal(err)
