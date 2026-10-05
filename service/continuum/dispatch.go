@@ -110,7 +110,7 @@ func handlePingResponse(dc *dispatchCtx, payload any) bool {
 	// Heartbeat received — peer is alive.  Disarm the
 	// ping timeout, refresh peer TTL and update LastSeen.
 	_ = dc.s.pings.Cancel(*dc.id)
-	dc.s.refreshPeerLastSeen(dc.sessionCtx, *dc.id)
+	dc.s.refreshPeerLastSeen(dc.ctx, *dc.id)
 	return false
 }
 
