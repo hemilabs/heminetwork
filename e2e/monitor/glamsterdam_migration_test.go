@@ -1537,7 +1537,11 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 	chainID := uint256.MustFromBig(l1ChainId())
 	gasFeeCap := uint256.NewInt(1_000_000_000)
 
-	// a plain transfer first, it marks the first L1 block of this test
+	// A plain transfer first, it marks the first L1 block of this test.  It
+	// goes to an account that exists: on Glamsterdam a transfer that creates
+	// the recipient pays state gas for the new account (EIP-8037), about ten
+	// times the gas of a transfer.
+	loadAddress := crypto.PubkeyToAddress(glamsterdamLoadKey(t).PublicKey)
 	nonce, err := l1Client.PendingNonceAt(ctx, from)
 	if err != nil {
 		t.Fatal(err)
@@ -1548,7 +1552,7 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 		GasTipCap: big.NewInt(1),
 		GasFeeCap: gasFeeCap.ToBig(),
 		Gas:       100_000,
-		To:        &dummyRecipient,
+		To:        &loadAddress,
 		Value:     big.NewInt(1),
 	})
 	if receipt.Status != types.ReceiptStatusSuccessful {

@@ -299,7 +299,9 @@ func TestRPCProxy(t *testing.T) {
 	}
 }
 
-// testL1 is an L1 JSON-RPC server that only serves blocks.
+// testL1 is an L1 JSON-RPC server that only serves blocks, with their
+// transactions as objects or, like a real node when they are not asked for,
+// as hashes.
 type testL1 struct {
 	blocks []l1Block
 	fail   bool
@@ -320,14 +322,30 @@ func (l *testL1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var result *l1Block
+	var block *l1Block
 	switch number := req.Params[0].(string); number {
 	case "latest":
-		result = &l.blocks[len(l.blocks)-1]
+		block = &l.blocks[len(l.blocks)-1]
 	default:
 		n, err := hexutil.DecodeUint64(number)
 		if err == nil && n < uint64(len(l.blocks)) {
-			result = &l.blocks[n]
+			block = &l.blocks[n]
+		}
+	}
+	var result any
+	if block != nil {
+		txs := make([]any, 0, len(block.Transactions))
+		for i, tx := range block.Transactions {
+			if withTxs, _ := req.Params[1].(bool); withTxs {
+				txs = append(txs, tx)
+			} else {
+				txs = append(txs, fmt.Sprintf("0x%064x", i))
+			}
+		}
+		result = map[string]any{
+			"number":       block.Number,
+			"timestamp":    block.Time,
+			"transactions": txs,
 		}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": 1, "result": result})
@@ -352,16 +370,12 @@ func TestBeaconAPI(t *testing.T) {
 			Time:   hexutil.Uint64(genesisTime + 3*i),
 		})
 	}
-	chain.blocks[2].Transactions = []struct {
-		BlobVersionedHashes []common.Hash `json:"blobVersionedHashes"`
-	}{
+	chain.blocks[2].Transactions = []l1Tx{
 		{},
 		{BlobVersionedHashes: []common.Hash{hashA}},
 		{BlobVersionedHashes: []common.Hash{hashB}},
 	}
-	chain.blocks[4].Transactions = []struct {
-		BlobVersionedHashes []common.Hash `json:"blobVersionedHashes"`
-	}{
+	chain.blocks[4].Transactions = []l1Tx{
 		{BlobVersionedHashes: []common.Hash{hashC}},
 	}
 

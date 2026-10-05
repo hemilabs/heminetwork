@@ -213,9 +213,22 @@ func newRPCProxy(l1 *url.URL, store *blobStore) http.Handler {
 type l1Block struct {
 	Number       hexutil.Uint64 `json:"number"`
 	Time         hexutil.Uint64 `json:"timestamp"`
-	Transactions []struct {
-		BlobVersionedHashes []common.Hash `json:"blobVersionedHashes"`
-	} `json:"transactions"`
+	Transactions []l1Tx         `json:"transactions"`
+}
+
+// l1Tx is the part of an L1 transaction that is looked at.  A block fetched
+// without its transactions lists them as hashes, which are ignored.
+type l1Tx struct {
+	BlobVersionedHashes []common.Hash `json:"blobVersionedHashes"`
+}
+
+func (tx *l1Tx) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		*tx = l1Tx{}
+		return nil
+	}
+	type plain l1Tx
+	return json.Unmarshal(data, (*plain)(tx))
 }
 
 // l1Client is a minimal L1 JSON-RPC client.

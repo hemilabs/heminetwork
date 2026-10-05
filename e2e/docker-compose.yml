@@ -381,9 +381,7 @@ services:
       - "--l2=ws://op-geth-l2:8551"
       - "--l2.jwt-secret=/tmp/jwt.hex"
       - "--sequencer.enabled=true"
-      # the sequencer picks L1 origins one block behind the L1 head, so the
-      # confirmation depth wrapper around the L1 source is used
-      - "--sequencer.l1-confs=1"
+      - "--sequencer.l1-confs=0"
       - "--sequencer.stopped=false"
       - "--verifier.l1-confs=0"
       - "--rollup.config=/shared-dir/rollup.json"
@@ -401,6 +399,9 @@ services:
       - "--l1.rpckind=standard"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
+      # poll the L1 safe and finalized labels every 30 seconds instead of
+      # every 384, so that a node has them soon after it started
+      - "--l1.epoch-poll-interval=30s"
       - "--p2p.no-discovery"
       - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
@@ -455,6 +456,9 @@ services:
       - "--l1.rpckind=standard"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
+      # poll the L1 safe and finalized labels every 30 seconds instead of
+      # every 384, so that a node has them soon after it started
+      - "--l1.epoch-poll-interval=30s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
       - "--log.level=debug"
@@ -544,6 +548,9 @@ services:
       - "--l1.rpckind=basic"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
+      # poll the L1 safe and finalized labels every 30 seconds instead of
+      # every 384, so that a node has them soon after it started
+      - "--l1.epoch-poll-interval=30s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
       - "--log.level=debug"
@@ -747,6 +754,9 @@ services:
       - "--l1.runtime-config-reload-interval=30s"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
+      # poll the L1 safe and finalized labels every 30 seconds instead of
+      # every 384, so that a node has them soon after it started
+      - "--l1.epoch-poll-interval=30s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
       - "--log.level=debug"
