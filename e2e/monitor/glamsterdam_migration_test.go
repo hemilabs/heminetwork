@@ -1020,9 +1020,21 @@ func scanOpStackLogs(ctx context.Context, container string) ([]string, error) {
 		if line != "" {
 			lines++
 			for _, problem := range opStackLogProblems {
-				if strings.Contains(line, problem) {
-					add("unexpected "+strconv.Quote(problem), line)
+				if !strings.Contains(line, problem) {
+					continue
 				}
+				// A contract that reverts while the transaction manager
+				// re-estimates gas for a fee bump is not the L1 refusing
+				// the transaction: op-proposer runs into it when a
+				// proposal it is about to bump was included in the
+				// meantime, which the L1 reorg test provokes by taking
+				// back the block with the proposal.  The L1 gas rules
+				// refuse a transaction with the errors listed on their
+				// own, never with a revert.
+				if problem == "failed to re-estimate gas" && strings.Contains(line, `err="execution reverted`) {
+					continue
+				}
+				add("unexpected "+strconv.Quote(problem), line)
 			}
 			if m := opNodeReorgLog.FindStringSubmatch(line); m != nil {
 				// A new head that directly follows the previous head but
@@ -2213,6 +2225,18 @@ func TestPostRunL1ReorgOnGlamsterdam(t *testing.T) {
 	// blocks, and derive from the new ones: the L1 blocks it refers to must
 	// be the new ones, and its safe L2 head must get past the unsafe L2
 	// head from before the reorg, that is the batcher has to post again.
+	//
+	// The L1 is in dev mode and calls its head safe, so the rewind took
+	// back blocks that the op-nodes were told are safe, which a real L1
+	// does not do.  An op-node asks for the safe L1 block every 30 seconds
+	// and has the dropped one until then; wait for that too.
+	onL1 := func(ref opNodeL1Ref) bool {
+		if ref == (opNodeL1Ref{}) {
+			return true
+		}
+		h, err := l1HeaderByNumber(ctx, l1, ref.Number)
+		return err == nil && h.Hash == ref.Hash
+	}
 	target := before.UnsafeL2.Number
 	for _, node := range opStackNodes {
 		rollup := dialRPC(t, ctx, node.rollupRPC)
@@ -2222,7 +2246,8 @@ func TestPostRunL1ReorgOnGlamsterdam(t *testing.T) {
 				return s.HeadL1.Number > uint64(head.Number)+2 &&
 					s.CurrentL1.Number > uint64(head.Number) &&
 					s.SafeL2.Number > target &&
-					s.SafeL2.L1Origin.Number > uint64(head.Number)
+					s.SafeL2.L1Origin.Number > uint64(head.Number) &&
+					onL1(s.SafeL1) && onL1(s.FinalizedL1)
 			})
 		checkOpNodeL1View(t, ctx, l1, node.name, status, false)
 	}
