@@ -1581,6 +1581,11 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	}
 
 	for k := range bm {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if want <= 0 {
 			break
 		}

@@ -219,3 +219,22 @@ func TestBlockExpiredRefill(t *testing.T) {
 		})
 	}
 }
+
+// TestSyncBlocksCancelled checks that syncBlocks sends no request once
+// its context is cancelled.
+func TestSyncBlocksCancelled(t *testing.T) {
+	s, _ := newSyncServer(t, 10)
+	getData := make(chan chainhash.Hash, 2*defaultPendingBlocks)
+	addPipePeer(t, s, "peer", getData)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	s.syncBlocks(ctx)
+
+	if got := collect(getData, 0, 500*time.Millisecond); len(got) != 0 {
+		t.Fatalf("requests sent after cancel: %v", len(got))
+	}
+	if l := s.blocks.Len(); l != 0 {
+		t.Fatalf("pending %v, want 0", l)
+	}
+}
