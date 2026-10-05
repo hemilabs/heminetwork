@@ -647,6 +647,25 @@ services:
     ports:
       - "28548:8548"
 
+  # A node can only snap sync the L2 once the sequencer has a block with a
+  # Bitcoin Attributes Deposited transaction at or before the pivot block of
+  # the sync, see wait-for-btc-attributes.sh.  The snap syncing node starts
+  # after this.
+  wait-for-btc-attributes:
+    depends_on:
+      op-geth-l2:
+        condition: "service_healthy"
+    image: optimism-stack:latest
+    volumes:
+      - ./wait-for-btc-attributes.sh:/tmp/wait-for-btc-attributes.sh
+    command:
+      - sh
+      - /tmp/wait-for-btc-attributes.sh
+    environment:
+      L2_RPC: "http://op-geth-l2:8546"
+    networks:
+      e2e:
+
   wait-for-finalized:
     depends_on:
       op-geth-l2-non-sequencing:
@@ -716,6 +735,10 @@ services:
       bitcoind-setban-1:
         condition: "service_completed_successfully"
       bitcoind-setban-2:
+        condition: "service_completed_successfully"
+      # the hVM light state of the pivot block must exist before a snap
+      # sync starts
+      wait-for-btc-attributes:
         condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
