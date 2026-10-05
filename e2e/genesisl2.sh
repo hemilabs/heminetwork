@@ -197,4 +197,13 @@ echo "$(jq --argjson timestamp "$(jq '.timestamp' /shared-dir/genesis.json)" '.t
 
 cat /shared-dir/l1genesis.json
 
+# The op-nodes are given the L1 chain config without the Glamsterdam
+# activation.  For the L1s of the Hemi networks op-node uses the chain config
+# that is built into its op-geth library, and that one does not know when the
+# L1 activates Glamsterdam.  The op-nodes of the localnet must not know more
+# about the L1 than they do in production.
+jq '.config | del(.amsterdamTime)' /shared-dir/l1genesis.json > /shared-dir/l1chainconfig-op-node.json
+
+cat /shared-dir/l1chainconfig-op-node.json
+
 cp .deployer/state.json /shared-dir/state.json

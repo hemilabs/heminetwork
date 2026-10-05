@@ -408,7 +408,11 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon=http://l1-beacon:5052"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      # without the Glamsterdam activation, see genesisl2.sh
+      - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
+      # records from which L1 block each safe L2 head was derived, the
+      # tests use it to see what was derived from either side of the fork
+      - "--safedb.path=/tmp/safedb"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -456,7 +460,11 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon=http://l1-beacon:5052"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      # without the Glamsterdam activation, see genesisl2.sh
+      - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
+      # records from which L1 block each safe L2 head was derived, the
+      # tests use it to see what was derived from either side of the fork
+      - "--safedb.path=/tmp/safedb"
       - "--p2p.no-discovery"
     volumes:
       - "shared-dir:/shared-dir"
@@ -541,7 +549,11 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon=http://l1-beacon:5052"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      # without the Glamsterdam activation, see genesisl2.sh
+      - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
+      # records from which L1 block each safe L2 head was derived, the
+      # tests use it to see what was derived from either side of the fork
+      - "--safedb.path=/tmp/safedb"
       - "--syncmode=execution-layer"
       - "--p2p.no-discovery"
     volumes:
@@ -735,7 +747,11 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon=http://l1-beacon:5052"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      # without the Glamsterdam activation, see genesisl2.sh
+      - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
+      # records from which L1 block each safe L2 head was derived, the
+      # tests use it to see what was derived from either side of the fork
+      - "--safedb.path=/tmp/safedb"
       - "--syncmode=consensus-layer"
       - "--p2p.no-discovery"
     volumes:

@@ -91,6 +91,11 @@ type opStackNode struct {
 	// have to follow it across the fork.  The others are started later and
 	// sync across the fork from the L2 genesis.
 	runsFromL1Genesis bool
+
+	// derivesFromL1Genesis is true for the op-nodes that derive the whole
+	// L2 from the L1.  The other one starts with the L2 that its execution
+	// client synced from its peers.
+	derivesFromL1Genesis bool
 }
 
 func (n opStackNode) container() string {
@@ -98,10 +103,21 @@ func (n opStackNode) container() string {
 }
 
 var opStackNodes = []opStackNode{
-	{name: "op-node", rollupRPC: "http://localhost:8548", l2RPC: "http://localhost:8546", runsFromL1Genesis: true},
-	{name: "op-node-non-sequencing", rollupRPC: "http://localhost:18548", l2RPC: "http://localhost:18546", runsFromL1Genesis: true},
-	{name: "op-node-non-sequencing-snap-sync", rollupRPC: "http://localhost:28548", l2RPC: "http://localhost:28546"},
-	{name: "op-node-non-sequencing-full-sync", rollupRPC: "http://localhost:38548", l2RPC: "http://localhost:38546"},
+	{
+		name: "op-node", rollupRPC: "http://localhost:8548", l2RPC: "http://localhost:8546",
+		runsFromL1Genesis: true, derivesFromL1Genesis: true,
+	},
+	{
+		name: "op-node-non-sequencing", rollupRPC: "http://localhost:18548", l2RPC: "http://localhost:18546",
+		runsFromL1Genesis: true, derivesFromL1Genesis: true,
+	},
+	{
+		name: "op-node-non-sequencing-snap-sync", rollupRPC: "http://localhost:28548", l2RPC: "http://localhost:28546",
+	},
+	{
+		name: "op-node-non-sequencing-full-sync", rollupRPC: "http://localhost:38548", l2RPC: "http://localhost:38546",
+		derivesFromL1Genesis: true,
+	},
 }
 
 // testingPostRun returns true when the tests that disturb the localnet are to
@@ -538,64 +554,231 @@ func l2BlockHash(t *testing.T, ctx context.Context, l2 *rpc.Client, name string,
 	return hash
 }
 
-// checkL1AttributesOnL2 ensures that the attributes of the L1 origin that an
-// L2 block carries in the L1Block contract are those of the L1 block.
-func checkL1AttributesOnL2(t *testing.T, ctx context.Context, l1 *rpc.Client, l2 *rpc.Client, name string, ref opNodeL2Ref) {
+// l1Attributes are the attributes of its L1 origin that an L2 block carries
+// in its first transaction, the L1 attributes deposit.
+type l1Attributes struct {
+	number      uint64
+	time        uint64
+	baseFee     *big.Int
+	blobBaseFee *big.Int
+	hash        common.Hash
+	batcherHash common.Hash
+}
+
+// l2L1Attributes returns the hash of an L2 block and the attributes of its
+// L1 origin, taken from the block as the L2 execution client has it.
+func l2L1Attributes(t *testing.T, ctx context.Context, l2 *rpc.Client, name string, number uint64) (common.Hash, l1Attributes) {
 	t.Helper()
 
-	call := func(what string, selector string) *big.Int {
-		var out hexutil.Bytes
-		err := l2.CallContext(ctx, &out, "eth_call",
-			map[string]string{"to": l1BlockPredeploy, "data": selector},
-			hexutil.EncodeUint64(ref.Number))
-		if err != nil {
-			t.Fatalf("%s: read L1Block.%s at l2 block %d: %v", name, what, ref.Number, err)
-		}
-		if len(out) != 32 {
-			t.Fatalf("%s: L1Block.%s at l2 block %d returned %d bytes", name, what, ref.Number, len(out))
-		}
-		return new(big.Int).SetBytes(out)
+	var block *struct {
+		Hash         common.Hash `json:"hash"`
+		Transactions []struct {
+			Type  hexutil.Uint64 `json:"type"`
+			Input hexutil.Bytes  `json:"input"`
+		} `json:"transactions"`
+	}
+	if err := l2.CallContext(ctx, &block, "eth_getBlockByNumber", hexutil.EncodeUint64(number), true); err != nil {
+		t.Fatalf("%s: fetch l2 block %d: %v", name, number, err)
+	}
+	if block == nil {
+		t.Fatalf("%s: l2 block %d not found", name, number)
+	}
+	if len(block.Transactions) == 0 || block.Transactions[0].Type != types.DepositTxType {
+		t.Fatalf("%s: l2 block %d does not start with a deposit transaction", name, number)
 	}
 
-	var (
-		number      = call("number()", "0x8381f58a")
-		hash        = common.BigToHash(call("hash()", "0x09bd5a60"))
-		baseFee     = call("basefee()", "0x5cf24969")
-		blobBaseFee = call("blobBaseFee()", "0xf8206140")
-	)
-
-	if !number.IsUint64() || number.Uint64() != ref.L1Origin.Number {
-		t.Fatalf("%s: L1Block.number at l2 block %d is %s, op-node says its l1 origin is %d",
-			name, ref.Number, number, ref.L1Origin.Number)
+	// The calldata of setL1BlockValuesEcotone() and setL1BlockValuesIsthmus()
+	// is packed: selector, base fee scalar (4 bytes), blob base fee scalar
+	// (4), sequence number (8), timestamp (8), number (8), base fee (32),
+	// blob base fee (32), hash (32), batcher hash (32).  Isthmus appends
+	// the operator fee parameters.
+	input := block.Transactions[0].Input
+	const ecotoneLen = 4 + 4 + 4 + 8 + 8 + 8 + 32 + 32 + 32 + 32
+	if len(input) < ecotoneLen {
+		t.Fatalf("%s: l1 attributes of l2 block %d have %d bytes, expected at least %d",
+			name, number, len(input), ecotoneLen)
 	}
-
-	canonical := mustL1Header(t, ctx, l1, number.Uint64())
-	if hash != canonical.Hash {
-		t.Fatalf("%s: L1Block.hash at l2 block %d is %s but l1 block %d is %s",
-			name, ref.Number, hash, canonical.Number, canonical.Hash)
+	switch selector := hexutil.Encode(input[:4]); selector {
+	case "0x440a5e20", "0x098999be": // Ecotone, Isthmus
+	default:
+		t.Fatalf("%s: l1 attributes of l2 block %d have an unknown format (selector %s)", name, number, selector)
 	}
-	if canonical.BaseFee == nil || baseFee.Cmp(canonical.BaseFee.ToInt()) != 0 {
-		t.Fatalf("%s: L1Block.basefee at l2 block %d is %s but l1 block %d has base fee %v",
-			name, ref.Number, baseFee, canonical.Number, canonical.BaseFee)
+	return block.Hash, l1Attributes{
+		time:        new(big.Int).SetBytes(input[20:28]).Uint64(),
+		number:      new(big.Int).SetBytes(input[28:36]).Uint64(),
+		baseFee:     new(big.Int).SetBytes(input[36:68]),
+		blobBaseFee: new(big.Int).SetBytes(input[68:100]),
+		hash:        common.BytesToHash(input[100:132]),
+		batcherHash: common.BytesToHash(input[132:164]),
+	}
+}
+
+// checkL1AttributesOnL2 ensures that the attributes of its L1 origin that an
+// L2 block carries are those of the L1 block, and returns them.
+func checkL1AttributesOnL2(t *testing.T, ctx context.Context, l1 *rpc.Client, l2 *rpc.Client, name string, l2Number uint64) l1Attributes {
+	t.Helper()
+
+	_, attrs := l2L1Attributes(t, ctx, l2, name, l2Number)
+
+	canonical := mustL1Header(t, ctx, l1, attrs.number)
+	if attrs.hash != canonical.Hash {
+		t.Fatalf("%s: l2 block %d has l1 origin %s:%d but the l1 has %s at that height",
+			name, l2Number, attrs.hash, attrs.number, canonical.Hash)
+	}
+	if attrs.time != uint64(canonical.Time) {
+		t.Fatalf("%s: l2 block %d has l1 origin timestamp %d but l1 block %d has %d",
+			name, l2Number, attrs.time, canonical.Number, canonical.Time)
+	}
+	if canonical.BaseFee == nil || attrs.baseFee.Cmp(canonical.BaseFee.ToInt()) != 0 {
+		t.Fatalf("%s: l2 block %d has l1 base fee %s but l1 block %d has %v",
+			name, l2Number, attrs.baseFee, canonical.Number, canonical.BaseFee)
+	}
+	if want := common.BytesToHash(common.HexToAddress(batcherSenderAddress).Bytes()); attrs.batcherHash != want {
+		t.Fatalf("%s: l2 block %d has batcher hash %s, expected %s", name, l2Number, attrs.batcherHash, want)
 	}
 
 	var feeHistory struct {
 		BaseFeePerBlobGas []*hexutil.Big `json:"baseFeePerBlobGas"`
 	}
-	err := l1.CallContext(ctx, &feeHistory, "eth_feeHistory", "0x1", hexutil.EncodeUint64(number.Uint64()), []float64{})
+	err := l1.CallContext(ctx, &feeHistory, "eth_feeHistory", "0x1", hexutil.EncodeUint64(attrs.number), []float64{})
 	if err != nil {
-		t.Fatalf("fetch l1 fee history of block %d: %v", number, err)
+		t.Fatalf("fetch l1 fee history of block %d: %v", attrs.number, err)
 	}
 	if len(feeHistory.BaseFeePerBlobGas) == 0 || feeHistory.BaseFeePerBlobGas[0] == nil {
-		t.Fatalf("l1 fee history of block %d has no blob base fee", number)
+		t.Fatalf("l1 fee history of block %d has no blob base fee", attrs.number)
 	}
-	if want := feeHistory.BaseFeePerBlobGas[0].ToInt(); blobBaseFee.Cmp(want) != 0 {
-		t.Fatalf("%s: L1Block.blobBaseFee at l2 block %d is %s but l1 block %d has blob base fee %s",
-			name, ref.Number, blobBaseFee, canonical.Number, want)
+	if want := feeHistory.BaseFeePerBlobGas[0].ToInt(); attrs.blobBaseFee.Cmp(want) != 0 {
+		t.Fatalf("%s: l2 block %d has l1 blob base fee %s but l1 block %d has %s",
+			name, l2Number, attrs.blobBaseFee, canonical.Number, want)
+	}
+	return attrs
+}
+
+// checkL2AcrossForkBoundary finds the L2 blocks around the first one that has
+// the first Glamsterdam L1 block as its L1 origin and ensures that they carry
+// the attributes of the L1 blocks on both sides of the fork.  The L1 block
+// hash in them is the first one the sequencer had to compute over the new
+// header fields.
+func checkL2AcrossForkBoundary(t *testing.T, ctx context.Context, l1 *rpc.Client, l2 *rpc.Client, name string, fork glamsterdamFork, l2Head uint64) {
+	t.Helper()
+
+	// L1 origins never decrease, binary search for the first L2 block with
+	// an L1 origin on Glamsterdam
+	forkNumber := uint64(fork.first.Number)
+	lo, hi := uint64(1), l2Head
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if _, attrs := l2L1Attributes(t, ctx, l2, name, mid); attrs.number < forkNumber {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo < 2 {
+		t.Fatalf("%s: no l2 block has an l1 origin before Glamsterdam", name)
 	}
 
-	t.Logf("%s: l2 block %d carries the attributes of l1 block %d %s (base fee %s, blob base fee %s)",
-		name, ref.Number, canonical.Number, canonical.Hash, baseFee, blobBaseFee)
+	// The L1 origin advances by at most one L1 block per L2 block.  Look at
+	// some L2 blocks on both sides, they cover the L1 blocks around the
+	// fork.
+	origins := make(map[uint64]struct{})
+	for n := lo - min(lo-1, 12); n <= min(lo+12, l2Head); n++ {
+		attrs := checkL1AttributesOnL2(t, ctx, l1, l2, name, n)
+		origins[attrs.number] = struct{}{}
+		switch {
+		case n < lo && attrs.number >= forkNumber, n >= lo && attrs.number < forkNumber:
+			t.Fatalf("%s: l2 block %d has l1 origin %d, the first l2 block on Glamsterdam l1 origins is %d",
+				name, n, attrs.number, lo)
+		case attrs.number == forkNumber && attrs.hash != fork.first.Hash:
+			t.Fatalf("%s: l2 block %d has l1 origin %s for the first Glamsterdam l1 block %d %s",
+				name, n, attrs.hash, forkNumber, fork.first.Hash)
+		case attrs.number == forkNumber-1 && attrs.hash != fork.lastBefore.Hash:
+			t.Fatalf("%s: l2 block %d has l1 origin %s for the last l1 block before Glamsterdam %d %s",
+				name, n, attrs.hash, forkNumber-1, fork.lastBefore.Hash)
+		}
+	}
+	for _, n := range []uint64{forkNumber - 1, forkNumber} {
+		if _, ok := origins[n]; !ok {
+			t.Fatalf("%s: no l2 block around l2 block %d has l1 block %d as its l1 origin", name, lo, n)
+		}
+	}
+	t.Logf("%s: l2 block %d is the first with an l1 origin on Glamsterdam (l1 block %d), "+
+		"the l2 blocks around it carry the attributes of the l1 blocks on both sides of the fork",
+		name, lo, forkNumber)
+}
+
+// opNodeSafeHead is the response of optimism_safeHeadAtL1Block: the safe L2
+// head that an op-node derived from the L1 up to an L1 block, and the L1
+// block it derived that head from.
+type opNodeSafeHead struct {
+	L1Block struct {
+		Hash   common.Hash `json:"hash"`
+		Number uint64      `json:"number"`
+	} `json:"l1Block"`
+	SafeHead struct {
+		Hash   common.Hash `json:"hash"`
+		Number uint64      `json:"number"`
+	} `json:"safeHead"`
+}
+
+// checkSafeHeadsAcrossFork ensures that an op-node derived safe L2 blocks
+// from batches in L1 blocks before Glamsterdam and from batches in L1 blocks
+// on Glamsterdam.
+func checkSafeHeadsAcrossFork(t *testing.T, ctx context.Context, l1 *rpc.Client, l2 *rpc.Client, rollup *rpc.Client, name string, fork glamsterdamFork, status *opNodeSyncStatus) {
+	t.Helper()
+
+	check := func(what string, l1Number uint64) opNodeSafeHead {
+		var safeHead *opNodeSafeHead
+		err := rollup.CallContext(ctx, &safeHead, "optimism_safeHeadAtL1Block", hexutil.Uint64(l1Number))
+		if err != nil || safeHead == nil {
+			t.Fatalf("%s: no safe l2 head was derived from the l1 %s (up to l1 block %d): %v", name, what, l1Number, err)
+		}
+		if canonical := mustL1Header(t, ctx, l1, safeHead.L1Block.Number); canonical.Hash != safeHead.L1Block.Hash {
+			t.Fatalf("%s: safe l2 head %d was derived from l1 block %s:%d but the l1 has %s at that height",
+				name, safeHead.SafeHead.Number, safeHead.L1Block.Hash, safeHead.L1Block.Number, canonical.Hash)
+		}
+		if hash := l2BlockHash(t, ctx, l2, name, safeHead.SafeHead.Number); hash != safeHead.SafeHead.Hash {
+			t.Fatalf("%s: safe l2 head %d derived from l1 block %d is %s but the execution client has %s",
+				name, safeHead.SafeHead.Number, safeHead.L1Block.Number, safeHead.SafeHead.Hash, hash)
+		}
+		return *safeHead
+	}
+
+	forkNumber := uint64(fork.first.Number)
+
+	before := check("before Glamsterdam", forkNumber-1)
+	if before.SafeHead.Number == 0 {
+		t.Fatalf("%s: no l2 block was derived from the l1 before Glamsterdam", name)
+	}
+
+	after := check("on Glamsterdam", status.CurrentL1.Number)
+	if after.L1Block.Number < forkNumber {
+		t.Fatalf("%s: the latest safe l2 head %d was derived from l1 block %d, before Glamsterdam (l1 block %d)",
+			name, after.SafeHead.Number, after.L1Block.Number, forkNumber)
+	}
+	if after.SafeHead.Number <= before.SafeHead.Number {
+		t.Fatalf("%s: the safe l2 head did not advance on Glamsterdam: %d derived from l1 block %d, %d from l1 block %d",
+			name, before.SafeHead.Number, before.L1Block.Number, after.SafeHead.Number, after.L1Block.Number)
+	}
+
+	t.Logf("%s: derived safe l2 head %d from l1 block %d before Glamsterdam and safe l2 head %d from l1 block %d on Glamsterdam",
+		name, before.SafeHead.Number, before.L1Block.Number, after.SafeHead.Number, after.L1Block.Number)
+}
+
+// evmHasGlamsterdam returns true if the EVM of a chain executes SLOTNUM
+// (EIP-7843), an opcode that Glamsterdam adds.
+func evmHasGlamsterdam(ctx context.Context, c *rpc.Client) (bool, error) {
+	// SLOTNUM STOP, run as contract creation code
+	var out hexutil.Bytes
+	err := c.CallContext(ctx, &out, "eth_call", map[string]string{"data": "0x4b00"}, "latest")
+	switch {
+	case err == nil:
+		return true, nil
+	case strings.Contains(err.Error(), "invalid opcode"):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // ---- docker ----------------------------------------------------------------
@@ -630,6 +813,12 @@ var opStackLogProblems = []string{
 	"failed to verify transactions list",
 	"failed to verify withdrawals list",
 	"failed to verify block from RPC",
+	// same for the receipts of an L1 block
+	"expected receipt root",
+	"has invalid gas used metadata",
+	"receipts but expected",
+	// and for L1 contract storage read by op-node
+	"failed to verify retrieved proof against state root",
 	// the L1 rejected a transaction of op-batcher or op-proposer because of
 	// its gas limit
 	"insufficient gas for floor data gas cost",
@@ -813,11 +1002,17 @@ func TestOpNodesFollowL1AcrossGlamsterdam(t *testing.T) {
 					node.container(), startedAt.UTC(), int64(fork.amsterdamTime)-startedAt.Unix())
 			}
 
+			// if it already logged that it does not understand the L1 there
+			// is no point in waiting for it
+			checkOpStackLogs(t, ctx, node.container())
+
 			// The L1 origin of the finalized L2 head is on Glamsterdam once
 			// the node derived L2 blocks from batches posted to Glamsterdam
 			// L1 blocks, with L1 origins on Glamsterdam, and saw them
 			// finalize on the L1.
-			status := waitForSyncStatus(t, ctx, rollup, node.name,
+			waitCtx, cancelWait := context.WithTimeout(ctx, 15*time.Minute)
+			defer cancelWait()
+			status := waitForSyncStatus(t, waitCtx, rollup, node.name,
 				fmt.Sprintf("for it to finalize l2 blocks that have an l1 origin on Glamsterdam (l1 block %d and later)", forkNumber),
 				func(s *opNodeSyncStatus) bool {
 					return s.HeadL1.Number > forkNumber &&
@@ -859,7 +1054,38 @@ func TestOpNodesFollowL1AcrossGlamsterdam(t *testing.T) {
 				_ = l2BlockHash(t, ctx, l2, node.name, status.UnsafeL2.Number)
 			}
 
-			checkL1AttributesOnL2(t, ctx, l1, l2, node.name, status.SafeL2)
+			if node.derivesFromL1Genesis {
+				checkSafeHeadsAcrossFork(t, ctx, l1, l2, rollup, node.name, fork, status)
+			}
+
+			// the L2 blocks carry the attributes of their L1 origins, at the
+			// fork boundary and now
+			checkL2AcrossForkBoundary(t, ctx, l1, l2, node.name, fork, status.SafeL2.Number)
+			for _, ref := range []opNodeL2Ref{status.FinalizedL2, status.SafeL2, status.UnsafeL2} {
+				if attrs := checkL1AttributesOnL2(t, ctx, l1, l2, node.name, ref.Number); attrs.number != ref.L1Origin.Number {
+					t.Fatalf("%s: l2 block %d has l1 origin %d but op-node says %d",
+						node.name, ref.Number, attrs.number, ref.L1Origin.Number)
+				}
+			}
+
+			// the L2 does not execute what Glamsterdam adds to the EVM, the
+			// L1 does
+			for _, c := range []struct {
+				name   string
+				client *rpc.Client
+				want   bool
+			}{
+				{"l1", l1, true},
+				{node.name + " l2", l2, false},
+			} {
+				got, err := evmHasGlamsterdam(ctx, c.client)
+				if err != nil {
+					t.Fatalf("%s: check for the SLOTNUM opcode: %v", c.name, err)
+				}
+				if got != c.want {
+					t.Fatalf("%s: the EVM executes the Glamsterdam opcode SLOTNUM: %v, expected %v", c.name, got, c.want)
+				}
+			}
 
 			checkOpStackLogs(t, ctx, node.container())
 		})
