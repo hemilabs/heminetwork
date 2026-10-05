@@ -48,3 +48,39 @@ after these milliseconds, values will be read and dumped.
 $ HEMI_E2E_DUMP_JSON_AFTER_MS=10000 go run ./... 
 {"bitcoin_block_count":3011,"pop_tx_count":20,"first_batcher_publication_hash":"0x2b86a72b48668b7a35dcab99166f9330c884c50d1b19847c3c0569a0d0806465,21","last_batcher_publication_hash":"0x5ec52eeba46c300e98546de25991c1862ef8dd11c3ee3357ee2a717517e2fe8c,192","batcher_publication_count":34,"pop_miner_hemi_balance":"14000000000000000000"}
 ```
+
+## L1 Glamsterdam migration tests
+
+The localnet L1 starts before Glamsterdam and activates it while the Hemi
+stack is running, so that the stack has to follow the L1 across the fork like
+it has to on a live network.  The L2 does not activate Glamsterdam.
+
+The tests in `glamsterdam_migration_test.go` check that the op-nodes keep
+recognising L1 blocks (every L1 block they refer to is compared with what the
+L1 itself has), that op-batcher and op-proposer keep getting their
+transactions included under the L1 gas rules of the time, and that the L2 is
+unchanged.  The `EIPNNNN_` functions in the `eipNNNN_test.go` files only show
+that the L1 has Glamsterdam active.
+
+The following environment variables are read by `docker compose up`:
+
+* `L1_AMSTERDAM_OFFSET_SECONDS`: seconds after its genesis at which the L1
+  activates Glamsterdam, 300 by default.  The op-nodes and the batcher that
+  are started with the L1 must be running before that.  With 0 the L1 runs
+  Glamsterdam from genesis and the migration tests fail.
+* `BATCHER_DA_TYPE`: how op-batcher publishes batches, `calldata` (default)
+  or `blobs`.  It must also be set when running the tests.  The L1 has no
+  consensus layer node, `e2e/fakebeacon` keeps the blobs and serves them to
+  the op-nodes.
+
+The op-nodes do not trust the L1 RPC (no `--l1.trustrpc`), as in production,
+and each of the four accesses the L1 in a different way, see
+`e2e/docker-compose.yml`.
+
+Some tests restart services and look at all logs.  They are skipped unless
+`HEMI_E2E_POST_RUN=true` is set and are run after everything else passed:
+
+```
+go test -timeout 30m -v .
+HEMI_E2E_POST_RUN=true go test -timeout 30m -v -run '^TestPostRun' .
+```

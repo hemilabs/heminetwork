@@ -239,6 +239,11 @@ services:
       - "/shared-dir/gethl1datadir"
       - "--gpo.percentile=0"
       - --http.api=web3,debug,eth,txpool,net,engine,miner
+      # op-node-non-sequencing subscribes to L1 heads over WebSocket
+      - "--ws"
+      - "--ws.addr=0.0.0.0"
+      - "--ws.port=8546"
+      - "--ws.origins=*"
       - --ws.api=debug,eth,txpool,net,engine,miner
       - --rpc.txfeecap=0
       # keep the 200M block gas limit set in genesisl2.sh (geth would move it
@@ -251,6 +256,26 @@ services:
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
       - "./e2e/jwt.hex:/tmp/jwt.hex:ro"
       - {type: "tmpfs", target: "/tmp"}
+    networks:
+      e2e:
+
+  # geth-l1 runs in --dev mode and so there is no consensus layer node that
+  # keeps the blobs of blob transactions.  l1-beacon stands in for one: the
+  # batcher submits its transactions through it so it can keep their blobs,
+  # and the op-nodes fetch them from its Beacon API, see e2e/fakebeacon.
+  l1-beacon:
+    build:
+      dockerfile: "./e2e/fakebeacon/Dockerfile"
+      context: "./.."
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+    environment:
+      FAKEBEACON_L1_RPC_URL: "http://geth-l1:8545"
+      FAKEBEACON_BEACON_ADDRESS: ":5052"
+      FAKEBEACON_RPC_ADDRESS: ":8545"
+    ports:
+      - "5052:5052"
     networks:
       e2e:
 
@@ -268,6 +293,9 @@ services:
       PROPOSER_MODE: ${PROPOSER_MODE:-fault}
       L2OO_SUBMISSION_INTERVAL: ${L2OO_SUBMISSION_INTERVAL:-120}
       L2OO_FINALIZATION_PERIOD_SECONDS: ${L2OO_FINALIZATION_PERIOD_SECONDS:-4}
+      # seconds after its genesis at which the L1 activates Glamsterdam, see
+      # genesisl2.sh
+      L1_AMSTERDAM_OFFSET_SECONDS: ${L1_AMSTERDAM_OFFSET_SECONDS:-300}
     working_dir: "/tmp"
     command:
       - "sh"
@@ -336,6 +364,8 @@ services:
     depends_on:
       geth-l1:
         condition: "service_started"
+      l1-beacon:
+        condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
     healthcheck:
@@ -352,11 +382,16 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
+      # The L1 is not trusted (no --l1.trustrpc), like in production: op-node
+      # computes the hash of every L1 block itself and verifies the
+      # transactions and receipts of the block against it.  This is what
+      # fails first if op-node does not understand the blocks of the L1,
+      # for example after the L1 activated a hard fork.  The four op-nodes
+      # each access the L1 in a different way.  This one polls for the L1
+      # head over HTTP and fetches all receipts of a block at once.
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
-      - "--l1.trustrpc"
       - "--log.level=info"
-      - "--l1.trustrpc=true"
       - "--l1.http-poll-interval=1s"
       - "--p2p.no-discovery"
       - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
@@ -372,7 +407,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://l1-beacon:5052"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
@@ -387,6 +422,8 @@ services:
   op-node-non-sequencing:
     image: optimism-stack:latest
     depends_on:
+      l1-beacon:
+        condition: "service_started"
       op-node:
         condition: "service_started"
     healthcheck:
@@ -400,11 +437,11 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
-      - "--l1=http://geth-l1:8545"
+      # the L1 is not trusted, see op-node; this one follows the L1 head
+      # with a WebSocket subscription
+      - "--l1=ws://geth-l1:8546"
       - "--l1.rpckind=standard"
-      - "--l1.trustrpc"
       - "--log.level=info"
-      - "--l1.trustrpc=true"
       - "--l1.http-poll-interval=1s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
@@ -418,7 +455,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://l1-beacon:5052"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
       - "--p2p.no-discovery"
     volumes:
@@ -467,6 +504,8 @@ services:
   op-node-non-sequencing-snap-sync:
     image: optimism-stack:latest
     depends_on:
+      l1-beacon:
+        condition: "service_started"
       op-geth-l2-non-sequencing-snap-sync:
         condition: "service_healthy"
     healthcheck:
@@ -483,11 +522,11 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
+      # the L1 is not trusted, see op-node; this one fetches the receipts
+      # of an L1 block one transaction at a time
       - "--l1=http://geth-l1:8545"
-      - "--l1.rpckind=standard"
-      - "--l1.trustrpc"
+      - "--l1.rpckind=basic"
       - "--log.level=info"
-      - "--l1.trustrpc=true"
       - "--l1.http-poll-interval=1s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
@@ -501,7 +540,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://l1-beacon:5052"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
       - "--syncmode=execution-layer"
       - "--p2p.no-discovery"
@@ -659,6 +698,8 @@ services:
   op-node-non-sequencing-full-sync:
     image: optimism-stack:latest
     depends_on:
+      l1-beacon:
+        condition: "service_started"
       op-geth-l2-non-sequencing-full-sync:
         condition: "service_healthy"
     healthcheck:
@@ -675,11 +716,11 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
+      # the L1 is not trusted, see op-node; this one fetches the receipts
+      # of an L1 block in their consensus encoding
       - "--l1=http://geth-l1:8545"
-      - "--l1.rpckind=standard"
-      - "--l1.trustrpc"
+      - "--l1.rpckind=debug_geth"
       - "--log.level=info"
-      - "--l1.trustrpc=true"
       - "--l1.http-poll-interval=1s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
@@ -693,7 +734,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://l1-beacon:5052"
       - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
       - "--syncmode=consensus-layer"
       - "--p2p.no-discovery"
@@ -726,10 +767,19 @@ services:
       - "--rpc.enable-admin"
       - "--max-channel-duration=5"
       - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
+      # through l1-beacon, which keeps the blobs of blob transactions
+      - "--l1-eth-rpc=http://l1-beacon:8545"
+      # an account of its own, see .env
+      - "--private-key=${BATCHER_PRIVATE_KEY}"
+      # "calldata" or "blobs"
+      - "--data-availability-type=${BATCHER_DA_TYPE:-calldata}"
+      # the L1 has Osaka active from genesis, blob transactions must carry
+      # cell proofs
+      - "--txmgr.cell-proof-time=0"
     depends_on:
       geth-l1:
+        condition: "service_started"
+      l1-beacon:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"

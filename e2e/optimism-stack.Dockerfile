@@ -4,8 +4,14 @@
 
 # increment me to break the cache: 2
 
-ARG OP_GETH_COMMIT=8e723c049b37ae7c2a82f2d3bf899065042382a6
-ARG OPTIMISM_COMMIT=0eb8e16f5197d35ce378fcc3297f1115398ea1aa
+# hemilabs/op-geth "glamsterdam-l1-header-compat" and hemilabs/optimism
+# "glamsterdam-l1-compat": the L2 keeps running its current forks and only
+# learns to follow an L1 that has activated Glamsterdam.  The optimism commit
+# pins exactly this op-geth commit in its go.mod, so op-node, op-batcher and
+# op-proposer are linked against the same code that runs as the L2 execution
+# client.
+ARG OP_GETH_COMMIT=f5c491e251ce3c4941c437ee16ababf97655aef4
+ARG OPTIMISM_COMMIT=0b2a85d14f037db6c6f93f28d96efc66a984e608
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken

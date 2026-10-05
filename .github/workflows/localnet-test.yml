@@ -6,6 +6,11 @@
 name: "Localnet Test"
 on:
   workflow_dispatch: # Manually triggered
+  # Changes to the localnet and its tests are tested with the localnet.
+  pull_request:
+    paths:
+      - "e2e/**"
+      - ".github/workflows/localnet-test.yml"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
@@ -22,11 +27,21 @@ jobs:
       DOCKERFILE_NAME: ./e2e/optimism-stack.Dockerfile
       DOCKER_IMAGE_TAG: optimism-stack:latest
     strategy:
+      # the configurations are independent, let each of them finish
+      fail-fast: false
       matrix:
         go-version: [ "1.26.x" ]
         proposer_mode: ["l2oo", "fault"]
         gethl1:
           - "ethereum/client-go:v1.17.6@sha256:6606aa1c7b6354d57581952604e7ab5a49689aeee9aebf668c81b6d3225395f1"
+        include:
+          # op-batcher publishes batches as blobs with one proposer mode and
+          # as calldata with the other, so that both are tested without
+          # doubling the number of jobs.
+          - proposer_mode: "l2oo"
+            batcher_da: "blobs"
+          - proposer_mode: "fault"
+            batcher_da: "calldata"
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -110,10 +125,14 @@ jobs:
           TAR_SIZE=$(du -hs $LOCALNET_OPTIMISM_STACK_CACHE_FILE | cut -f1)
           echo "Saved compressed tarball size: $TAR_SIZE"
 
+      # The L1 starts before Glamsterdam and activates it 5 minutes after its
+      # genesis (L1_AMSTERDAM_OFFSET_SECONDS in e2e/docker-compose.yml), when
+      # the Hemi stack is up and has been deriving the L2 for a while.
       - name: "run localnet"
         env:
           LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
+          BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
         run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
 
       - name: "remove more dangling"
@@ -147,10 +166,20 @@ jobs:
       - name: "get localnet stats"
         env:
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
+          BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
         run: go test -timeout 30m -v .
-      
+
+      # These restart services, they are run once everything else passed.
+      - name: "restart the OP stack on Glamsterdam and check its logs"
+        env:
+          PROPOSER_MODE: ${{ matrix.proposer_mode }}
+          BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
+          HEMI_E2E_POST_RUN: "true"
+        working-directory: ./e2e/monitor
+        run: go test -timeout 30m -v -run '^TestPostRun' .
+
       - name: "dump logs"
         if: "always()"
         run: docker compose -f ./e2e/docker-compose.yml logs
