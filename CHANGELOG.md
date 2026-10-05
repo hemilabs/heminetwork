@@ -114,6 +114,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `tbc` checkpoints are now at most 25,000 blocks apart (mainnet up to
+  950,000, testnet4 up to 125,000), and the `tbcd` block header cache
+  default (`TBC_HEADER_CACHE_SIZE`) holds two checkpoint intervals,
+  12.8 MB instead of 2 MB
+  ([#1197](https://github.com/hemilabs/heminetwork/pull/1197)).
 - All leveldb databases now share one managed 512 MiB block cache and
   one 4096-handle table file pool (previously 8 MiB and 500 handles
   private per database); write-heavy databases get larger write buffers
