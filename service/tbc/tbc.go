@@ -1321,11 +1321,8 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 
 	log.Infof("Block expired: %v %v", p, hash)
 
-	// XXX we really want to kick off syncing here when blocks missing hits
-	// 0. If not we stall until the next block comes in before downloading
-	// it and then starting the sync.
-
-	// Legit timeout, return error so that it can be retried.
+	// Legit timeout, return error so that it can be retried.  The
+	// freed download slot is refilled by blockExpired.
 	return fmt.Errorf("timeout %v", key)
 }
 
@@ -1343,6 +1340,17 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 			}
 		}
 	}
+
+	// An expired request frees a download slot, and when the block
+	// was dropped from blocks missing nothing else asks for the next
+	// one.  Without a refill here the download stalls until the next
+	// block or header arrives.
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	go s.syncBlocks(ctx)
 }
 
 func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
@@ -1483,7 +1491,11 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	if want <= 0 {
 		return
 	}
-	bm, err := s.g.db.BlocksMissing(ctx, want)
+	// The blocks being downloaded are the lowest entries in blocks
+	// missing.  Read past them so that want new requests go out;
+	// reading only want entries returns mostly blocks in flight, and
+	// once half the window is in flight no new request is sent.
+	bm, err := s.g.db.BlocksMissing(ctx, defaultPendingBlocks)
 	if err != nil {
 		log.Errorf("blocks missing: %v", err)
 		return
@@ -1569,6 +1581,9 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	}
 
 	for k := range bm {
+		if want <= 0 {
+			break
+		}
 		bi := bm[k]
 		hash, _ := chainhash.NewHash(bi.Hash[:])
 		hashS := hash.String()
@@ -1576,6 +1591,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			// Already being downloaded.
 			continue
 		}
+		want--
 		if err := s.downloadBlockFromRandomPeer(ctx, *hash); err != nil {
 			// This can happen during startup or when the network
 			// is starved.
@@ -1804,6 +1820,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	}
 	if err := s.verifyHeaderContext(ctx, msg.Headers); err != nil {
 		return fmt.Errorf("header context verify: %w", err)
+	}
+	if err := s.verifyHeaderCheckpoints(ctx, msg.Headers); err != nil {
+		return fmt.Errorf("header checkpoint verify: %w", err)
 	}
 
 	// When running in normal (not External Header) mode, do not set

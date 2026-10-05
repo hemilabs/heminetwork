@@ -6,6 +6,7 @@ package tbc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 
+	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
@@ -188,6 +190,78 @@ func (s *Server) verifyHeaderContext(ctx context.Context, headers []*wire.BlockH
 			genesisHeight: genesisHeight,
 			ctx:           ctx,
 			db:            s.g.db,
+		}
+	}
+
+	return nil
+}
+
+// ErrCheckpoint is returned when a header contradicts the chain
+// checkpoints.
+var ErrCheckpoint = errors.New("checkpoint violation")
+
+// checkpointAt returns the checkpoint at height, or nil.
+func checkpointAt(height uint64, hha []chaincfg.Checkpoint) *chaincfg.Checkpoint {
+	for k := range hha {
+		if uint64(hha[k].Height) == height {
+			return &hha[k]
+		}
+	}
+	return nil
+}
+
+// verifyHeaderCheckpoints rejects a batch of connected headers that
+// contradicts the chain checkpoints.  A header at a checkpoint height
+// must carry the checkpoint hash, and a header we do not already have
+// must not sit at or below the most recent checkpoint our best header
+// has passed: that is a fork off a checkpointed part of the chain.
+//
+// Headers we already have are allowed, so a peer that resends known
+// headers (for example after falling back to genesis on an unknown
+// locator) is not penalized.
+//
+// Without this check a peer can feed a valid low-work fork from
+// genesis.  Every header in it adds a blocks missing entry that no
+// honest peer can serve, and block download stalls on them.
+func (s *Server) verifyHeaderCheckpoints(ctx context.Context, headers []*wire.BlockHeader) error {
+	if len(headers) == 0 || len(s.g.chain.Checkpoints) == 0 {
+		return nil
+	}
+
+	pbh, err := s.g.db.BlockHeaderByHash(ctx, headers[0].PrevBlock)
+	if err != nil {
+		return fmt.Errorf("checkpoint parent lookup: %w", err)
+	}
+	bhb, err := s.g.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return fmt.Errorf("checkpoint best: %w", err)
+	}
+	var floor uint64
+	if cp := previousCheckpoint(bhb, s.g.chain.Checkpoints); cp != nil {
+		floor = uint64(cp.Height)
+	}
+
+	for i, hdr := range headers {
+		height := pbh.Height + uint64(i) + 1
+		hash := hdr.BlockHash()
+		if cp := checkpointAt(height, s.g.chain.Checkpoints); cp != nil &&
+			!cp.Hash.IsEqual(&hash) {
+			return fmt.Errorf("%w: header %v at height %v, want %v",
+				ErrCheckpoint, hash, height, cp.Hash)
+		}
+		if height > floor {
+			continue
+		}
+		_, err := s.g.db.BlockHeaderByHash(ctx, hash)
+		switch {
+		case err == nil:
+			// Known header, not a new fork.
+		case errors.Is(err, database.ErrNotFound):
+			return fmt.Errorf("%w: header %v at height %v forks "+
+				"below checkpoint height %v", ErrCheckpoint, hash,
+				height, floor)
+		default:
+			return fmt.Errorf("checkpoint header lookup: %w", err)
 		}
 	}
 
