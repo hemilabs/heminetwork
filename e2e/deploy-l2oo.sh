@@ -68,11 +68,20 @@ cd $PROJECT
 
 forge build
 
+# The L1 runs the Glamsterdam fork, which charges contract code deposit as
+# state gas (EIP-8037) at a far higher rate than the pinned forge's local EVM.
+# By default forge sizes each broadcast transaction from its local simulation,
+# so creations would run out of gas on the L1 ("contract creation code storage
+# out of gas").  --skip-simulation makes forge ask the L1 to estimate gas for
+# every transaction instead.  Note that forge's --gas-limit only sets the
+# block gas limit of its local simulation, not the broadcast gas.
+
 # the batcher uses the same key, retry in case we race it for a nonce
 for i in 1 2 3 4 5; do
 	if forge script contracts/DeployL2OutputOracle.s.sol:DeployL2OutputOracle \
 		--broadcast \
 		--slow \
+		--skip-simulation \
 		--rpc-url $L1_RPC; then
 		break
 	fi
@@ -96,6 +105,7 @@ for i in 1 2 3 4 5; do
 	if forge script contracts/UpgradeOptimismPortal.s.sol:UpgradeOptimismPortal \
 		--broadcast \
 		--slow \
+		--skip-simulation \
 		--rpc-url $L1_RPC; then
 		break
 	fi
