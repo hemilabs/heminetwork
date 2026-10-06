@@ -177,7 +177,7 @@ jobs:
         # XXX should this be a make command?
         run: go test -timeout 30m -v .
 
-      # These restart services, so they run after everything else.
+      # These restart and reorg services, so they run after everything else.
       - name: "disturb the OP stack on Glamsterdam"
         env:
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
