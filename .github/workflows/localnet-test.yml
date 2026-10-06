@@ -37,6 +37,14 @@ jobs:
         gethl1:
           # the release that Sepolia runs through the Glamsterdam activation
           - "ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64"
+        include:
+          # op-batcher publishes batches as blobs with one proposer mode and
+          # as calldata with the other, so that both are tested without
+          # doubling the number of jobs.
+          - proposer_mode: "l2oo"
+            batcher_da: "blobs"
+          - proposer_mode: "fault"
+            batcher_da: "calldata"
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -129,6 +137,7 @@ jobs:
         env:
           LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
+          BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
           L1_AMSTERDAM_OFFSET_SECONDS: "420"
         run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
 

@@ -704,8 +704,9 @@ func dockerOutput(ctx context.Context, args ...string) (string, error) {
 
 // checkContainerConfig ensures that an op-node container runs with the
 // settings that make the tests meaningful: it must verify what the L1 RPC
-// returns and keep its receipt validation.  These are the production
-// settings, and the ones a previous version of the localnet did not use.
+// returns, use a beacon endpoint, and keep its receipt validation.  These
+// are the production settings, and the ones a previous version of the
+// localnet did not use.
 func checkContainerConfig(t *testing.T, ctx context.Context, container string) {
 	t.Helper()
 
@@ -718,7 +719,7 @@ func checkContainerConfig(t *testing.T, ctx context.Context, container string) {
 		t.Fatalf("decode the command of %s: %v", container, err)
 	}
 	for _, arg := range cmd {
-		for _, forbidden := range []string{"--l1.trustrpc", "--hemitrap.enabled"} {
+		for _, forbidden := range []string{"--l1.trustrpc", "--l1.beacon.ignore", "--hemitrap.enabled"} {
 			if arg == forbidden || strings.HasPrefix(arg, forbidden+"=") {
 				t.Fatalf("%s runs with %s, the tests need op-node to verify the l1 the way it does in production", container, arg)
 			}
@@ -772,6 +773,9 @@ var opStackLogProblems = []string{
 	"failed to verify retrieved proof against state root",
 	// op-node and the L2 execution client disagree about an L2 block
 	"invalid block extraData",
+	// op-node could not read the beacon spec
+	"beacon spec has neither",
+	"got bad value for seconds per slot",
 	// a service crashed
 	"panic:",
 	"CRIT ",

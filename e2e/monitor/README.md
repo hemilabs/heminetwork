@@ -66,6 +66,9 @@ The following environment variables are read by `docker compose up`:
   activates Glamsterdam, 300 by default.  The op-nodes and the batcher that
   are started with the L1 must be running before that.  With 0 the L1 runs
   Glamsterdam from genesis and the migration tests fail.
+* `BATCHER_DA_TYPE`: how op-batcher publishes batches, `calldata` (default)
+  or `blobs`.  The L1 has no consensus layer node, `e2e/fakebeacon` keeps the
+  blobs and serves them to the op-nodes.
 
 The op-nodes do not trust the L1 RPC (no `--l1.trustrpc`) and are not told
 when the L1 activates Glamsterdam, as in production.  Each of the four
