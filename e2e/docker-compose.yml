@@ -212,50 +212,26 @@ services:
     container_name: e2e-geth-l1-1
     ports:
       - "8545:8545"
+      - "18551:8551"
     working_dir: "/tmp/geth"
     depends_on:
       geth-l1-setup:
         condition: "service_completed_successfully"
+    environment:
+      # dev (geth simulates the consensus layer) or prysm (a Prysm beacon
+      # node and validator drive geth over the engine API, see e2e/prysm);
+      # the tests read it too
+      L1_CONSENSUS: ${L1_CONSENSUS:-dev}
+    entrypoint:
+      - sh
     command:
-      - "--dev"
-      - "--dev.period"
-      - "3"
-      - "--keystore"
-      - "/tmp/keystore"
-      - "--password"
-      - "/tmp/passwords.txt"
-      - "--http"
-      - "--http.port=8545"
-      - "--http.addr"
-      - "0.0.0.0"
-      - "--http.vhosts"
-      - "*"
-      - "--syncmode=full"
-      - "--nodiscover"
-      - "--maxpeers=0"
-      - "--authrpc.vhosts=\"*\""
-      - "--rpc.allow-unprotected-txs"
-      - "--datadir"
-      - "/shared-dir/gethl1datadir"
-      - "--gpo.percentile=0"
-      # dev: the tests add withdrawals to L1 blocks with dev_addWithdrawal
-      - --http.api=web3,debug,eth,txpool,net,engine,miner,dev
-      # op-node-non-sequencing subscribes to L1 heads over WebSocket
-      - "--ws"
-      - "--ws.addr=0.0.0.0"
-      - "--ws.port=8546"
-      - "--ws.origins=*"
-      - --ws.api=debug,eth,txpool,net,engine,miner
-      - --rpc.txfeecap=0
-      # keep the 200M block gas limit set in genesisl2.sh (geth would move it
-      # towards its default) and allow estimating gas up to it
-      - --miner.gaslimit=200000000
-      - --rpc.gascap=200000000
+      - /geth-l1-entrypoint.sh
     volumes:
       - "shared-dir:/shared-dir"
+      - "./geth-l1-entrypoint.sh:/geth-l1-entrypoint.sh:ro"
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
-      - "./e2e/jwt.hex:/tmp/jwt.hex:ro"
+      - "./jwt.hex:/tmp/jwt.hex:ro"
       - {type: "tmpfs", target: "/tmp"}
     networks:
       e2e:
@@ -285,6 +261,95 @@ services:
     networks:
       e2e:
 
+  # A real proof-of-stake consensus layer for the L1 (L1_CONSENSUS=prysm,
+  # docker compose --profile prysm): a Prysm beacon node that drives geth-l1
+  # over the engine API and a validator client with the 64 interop validators
+  # of the genesis state, see e2e/prysm.  With it the L1 has real slots, real
+  # finality, a real Beacon API and the Gloas fork on the consensus layer at
+  # the same time as Amsterdam on the execution layer.
+  prysm-beacon:
+    profiles: ["prysm"]
+    # yamllint disable-line rule:line-length
+    image: gcr.io/prysmaticlabs/prysm/beacon-chain:v7.2.0@sha256:c3e64cf1236a50f8faaed7d2fb28cae3d9598550b114329bd74c525c54866762
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+    command:
+      - "--datadir=/tmp/beacon"
+      - "--genesis-state=/shared-dir/genesis.ssz"
+      - "--chain-config-file=/shared-dir/prysm-config.yml"
+      - "--execution-endpoint=http://geth-l1:8551"
+      - "--jwt-secret=/tmp/jwt.hex"
+      - "--chain-id=1337"
+      - "--contract-deployment-block=0"
+      - "--min-sync-peers=0"
+      - "--minimum-peers-per-subnet=0"
+      - "--no-discovery"
+      - "--bootstrap-node="
+      - "--rpc-host=0.0.0.0"
+      - "--rpc-port=4000"
+      - "--http-host=0.0.0.0"
+      - "--http-port=3500"
+      # custodies all blob data, so that it can serve the blobs of every
+      # block over its Beacon API
+      - "--supernode"
+      - "--suggested-fee-recipient=0x78697c88847dfbbb40523e42c1f2e28a13a170be"
+      - "--accept-terms-of-use"
+      - "--force-clear-db"
+    volumes:
+      - "shared-dir:/shared-dir"
+      - "./jwt.hex:/tmp/jwt.hex:ro"
+      - {type: "tmpfs", target: "/tmp"}
+    ports:
+      - "3500:3500"
+    networks:
+      e2e:
+
+  # imports the keystores of the interop validators into a wallet
+  prysm-validator-import:
+    profiles: ["prysm"]
+    # yamllint disable-line rule:line-length
+    image: gcr.io/prysmaticlabs/prysm/validator:v7.2.0@sha256:b8520ae06b41be2e0352dc99df57e77fd21dc695d399ebfcaaf3c07ce99290ff
+    command:
+      - "accounts"
+      - "import"
+      - "--keys-dir=/prysm/keys"
+      - "--wallet-dir=/wallet"
+      - "--wallet-password-file=/prysm/wallet-password.txt"
+      - "--account-password-file=/prysm/wallet-password.txt"
+      - "--accept-terms-of-use"
+    volumes:
+      - "./prysm:/prysm:ro"
+      - "prysm-wallet:/wallet"
+    networks:
+      e2e:
+
+  prysm-validator:
+    profiles: ["prysm"]
+    # yamllint disable-line rule:line-length
+    image: gcr.io/prysmaticlabs/prysm/validator:v7.2.0@sha256:b8520ae06b41be2e0352dc99df57e77fd21dc695d399ebfcaaf3c07ce99290ff
+    depends_on:
+      prysm-beacon:
+        condition: "service_started"
+      prysm-validator-import:
+        condition: "service_completed_successfully"
+    command:
+      - "--datadir=/tmp/validator"
+      - "--beacon-rpc-provider=prysm-beacon:4000"
+      - "--chain-config-file=/shared-dir/prysm-config.yml"
+      - "--wallet-dir=/wallet"
+      - "--wallet-password-file=/prysm/wallet-password.txt"
+      - "--suggested-fee-recipient=0x78697c88847dfbbb40523e42c1f2e28a13a170be"
+      - "--accept-terms-of-use"
+      - "--force-clear-db"
+    volumes:
+      - "shared-dir:/shared-dir"
+      - "./prysm:/prysm:ro"
+      - "prysm-wallet:/wallet"
+      - {type: "tmpfs", target: "/tmp"}
+    networks:
+      e2e:
+
   op-geth-l2-setup:
     image: optimism-stack:latest
     depends_on:
@@ -300,8 +365,10 @@ services:
       L2OO_SUBMISSION_INTERVAL: ${L2OO_SUBMISSION_INTERVAL:-120}
       L2OO_FINALIZATION_PERIOD_SECONDS: ${L2OO_FINALIZATION_PERIOD_SECONDS:-4}
       # seconds after its genesis at which the L1 activates Glamsterdam, see
-      # genesisl2.sh
+      # genesisl2.sh; with L1_CONSENSUS=prysm a multiple of the 96 second
+      # epoch
       L1_AMSTERDAM_OFFSET_SECONDS: ${L1_AMSTERDAM_OFFSET_SECONDS:-300}
+      L1_CONSENSUS: ${L1_CONSENSUS:-dev}
     working_dir: "/tmp"
     command:
       - "sh"
@@ -312,6 +379,7 @@ services:
       - "./jwt.hex:/tmp/jwt.hex:ro"
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - "./genesisl2.sh:/tmp/genesisl2.sh"
+      - "./prysm:/tmp/prysm:ro"
       - "./output:/tmp/output"
       - "shared-dir:/shared-dir"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
@@ -416,7 +484,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon=http://l1-beacon:5052"
+      - "--l1.beacon=${OP_NODE_L1_BEACON:-http://l1-beacon:5052}"
       # without the Glamsterdam activation, see genesisl2.sh
       - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
       # records from which L1 block each safe L2 head was derived, the
@@ -471,7 +539,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon=http://l1-beacon:5052"
+      - "--l1.beacon=${OP_NODE_L1_BEACON:-http://l1-beacon:5052}"
       # without the Glamsterdam activation, see genesisl2.sh
       - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
       # records from which L1 block each safe L2 head was derived, the
@@ -563,7 +631,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon=http://l1-beacon:5052"
+      - "--l1.beacon=${OP_NODE_L1_BEACON:-http://l1-beacon:5052}"
       # without the Glamsterdam activation, see genesisl2.sh
       - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
       # records from which L1 block each safe L2 head was derived, the
@@ -792,7 +860,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon=http://l1-beacon:5053"
+      - "--l1.beacon=${OP_NODE_FULL_SYNC_L1_BEACON:-http://l1-beacon:5053}"
       # without the Glamsterdam activation, see genesisl2.sh
       - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
       # records from which L1 block each safe L2 head was derived, the
@@ -829,8 +897,9 @@ services:
       - "--rpc.enable-admin"
       - "--max-channel-duration=5"
       - "--max-pending-tx=1"
-      # through l1-beacon, which keeps the blobs of blob transactions
-      - "--l1-eth-rpc=http://l1-beacon:8545"
+      # through l1-beacon, which keeps the blobs of blob transactions; with
+      # a Prysm consensus layer straight to geth-l1
+      - "--l1-eth-rpc=${BATCHER_L1_RPC:-http://l1-beacon:8545}"
       # an account of its own, see .env
       - "--private-key=${BATCHER_PRIVATE_KEY}"
       # "calldata" or "blobs"
@@ -904,6 +973,7 @@ services:
 
 volumes:
   shared-dir:
+  prysm-wallet:
 networks:
   e2e:
     ipam:
