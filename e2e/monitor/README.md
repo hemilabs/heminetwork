@@ -68,4 +68,5 @@ The following environment variables are read by `docker compose up`:
   Glamsterdam from genesis and the migration tests fail.
 
 The op-nodes do not trust the L1 RPC (no `--l1.trustrpc`) and are not told
-when the L1 activates Glamsterdam, as in production.
+when the L1 activates Glamsterdam, as in production.  Each of the four
+accesses the L1 in a different way, see `e2e/docker-compose.yml`.
