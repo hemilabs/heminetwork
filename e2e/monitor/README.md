@@ -57,8 +57,10 @@ it has to on a live network.  The L2 does not activate Glamsterdam.
 
 The tests in `glamsterdam_migration_test.go` check that the op-nodes keep
 recognising L1 blocks (every L1 block they refer to is compared with what the
-L1 itself has) and that the L2 is unchanged.  The `EIPNNNN_` functions in the
-`eipNNNN_test.go` files only show that the L1 has Glamsterdam active.
+L1 itself has), that op-batcher keeps getting its transactions included under
+the L1 gas rules of the time, and that the L2 is unchanged.  The `EIPNNNN_`
+functions in the `eipNNNN_test.go` files only show that the L1 has Glamsterdam
+active.
 
 The following environment variables are read by `docker compose up`:
 
@@ -67,8 +69,9 @@ The following environment variables are read by `docker compose up`:
   are started with the L1 must be running before that.  With 0 the L1 runs
   Glamsterdam from genesis and the migration tests fail.
 * `BATCHER_DA_TYPE`: how op-batcher publishes batches, `calldata` (default)
-  or `blobs`.  The L1 has no consensus layer node, `e2e/fakebeacon` keeps the
-  blobs and serves them to the op-nodes.
+  or `blobs`.  It must also be set when running the tests.  The L1 has no
+  consensus layer node, `e2e/fakebeacon` keeps the blobs and serves them to
+  the op-nodes.
 
 The op-nodes do not trust the L1 RPC (no `--l1.trustrpc`) and are not told
 when the L1 activates Glamsterdam, as in production.  Each of the four

@@ -172,6 +172,7 @@ jobs:
       - name: "get localnet stats"
         env:
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
+          BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
         run: go test -timeout 30m -v .
