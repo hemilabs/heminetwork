@@ -6,10 +6,17 @@
 name: "Localnet Test"
 on:
   workflow_dispatch: # Manually triggered
+  # The localnet builds tbcd, bfgd, popmd and its own tests from the
+  # checkout, so every pull request and every push to main runs it.
+  push:
+    branches: [ "main" ]
+  pull_request:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
-  cancel-in-progress: true
+  # a newer push to a pull request supersedes the run in progress; runs on
+  # main are left to finish, so that main always has a complete run
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -22,6 +29,8 @@ jobs:
       DOCKERFILE_NAME: ./e2e/optimism-stack.Dockerfile
       DOCKER_IMAGE_TAG: optimism-stack:latest
     strategy:
+      # the configurations are independent, let each of them finish
+      fail-fast: false
       matrix:
         go-version: [ "1.26.x" ]
         proposer_mode: ["l2oo", "fault"]
