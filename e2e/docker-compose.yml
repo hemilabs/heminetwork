@@ -268,6 +268,9 @@ services:
       PROPOSER_MODE: ${PROPOSER_MODE:-fault}
       L2OO_SUBMISSION_INTERVAL: ${L2OO_SUBMISSION_INTERVAL:-120}
       L2OO_FINALIZATION_PERIOD_SECONDS: ${L2OO_FINALIZATION_PERIOD_SECONDS:-4}
+      # seconds after its genesis at which the L1 activates Glamsterdam, see
+      # genesisl2.sh
+      L1_AMSTERDAM_OFFSET_SECONDS: ${L1_AMSTERDAM_OFFSET_SECONDS:-300}
     working_dir: "/tmp"
     command:
       - "sh"
@@ -352,10 +355,18 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
+      # The L1 is not trusted (no --l1.trustrpc), like in production: op-node
+      # computes the hash of every L1 block itself and verifies the
+      # transactions and receipts of the block against it.  This is what
+      # fails first if op-node does not understand the blocks of the L1,
+      # for example after the L1 activated a hard fork.
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
+      # poll the L1 safe and finalized labels every 30 seconds instead of
+      # every 384, so that a node has them soon after it started
+      - "--l1.epoch-poll-interval=30s"
       - "--p2p.no-discovery"
       - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
@@ -371,7 +382,11 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      # without the Glamsterdam activation, see genesisl2.sh
+      - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
+      # records from which L1 block each safe L2 head was derived, the
+      # tests use it to see what was derived from either side of the fork
+      - "--safedb.path=/tmp/safedb"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -398,10 +413,14 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
+      # the L1 is not trusted, see op-node
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
+      # poll the L1 safe and finalized labels every 30 seconds instead of
+      # every 384, so that a node has them soon after it started
+      - "--l1.epoch-poll-interval=30s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
       - "--log.level=debug"
@@ -415,7 +434,11 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      # without the Glamsterdam activation, see genesisl2.sh
+      - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
+      # records from which L1 block each safe L2 head was derived, the
+      # tests use it to see what was derived from either side of the fork
+      - "--safedb.path=/tmp/safedb"
       - "--p2p.no-discovery"
     volumes:
       - "shared-dir:/shared-dir"
@@ -479,10 +502,14 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
+      # the L1 is not trusted, see op-node
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
+      # poll the L1 safe and finalized labels every 30 seconds instead of
+      # every 384, so that a node has them soon after it started
+      - "--l1.epoch-poll-interval=30s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
       - "--log.level=debug"
@@ -496,7 +523,11 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      # without the Glamsterdam activation, see genesisl2.sh
+      - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
+      # records from which L1 block each safe L2 head was derived, the
+      # tests use it to see what was derived from either side of the fork
+      - "--safedb.path=/tmp/safedb"
       - "--syncmode=execution-layer"
       - "--p2p.no-discovery"
     volumes:
@@ -692,10 +723,14 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
+      # the L1 is not trusted, see op-node
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
+      # poll the L1 safe and finalized labels every 30 seconds instead of
+      # every 384, so that a node has them soon after it started
+      - "--l1.epoch-poll-interval=30s"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
       - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
       - "--log.level=debug"
@@ -709,7 +744,11 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
+      # without the Glamsterdam activation, see genesisl2.sh
+      - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
+      # records from which L1 block each safe L2 head was derived, the
+      # tests use it to see what was derived from either side of the fork
+      - "--safedb.path=/tmp/safedb"
       - "--syncmode=consensus-layer"
       - "--p2p.no-discovery"
     volumes:
