@@ -238,7 +238,8 @@ services:
       - "--datadir"
       - "/shared-dir/gethl1datadir"
       - "--gpo.percentile=0"
-      - --http.api=web3,debug,eth,txpool,net,engine,miner
+      # dev: the tests add withdrawals to L1 blocks with dev_addWithdrawal
+      - --http.api=web3,debug,eth,txpool,net,engine,miner,dev
       # op-node-non-sequencing subscribes to L1 heads over WebSocket
       - "--ws"
       - "--ws.addr=0.0.0.0"
