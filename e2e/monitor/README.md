@@ -16,6 +16,7 @@ and print a table that refreshes every 1 second.
 Make sure you have localnet running:
 
 from the root of the repo:
+
 ```
 docker build -f ./e2e/optimism-stack.Dockerfile -t optimism-stack:latest .
 docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
@@ -27,6 +28,7 @@ in the docker compose file. This is mainly here to help ensure you start with a
 clean environment.  It can be omitted.
 
 from this directory:
+
 ```
 $  go run ./... 
 +--------------------------------+------------------------------------------------------------------------+
@@ -40,8 +42,8 @@ $  go run ./...
 +--------------------------------+------------------------------------------------------------------------+
 ```
 
-If you would like to print the results as json, you can give the json 
-"snapshot" a delay via the env variable `HEMI_E2E_DUMP_JSON_AFTER_MS`, 
+If you would like to print the results as json, you can give the json
+"snapshot" a delay via the env variable `HEMI_E2E_DUMP_JSON_AFTER_MS`,
 after these milliseconds, values will be read and dumped.
 
 ```
@@ -56,8 +58,11 @@ stack is running, so that the stack has to follow the L1 across the fork like
 it has to on a live network.  The L2 does not activate Glamsterdam.
 
 The tests in `glamsterdam_migration_test.go` check that the op-nodes keep
-recognising L1 blocks and that the L2 is unchanged.  The `EIPNNNN_` functions in the
-`eipNNNN_test.go` files only show that the L1 has Glamsterdam active.
+recognising L1 blocks (every L1 block they refer to is compared with what the
+L1 itself has), that op-batcher and op-proposer keep getting their
+transactions included under the L1 gas rules of the time, and that the L2 is
+unchanged.  The `EIPNNNN_` functions in the `eipNNNN_test.go` files only show
+that the L1 has Glamsterdam active.
 
 The following environment variables are read by `docker compose up`:
 
