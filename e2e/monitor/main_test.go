@@ -1247,38 +1247,35 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
 		break
+	}
 
-		if testingFork() {
-			waitSequencerWindowSizeForFork(t)
-		}
-
-		select {
-		case <-time.After(5 * time.Second):
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-
+	// The deposit reaches the L2 once the sequencer derives the L1 block
+	// that has it, a few seconds later on a dev mode L1 and longer on an
+	// L1 with a real consensus layer.  Wait for it here, without sending
+	// the deposit again, before the funds are spent on the L2.
+	if testingFork() {
+		waitSequencerWindowSizeForFork(t)
+	}
+	const depositTimeout = 5 * time.Minute
+	deadline := time.Now().Add(depositTimeout)
+	for {
 		balance, err := l2Client.BalanceAt(ctx, receiverAddress, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		if testingFork() && prevBalance.Cmp(balance) != -1 {
-			t.Fatalf("balance did not increase: prevBalance=%d, balance=%d", prevBalance, balance)
+		if new(big.Int).Sub(balance, prevBalance).Cmp(value) >= 0 {
+			t.Logf("balance increased: prevBalance=%d, balance=%d", prevBalance, balance)
+			return
 		}
-
-		t.Logf("balance increased: prevBalance=%d, balance=%d", prevBalance, balance)
-
-		// check that we have at least the sent balance in HemiEth
-		if balance.Cmp(value) < 0 {
-			t.Logf("unexpected balance: %s", balance)
-			continue
-		} else {
-			break
+		if time.Now().After(deadline) {
+			t.Fatalf("the l2 balance of %s did not increase by %d within %s: prevBalance=%d, balance=%d",
+				receiverAddress, value, depositTimeout, prevBalance, balance)
 		}
-
-		if i == abort {
-			t.Fatal("retries exceeded")
+		t.Logf("waiting for the deposit to reach the l2: prevBalance=%d, balance=%d", prevBalance, balance)
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
 		}
 	}
 }
