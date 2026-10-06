@@ -134,6 +134,7 @@ jobs:
       # migration tests fail if the sequencer or the batcher were not up in
       # time; raise the offset rather than lowering it.
       - name: "run localnet"
+        id: run_localnet
         env:
           LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
@@ -178,7 +179,10 @@ jobs:
         run: go test -timeout 30m -v .
 
       # These restart and reorg services, so they run after everything else.
-      - name: "disturb the OP stack on Glamsterdam"
+      # They also run when the tests above failed, their log sweep shows what
+      # the services complained about.
+      - name: "disturb the OP stack on Glamsterdam and check its logs"
+        if: ${{ !cancelled() && steps.run_localnet.outcome == 'success' }}
         env:
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
           BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
