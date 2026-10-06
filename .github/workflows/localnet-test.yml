@@ -35,7 +35,8 @@ jobs:
         go-version: [ "1.26.x" ]
         proposer_mode: ["l2oo", "fault"]
         gethl1:
-          - "ethereum/client-go:v1.17.6@sha256:6606aa1c7b6354d57581952604e7ab5a49689aeee9aebf668c81b6d3225395f1"
+          # the release that Sepolia runs through the Glamsterdam activation
+          - "ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64"
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
