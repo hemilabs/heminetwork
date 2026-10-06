@@ -27,6 +27,9 @@ fault)
 	    --allow-non-finalized=true
 	;;
 l2oo)
+	# proposes finalized L2 outputs only (no --allow-non-finalized), like the
+	# proposers of the Hemi networks: a proposal depends on the finalized L1
+	# blocks that op-node reads
 	op-proposer/bin/op-proposer \
 	    --poll-interval=1s \
 	    --rpc.port=8560 \
@@ -36,8 +39,7 @@ l2oo)
 	    --rollup-rpc=http://op-node:8548 \
 	    --resubmission-timeout=15s \
 	    --safe-abort-nonce-too-low-count=3 \
-	    --txmgr.not-in-mempool-timeout=3s \
-	    --allow-non-finalized=true
+	    --txmgr.not-in-mempool-timeout=3s
 	;;
 *)
 	echo "unknown PROPOSER_MODE: $PROPOSER_MODE (expected fault or l2oo)"
