@@ -133,6 +133,12 @@ var opStackNodes = []opStackNode{
 	},
 }
 
+// testingPostRun returns true when the tests that disturb the localnet are to
+// be run.  They are run on their own, after all other tests have passed.
+func testingPostRun() bool {
+	return os.Getenv("HEMI_E2E_POST_RUN") == "true"
+}
+
 // batcherDAType returns how the localnet op-batcher was told to publish
 // batches, "calldata" or "blobs".  See BATCHER_DA_TYPE in docker-compose.yml.
 func batcherDAType(t *testing.T) string {
@@ -989,7 +995,7 @@ func checkOpStackLogs(t *testing.T, ctx context.Context, container string) {
 // that it completes before the other tests, which all need the L1 to be on
 // Glamsterdam.
 func TestL1MigratesToGlamsterdam(t *testing.T) {
-	if testingFork() {
+	if testingFork() || testingPostRun() {
 		t.Skip("only run against a fresh localnet")
 	}
 
@@ -1038,7 +1044,7 @@ func TestL1MigratesToGlamsterdam(t *testing.T) {
 // L2 from L1 blocks before and after the L1 activated Glamsterdam, and that
 // the L1 blocks it refers to are the blocks that the L1 has.
 func TestOpNodesFollowL1AcrossGlamsterdam(t *testing.T) {
-	if testingFork() {
+	if testingFork() || testingPostRun() {
 		t.Skip("only run against a fresh localnet")
 	}
 
@@ -1333,7 +1339,7 @@ func sendHeavyL2Transactions(t *testing.T, ctx context.Context) uint64 {
 // what the L1 charged for them at the time, and that all op-nodes derive the
 // L2 from them.
 func TestBatcherPostsAcrossGlamsterdam(t *testing.T) {
-	if testingFork() {
+	if testingFork() || testingPostRun() {
 		t.Skip("only run against a fresh localnet")
 	}
 
@@ -1504,7 +1510,7 @@ func sendL1Transaction(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 // base fee that changes.  It then ensures that every op-node got past those
 // blocks and that the L2 carries the changed base fee.
 func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
-	if testingFork() {
+	if testingFork() || testingPostRun() {
 		t.Skip("only run against a fresh localnet")
 	}
 
@@ -1718,7 +1724,7 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 // TestProposerProposesAfterGlamsterdam ensures that op-proposer got an
 // output root proposal included in the L1 after the L1 activated Glamsterdam.
 func TestProposerProposesAfterGlamsterdam(t *testing.T) {
-	if testingFork() {
+	if testingFork() || testingPostRun() {
 		t.Skip("only run against a fresh localnet")
 	}
 
@@ -1888,4 +1894,135 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 
 	checkContainerNotRestarted(t, ctx, proposerContainer)
 	checkOpStackLogs(t, ctx, proposerContainer)
+}
+
+// ---- post-run tests --------------------------------------------------------
+//
+// These disturb the localnet, they are run on their own after all other
+// tests have passed:
+//
+//	HEMI_E2E_POST_RUN=true go test -v -run '^TestPostRun' .
+
+// TestPostRunOpStackRestartsOnGlamsterdam ensures that op-batcher and the
+// op-nodes can be restarted when the L1 is on Glamsterdam.  When they start
+// they have to find their place on the L1 again, starting from L1 blocks
+// that are on Glamsterdam.
+func TestPostRunOpStackRestartsOnGlamsterdam(t *testing.T) {
+	if testingFork() || !testingPostRun() {
+		t.Skip("only run with HEMI_E2E_POST_RUN=true, after the other tests have passed")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
+	defer cancel()
+
+	fork := l1GlamsterdamFork(t, ctx)
+	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
+
+	var (
+		sequencer = opStackNodes[0]
+		verifier  = opStackNodes[1]
+	)
+	sequencerRollup := dialRPC(t, ctx, sequencer.rollupRPC)
+
+	before := waitForSyncStatus(t, ctx, sequencerRollup, sequencer.name, "for it to be on Glamsterdam l1 blocks",
+		func(s *opNodeSyncStatus) bool {
+			return s.SafeL2.L1Origin.Number >= uint64(fork.first.Number)
+		})
+
+	fullSync := opStackNodes[3]
+	for _, container := range []string{batcherContainer, proposerContainer, fullSync.container(), verifier.container(), sequencer.container()} {
+		t.Logf("restarting %s", container)
+		if _, err := dockerOutput(ctx, "restart", container); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// what the sequencer was at once it came back
+	restarted := waitForSyncStatus(t, ctx, sequencerRollup, sequencer.name, "for it to answer after the restart",
+		func(s *opNodeSyncStatus) bool { return s.UnsafeL2.Number > 0 })
+	if restarted.UnsafeL2.Number < before.SafeL2.Number {
+		t.Fatalf("%s came back with unsafe l2 head %d, below the safe l2 head %d before the restart",
+			sequencer.name, restarted.UnsafeL2.Number, before.SafeL2.Number)
+	}
+
+	// The sequencer has to produce new L2 blocks, the batcher has to post
+	// them to the L1, and all op-nodes have to derive them from the L1: the
+	// safe L2 head has to get past the L2 block that was the unsafe head
+	// when the sequencer came back.
+	target := restarted.UnsafeL2.Number + 10
+	progressed := func(s *opNodeSyncStatus) bool {
+		return s.UnsafeL2.Number > target &&
+			s.SafeL2.Number > target &&
+			s.HeadL1.Number > restarted.HeadL1.Number+2 &&
+			s.CurrentL1.Number > restarted.HeadL1.Number+2
+	}
+	what := fmt.Sprintf("for it to derive l2 block %d from the l1 after the restart", target)
+	statuses := make(map[string]*opNodeSyncStatus)
+	for _, node := range []opStackNode{sequencer, verifier, fullSync} {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		statuses[node.name] = waitForSyncStatus(t, ctx, rollup, node.name, what, progressed)
+		checkOpNodeL1View(t, ctx, l1, node.name, statuses[node.name], false)
+	}
+
+	sequencerL2 := dialRPC(t, ctx, sequencer.l2RPC)
+	for _, node := range []opStackNode{verifier, fullSync} {
+		l2 := dialRPC(t, ctx, node.l2RPC)
+		number := min(statuses[sequencer.name].SafeL2.Number, statuses[node.name].SafeL2.Number)
+		sequencerHash := l2BlockHash(t, ctx, sequencerL2, sequencer.name, number)
+		if hash := l2BlockHash(t, ctx, l2, node.name, number); hash != sequencerHash {
+			t.Fatalf("%s has l2 block %d as %s but the sequencer has %s", node.name, number, hash, sequencerHash)
+		}
+	}
+
+	// the proposer has to propose again
+	l1Client := ethclient.NewClient(l1)
+	proposedAfter := func() (uint64, error) {
+		if testingL2OO() {
+			oracle, err := bindings.NewL2OutputOracleCaller(l2OutputOracle(t), l1Client)
+			if err != nil {
+				return 0, err
+			}
+			next, err := oracle.NextOutputIndex(&bind.CallOpts{Context: ctx})
+			if err != nil || next.Sign() == 0 {
+				return 0, err
+			}
+			output, err := oracle.GetL2Output(&bind.CallOpts{Context: ctx}, new(big.Int).Sub(next, big.NewInt(1)))
+			if err != nil {
+				return 0, err
+			}
+			return output.Timestamp.Uint64(), nil
+		}
+		factory, err := bindings.NewDisputeGameFactoryCaller(disputeGameFactory(t), l1Client)
+		if err != nil {
+			return 0, err
+		}
+		count, err := factory.GameCount(&bind.CallOpts{Context: ctx})
+		if err != nil || count.Sign() == 0 {
+			return 0, err
+		}
+		game, err := factory.GameAtIndex(&bind.CallOpts{Context: ctx}, new(big.Int).Sub(count, big.NewInt(1)))
+		if err != nil {
+			return 0, err
+		}
+		return game.Timestamp, nil
+	}
+	restartedAt, err := containerStartedAt(ctx, proposerContainer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		proposedAt, err := proposedAfter()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if proposedAt > uint64(restartedAt.Unix()) {
+			t.Logf("the proposer proposed again at timestamp %d, %d seconds after its restart", proposedAt, proposedAt-uint64(restartedAt.Unix()))
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for a proposal after the proposer restart (latest at timestamp %d)", proposedAt)
+		case <-time.After(10 * time.Second):
+		}
+	}
 }
