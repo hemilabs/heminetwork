@@ -130,7 +130,16 @@ echo "$(jq '.alloc."0x5663a22EAF74371d1765FdA4635fa81ee1c88fa8".balance = "0x999
 echo "$(jq '.config.cancunTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.config.pragueTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.config.osakaTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
-echo "$(jq '.config.amsterdamTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
+
+# The L1 starts on Osaka and activates Glamsterdam (the Amsterdam execution
+# layer fork) L1_AMSTERDAM_OFFSET_SECONDS after its genesis.  This way the
+# Hemi stack is already sequencing, batching and deriving when the L1 migrates
+# and has to follow it across the fork, like it has to on a live network.
+# With an offset of 0 the L1 runs Amsterdam from genesis and the migration
+# itself is not exercised.  The L1 genesis timestamp is set to the L2 genesis
+# timestamp below.
+L1_AMSTERDAM_TIME=$(($(printf '%d' "$(jq -r '.timestamp' /shared-dir/genesis.json)") + ${L1_AMSTERDAM_OFFSET_SECONDS:-300}))
+echo "$(jq ".config.amsterdamTime = $L1_AMSTERDAM_TIME" /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 
 # Amsterdam charges contract code deposit as state gas (EIP-8037, 1530 gas
 # per byte), so deploying the L2OutputOracle and the legacy OptimismPortal in
@@ -179,5 +188,14 @@ jq --arg addr "0x000064D678505ad48F8cCb093BC65613800E8282" \
 echo "$(jq --argjson timestamp "$(jq '.timestamp' /shared-dir/genesis.json)" '.timestamp = $timestamp' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 
 cat /shared-dir/l1genesis.json
+
+# The op-nodes are given the L1 chain config without the Glamsterdam
+# activation.  For the L1s of the Hemi networks op-node uses the chain config
+# that is built into its op-geth library, and that one does not know when the
+# L1 activates Glamsterdam.  The op-nodes of the localnet must not know more
+# about the L1 than they do in production.
+jq '.config | del(.amsterdamTime)' /shared-dir/l1genesis.json > /shared-dir/l1chainconfig-op-node.json
+
+cat /shared-dir/l1chainconfig-op-node.json
 
 cp .deployer/state.json /shared-dir/state.json
