@@ -14,8 +14,12 @@
 # same pivot block without getting anywhere.  On the localnet that is a
 # race between the first Bitcoin block after the hVM activation and the
 # start of the snap syncing node, which this closes: it returns once the
-# sequencer has a block with such a transaction that is far enough behind
-# its head to be at or before the pivot block of a sync that starts now.
+# block DEPTH blocks behind the head of the sequencer has such a
+# transaction, which is at or before the pivot block of a sync that starts
+# now.
+#
+# Only one block is looked at per poll, so a block with such a transaction
+# can be skipped; this relies on Bitcoin blocks still being mined.
 
 L2_RPC="${L2_RPC:-http://op-geth-l2:8546}"
 
@@ -25,60 +29,49 @@ BTC_ATTRIBUTES_TX_TYPE="0x7c"
 
 # how far the pivot block of a snap sync is behind the head
 # (fsMinFullBlocks in op-geth), and some more blocks to be sure
-PIVOT_DISTANCE=64
-MARGIN=16
+DEPTH=$((64 + 16))
 
+# makes a JSON-RPC call to the l2 and prints the response; prints nothing
+# when the l2 does not answer or answers with an HTTP error
 rpc() {
 	curl --silent --fail --max-time 10 -X POST -H 'Content-Type: application/json' \
 		--data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" "$L2_RPC"
 }
 
-echo "waiting for an l2 block with a Bitcoin Attributes Deposited transaction at $L2_RPC"
+echo "waiting for an l2 block $DEPTH blocks behind the head with a Bitcoin Attributes Deposited transaction at $L2_RPC"
 
-next=1
-first=""
 loops=0
 while :; do
+	# the head of the sequencer, as hex, or empty when the l2 does not
+	# answer yet
 	head=$(rpc eth_blockNumber '[]' | jq -r '.result // empty')
-	if [ -z "$head" ]; then
-		echo "the l2 does not answer yet"
-		sleep 3
-		continue
-	fi
-	head=$(printf '%d' "$head")
+	if [ -n "$head" ]; then
+		head=$(printf '%d' "$head")
 
-	# look at the blocks that were not looked at yet
-	while [ -z "$first" ] && [ "$next" -le "$head" ]; do
-		count=$(rpc eth_getBlockByNumber "[\"$(printf '0x%x' "$next")\", true]" |
-			jq -r --arg type "$BTC_ATTRIBUTES_TX_TYPE" \
-				'if .result == null then "missing" else [.result.transactions[] | select((.type // "" | ascii_downcase) == $type)] | length end')
-		case "$count" in
-		"" | missing)
-			# not there yet, or the l2 did not answer: ask again
-			break
-			;;
-		0)
-			next=$((next + 1))
-			;;
-		*)
-			first=$next
-			echo "l2 block $first has the first Bitcoin Attributes Deposited transaction"
-			;;
-		esac
-	done
+		# the chain must be at least DEPTH blocks long before there is a
+		# block DEPTH blocks behind the head
+		if [ "$head" -ge "$DEPTH" ]; then
+			n=$((head - DEPTH))
 
-	if [ -n "$first" ] && [ "$head" -ge $((first + PIVOT_DISTANCE + MARGIN)) ]; then
-		echo "the l2 is at block $head, a snap sync that starts now has its pivot block after l2 block $first"
-		exit 0
+			# the number of Bitcoin Attributes Deposited transactions in
+			# block n, or empty when the block or an answer is missing
+			count=$(rpc eth_getBlockByNumber "[\"$(printf '0x%x' "$n")\", true]" |
+				jq -r --arg type "$BTC_ATTRIBUTES_TX_TYPE" \
+					'.result.transactions // empty | map(select((.type // "" | ascii_downcase) == $type)) | length')
+
+			# block n is at or before the pivot block of a snap sync that
+			# starts now, so the sync can get the hVM light state
+			if [ -n "$count" ] && [ "$count" -gt 0 ]; then
+				echo "the l2 is at block $head and l2 block $n has a Bitcoin Attributes Deposited transaction"
+				exit 0
+			fi
+		fi
 	fi
 
+	# report progress about every 10 seconds
 	loops=$((loops + 1))
 	if [ $((loops % 10)) -eq 0 ]; then
-		if [ -z "$first" ]; then
-			echo "no Bitcoin Attributes Deposited transaction up to l2 block $((next - 1)) (head: $head)"
-		else
-			echo "the l2 is at block $head, waiting for block $((first + PIVOT_DISTANCE + MARGIN))"
-		fi
+		echo "still waiting (head: ${head:-none})"
 	fi
 	sleep 1
 done
