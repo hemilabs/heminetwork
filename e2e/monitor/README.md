@@ -77,8 +77,9 @@ The op-nodes do not trust the L1 RPC (no `--l1.trustrpc`) and are not told
 when the L1 activates Glamsterdam, as in production.  Each of the four
 accesses the L1 in a different way, see `e2e/docker-compose.yml`.
 
-Some tests restart services and reorg the L1.  They are skipped unless
-`HEMI_E2E_POST_RUN=true` is set and are run after everything else:
+Some tests restart services, reorg the L1 and look at all logs.  They are
+skipped unless `HEMI_E2E_POST_RUN=true` is set and are run after everything
+else:
 
 ```
 go test -timeout 30m -v .

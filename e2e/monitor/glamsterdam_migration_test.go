@@ -941,9 +941,21 @@ func scanOpStackLogs(ctx context.Context, container string) ([]string, error) {
 		if line != "" {
 			lines++
 			for _, problem := range opStackLogProblems {
-				if strings.Contains(line, problem) {
-					add("unexpected "+strconv.Quote(problem), line)
+				if !strings.Contains(line, problem) {
+					continue
 				}
+				// A contract that reverts while the transaction manager
+				// re-estimates gas for a fee bump is not the L1 refusing
+				// the transaction: op-proposer runs into it when a
+				// proposal it is about to bump was included in the
+				// meantime, which the L1 reorg test provokes by taking
+				// back the block with the proposal.  The L1 gas rules
+				// refuse a transaction with the errors listed on their
+				// own, never with a revert.
+				if problem == "failed to re-estimate gas" && strings.Contains(line, `err="execution reverted`) {
+					continue
+				}
+				add("unexpected "+strconv.Quote(problem), line)
 			}
 			if m := opNodeReorgLog.FindStringSubmatch(line); m != nil {
 				// A new head that directly follows the previous head but
@@ -1901,8 +1913,8 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 
 // ---- post-run tests --------------------------------------------------------
 //
-// These disturb the localnet, they are run on their own after all other
-// tests have passed:
+// These disturb the localnet or look at everything that happened, they are
+// run on their own after all other tests have passed:
 //
 //	HEMI_E2E_POST_RUN=true go test -v -run '^TestPostRun' .
 
@@ -2141,5 +2153,26 @@ func TestPostRunL1ReorgOnGlamsterdam(t *testing.T) {
 		if hash := l2BlockHash(t, ctx, l2, node.name, number); hash != sequencerHash {
 			t.Fatalf("%s has l2 block %d as %s but the sequencer has %s", node.name, number, hash, sequencerHash)
 		}
+	}
+}
+
+// TestPostRunOpStackLogs ensures that none of the OP stack services logged
+// that it does not understand the L1, at any time since the localnet was
+// started.
+func TestPostRunOpStackLogs(t *testing.T) {
+	if testingFork() || !testingPostRun() {
+		t.Skip("only run with HEMI_E2E_POST_RUN=true, after the other tests have passed")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	defer cancel()
+
+	containers := []string{batcherContainer, proposerContainer}
+	for _, node := range opStackNodes {
+		containers = append(containers, node.container())
+	}
+	for _, container := range containers {
+		checkContainerNotRestarted(t, ctx, container)
+		checkOpStackLogs(t, ctx, container)
 	}
 }
