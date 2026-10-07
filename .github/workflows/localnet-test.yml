@@ -176,7 +176,16 @@ jobs:
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
         run: go test -timeout 30m -v .
-      
+
+      # These restart services, so they run after everything else.
+      - name: "disturb the OP stack on Glamsterdam"
+        env:
+          PROPOSER_MODE: ${{ matrix.proposer_mode }}
+          BATCHER_DA_TYPE: ${{ matrix.batcher_da }}
+          HEMI_E2E_POST_RUN: "true"
+        working-directory: ./e2e/monitor
+        run: go test -timeout 30m -v -run '^TestPostRun' .
+
       - name: "dump logs"
         if: "always()"
         run: docker compose -f ./e2e/docker-compose.yml logs
