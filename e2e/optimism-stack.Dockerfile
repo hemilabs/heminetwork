@@ -103,6 +103,14 @@ COPY --from=foundry_build /git/foundry/target/release/forge /usr/bin/forge
 
 RUN forge --help
 
+# prysmctl generates the beacon genesis state of the geth + Prysm L1
+# (L1_CONSENSUS=prysm), see e2e/prysm/generate-genesis.sh
+ARG PRYSM_VERSION=v7.2.0
+ARG PRYSMCTL_SHA256=b67278f8c247a9983e521dc14cc58af7a923f70a3d520e43651072156dcaae5b
+RUN curl -sSL -o /usr/bin/prysmctl https://github.com/OffchainLabs/prysm/releases/download/$PRYSM_VERSION/prysmctl-$PRYSM_VERSION-linux-amd64 \
+	&& echo "$PRYSMCTL_SHA256  /usr/bin/prysmctl" | sha256sum -c - \
+	&& chmod +x /usr/bin/prysmctl
+
 WORKDIR /git/optimism
 
 RUN git reset --hard

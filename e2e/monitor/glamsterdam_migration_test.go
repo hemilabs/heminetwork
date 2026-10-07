@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -88,7 +89,85 @@ const (
 	// opStackContainers are the containers of the OP stack services.
 	batcherContainer  = "e2e-op-batcher-1"
 	proposerContainer = "e2e-op-proposer-1"
+
+	// prysmBeaconAPI is the Beacon API of the Prysm beacon node of the
+	// localnet when the L1 has a Prysm consensus layer.
+	prysmBeaconAPI = "http://localhost:3500"
 )
+
+// l1HasPrysm returns true when the localnet L1 is driven by a Prysm beacon
+// node and validator instead of geth's dev mode, see L1_CONSENSUS in
+// e2e/docker-compose.yml.  Such an L1 has real slots, real finality, a real
+// Beacon API, and the Gloas fork on the consensus layer at the same time as
+// Amsterdam on the execution layer.
+func l1HasPrysm(t *testing.T) bool {
+	t.Helper()
+
+	switch c := os.Getenv("L1_CONSENSUS"); c {
+	case "", "dev":
+		return false
+	case "prysm":
+		return true
+	default:
+		t.Fatalf("unknown L1_CONSENSUS %q, expected dev or prysm", c)
+		return false
+	}
+}
+
+// beaconSlotParams returns the genesis time and the slot duration in seconds
+// of the beacon chain behind the Beacon API, read the way op-node reads them.
+func beaconSlotParams(t *testing.T, ctx context.Context, api string) (genesisTime uint64, secondsPerSlot uint64) {
+	t.Helper()
+
+	get := func(path string, v any) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, api+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s%s: %v", api, path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s%s: status %d", api, path, resp.StatusCode)
+		}
+		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+			t.Fatalf("GET %s%s: decode: %v", api, path, err)
+		}
+	}
+
+	var genesis struct {
+		Data struct {
+			GenesisTime string `json:"genesis_time"`
+		} `json:"data"`
+	}
+	get("/eth/v1/beacon/genesis", &genesis)
+	genesisTime, err := strconv.ParseUint(genesis.Data.GenesisTime, 10, 64)
+	if err != nil {
+		t.Fatalf("beacon genesis time %q: %v", genesis.Data.GenesisTime, err)
+	}
+
+	var spec struct {
+		Data struct {
+			SlotDurationMs string `json:"SLOT_DURATION_MS"`
+			SecondsPerSlot string `json:"SECONDS_PER_SLOT"`
+		} `json:"data"`
+	}
+	get("/eth/v1/config/spec", &spec)
+	if spec.Data.SlotDurationMs != "" {
+		ms, err := strconv.ParseUint(spec.Data.SlotDurationMs, 10, 64)
+		if err != nil || ms == 0 || ms%1000 != 0 {
+			t.Fatalf("beacon spec SLOT_DURATION_MS %q is not a whole number of seconds", spec.Data.SlotDurationMs)
+		}
+		return genesisTime, ms / 1000
+	}
+	secondsPerSlot, err = strconv.ParseUint(spec.Data.SecondsPerSlot, 10, 64)
+	if err != nil || secondsPerSlot == 0 {
+		t.Fatalf("beacon spec has neither SLOT_DURATION_MS nor a usable SECONDS_PER_SLOT (%q)", spec.Data.SecondsPerSlot)
+	}
+	return genesisTime, secondsPerSlot
+}
 
 // opStackNode is one of the op-node and L2 execution client pairs of the
 // localnet.
@@ -1053,6 +1132,31 @@ func TestL1MigratesToGlamsterdam(t *testing.T) {
 				n, h.Time, got, want)
 		}
 	}
+
+	// With a real consensus layer the slot number in the header is the
+	// beacon slot of the block, which is the block's timestamp counted in
+	// slots from the beacon genesis; geth's dev mode always puts 0 there.
+	if l1HasPrysm(t) {
+		genesisTime, secondsPerSlot := beaconSlotParams(t, ctx, prysmBeaconAPI)
+		var checked, maxSlot uint64
+		for n := uint64(fork.first.Number); n <= uint64(head.Number); n++ {
+			h := mustL1Header(t, ctx, l1, n)
+			want := (uint64(h.Time) - genesisTime) / secondsPerSlot
+			if uint64(*h.SlotNumber) != want {
+				t.Fatalf("l1 block %d (timestamp %d) has slotNumber %d, the beacon chain (genesis %d, %d second slots) is at slot %d then",
+					n, h.Time, *h.SlotNumber, genesisTime, secondsPerSlot, want)
+			}
+			if uint64(*h.SlotNumber) <= maxSlot && checked > 0 {
+				t.Fatalf("l1 block %d has slotNumber %d, not after the %d of the block before", n, *h.SlotNumber, maxSlot)
+			}
+			maxSlot = uint64(*h.SlotNumber)
+			checked++
+		}
+		t.Logf("the slot numbers of the %d l1 blocks on Glamsterdam match the beacon chain (first %d, latest %d)",
+			checked, *fork.first.SlotNumber, maxSlot)
+	} else {
+		t.Logf("the l1 is in dev mode, its slotNumber is always %d", *fork.first.SlotNumber)
+	}
 }
 
 // TestOpNodesFollowL1AcrossGlamsterdam ensures that every op-node derives the
@@ -1572,12 +1676,16 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 	}
 	firstBlock := receipt.BlockNumber.Uint64()
 
-	// A withdrawal in the next L1 block.  The L1 is in dev mode and has no
-	// consensus layer to issue withdrawals, dev_addWithdrawal queues one.
-	if err := l1.CallContext(ctx, nil, "dev_addWithdrawal", &types.Withdrawal{
-		Index: 1, Validator: 1, Address: from, Amount: 1_000_000_000,
-	}); err != nil {
-		t.Fatalf("add a withdrawal to the l1: %v", err)
+	// A withdrawal in the next L1 block.  In dev mode the L1 has no
+	// consensus layer to issue withdrawals, dev_addWithdrawal queues one;
+	// the Prysm consensus layer issues none because the interop validators
+	// have no withdrawal address.
+	if !l1HasPrysm(t) {
+		if err := l1.CallContext(ctx, nil, "dev_addWithdrawal", &types.Withdrawal{
+			Index: 1, Validator: 1, Address: from, Amount: 1_000_000_000,
+		}); err != nil {
+			t.Fatalf("add a withdrawal to the l1: %v", err)
+		}
 	}
 
 	// A set code transaction (EIP-7702) that delegates the account to an
@@ -2049,6 +2157,10 @@ func TestPostRunOpStackRestartsOnGlamsterdam(t *testing.T) {
 func TestPostRunL1ReorgOnGlamsterdam(t *testing.T) {
 	if testingFork() || !testingPostRun() {
 		t.Skip("only run with HEMI_E2E_POST_RUN=true, after the other tests have passed")
+	}
+	if l1HasPrysm(t) {
+		// the beacon node would put the head back where it was
+		t.Skip("the L1 is driven by a consensus layer, it cannot be rewound with debug_setHead")
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
