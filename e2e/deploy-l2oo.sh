@@ -77,7 +77,8 @@ forge build
 # transaction instead, whichever fork it is on.  Note that forge's --gas-limit
 # only sets the block gas limit of its local simulation, not the broadcast gas.
 
-# the batcher uses the same key, retry in case we race it for a nonce
+# other transactions may be sent with the same key, retry in case we race
+# them for a nonce
 for i in 1 2 3 4 5; do
 	if forge script contracts/DeployL2OutputOracle.s.sol:DeployL2OutputOracle \
 		--broadcast \
@@ -101,7 +102,8 @@ done
 export L2OO_PROXY=$(jq -r '.l2OutputOracleProxy' deployments/l2oo.json)
 export OPTIMISM_PORTAL_PROXY=$(jq -r '.opChainDeployments[0].optimismPortalProxyAddress' /shared-dir/state.json)
 
-# the batcher uses the same key, retry in case we race it for a nonce
+# other transactions may be sent with the same key, retry in case we race
+# them for a nonce
 for i in 1 2 3 4 5; do
 	if forge script contracts/UpgradeOptimismPortal.s.sol:UpgradeOptimismPortal \
 		--broadcast \

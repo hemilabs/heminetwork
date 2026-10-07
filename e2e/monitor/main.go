@@ -27,7 +27,7 @@ const (
 	dataRefreshSeconds   = 1
 	tableRefreshSeconds  = 1
 	batcherInboxAddress  = "0x00289c189bee4e70334629f04cd5ed602b6600eb"
-	batcherSenderAddress = "0x78697c88847dfbbb40523e42c1f2e28a13a170be"
+	batcherSenderAddress = "0x5155b5c501fc980a6c54acd3b783e0875530c516"
 )
 
 var ethAddress = os.Getenv("ETH_ADDRESS")

@@ -259,6 +259,31 @@ services:
     networks:
       e2e:
 
+  # geth-l1 runs in --dev mode and so there is no consensus layer node that
+  # keeps the blobs of blob transactions.  l1-beacon stands in for one: the
+  # batcher submits its transactions through it so it can keep their blobs,
+  # and the op-nodes fetch them from its Beacon API, see e2e/fakebeacon.
+  l1-beacon:
+    build:
+      dockerfile: "./e2e/fakebeacon/Dockerfile"
+      context: "./.."
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+    environment:
+      FAKEBEACON_L1_RPC_URL: "http://geth-l1:8545"
+      FAKEBEACON_BEACON_ADDRESS: ":5052"
+      # answers like an older beacon node (blobs only from the deprecated
+      # blob_sidecars endpoint) and a stricter one (only the SLOT_DURATION_MS
+      # spec key), used by op-node-non-sequencing-full-sync
+      FAKEBEACON_BEACON_LEGACY_ADDRESS: ":5053"
+      FAKEBEACON_RPC_ADDRESS: ":8545"
+    ports:
+      - "5052:5052"
+      - "5053:5053"
+    networks:
+      e2e:
+
   op-geth-l2-setup:
     image: optimism-stack:latest
     depends_on:
@@ -344,6 +369,8 @@ services:
     depends_on:
       geth-l1:
         condition: "service_started"
+      l1-beacon:
+        condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
     healthcheck:
@@ -388,7 +415,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://l1-beacon:5052"
       # without the Glamsterdam activation, see genesisl2.sh
       - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
       # records from which L1 block each safe L2 head was derived, the
@@ -407,6 +434,8 @@ services:
   op-node-non-sequencing:
     image: optimism-stack:latest
     depends_on:
+      l1-beacon:
+        condition: "service_started"
       op-node:
         condition: "service_started"
     healthcheck:
@@ -441,7 +470,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://l1-beacon:5052"
       # without the Glamsterdam activation, see genesisl2.sh
       - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
       # records from which L1 block each safe L2 head was derived, the
@@ -494,6 +523,8 @@ services:
   op-node-non-sequencing-snap-sync:
     image: optimism-stack:latest
     depends_on:
+      l1-beacon:
+        condition: "service_started"
       op-geth-l2-non-sequencing-snap-sync:
         condition: "service_healthy"
     healthcheck:
@@ -531,7 +562,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://l1-beacon:5052"
       # without the Glamsterdam activation, see genesisl2.sh
       - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
       # records from which L1 block each safe L2 head was derived, the
@@ -716,6 +747,8 @@ services:
   op-node-non-sequencing-full-sync:
     image: optimism-stack:latest
     depends_on:
+      l1-beacon:
+        condition: "service_started"
       op-geth-l2-non-sequencing-full-sync:
         condition: "service_healthy"
     healthcheck:
@@ -735,8 +768,9 @@ services:
       # the L1 is not trusted, see op-node; this one lets op-node find out
       # how to fetch receipts (the production setting, on geth it settles on
       # their consensus encoding after trying the provider-specific methods),
-      # follows the L1 one block behind its head, and reloads the runtime
-      # config from L1 storage proofs every 30 seconds
+      # follows the L1 one block behind its head, reloads the runtime config
+      # from L1 storage proofs every 30 seconds, and fetches blobs the way
+      # older beacon nodes serve them
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=any"
       - "--l1.runtime-config-reload-interval=30s"
@@ -757,7 +791,7 @@ services:
       - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
-      - "--l1.beacon.ignore=true"
+      - "--l1.beacon=http://l1-beacon:5053"
       # without the Glamsterdam activation, see genesisl2.sh
       - "--rollup.l1-chain-config=/shared-dir/l1chainconfig-op-node.json"
       # records from which L1 block each safe L2 head was derived, the
@@ -794,10 +828,19 @@ services:
       - "--rpc.enable-admin"
       - "--max-channel-duration=5"
       - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
+      # through l1-beacon, which keeps the blobs of blob transactions
+      - "--l1-eth-rpc=http://l1-beacon:8545"
+      # an account of its own, see .env
+      - "--private-key=${BATCHER_PRIVATE_KEY}"
+      # "calldata" or "blobs"
+      - "--data-availability-type=${BATCHER_DA_TYPE:-calldata}"
+      # the L1 has Osaka active from genesis, blob transactions must carry
+      # cell proofs
+      - "--txmgr.cell-proof-time=0"
     depends_on:
       geth-l1:
+        condition: "service_started"
+      l1-beacon:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
