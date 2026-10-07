@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net"
 	"strconv"
@@ -348,33 +349,43 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 		return nil, fmt.Errorf("get headers: locator not found %v", locator)
 	}
 
+	// TEST HARNESS ONLY. Walk PARENT LINKS, not height buckets.
+	//
+	// This used to take "some block at height h+1, h+2, ..." and, wherever the fixture contains a
+	// fork, it would pick blocks from DIFFERENT branches at successive heights -- emitting a
+	// "headers" message that is not a chain. No real peer does that: Bitcoin Core and btcd both walk
+	// their active chain by parent link, so a headers message is contiguous by construction.
+	//
+	// That mattered as soon as the node started checking contiguity. It also means these fork tests
+	// were previously exercising a shape the protocol cannot produce.
 	nmh := wire.NewMsgHeaders()
-	height := from.Height() + 1
-	b.logf("start from %v", height)
+	cur := from
+	b.logf("start from %v", cur.Height()+1)
 	for range 2000 {
+		height := cur.Height() + 1
 		bs, ok := b.blocksAtHeight[height]
 		if !ok {
 			b.logf("no more blocks at: %v", height)
 			return nmh, nil
 		}
-		var parentBlock *block
+		curHash := cur.Hash()
+		var child *block
 		for _, v := range bs {
-			if from.Hash().IsEqual(v.Hash()) {
-				continue
+			if v.MsgBlock().Header.PrevBlock.IsEqual(curHash) {
+				child = v
+				break
 			}
-			parentBlock = v
-			break
 		}
-		if parentBlock == nil {
-			return nil, fmt.Errorf("no parent at: %v", height)
+		if child == nil {
+			// No block at the next height descends from cur: the fixture's branch ends here.
+			b.logf("no child of %v at height %v", curHash, height)
+			return nmh, nil
 		}
-		err := nmh.AddBlockHeader(&parentBlock.MsgBlock().Header)
-		if err != nil {
+		if err := nmh.AddBlockHeader(&child.MsgBlock().Header); err != nil {
 			return nil, fmt.Errorf("add header: %w", err)
 		}
-
-		b.logf("%v: %v", height, parentBlock.MsgBlock().Header.BlockHash())
-		height++
+		b.logf("%v: %v", height, child.MsgBlock().Header.BlockHash())
+		cur = child
 	}
 
 	return nmh, nil
@@ -528,8 +539,14 @@ func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcuti
 	}
 	t.Logf("coinbase tx %v: %v", nextBlockHeight, coinbaseTx.Hash())
 
-	if reqDifficulty == 0 {
-		reqDifficulty = uint32(0x1d00ffff)
+	// Use the chain's OWN PowLimitBits and mine to it (see the grind below). On regtest the target
+	// is ~2^255 so a nonce is found in a handful of tries.
+	// Use a LOCAL. newBlockTemplate used to assign into the package global, so a test that failed
+	// between setting and resetting reqDifficulty leaked its value into every later test. A helper
+	// should not write a package global, and the leak is invisible under -shuffle or a -run filter.
+	bits := reqDifficulty
+	if bits == 0 {
+		bits = params.PowLimitBits
 	}
 
 	var blockTxs []*btcutil.Tx
@@ -543,13 +560,30 @@ func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcuti
 			PrevBlock:  *parent,
 			MerkleRoot: blockchain.CalcMerkleRoot(blockTxs, false),
 			Timestamp:  time.Now(),
-			Bits:       reqDifficulty,
+			Bits:       bits,
 		},
 	}
 	for _, tx := range blockTxs {
 		if err = msgBlock.AddTransaction(tx.MsgTx()); err != nil {
 			return nil, fmt.Errorf("add transaction to block: %w", err)
 		}
+	}
+
+	// Grind a real nonce so the header meets the target it claims. Without this the harness emits
+	// headers with zero proof-of-work, which no proof-of-work-checking node will accept.
+	target := blockchain.CompactToBig(msgBlock.Header.Bits)
+	mined := false
+	for n := uint32(0); n < math.MaxUint32; n++ {
+		msgBlock.Header.Nonce = n
+		hash := msgBlock.Header.BlockHash()
+		if blockchain.HashToBig(&hash).Cmp(target) <= 0 {
+			mined = true
+			break
+		}
+	}
+	if !mined {
+		return nil, fmt.Errorf("could not mine block at height %v with bits %08x",
+			nextBlockHeight, msgBlock.Header.Bits)
 	}
 
 	b := btcutil.NewBlock(msgBlock)
@@ -1193,7 +1227,7 @@ func TestFork(t *testing.T) {
 		AutoIndex:            false,
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
+		BlockSanity:          true,
 		LevelDBHome:          t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
@@ -1438,7 +1472,7 @@ func TestIndexNoFork(t *testing.T) {
 		AutoIndex:            false,
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
+		BlockSanity:          true,
 		LevelDBHome:          t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
@@ -1639,7 +1673,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		AutoIndex:            false,
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
+		BlockSanity:          true,
 		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
@@ -1957,7 +1991,7 @@ func TestIndexFork(t *testing.T) {
 		AutoIndex:            false,
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
+		BlockSanity:          true,
 		LevelDBHome:          t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
@@ -2289,7 +2323,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		AutoIndex:            false,
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
+		BlockSanity:          true,
 		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
@@ -2868,7 +2902,7 @@ func TestForkCanonicity(t *testing.T) {
 		AutoIndex:            false,
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
+		BlockSanity:          true,
 		LevelDBHome:          t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
@@ -2909,8 +2943,13 @@ func TestForkCanonicity(t *testing.T) {
 
 	mainChainHashes := map[string]*chainhash.Hash{"genesis": parent, "b1": b1.Hash()}
 
-	// increase difficulty to ensure b1 -> b5 remains canonical
-	reqDifficulty = uint32(0x1d000fff)
+	// increase difficulty to ensure b1 -> b5 remains canonical.
+	//
+	// Was 0x1d000fff (mainnet-range) against a 0x1d00ffff default -- a ~16x work ratio. Keep the
+	// ratio, but in the REGTEST range so the harness can actually mine it: 0x2007ffff has a mantissa
+	// 16x smaller than 0x207fffff, hence ~16x the work, and a target near 2^251 that a few dozen
+	// nonce tries will meet.
+	reqDifficulty = uint32(0x2007ffff)
 
 	// mine b2 to b5
 	prevHash := b1.Hash()
