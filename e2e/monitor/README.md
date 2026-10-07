@@ -57,10 +57,10 @@ it has to on a live network.  The L2 does not activate Glamsterdam.
 
 The tests in `glamsterdam_migration_test.go` check that the op-nodes keep
 recognising L1 blocks (every L1 block they refer to is compared with what the
-L1 itself has), that op-batcher keeps getting its transactions included under
-the L1 gas rules of the time, and that the L2 is unchanged.  The `EIPNNNN_`
-functions in the `eipNNNN_test.go` files only show that the L1 has Glamsterdam
-active.
+L1 itself has), that op-batcher and op-proposer keep getting their
+transactions included under the L1 gas rules of the time, and that the L2 is
+unchanged.  The `EIPNNNN_` functions in the `eipNNNN_test.go` files only show
+that the L1 has Glamsterdam active.
 
 The following environment variables are read by `docker compose up`:
 

@@ -42,6 +42,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-node/bindings"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -84,7 +86,8 @@ const (
 	l1GasBurners = 8
 
 	// opStackContainers are the containers of the OP stack services.
-	batcherContainer = "e2e-op-batcher-1"
+	batcherContainer  = "e2e-op-batcher-1"
+	proposerContainer = "e2e-op-proposer-1"
 )
 
 // opStackNode is one of the op-node and L2 execution client pairs of the
@@ -1710,4 +1713,179 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 		t.Logf("%s: l2 block %d carries the raised base fee %s of l1 block %d", node.name, lo, attrs.baseFee, raised)
 		checkOpStackLogs(t, ctx, node.container())
 	}
+}
+
+// TestProposerProposesAfterGlamsterdam ensures that op-proposer got an
+// output root proposal included in the L1 after the L1 activated Glamsterdam.
+func TestProposerProposesAfterGlamsterdam(t *testing.T) {
+	if testingFork() {
+		t.Skip("only run against a fresh localnet")
+	}
+
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Minute)
+	defer cancel()
+
+	fork := l1GlamsterdamFork(t, ctx)
+
+	l1Client, err := ethclient.DialContext(ctx, l1Endpoint())
+	if err != nil {
+		t.Fatalf("could not dial eth l1 %s", err)
+	}
+	defer l1Client.Close()
+
+	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
+	forkNumber := uint64(fork.first.Number)
+
+	// latest looks at the latest proposal and returns true once it is one
+	// made on Glamsterdam about Glamsterdam L1 blocks, or an error
+	var latest func() (bool, error)
+	if testingL2OO() {
+		ooproxy := l2OutputOracle(t)
+		oracle, err := bindings.NewL2OutputOracle(ooproxy, l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		latest = func() (bool, error) {
+			next, err := oracle.NextOutputIndex(&bind.CallOpts{Context: ctx})
+			if err != nil || next.Sign() == 0 {
+				return false, err
+			}
+			index := new(big.Int).Sub(next, big.NewInt(1))
+			output, err := oracle.GetL2Output(&bind.CallOpts{Context: ctx}, index)
+			if err != nil {
+				return false, err
+			}
+			if output.Timestamp.Uint64() < fork.amsterdamTime {
+				t.Logf("the latest proposal (output %d) was included at timestamp %d, before Glamsterdam", index, output.Timestamp)
+				return false, nil
+			}
+
+			// The proposal names the L1 block op-node was at, by number and
+			// hash: proposeL2Output(outputRoot, l2BlockNumber, l1BlockHash,
+			// l1BlockNumber).  The L2OutputOracle rejects a proposal whose
+			// hash is not blockhash(l1BlockNumber), so an included proposal
+			// about a Glamsterdam L1 block is the L1 itself agreeing with the
+			// hash that op-node computed for it.
+			events, err := oracle.FilterOutputProposed(&bind.FilterOpts{Context: ctx}, nil, []*big.Int{index}, nil)
+			if err != nil {
+				return false, err
+			}
+			defer events.Close()
+			if !events.Next() {
+				return false, fmt.Errorf("no OutputProposed event for output %d: %v", index, events.Error())
+			}
+			tx, _, err := l1Client.TransactionByHash(ctx, events.Event.Raw.TxHash)
+			if err != nil {
+				return false, err
+			}
+			input := tx.Data()
+			if len(input) != 4+4*32 || hexutil.Encode(input[:4]) != "0x9aaab648" {
+				return false, fmt.Errorf("proposal transaction %s is not a proposeL2Output call (%d bytes, selector %s)",
+					tx.Hash(), len(input), hexutil.Encode(input[:min(4, len(input))]))
+			}
+			var (
+				l1BlockHash   = common.BytesToHash(input[68:100])
+				l1BlockNumber = new(big.Int).SetBytes(input[100:132])
+			)
+			if !l1BlockNumber.IsUint64() {
+				return false, fmt.Errorf("proposal %s names l1 block %s", tx.Hash(), l1BlockNumber)
+			}
+			if l1BlockNumber.Uint64() < forkNumber {
+				t.Logf("the latest proposal (output %d, included at timestamp %d) is about l1 block %d, before Glamsterdam",
+					index, output.Timestamp, l1BlockNumber)
+				return false, nil
+			}
+			canonical := mustL1Header(t, ctx, l1, l1BlockNumber.Uint64())
+			if canonical.Hash != l1BlockHash {
+				return false, fmt.Errorf("proposal %s names l1 block %d as %s but the l1 has %s",
+					tx.Hash(), l1BlockNumber, l1BlockHash, canonical.Hash)
+			}
+
+			// and it is the output root that op-node has
+			checkL2OOOutputRoot(t, ctx, bindings.TypesOutputProposal(output))
+			t.Logf("output %d for l2 block %d was proposed at timestamp %d (%d seconds after the l1 activated Glamsterdam) "+
+				"about l1 block %d %s, which the l1 agrees with",
+				index, output.L2BlockNumber, output.Timestamp, output.Timestamp.Uint64()-fork.amsterdamTime, l1BlockNumber, l1BlockHash)
+			return true, nil
+		}
+	} else {
+		factory, err := bindings.NewDisputeGameFactoryCaller(disputeGameFactory(t), l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rollup := dialRPC(t, ctx, opStackNodes[0].rollupRPC)
+		latest = func() (bool, error) {
+			count, err := factory.GameCount(&bind.CallOpts{Context: ctx})
+			if err != nil || count.Sign() == 0 {
+				return false, err
+			}
+			game, err := factory.GameAtIndex(&bind.CallOpts{Context: ctx}, new(big.Int).Sub(count, big.NewInt(1)))
+			if err != nil {
+				return false, err
+			}
+			if game.Timestamp < fork.amsterdamTime {
+				t.Logf("the latest game was created at timestamp %d, before Glamsterdam", game.Timestamp)
+				return false, nil
+			}
+
+			// the root claim of the game is op-node's output root for the
+			// L2 block it is about
+			call := func(selector string) ([]byte, error) {
+				var out hexutil.Bytes
+				err := l1.CallContext(ctx, &out, "eth_call",
+					map[string]string{"to": game.Proxy.Hex(), "data": selector}, "latest")
+				return out, err
+			}
+			rootClaim, err := call("0xbcef3b55") // rootClaim()
+			if err != nil {
+				return false, err
+			}
+			l2BlockNumber, err := call("0x8b85902b") // l2BlockNumber()
+			if err != nil {
+				return false, err
+			}
+			if len(rootClaim) != 32 || len(l2BlockNumber) != 32 {
+				return false, fmt.Errorf("game %s returned %d and %d bytes for rootClaim and l2BlockNumber", game.Proxy, len(rootClaim), len(l2BlockNumber))
+			}
+			var outputAtBlock struct {
+				OutputRoot common.Hash `json:"outputRoot"`
+			}
+			if err := rollup.CallContext(ctx, &outputAtBlock, "optimism_outputAtBlock", hexutil.EncodeBig(new(big.Int).SetBytes(l2BlockNumber))); err != nil {
+				return false, err
+			}
+			if outputAtBlock.OutputRoot != common.BytesToHash(rootClaim) {
+				return false, fmt.Errorf("game %s claims %x for l2 block %d but op-node has %s",
+					game.Proxy, rootClaim, new(big.Int).SetBytes(l2BlockNumber), outputAtBlock.OutputRoot)
+			}
+			t.Logf("game %s for l2 block %d was created at timestamp %d (%d seconds after the l1 activated Glamsterdam) with op-node's output root",
+				game.Proxy, new(big.Int).SetBytes(l2BlockNumber), game.Timestamp, game.Timestamp-fork.amsterdamTime)
+			return true, nil
+		}
+	}
+
+	var lastErr error
+	for errors := 0; ; {
+		done, err := latest()
+		if err != nil {
+			// the L1 or op-node RPC may fail now and then
+			if errors++; errors > 5 {
+				t.Fatalf("checking the latest proposal failed %d times, last: %v", errors, err)
+			}
+			lastErr = err
+			t.Logf("checking the latest proposal failed, will retry: %v", err)
+		} else if done {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for a proposal about the Glamsterdam l1: %s (last error: %v)", ctx.Err(), lastErr)
+		case <-time.After(10 * time.Second):
+		}
+	}
+
+	checkContainerNotRestarted(t, ctx, proposerContainer)
+	checkOpStackLogs(t, ctx, proposerContainer)
 }
