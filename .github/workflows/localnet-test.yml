@@ -7,16 +7,16 @@ name: "Localnet Test"
 on:
   workflow_dispatch: # Manually triggered
   # The localnet builds tbcd, bfgd, popmd and its own tests from the
-  # checkout, so every pull request and every push to main runs it.
+  # checkout, so every pull request to main and every push to main runs it.
   push:
     branches: [ "main" ]
   pull_request:
+    branches: [ "main" ]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
-  # a newer push to a pull request supersedes the run in progress; runs on
-  # main are left to finish, so that main always has a complete run
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # a newer push to a pull request or to main supersedes the run in progress
+  cancel-in-progress: true
 
 permissions:
   contents: read
