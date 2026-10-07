@@ -900,8 +900,9 @@ var opStackLogProblems = []string{
 }
 
 // maxOpNodeReorgLogs is the most "possible L1 re-org" warnings an op-node may
-// log in a run.  The localnet L1 does not reorg.  An op-node that computes a
-// different hash than the L1 for every block logs it for every block.
+// log in a run.  The localnet L1 only reorgs when a test makes it, and then
+// each op-node logs the warning once.  An op-node that computes a different
+// hash than the L1 for every block logs it for every block.
 const maxOpNodeReorgLogs = 8
 
 // opNodeReorgLog matches the warning that op-node logs when a new L1 head is
@@ -948,7 +949,9 @@ func scanOpStackLogs(ctx context.Context, container string) ([]string, error) {
 				// A new head that directly follows the previous head but
 				// does not have its hash as parent hash means that op-node
 				// computed a different hash for the previous head than the
-				// one the L1 uses.  The localnet L1 does not reorg.
+				// one the L1 uses.  The localnet L1 only reorgs when a test
+				// makes it, which op-node sees as a new head at or below the
+				// previous one.
 				oldNumber, _ := strconv.ParseUint(m[2], 10, 64)
 				newNumber, _ := strconv.ParseUint(m[5], 10, 64)
 				if newNumber == oldNumber+1 {
@@ -2023,6 +2026,120 @@ func TestPostRunOpStackRestartsOnGlamsterdam(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for a proposal after the proposer restart (latest at timestamp %d)", proposedAt)
 		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
+// TestPostRunL1ReorgOnGlamsterdam makes the L1 reorg a few blocks while it is
+// on Glamsterdam and ensures that the OP stack follows the new L1 blocks.
+// Short reorgs of the L1 are to be expected with ePBS on the consensus layer
+// side of Glamsterdam.
+func TestPostRunL1ReorgOnGlamsterdam(t *testing.T) {
+	if testingFork() || !testingPostRun() {
+		t.Skip("only run with HEMI_E2E_POST_RUN=true, after the other tests have passed")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
+	defer cancel()
+
+	fork := l1GlamsterdamFork(t, ctx)
+	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
+	sequencer := opStackNodes[0]
+	sequencerRollup := dialRPC(t, ctx, sequencer.rollupRPC)
+
+	// The L1 in dev mode finalizes every 32 blocks; a reorg must not go
+	// below the finalized block, so wait for a head that is well past one.
+	const depth = 3
+	var head *l1Header
+	for {
+		h, err := l1HeaderByTag(ctx, l1, "latest")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if uint64(h.Number)%32 >= depth+2 && uint64(h.Number) > uint64(fork.first.Number)+depth {
+			head = h
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+	before := waitForSyncStatus(t, ctx, sequencerRollup, sequencer.name, "for it to be at the l1 head",
+		func(s *opNodeSyncStatus) bool { return s.HeadL1.Number >= uint64(head.Number)-1 })
+	dropped := mustL1Header(t, ctx, l1, uint64(head.Number)-depth+1)
+
+	t.Logf("rewinding the l1 from block %d to block %d", head.Number, uint64(head.Number)-depth)
+	if err := l1.CallContext(ctx, nil, "debug_setHead", hexutil.EncodeUint64(uint64(head.Number)-depth)); err != nil {
+		t.Fatalf("rewind the l1: %v", err)
+	}
+
+	// the L1 builds new blocks from there, with other hashes
+	var replaced *l1Header
+	for {
+		h, err := l1HeaderByTag(ctx, l1, "latest")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if uint64(h.Number) > uint64(head.Number)+2 {
+			replaced = mustL1Header(t, ctx, l1, uint64(dropped.Number))
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("the l1 did not build new blocks after the rewind: %v", ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+	if replaced.Hash == dropped.Hash {
+		t.Fatalf("l1 block %d is still %s after the rewind", dropped.Number, dropped.Hash)
+	}
+	t.Logf("l1 block %d is now %s, it was %s", dropped.Number, replaced.Hash, dropped.Hash)
+
+	// Every op-node has to notice, drop what it derived from the dropped
+	// blocks, and derive from the new ones: the L1 blocks it refers to must
+	// be the new ones, and its safe L2 head must get past the unsafe L2
+	// head from before the reorg, that is the batcher has to post again.
+	//
+	// The L1 is in dev mode and calls its head safe, so the rewind took
+	// back blocks that the op-nodes were told are safe, which a real L1
+	// does not do.  An op-node asks for the safe L1 block every 30 seconds
+	// and has the dropped one until then; wait for that too.
+	onL1 := func(ref opNodeL1Ref) bool {
+		if ref == (opNodeL1Ref{}) {
+			return true
+		}
+		h, err := l1HeaderByNumber(ctx, l1, ref.Number)
+		return err == nil && h.Hash == ref.Hash
+	}
+	target := before.UnsafeL2.Number
+	for _, node := range opStackNodes {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		status := waitForSyncStatus(t, ctx, rollup, node.name,
+			fmt.Sprintf("for it to follow the l1 past the reorg and derive l2 block %d", target),
+			func(s *opNodeSyncStatus) bool {
+				return s.HeadL1.Number > uint64(head.Number)+2 &&
+					s.CurrentL1.Number > uint64(head.Number) &&
+					s.SafeL2.Number > target &&
+					s.SafeL2.L1Origin.Number > uint64(head.Number) &&
+					onL1(s.SafeL1) && onL1(s.FinalizedL1)
+			})
+		checkOpNodeL1View(t, ctx, l1, node.name, status, false)
+	}
+
+	sequencerL2 := dialRPC(t, ctx, sequencer.l2RPC)
+	for _, node := range opStackNodes[1:] {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		var status *opNodeSyncStatus
+		if err := rollup.CallContext(ctx, &status, "optimism_syncStatus"); err != nil {
+			t.Fatal(err)
+		}
+		l2 := dialRPC(t, ctx, node.l2RPC)
+		number := status.SafeL2.Number
+		sequencerHash := l2BlockHash(t, ctx, sequencerL2, sequencer.name, number)
+		if hash := l2BlockHash(t, ctx, l2, node.name, number); hash != sequencerHash {
+			t.Fatalf("%s has l2 block %d as %s but the sequencer has %s", node.name, number, hash, sequencerHash)
 		}
 	}
 }
