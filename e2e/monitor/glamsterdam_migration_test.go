@@ -26,11 +26,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -42,6 +45,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -52,6 +57,25 @@ const (
 	// l1BlockPredeploy is the L2 contract that holds the attributes of the
 	// L1 origin of an L2 block.
 	l1BlockPredeploy = "0x4200000000000000000000000000000000000015"
+
+	// glamsterdamZeroValueCallBaseGas is the EIP-2780 intrinsic base cost of
+	// a transaction that calls another account without sending value: 12000
+	// for the transaction itself plus 3000 for touching the recipient.  It
+	// replaces the 21000 gas charged before Glamsterdam.
+	glamsterdamZeroValueCallBaseGas uint64 = 12000 + 3000
+
+	// preGlamsterdamFloorPerToken is the EIP-7623 calldata floor cost per
+	// token, which EIP-7976 raises to totalCostFloorPerToken.
+	preGlamsterdamFloorPerToken uint64 = 10
+
+	// glamsterdamHeavyTxs transactions of glamsterdamHeavyTxSize random
+	// bytes are sent on the L2 so that the batcher has to post batches of
+	// production size.
+	glamsterdamHeavyTxs    = 6
+	glamsterdamHeavyTxSize = 30_000
+
+	// opStackContainers are the containers of the OP stack services.
+	batcherContainer = "e2e-op-batcher-1"
 )
 
 // opStackNode is one of the op-node and L2 execution client pairs of the
@@ -97,6 +121,35 @@ var opStackNodes = []opStackNode{
 	},
 }
 
+// batcherDAType returns how the localnet op-batcher was told to publish
+// batches, "calldata" or "blobs".  See BATCHER_DA_TYPE in docker-compose.yml.
+func batcherDAType(t *testing.T) string {
+	t.Helper()
+
+	switch da := os.Getenv("BATCHER_DA_TYPE"); da {
+	case "":
+		return "calldata"
+	case "calldata", "blobs":
+		return da
+	default:
+		t.Fatalf("unknown BATCHER_DA_TYPE %q, expected calldata or blobs", da)
+		return ""
+	}
+}
+
+// glamsterdamLoadKey returns the key of the account used to put load on the
+// batcher.  It is derived from a public label and funded on the L1 by
+// e2e/genesisl2.sh, it is only meant for the localnet.
+func glamsterdamLoadKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+
+	key, err := crypto.ToECDSA(crypto.Keccak256([]byte("hemi localnet glamsterdam batcher load")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
 func dialRPC(t *testing.T, ctx context.Context, url string) *rpc.Client {
 	t.Helper()
 
@@ -135,6 +188,28 @@ func (h *l1Header) glamsterdam() (bool, error) {
 	}
 }
 
+type l1Tx struct {
+	Hash                common.Hash     `json:"hash"`
+	From                common.Address  `json:"from"`
+	To                  *common.Address `json:"to"`
+	Input               hexutil.Bytes   `json:"input"`
+	Gas                 hexutil.Uint64  `json:"gas"`
+	Type                hexutil.Uint64  `json:"type"`
+	Value               *hexutil.Big    `json:"value"`
+	BlobVersionedHashes []common.Hash   `json:"blobVersionedHashes"`
+}
+
+type l1Block struct {
+	l1Header
+	Transactions []l1Tx `json:"transactions"`
+}
+
+type l1Receipt struct {
+	Status      hexutil.Uint64 `json:"status"`
+	GasUsed     hexutil.Uint64 `json:"gasUsed"`
+	BlockNumber hexutil.Uint64 `json:"blockNumber"`
+}
+
 // l1HeaderByTag returns the header of an L1 block by number or block tag.
 func l1HeaderByTag(ctx context.Context, l1 *rpc.Client, block string) (*l1Header, error) {
 	var h *l1Header
@@ -159,6 +234,18 @@ func mustL1Header(t *testing.T, ctx context.Context, l1 *rpc.Client, number uint
 		t.Fatal(err)
 	}
 	return h
+}
+
+// l1BlockByNumber returns an L1 block with its transactions.
+func l1BlockByNumber(ctx context.Context, l1 *rpc.Client, number uint64) (*l1Block, error) {
+	var b *l1Block
+	if err := l1.CallContext(ctx, &b, "eth_getBlockByNumber", hexutil.EncodeUint64(number), true); err != nil {
+		return nil, fmt.Errorf("fetch l1 block %d: %w", number, err)
+	}
+	if b == nil {
+		return nil, fmt.Errorf("l1 block %d not found", number)
+	}
+	return b, nil
 }
 
 // ---- the L1 fork -----------------------------------------------------------
@@ -771,8 +858,20 @@ var opStackLogProblems = []string{
 	"receipts but expected",
 	// and for L1 contract storage read by op-node
 	"failed to verify retrieved proof against state root",
+	// the L1 rejected a transaction of op-batcher or op-proposer because of
+	// its gas limit
+	"insufficient gas for floor data gas cost",
+	"intrinsic gas too low",
 	// op-node and the L2 execution client disagree about an L2 block
 	"invalid block extraData",
+	// op-batcher or op-proposer could not get a transaction accepted by the
+	// L1 or re-estimate its gas; the transaction manager retries with a
+	// re-estimated gas limit after a while, which hides a wrong gas limit
+	// from everything but the logs
+	"unable to publish transaction",
+	"failed to re-estimate gas",
+	// op-batcher fell back to the L1's gas estimate
+	"Failed to calculate batch transaction gas limit",
 	// op-node could not read the beacon spec
 	"beacon spec has neither",
 	"got bad value for seconds per slot",
@@ -1060,4 +1159,301 @@ func TestOpNodesFollowL1AcrossGlamsterdam(t *testing.T) {
 			checkOpStackLogs(t, ctx, node.container())
 		})
 	}
+}
+
+// batcherTx is a transaction that op-batcher sent to the batch inbox.
+type batcherTx struct {
+	l1Tx
+	block       uint64
+	glamsterdam bool
+}
+
+// batcherTransactions returns the transactions that the batcher sent to the
+// batch inbox in the L1 blocks from 1 to the L1 head.
+func batcherTransactions(t *testing.T, ctx context.Context, l1 *rpc.Client, fork glamsterdamFork) []batcherTx {
+	t.Helper()
+
+	var (
+		batcher = common.HexToAddress(batcherSenderAddress)
+		inbox   = common.HexToAddress(batcherInboxAddress)
+	)
+
+	head, err := l1HeaderByTag(ctx, l1, "latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var txs []batcherTx
+	for n := uint64(1); n <= uint64(head.Number); n++ {
+		block, err := l1BlockByNumber(ctx, l1, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tx := range block.Transactions {
+			if tx.From != batcher || tx.To == nil || *tx.To != inbox {
+				continue
+			}
+			txs = append(txs, batcherTx{
+				l1Tx:        tx,
+				block:       n,
+				glamsterdam: n >= uint64(fork.first.Number),
+			})
+		}
+	}
+	return txs
+}
+
+// sendHeavyL2Transactions sends transactions with a lot of incompressible
+// data to the L2 and returns the number of the last L2 block that includes
+// one of them.  The batcher has to post that data to the L1.
+//
+// The transactions are sent with exactly the gas that such a transaction
+// needs before Glamsterdam, which is far less than what it needs on
+// Glamsterdam.  The L2 accepting them shows that the L2 did not pick up the
+// Glamsterdam gas rules.
+func sendHeavyL2Transactions(t *testing.T, ctx context.Context) uint64 {
+	t.Helper()
+
+	key := glamsterdamLoadKey(t)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+
+	l1Client, err := ethclient.DialContext(ctx, l1Endpoint())
+	if err != nil {
+		t.Fatalf("could not dial eth l1 %s", err)
+	}
+	defer l1Client.Close()
+
+	l2Client, err := ethclient.DialContext(ctx, opStackNodes[0].l2RPC)
+	if err != nil {
+		t.Fatalf("could not dial eth l2 %s", err)
+	}
+	defer l2Client.Close()
+
+	// the account is only funded on the L1
+	minBalance := big.NewInt(50_000_000_000_000_000)
+	balance, err := l2Client.BalanceAt(ctx, from, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balance.Cmp(minBalance) < 0 {
+		bridgeEthL1ToL2(t, ctx, l1Client, l2Client, key)
+		for balance.Cmp(minBalance) < 0 {
+			select {
+			case <-ctx.Done():
+				t.Fatalf("timed out waiting for the l1 -> l2 eth bridge to %s", from)
+			case <-time.After(3 * time.Second):
+			}
+			if balance, err = l2Client.BalanceAt(ctx, from, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	gasPrice, err := l2Client.SuggestGasPrice(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gasPrice = new(big.Int).Add(new(big.Int).Mul(gasPrice, big.NewInt(2)), big.NewInt(1_000_000_000))
+
+	nonce, err := l2Client.PendingNonceAt(ctx, from)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signer := types.LatestSignerForChainID(l2ChainId())
+	txs := make([]*types.Transaction, 0, glamsterdamHeavyTxs)
+	for i := range glamsterdamHeavyTxs {
+		data := make([]byte, glamsterdamHeavyTxSize)
+		if _, err := crand.Read(data); err != nil {
+			t.Fatal(err)
+		}
+
+		tx, err := types.SignNewTx(key, signer, &types.LegacyTx{
+			Nonce:    nonce + uint64(i),
+			To:       &dummyRecipient,
+			Gas:      txBaseCost + preGlamsterdamFloorPerToken*tokensInCalldata(data),
+			GasPrice: gasPrice,
+			Data:     data,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l2Client.SendTransaction(ctx, tx); err != nil {
+			t.Fatalf("send l2 transaction with %d bytes of data and gas limit %d: %v", len(data), tx.Gas(), err)
+		}
+		txs = append(txs, tx)
+	}
+
+	var lastBlock uint64
+	for _, tx := range txs {
+		var receipt *types.Receipt
+		for deadline := time.Now().Add(3 * time.Minute); receipt == nil; {
+			if receipt, err = l2Client.TransactionReceipt(ctx, tx.Hash()); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("l2 transaction %s was not included: %v", tx.Hash(), err)
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(time.Second):
+			}
+		}
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			t.Fatalf("l2 transaction %s failed", tx.Hash())
+		}
+		if receipt.GasUsed != tx.Gas() {
+			t.Fatalf("l2 transaction %s with %d bytes of data used %d gas, expected the pre-Glamsterdam calldata floor of %d",
+				tx.Hash(), len(tx.Data()), receipt.GasUsed, tx.Gas())
+		}
+		lastBlock = max(lastBlock, receipt.BlockNumber.Uint64())
+	}
+
+	t.Logf("sent %d l2 transactions with %d bytes of random data each, the last one is in l2 block %d",
+		len(txs), glamsterdamHeavyTxSize, lastBlock)
+
+	return lastBlock
+}
+
+// TestBatcherPostsAcrossGlamsterdam ensures that op-batcher got batches
+// included in the L1 before and after the L1 activated Glamsterdam, paying
+// what the L1 charged for them at the time, and that all op-nodes derive the
+// L2 from them.
+func TestBatcherPostsAcrossGlamsterdam(t *testing.T) {
+	if testingFork() {
+		t.Skip("only run against a fresh localnet")
+	}
+
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Minute)
+	defer cancel()
+
+	da := batcherDAType(t)
+	fork := l1GlamsterdamFork(t, ctx)
+	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
+
+	// Make the batcher post a lot of data after the fork.  Compressed random
+	// data has enough zero bytes to tell a calldata floor that counts every
+	// byte, like the one of Glamsterdam, from one that counts zero bytes
+	// for less.
+	heavyBlock := sendHeavyL2Transactions(t, ctx)
+
+	// the batches with that data have to make it to the L1 and be derived
+	// from it by every op-node, in blob mode this includes fetching the
+	// blobs from the beacon API
+	for _, node := range opStackNodes {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		waitForSyncStatus(t, ctx, rollup, node.name,
+			fmt.Sprintf("for l2 block %d to be derived from the l1", heavyBlock),
+			func(s *opNodeSyncStatus) bool {
+				return s.SafeL2.Number >= heavyBlock
+			})
+	}
+
+	var (
+		txs               = batcherTransactions(t, ctx, l1, fork)
+		before, after     int
+		maxZeroBytesAfter int
+		maxSizeAfter      int
+		aroundFork        []uint64
+	)
+	for _, tx := range txs {
+		if tx.block+4 >= uint64(fork.first.Number) && tx.block <= uint64(fork.first.Number)+4 {
+			aroundFork = append(aroundFork, tx.block)
+		}
+		var receipt *l1Receipt
+		if err := l1.CallContext(ctx, &receipt, "eth_getTransactionReceipt", tx.Hash); err != nil || receipt == nil {
+			t.Fatalf("fetch receipt of batcher transaction %s: %v", tx.Hash, err)
+		}
+		if receipt.Status != 1 {
+			t.Fatalf("batcher transaction %s in l1 block %d failed", tx.Hash, tx.block)
+		}
+
+		// A batcher transaction does not execute anything, it uses the
+		// intrinsic gas of its data or the calldata floor.  Before
+		// Glamsterdam that is 21000 gas plus 10 gas per calldata token
+		// (EIP-7623), on Glamsterdam 15000 gas (EIP-2780) plus 64 gas per
+		// byte (EIP-7976).
+		var wantGasUsed uint64
+		if tx.glamsterdam {
+			after++
+			wantGasUsed = glamsterdamZeroValueCallBaseGas + floorCost(tx.Input)
+		} else {
+			before++
+			wantGasUsed = txBaseCost + preGlamsterdamFloorPerToken*tokensInCalldata(tx.Input)
+		}
+		if uint64(receipt.GasUsed) != wantGasUsed {
+			t.Fatalf("batcher transaction %s in l1 block %d (on Glamsterdam: %v) with %d bytes of calldata used %d gas, expected %d",
+				tx.Hash, tx.block, tx.glamsterdam, len(tx.Input), receipt.GasUsed, wantGasUsed)
+		}
+
+		// The batcher does not know when the L1 activates Glamsterdam, it
+		// sets the gas limit that satisfies both the pre-Glamsterdam and
+		// the Glamsterdam calldata floor.  A transaction that the L1
+		// rejected for its gas limit is resent later with the L1's gas
+		// estimate, which is the floor as well; such rejections are found
+		// in the batcher logs below.
+		wantGasLimit := max(txBaseCost+preGlamsterdamFloorPerToken*tokensInCalldata(tx.Input),
+			glamsterdamZeroValueCallBaseGas+floorCost(tx.Input))
+		if uint64(tx.Gas) != wantGasLimit {
+			t.Fatalf("batcher transaction %s in l1 block %d with %d bytes of calldata has gas limit %d, expected %d",
+				tx.Hash, tx.block, len(tx.Input), tx.Gas, wantGasLimit)
+		}
+
+		switch da {
+		case "calldata":
+			if tx.Type == types.BlobTxType || len(tx.BlobVersionedHashes) != 0 || len(tx.Input) == 0 {
+				t.Fatalf("batcher transaction %s in l1 block %d is not a calldata transaction (type %d, %d blobs, %d bytes of calldata)",
+					tx.Hash, tx.block, tx.Type, len(tx.BlobVersionedHashes), len(tx.Input))
+			}
+		case "blobs":
+			if tx.Type != types.BlobTxType || len(tx.BlobVersionedHashes) == 0 {
+				t.Fatalf("batcher transaction %s in l1 block %d is not a blob transaction (type %d, %d blobs)",
+					tx.Hash, tx.block, tx.Type, len(tx.BlobVersionedHashes))
+			}
+		}
+
+		if tx.glamsterdam {
+			maxSizeAfter = max(maxSizeAfter, len(tx.Input))
+			zeroBytes := 0
+			for _, b := range tx.Input {
+				if b == 0 {
+					zeroBytes++
+				}
+			}
+			maxZeroBytesAfter = max(maxZeroBytesAfter, zeroBytes)
+		}
+	}
+
+	t.Logf("the batcher posted %d %s transactions before and %d after the l1 activated Glamsterdam at l1 block %d; "+
+		"the l1 blocks around the fork with batcher transactions are %v",
+		before, da, after, fork.first.Number, aroundFork)
+
+	if before == 0 {
+		t.Fatalf("the batcher did not post a batch before the l1 activated Glamsterdam at l1 block %d; "+
+			"it was not batching across the migration.  Use a larger L1_AMSTERDAM_OFFSET_SECONDS "+
+			"if the localnet starts up slowly", fork.first.Number)
+	}
+	if after == 0 {
+		t.Fatal("the batcher did not post a batch after the l1 activated Glamsterdam")
+	}
+
+	if da == "calldata" {
+		// The pre-Glamsterdam floor charges a zero byte a quarter of a
+		// non-zero byte, the Glamsterdam floor charges every byte the
+		// same.  A gas limit that still discounts zero bytes is too low on
+		// Glamsterdam once a batch has more than 125 of them.
+		t.Logf("the largest batch posted on Glamsterdam has %d bytes, the most zero bytes in a batch are %d",
+			maxSizeAfter, maxZeroBytesAfter)
+		if maxZeroBytesAfter <= 125 {
+			t.Fatalf("no batch posted on Glamsterdam has more than 125 zero bytes (most: %d), "+
+				"the calldata floor was not exercised with a large batch", maxZeroBytesAfter)
+		}
+	}
+
+	// a gas limit the L1 rejected is only visible in the logs
+	checkContainerNotRestarted(t, ctx, batcherContainer)
+	checkOpStackLogs(t, ctx, batcherContainer)
 }
