@@ -78,7 +78,7 @@ func TestVerifyHeadersPoWRejectsUnminedHeader(t *testing.T) {
 		Bits:       0x1d00ffff,
 		Nonce:      0,
 	}
-	if err := s.verifyHeadersPoW([]*wire.BlockHeader{unmined}); err == nil {
+	if _, err := s.verifyHeadersPoW([]*wire.BlockHeader{unmined}); err == nil {
 		t.Fatal("expected unmined header to be rejected, got nil")
 	} else if !strings.Contains(err.Error(), "proof-of-work") {
 		t.Fatalf("unexpected error: %v", err)
@@ -86,7 +86,7 @@ func TestVerifyHeadersPoWRejectsUnminedHeader(t *testing.T) {
 
 	// It must also be rejected when it is not the first header of the batch.
 	good := mineHeader(t, params.GenesisHash, params.PowLimitBits, 0x01)
-	if err := s.verifyHeadersPoW([]*wire.BlockHeader{good, unmined}); err == nil {
+	if _, err := s.verifyHeadersPoW([]*wire.BlockHeader{good, unmined}); err == nil {
 		t.Fatal("expected unmined header at index 1 to be rejected, got nil")
 	}
 }
@@ -105,25 +105,25 @@ func TestVerifyHeadersPoWRejectsTargetAbovePowLimit(t *testing.T) {
 		Timestamp:  time.Unix(1700000000, 0),
 		Bits:       0x207fffff,
 	}
-	if err := s.verifyHeadersPoW([]*wire.BlockHeader{h}); err == nil {
+	if _, err := s.verifyHeadersPoW([]*wire.BlockHeader{h}); err == nil {
 		t.Fatal("expected target above PowLimit to be rejected, got nil")
 	}
 }
 
-// TestVerifyHeadersPoWAcceptsMinedHeaders is the false-reject guard: genuinely mined headers,
-// including ones timestamped well outside the host's ~2h window in both directions, must pass.
+// TestVerifyHeadersPoWAcceptsMinedHeaders is the false-reject guard: a genuinely
+// mined header passes, and one timestamped far in the future is dropped, not
+// rejected as invalid.
 func TestVerifyHeadersPoWAcceptsMinedHeaders(t *testing.T) {
 	params := &chaincfg.RegressionNetParams
 	s := &Server{chainParams: params}
 
 	h := mineHeader(t, params.GenesisHash, params.PowLimitBits, 0x33)
-	if err := s.verifyHeadersPoW([]*wire.BlockHeader{h}); err != nil {
-		t.Fatalf("mined header rejected: %v", err)
+	if n, err := s.verifyHeadersPoW([]*wire.BlockHeader{h}); err != nil || n != 1 {
+		t.Fatalf("expected 1, nil for a mined header, got %v, %v", n, err)
 	}
 
-	// A header timestamped 10 years in the future must still be accepted: the timestamp arm is
-	// deliberately neutralised by deterministicTimeSource so that two honest nodes with different
-	// clocks cannot disagree about identical bytes.
+	// A mined header 10 years ahead is past the two hour limit: dropped
+	// (0 usable headers) without an error, so the peer is not blamed.
 	future := &wire.BlockHeader{
 		Version:    1,
 		PrevBlock:  *params.GenesisHash,
@@ -139,12 +139,12 @@ func TestVerifyHeadersPoWAcceptsMinedHeaders(t *testing.T) {
 			break
 		}
 	}
-	if err := s.verifyHeadersPoW([]*wire.BlockHeader{future}); err != nil {
-		t.Fatalf("future-timestamped mined header rejected: %v", err)
+	if n, err := s.verifyHeadersPoW([]*wire.BlockHeader{future}); err != nil || n != 0 {
+		t.Fatalf("expected 0, nil for a far-future header, got %v, %v", n, err)
 	}
 }
 
-// TestDeterministicTimeSource pins the contract the PoW and block-sanity gates rely on.
+// TestDeterministicTimeSource pins the contract the block-sanity gates rely on.
 func TestDeterministicTimeSource(t *testing.T) {
 	var ts blockchain.MedianTimeSource = deterministicTimeSource{}
 	if ts.AdjustedTime().Before(time.Now().Add(100 * 365 * 24 * time.Hour)) {

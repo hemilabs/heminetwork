@@ -192,8 +192,8 @@ func TestHandleHeadersRejectsWrongDifficulty(t *testing.T) {
 	}
 
 	// Premise: the header really does clear the PoW gate that runs first.
-	if err := s.verifyHeadersPoW(msg.Headers); err != nil {
-		t.Fatalf("premise: mined child must clear verifyHeadersPoW: %v", err)
+	if n, err := s.verifyHeadersPoW(msg.Headers); err != nil || n != len(msg.Headers) {
+		t.Fatalf("premise: mined child must clear verifyHeadersPoW: %v, %v", n, err)
 	}
 
 	reachedStore, err := callHandleHeaders(t, s, msg)

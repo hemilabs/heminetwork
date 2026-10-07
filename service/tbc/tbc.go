@@ -313,6 +313,11 @@ type Server struct {
 	// WebSockets
 	sessions       map[string]*tbcWs
 	requestTimeout time.Duration
+
+	// futureWarnLast is when handleHeaders last warned about headers dated
+	// more than two hours ahead, in UnixNano; 0 means never. See
+	// futureWarnDue.
+	futureWarnLast atomic.Int64
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -1964,16 +1969,15 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 	return it, cbh, lbh, n, err
 }
 
-// deterministicTimeSource neutralises the ONE wall-clock-dependent rule in btcd's header and block
-// sanity checks.
-//
-// Both CheckBlockHeaderSanity and CheckBlockSanity reject a header whose timestamp exceeds
-// timeSource.AdjustedTime()+2h. That rule must not be applied here. s.timeSource is a
-// blockchain.MedianTimeSource that is never fed as AddTimeSample has no callers.
-//
-// Returning a far-future adjusted time makes host-clock-based divergence unreachable while ensuring
-// the deterministic median-time difficulty rule is still applied as expected. btcd checks
-// proof-of-work BEFORE the timestamp, so nothing is weakened by neutralising the later check.
+// deterministicTimeSource disables the one wall-clock rule in btcd's header and
+// block sanity checks: a timestamp more than two hours past AdjustedTime() is
+// rejected. Block bodies and RPC inserts use it because they decide what is
+// stored for the hVM, and a host clock that is off would make honest nodes
+// store different data. The datadir identity check uses it because it checks
+// network and proof-of-work identity, not time: a stored header may be any
+// distance ahead of the current clock (accepted under an earlier clock, or by
+// a body or RPC insert), and a time failure there would wrongly refuse to
+// start. P2P headers use wallClockTimeSource instead.
 //
 // The constant is deliberately larger than the maximum uint32 value.
 type deterministicTimeSource struct{}
@@ -1981,6 +1985,17 @@ type deterministicTimeSource struct{}
 func (deterministicTimeSource) AdjustedTime() time.Time         { return time.Unix(1<<40, 0) }
 func (deterministicTimeSource) AddTimeSample(string, time.Time) {}
 func (deterministicTimeSource) Offset() time.Duration           { return 0 }
+
+// wallClockTimeSource is the host clock, for P2P headers. Dropping a header
+// that is too far in the future stores nothing, and we ask for it again on a
+// later getheaders once its time has come, so a skewed clock only delays sync.
+// Without the limit a peer could use future timestamps to lower the required
+// difficulty (testnet min-difficulty rule) or to place a far-future tip.
+type wallClockTimeSource struct{}
+
+func (wallClockTimeSource) AdjustedTime() time.Time         { return time.Unix(time.Now().Unix(), 0) }
+func (wallClockTimeSource) AddTimeSample(string, time.Time) {}
+func (wallClockTimeSource) Offset() time.Duration           { return 0 }
 
 // stripLogLimiter throttles the witness-strip INFO lines.
 //
@@ -2047,17 +2062,37 @@ func StripBlockWitness(blk *wire.MsgBlock) int {
 	return n
 }
 
-// verifyHeadersPoW rejects a headers message containing any header that does not meet its own
-// claimed proof-of-work target.
-func (s *Server) verifyHeadersPoW(headers []*wire.BlockHeader) error {
+// futureWarnDue rate limits handleHeaders' warning about headers dated more
+// than two hours ahead to one per ten minutes. A peer can trigger the drop at
+// will, so the warning must not be per message.
+func (s *Server) futureWarnDue() bool {
+	const every = int64(10 * time.Minute)
+	now := time.Now().UnixNano()
+	last := s.futureWarnLast.Load()
+	return now-last >= every && s.futureWarnLast.CompareAndSwap(last, now)
+}
+
+// verifyHeadersPoW checks headers in order against their own claimed
+// proof-of-work target and the two hour future limit, and returns how many
+// leading headers may be processed now. A header too far in the future is not
+// an error, as in Bitcoin Core: it and everything after it are dropped without
+// blaming the peer, and we ask for them again later. Headers after the cut
+// are not checked at all. This relies on btcd checking proof-of-work before
+// the timestamp, so an unmined first future header is still an error.
+func (s *Server) verifyHeadersPoW(headers []*wire.BlockHeader) (int, error) {
 	for i, hdr := range headers {
 		err := blockchain.CheckBlockHeaderSanity(hdr, s.chainParams.PowLimit,
-			deterministicTimeSource{}, blockchain.BFNone)
-		if err != nil {
-			return fmt.Errorf("header %d of %d proof-of-work: %w", i, len(headers), err)
+			wallClockTimeSource{}, blockchain.BFNone)
+		if err == nil {
+			continue
 		}
+		var re blockchain.RuleError
+		if errors.As(err, &re) && re.ErrorCode == blockchain.ErrTimeTooNew {
+			return i, nil
+		}
+		return 0, fmt.Errorf("header %d of %d proof-of-work: %w", i, len(headers), err)
 	}
-	return nil
+	return len(headers), nil
 }
 
 // verifyHeaderBatchShape rejects a headers message whose headers do not form a single chain.
@@ -2173,17 +2208,42 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		pbhHash = &msg.Headers[k].PrevBlock
 	}
 
-	// Validate before the store. ldb.BlockHeadersInsert assigns heights and cumulative work
-	// positionally and the store exposes no delete, so anything admitted here is permanent.
-	if err := s.verifyHeadersPoW(msg.Headers); err != nil {
-		return fmt.Errorf("handle headers %v: %w", p, err)
-	}
 	// Contiguity must be checked before the context gate below. It lets the
 	// gate treat a stored tip as proof that the whole batch is stored;
 	// otherwise a crafted batch [garbage, known_tip] would skip the context
-	// check.
+	// check. It is checked on the full batch, before future headers are
+	// dropped, so a malformed batch is refused whatever it starts with.
 	if err := shapeErr; err != nil {
 		return fmt.Errorf("handle headers %v: %w", p, err)
+	}
+	// Validate before the store. ldb.BlockHeadersInsert assigns heights and cumulative work
+	// positionally and the store exposes no delete, so anything admitted here is permanent.
+	n, err := s.verifyHeadersPoW(msg.Headers)
+	if err != nil {
+		return fmt.Errorf("handle headers %v: %w", p, err)
+	}
+	if n < len(msg.Headers) {
+		h := msg.Headers[n]
+		log.Debugf("handle headers %v: dropping %v of %v headers starting at "+
+			"%v, dated more than two hours ahead", p, len(msg.Headers)-n,
+			len(msg.Headers), h.BlockHash())
+		if s.futureWarnDue() {
+			log.Warningf("Header %v is dated %v, more than two hours past "+
+				"local time %v; it is ignored for now. If this persists, "+
+				"check the system clock.", h.BlockHash(), h.Timestamp.UTC(),
+				time.Now().UTC().Truncate(time.Second))
+		}
+		if n == 0 {
+			// Nothing usable for now. An empty reply is what starts block
+			// download, and a node whose clock is slow may never get one,
+			// so start it here when blocks are missing. Unlike that path,
+			// this does not start indexing or the mempool fan-out.
+			if s.blksMissing(ctx) {
+				go s.syncBlocks(ctx)
+			}
+			return nil
+		}
+		msg.Headers = msg.Headers[:n]
 	}
 	// The context check is expensive: a retarget-boundary header walks ~2015
 	// ancestors. Skip it when the batch tip is already stored, since then
@@ -2349,8 +2409,8 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	}
 
 	if s.cfg.BlockSanity {
-		// deterministicTimeSource, *not* s.timeSource, so that host clock cannot produce unexpected
-		// divergences in edge cases.
+		// deterministicTimeSource, not wallClockTimeSource, so that the host
+		// clock cannot make honest nodes store different blocks.
 		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
 			deterministicTimeSource{})
 		if err != nil {

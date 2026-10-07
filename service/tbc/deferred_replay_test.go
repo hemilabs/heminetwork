@@ -305,30 +305,31 @@ func TestHandleHeadersReplaySkipsContextWalk(t *testing.T) {
 	}
 }
 
-// A stored tip must never let a crafted [garbage, known tip] batch through.
-// PoW and contiguity run on every batch before the context skip, so a bad-PoW
-// or non-contiguous first header is still rejected and never inserted.
+// A stored tip must never let a crafted batch through. Contiguity and PoW run
+// on every batch before the context skip, so a non-contiguous or bad-PoW
+// batch is rejected and never inserted.
 func TestHandleHeadersNonContiguousKnownTipStillRejected(t *testing.T) {
-	t.Run("bad-PoW first header is rejected by verifyHeadersPoW", func(t *testing.T) {
+	t.Run("contiguous batch with a bad-PoW header is rejected by verifyHeadersPoW", func(t *testing.T) {
 		params, spy, tip := contextWindow(t)
 		s := &Server{cfg: &Config{Network: "mainnet"}, chainParams: params, db: spy}
 
-		// Claims a hard target but is not mined.
+		// Connects to the known tip, so only PoW can reject it. Claims a
+		// hard target but is not mined.
 		garbage := &wire.BlockHeader{
 			Version:   1,
-			PrevBlock: chainhash.Hash{0xde, 0xad},
+			PrevBlock: tip.BlockHash(),
 			Bits:      0x1b0404cb, // far harder than the easy PoW limit; unmined
 			Timestamp: time.Unix(1700000000, 0),
 		}
 		msg := wire.NewMsgHeaders()
-		for _, h := range []*wire.BlockHeader{garbage, tip} {
+		for _, h := range []*wire.BlockHeader{tip, garbage} {
 			if err := msg.AddBlockHeader(h); err != nil {
 				t.Fatal(err)
 			}
 		}
 		err := s.handleHeaders(t.Context(), fakePeer(t, 0), msg)
 		if err == nil || !strings.Contains(err.Error(), "proof-of-work") {
-			t.Fatalf("bad-PoW first header must be rejected by PoW, got %v", err)
+			t.Fatalf("bad-PoW header must be rejected by PoW, got %v", err)
 		}
 		if spy.insertCalls != 0 {
 			t.Fatalf("a rejected batch reached the store (%v inserts)", spy.insertCalls)

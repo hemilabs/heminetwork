@@ -6,8 +6,10 @@ package tbc
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -140,5 +142,150 @@ func TestVerifyHeaderContextRetargetBoundary(t *testing.T) {
 	// The parent's un-retargeted bits must be rejected at the boundary.
 	if err := s.verifyHeaderContext(t.Context(), mkChild(parentBits)); err == nil {
 		t.Fatal("retarget boundary: un-retargeted (parent) bits accepted at a retarget height")
+	}
+}
+
+// mineHeaderAt mines a header on prev with the given timestamp.
+func mineHeaderAt(t *testing.T, prev chainhash.Hash, bits uint32, ts time.Time) *wire.BlockHeader {
+	t.Helper()
+	h := &wire.BlockHeader{Version: 1, PrevBlock: prev, Timestamp: ts.Truncate(time.Second), Bits: bits}
+	target := blockchain.CompactToBig(bits)
+	for n := uint32(0); ; n++ {
+		h.Nonce = n
+		hash := h.BlockHash()
+		if blockchain.HashToBig(&hash).Cmp(target) <= 0 {
+			return h
+		}
+	}
+}
+
+func TestVerifyHeadersPoWFutureLimit(t *testing.T) {
+	s := deferServer(t)
+	bits := s.chainParams.PowLimitBits
+	now := time.Now()
+
+	base := minedChain(t, s, chainhash.Hash{0x61}, 2, 1)
+	near := mineHeaderAt(t, base[1].BlockHash(), bits, now.Add(time.Hour))
+	far := mineHeaderAt(t, base[1].BlockHash(), bits, now.Add(3*time.Hour))
+	after := mineHeaderAt(t, far.BlockHash(), bits, now.Add(time.Minute))
+
+	// The limit is exactly two hours: btcd rejects a timestamp after
+	// AdjustedTime()+2h, and AdjustedTime() is whole seconds.
+	edge := mineHeaderAt(t, base[1].BlockHash(), bits, now.Truncate(time.Second).Add(2*time.Hour))
+	past := mineHeaderAt(t, base[1].BlockHash(), bits, now.Add(2*time.Hour+time.Minute))
+	if n, err := s.verifyHeadersPoW([]*wire.BlockHeader{edge}); err != nil || n != 1 {
+		t.Fatalf("expected 1, nil at exactly two hours, got %v, %v", n, err)
+	}
+	if n, err := s.verifyHeadersPoW([]*wire.BlockHeader{past}); err != nil || n != 0 {
+		t.Fatalf("expected 0, nil at two hours and a minute, got %v, %v", n, err)
+	}
+
+	n, err := s.verifyHeadersPoW([]*wire.BlockHeader{base[0], base[1], near})
+	if err != nil || n != 3 {
+		t.Fatalf("expected 3, nil within two hours, got %v, %v", n, err)
+	}
+	n, err = s.verifyHeadersPoW([]*wire.BlockHeader{base[0], base[1], far, after})
+	if err != nil || n != 2 {
+		t.Fatalf("expected 2, nil with a header three hours ahead, got %v, %v", n, err)
+	}
+	n, err = s.verifyHeadersPoW([]*wire.BlockHeader{far})
+	if err != nil || n != 0 {
+		t.Fatalf("expected 0, nil for a future-only batch, got %v, %v", n, err)
+	}
+
+	// Proof-of-work is checked before the timestamp, so an unmined future
+	// header is an error, not a drop.
+	bad := *far
+	bad.Bits = 0x1d00ffff
+	if _, err := s.verifyHeadersPoW([]*wire.BlockHeader{base[0], &bad}); err == nil {
+		t.Fatal("expected an error for an unmined header")
+	}
+}
+
+// bmCountDB counts BlocksMissing calls and reports nothing missing.
+type bmCountDB struct {
+	*replayStubDB
+	bm atomic.Int32
+}
+
+func (d *bmCountDB) BlocksMissing(context.Context, int) ([]tbcd.BlockIdentifier, error) {
+	d.bm.Add(1)
+	return nil, nil
+}
+
+func TestHandleHeadersDropsFutureSuffix(t *testing.T) {
+	s, rdb := replayServer(t)
+	db := &bmCountDB{replayStubDB: rdb}
+	s.db = db
+	bits := s.chainParams.PowLimitBits
+	base := minedChain(t, s, chainhash.Hash{0x62}, 2, 1)
+	far := mineHeaderAt(t, base[1].BlockHash(), bits, time.Now().Add(3*time.Hour))
+
+	msg := headersMsg(t, base[0], base[1], far)
+	if err := s.handleHeaders(t.Context(), fakePeer(t, 1), msg); err != nil {
+		t.Fatalf("expected the peer to be kept, got %v", err)
+	}
+	if n := db.applied(); n != 1 {
+		t.Fatalf("expected 1 insert, got %v", n)
+	}
+	db.mtx.Lock()
+	got := len(db.seen[0].Headers)
+	db.mtx.Unlock()
+	if got != 2 {
+		t.Fatalf("expected the 2 valid headers to be inserted, got %v", got)
+	}
+
+	if err := s.handleHeaders(t.Context(), fakePeer(t, 2), headersMsg(t, far)); err != nil {
+		t.Fatalf("expected the peer to be kept, got %v", err)
+	}
+	if n := db.applied(); n != 1 {
+		t.Fatalf("expected no insert for a future-only batch, got %v inserts", n)
+	}
+	// A future-only reply is treated like an empty one, which is what
+	// starts block download when blocks are missing.
+	if n := db.bm.Load(); n != 1 {
+		t.Fatalf("expected the future-only batch to check for missing blocks, got %v checks", n)
+	}
+
+	// Contiguity is checked on the full batch, so a malformed batch that
+	// starts with a future header is still refused.
+	junk := mineHeaderAt(t, chainhash.Hash{0x63}, bits, time.Unix(1700000000, 0))
+	if err := s.handleHeaders(t.Context(), fakePeer(t, 3), headersMsg(t, far, junk)); err == nil {
+		t.Fatal("expected an error for a non-contiguous batch starting with a future header")
+	}
+}
+
+// syncKickDB reports one block missing to blksMissing (count 1) and records
+// whether syncBlocks, which asks for more, ran. It returns an error to that
+// larger query so syncBlocks exits before downloading anything.
+type syncKickDB struct {
+	*replayStubDB
+	synced atomic.Bool
+}
+
+func (d *syncKickDB) BlocksMissing(_ context.Context, count int) ([]tbcd.BlockIdentifier, error) {
+	if count > 1 {
+		d.synced.Store(true)
+		return nil, errors.New("stop here")
+	}
+	return []tbcd.BlockIdentifier{{Height: 1}}, nil
+}
+
+func TestHandleHeadersFutureOnlyStartsBlockDownload(t *testing.T) {
+	s, rdb := replayServer(t)
+	db := &syncKickDB{replayStubDB: rdb}
+	s.db = db
+	base := minedChain(t, s, chainhash.Hash{0x64}, 1, 1)
+	far := mineHeaderAt(t, base[0].BlockHash(), s.chainParams.PowLimitBits, time.Now().Add(3*time.Hour))
+
+	if err := s.handleHeaders(t.Context(), fakePeer(t, 1), headersMsg(t, far)); err != nil {
+		t.Fatalf("expected the peer to be kept, got %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !db.synced.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("expected a future-only reply to start syncBlocks when blocks are missing")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
