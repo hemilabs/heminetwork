@@ -31,6 +31,9 @@ BTC_ATTRIBUTES_TX_TYPE="0x7c"
 # (fsMinFullBlocks in op-geth), and some more blocks to be sure
 DEPTH=$((64 + 16))
 
+# how long to wait before giving up, in seconds
+TIMEOUT=600
+
 # makes a JSON-RPC call to the l2 and prints the response; prints nothing
 # when the l2 does not answer or answers with an HTTP error
 rpc() {
@@ -40,13 +43,21 @@ rpc() {
 
 echo "waiting for an l2 block $DEPTH blocks behind the head with a Bitcoin Attributes Deposited transaction at $L2_RPC"
 
+deadline=$(($(date +%s) + TIMEOUT))
+last_head="" # the last head the l2 answered with, for the timeout error
 loops=0
 while :; do
+	if [ "$(date +%s)" -ge "$deadline" ]; then
+		echo "error: timed out after ${TIMEOUT}s waiting for l2 block head - $DEPTH to have a Bitcoin Attributes Deposited transaction (last l2 block head: ${last_head:-none, the l2 never answered})" >&2
+		exit 1
+	fi
+
 	# the head of the sequencer, as hex, or empty when the l2 does not
 	# answer yet
 	head=$(rpc eth_blockNumber '[]' | jq -r '.result // empty')
 	if [ -n "$head" ]; then
 		head=$(printf '%d' "$head")
+		last_head=$head
 
 		# the chain must be at least DEPTH blocks long before there is a
 		# block DEPTH blocks behind the head
