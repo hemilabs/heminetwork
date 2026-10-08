@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `tbc` block download metrics (`blocks_inserted_total`,
+  `block_requests_total`, `block_requests_expired_total`,
+  `blocks_pending`) and stop `tbc` from crashing at startup when an
+  indexer position cannot be read
+  ([#1192](https://github.com/hemilabs/heminetwork/pull/1192)).
 - Verify incoming block headers against btcd's `CheckBlockHeaderSanity`
   (PoW, timestamp) and `CheckBlockHeaderContext` (difficulty retarget,
   median-time-past, version) before insertion in all paths: P2P,
