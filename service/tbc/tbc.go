@@ -682,28 +682,25 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 	return nil
 }
 
-// peerBehindFrontier reports whether a peer advertising lastBlock is
-// behind our indexed block frontier, and therefore cannot serve a
-// block we still need.
+// peerBehind reports whether a peer advertising lastBlock is behind
+// our best header, and therefore cannot serve the blocks we still
+// need.
 //
-// It gates on the indexer height, NOT the best *header* height. The
-// header tip routinely leads block download (headers-first IBD; op-geth
-// pushing external headers), and a datadir can even carry a header
-// chain that is entirely ahead of the live network. Whenever the header
-// tip is above the live chain, a header-tip gate rejects every real
-// peer ("remote peer height below ours") -- including the peers at the
-// live tip that hold the block bodies we still need -- leaving the node
-// with zero peers and no way to progress, across restarts. The indexer
-// height only advances on blocks we actually downloaded and processed,
-// so it never runs ahead of the live chain.
-func (s *Server) peerBehindFrontier(ctx context.Context, lastBlock int32) bool {
-	var frontier uint64
-	if s.ui != nil {
-		if ib, err := s.ui.IndexerAt(ctx); err == nil && ib != nil {
-			frontier = ib.Height
-		}
-	}
-	return uint64(lastBlock) < frontier
+// It gates on the best *header* height, not the indexer height.
+// During IBD the indexers do not run until every block is downloaded,
+// so the indexer sits at genesis and an indexer gate admits every
+// peer, including peers that lack the blocks we ask for.  Those
+// requests expire, handleBlockExpired treats an expired block as a
+// side chain and drops it from blocks missing, and sync stalls until
+// the next block is announced.
+//
+// A bogus header tip ahead of the live chain is kept out by the
+// proof-of-work checks on header insertion (#1117).  A datadir that
+// already carries one must be wiped.
+//
+// A negative lastBlock is not a valid height and is always behind.
+func peerBehind(lastBlock int32, best uint64) bool {
+	return lastBlock < 0 || uint64(lastBlock) < best
 }
 
 func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
@@ -741,13 +738,13 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 		readError = err
 		return fmt.Errorf("peer remote version: %w", err)
 	}
-	// Skip peers that are behind our indexed block frontier: those
-	// cannot serve a block we still need.  See peerBehindFrontier
-	// for why this gates on the indexer height, not the header tip.
-	if s.peerBehindFrontier(ctx, remoteVersion.LastBlock) {
+	// Skip peers that are behind our best header: those cannot
+	// serve the blocks we still need.  See peerBehind.
+	if peerBehind(remoteVersion.LastBlock, bhb.Height) {
 		// Set readError so the Disconnected line records why; a
 		// swallowed reason here is what made this failure silent.
-		readError = errors.New("remote peer height below ours")
+		readError = fmt.Errorf("remote peer height %v below ours %v",
+			remoteVersion.LastBlock, bhb.Height)
 		return readError
 	}
 	if err := s.getHeadersByHeights(ctx, p,
