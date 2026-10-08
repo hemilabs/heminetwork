@@ -191,7 +191,7 @@ services:
 
   geth-l1-setup:
     # yamllint disable-line rule:line-length
-    image: ${LOCALNET_GETH_L1_IMAGE:-ethereum/client-go:v1.17.6@sha256:6606aa1c7b6354d57581952604e7ab5a49689aeee9aebf668c81b6d3225395f1}
+    image: ${LOCALNET_GETH_L1_IMAGE:-ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64}
     working_dir: "/tmp/geth"
     depends_on:
       op-geth-l2-setup:
@@ -208,7 +208,7 @@ services:
 
   geth-l1:
     # yamllint disable-line rule:line-length
-    image: ${LOCALNET_GETH_L1_IMAGE:-ethereum/client-go:v1.17.6@sha256:6606aa1c7b6354d57581952604e7ab5a49689aeee9aebf668c81b6d3225395f1}
+    image: ${LOCALNET_GETH_L1_IMAGE:-ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64}
     container_name: e2e-geth-l1-1
     ports:
       - "8545:8545"
