@@ -29,8 +29,10 @@ const (
 	defaultNetwork  = "mainnet"
 	defaultHome     = "~/." + daemonName
 	bDefaultSize    = "512mb" // ~320 blocks on mainnet
-	bhsDefaultSize  = "2mb"
 )
+
+// bhsDefaultSize holds two checkpoint intervals of block headers.
+var bhsDefaultSize = strconv.Itoa(tbc.HeaderCacheSize)
 
 // parseRequestTimeout parses a request timeout value. It accepts Go
 // duration strings (e.g. "120s", "2m") and, for backward compatibility,
