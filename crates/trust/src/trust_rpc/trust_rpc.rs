@@ -1,9 +1,10 @@
-use crate::trust_rpc::protocol::{JobStatus, Payload};
+use crate::trust_rpc::protocol::{JobStatus, Payload, ProtocolErrable};
 use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
 use sha2::Sha256;
+use std::str::FromStr;
 use std::sync::{Arc, RwLock, atomic::AtomicUsize};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -25,6 +26,8 @@ mod protocol_test;
 
 #[derive(Error, Debug)]
 pub enum TrustRPCError {
+    #[error("Bitcoin hex decode error: {0}")]
+    BitcoinHex(#[from] bitcoin::consensus::encode::FromHexError),
     #[error("Tungstenite error: {0}")]
     Tungstenite(#[from] tungstenite::Error),
     #[error("Tokio IO error: {0}")]
@@ -39,6 +42,12 @@ pub enum TrustRPCError {
     Protocol(#[from] protocol::ProtocolError),
     #[error("Connection lost")]
     ConnectionLost,
+    #[error("unexpected response type: {0}")]
+    UnexpectedResponse(String),
+    #[error("Job failed: {0}")]
+    JobFailed(String),
+    #[error("{0} not found: {1}")]
+    NotFound(String, String),
     #[error("{0}")]
     Other(String),
 }
@@ -178,7 +187,7 @@ impl TrustRPC {
         let trpc = Self {
             write: Arc::new(Mutex::new(write)),
             rt,
-            msg_counter: AtomicUsize::new(0),
+            msg_counter: AtomicUsize::new(1),
             msg_chan: Arc::new(RwLock::new(None)),
             cancel: CancellationToken::new(),
             config: config.clone(),
@@ -214,10 +223,18 @@ impl TrustRPC {
                                     continue;
                                 }
                                 let t = msg.into_text().unwrap();
-                                let pmsg = match protocol::unmarshal(t.as_str()) {
+                                let pmsg = match protocol::Message::unmarshal(t.as_str()) {
                                     Ok(m) => m,
                                     Err(_) => continue, // XXX log
                                 };
+
+                                if pmsg.header.id == "0" {
+                                    if let Ok(protocol::Command::PingRequest) = pmsg.parse_command() {
+                                        continue
+                                    }
+                                    // XXX unexpected first message, log error
+                                    continue
+                                }
 
                                 // Clone the sender chan before dropping the lock
                                 // so we never hold a RwLock guard across await.
@@ -288,19 +305,19 @@ impl TrustRPC {
         });
     }
 
-    pub fn ping(&mut self) -> Result<()> {
-        let (id, mut rcv, _guard) = self.add_chan()?;
-        let req = protocol::PingRequest { timestamp: 10 };
-        let msg = protocol::encode(&id, &Payload::PingRequest(req))?;
-
+    fn make_request(
+        &self,
+        mut rcv: mpsc::Receiver<ChannelEvent>,
+        msg: protocol::Message,
+    ) -> Result<protocol::Payload> {
         self.rt.block_on(async {
             tokio::time::timeout(self.config.cmd_timeout, async {
                 let mut write = self.write.lock().await;
 
-                // Send ping request
+                // Send request
                 tokio::select! {
                     _ = self.cancel.cancelled() => return Err(TrustRPCError::Cancelled),
-                    res = write.send(tungstenite::Message::text(protocol::marshal(&msg)?)) => res,
+                    res = write.send(tungstenite::Message::text(msg.marshal()?)) => res,
                 }?;
 
                 // Wait for reply
@@ -308,23 +325,423 @@ impl TrustRPC {
                     _ = self.cancel.cancelled() => Err(TrustRPCError::Cancelled),
                     event = rcv.recv() => match event {
                         Some(ChannelEvent::Message(resp)) => {
-                            match resp.decode() {
-                                Ok(Payload::PingResponse(_)) => {},
-                                Ok(p) => {
-                                    let err = format!("unexpected response type: {}", p.command());
-                                    return Err(TrustRPCError::Other(err))
-                                }
-                                Err(e) => return Err(e),
-                            };
-                            Ok(())
+                            resp.decode()
                         }
                         _ => Err(TrustRPCError::ConnectionLost)
                     },
                 }
             })
             .await
-            .unwrap_or(Err(TrustRPCError::Timeout("ping response".into())))
+            .unwrap_or(Err(TrustRPCError::Timeout("response timeout".into())))
         })
+    }
+
+    pub fn balance_by_address(&mut self, address: bitcoin::address::Address) -> Result<u64> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BalanceByAddressRequest {
+            address: address.to_string(),
+        };
+        let msg = Payload::BalanceByAddressRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BalanceByAddressResponse(s) => s.into_result()?.balance,
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn utxos_by_address(
+        &mut self,
+        address: bitcoin::address::Address,
+        start: u32,
+        count: u32,
+        filter_mempool: bool,
+    ) -> Result<Vec<protocol::Utxo>> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::UtxosByAddressRequest {
+            address: address.to_string(),
+            filter_mempool,
+            start,
+            count,
+        };
+        let msg = Payload::UtxosByAddressRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::UtxosByAddressResponse(s) => s.into_result()?.utxos,
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn tx_by_id(&mut self, tx_id: bitcoin::transaction::Txid) -> Result<bitcoin::Transaction> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::TxByIdRequest {
+            tx_id: tx_id.to_string(),
+        };
+        let msg = Payload::TxByIdRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::TxByIdResponse(s) => {
+                let s = s.into_result()?;
+                if s.tx.is_empty() {
+                    return Err(TrustRPCError::NotFound(
+                        "transaction".into(),
+                        tx_id.to_string(),
+                    ));
+                }
+                protocol::decode_tx(&s.tx)?
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn keystone_txs_by_hash(
+        &mut self,
+        abrev_hash: String,
+        depth: u32,
+    ) -> Result<Vec<protocol::KeystoneTx>> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::KeystoneTxsByL2KeystoneAbrevHashRequest {
+            l2_keystone_abrev_hash: abrev_hash,
+            depth,
+        };
+        let msg = Payload::KeystoneTxsByL2KeystoneAbrevHashRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::KeystoneTxsByL2KeystoneAbrevHashResponse(s) => s.into_result()?.keystone_txs,
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn block_by_hash(&mut self, hash: bitcoin::BlockHash) -> Result<bitcoin::Block> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BlockByHashRequest {
+            hash: hash.to_string(),
+        };
+        let msg = Payload::BlockByHashRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockByHashResponse(s) => {
+                let s = s.into_result()?;
+                if s.block.is_empty() {
+                    return Err(TrustRPCError::NotFound("block".into(), hash.to_string()));
+                }
+                protocol::decode_block(&s.block)?
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+        Ok(pl)
+    }
+
+    pub fn block_insert(&mut self, block: bitcoin::Block) -> Result<bitcoin::BlockHash> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BlockInsertRequest {
+            block: bitcoin::consensus::encode::serialize_hex(&block),
+        };
+        let msg = Payload::BlockInsertRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockInsertResponse(s) => {
+                let h = match s.into_result()?.block_hash {
+                    Some(h) => h,
+                    None => return Err(TrustRPCError::Other("blockhash is None".into())),
+                };
+                let hash = bitcoin::BlockHash::from_str(&h);
+                hash.map_err(|e| TrustRPCError::Other(e.to_string()))? // XXX different error type?
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn block_in_tx_index(&mut self, hash: bitcoin::BlockHash) -> Result<bool> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BlockInTxIndexRequest {
+            block_hash: hash.to_string(),
+        };
+        let msg = Payload::BlockInTxIndexRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockInTxIndexResponse(s) => s.into_result()?.indexed,
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn full_block_available(&mut self, hash: bitcoin::BlockHash) -> Result<bool> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::FullBlockAvailableRequest {
+            hash: hash.to_string(),
+        };
+        let msg = Payload::FullBlockAvailableRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::FullBlockAvailableResponse(s) => s.into_result()?.available,
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn block_hash_by_tx_id(
+        &mut self,
+        tx_id: bitcoin::transaction::Txid,
+    ) -> Result<bitcoin::BlockHash> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BlockHashByTxIDRequest {
+            tx_id: tx_id.to_string(),
+        };
+        let msg = Payload::BlockHashByTxIDRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockHashByTxIDResponse(s) => {
+                let h = match s.into_result()?.block_hash {
+                    Some(h) => h,
+                    None => {
+                        return Err(TrustRPCError::NotFound(
+                            "block hash".into(),
+                            tx_id.to_string(),
+                        ));
+                    }
+                };
+                let hash = bitcoin::BlockHash::from_str(&h);
+                hash.map_err(|e| TrustRPCError::Other(e.to_string()))? // XXX different error type?
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn block_header_best(&mut self) -> Result<(u64, bitcoin::block::Header)> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BlockHeaderBestRequest {};
+        let msg = Payload::BlockHeaderBestRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockHeaderBestResponse(s) => {
+                let s = s.into_result()?;
+                if s.block_header.is_empty() {
+                    return Err(TrustRPCError::NotFound(
+                        "block header".into(),
+                        "best".into(),
+                    ));
+                }
+                (s.height, protocol::decode_header(&s.block_header)?)
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn block_header_by_hash(
+        &mut self,
+        hash: bitcoin::BlockHash,
+    ) -> Result<(u64, bitcoin::block::Header)> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BlockHeaderByHashRequest {
+            hash: hash.to_string(),
+        };
+        let msg = Payload::BlockHeaderByHashRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockHeaderByHashResponse(s) => {
+                let s = s.into_result()?;
+                if s.block_header.is_empty() {
+                    return Err(TrustRPCError::NotFound(
+                        "block header".into(),
+                        hash.to_string(),
+                    ));
+                }
+                (s.height, protocol::decode_header(&s.block_header)?)
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn block_headers_by_height(&mut self, height: u32) -> Result<Vec<bitcoin::block::Header>> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BlockHeadersByHeightRequest { height };
+        let msg = Payload::BlockHeadersByHeightRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockHeadersByHeightResponse(s) => {
+                protocol::decode_header_batch(&s.into_result()?.block_headers)?
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn script_hash_available_to_spend(
+        &mut self,
+        tx_id: bitcoin::transaction::Txid,
+        index: u32,
+    ) -> Result<bool> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::ScriptHashAvailableToSpendRequest {
+            tx_id: tx_id.to_string(),
+            index,
+        };
+        let msg = Payload::ScriptHashAvailableToSpendRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::ScriptHashAvailableToSpendResponse(s) => s.into_result()?.available,
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn download_block_from_random_peers(
+        &mut self,
+        hash: bitcoin::BlockHash,
+        peers: u32,
+    ) -> Result<bitcoin::Block> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::BlockDownloadAsyncRequest {
+            hash: hash.to_string(),
+            peers,
+        };
+        let msg = Payload::BlockDownloadAsyncRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockDownloadAsyncResponse(s) => {
+                let s = s.into_result()?;
+                if s.block.is_empty() {
+                    return Err(TrustRPCError::NotFound("block".into(), hash.to_string()));
+                }
+                protocol::decode_block(&s.block)?
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn running(&mut self) -> Result<bool> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::PingRequest { timestamp: 10 };
+        let msg = Payload::PingRequest(req).encode(&id)?;
+
+        let res = match self.make_request(rcv, msg) {
+            Ok(res) => res,
+            Err(TrustRPCError::ConnectionLost) => return Ok(false),
+            Err(TrustRPCError::Timeout(_)) => return Ok(false),
+            Err(e) => return Err(e),
+        };
+
+        let pl = match res {
+            Payload::PingResponse(_) => true,
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
+    }
+
+    pub fn synced(&mut self) -> Result<protocol::SyncStatusResponse> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let req = protocol::SyncStatusRequest {};
+        let msg = Payload::SyncStatusRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::SyncStatusResponse(s) => s.into_result()?,
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+        Ok(pl)
+    }
+
+    pub fn block_headers_insert(
+        &mut self,
+        headers: &[bitcoin::block::Header],
+    ) -> Result<(String, bitcoin::block::Header, bitcoin::block::Header, u32)> {
+        let (id, rcv, _guard) = self.add_chan()?;
+        let block_headers = headers
+            .iter()
+            .map(|h| protocol::BlockHeader::from(*h))
+            .collect();
+        let req = protocol::BlockHeadersInsertRequest { block_headers };
+        let msg = Payload::BlockHeadersInsertRequest(req).encode(&id)?;
+
+        let res = self.make_request(rcv, msg)?;
+        let pl = match res {
+            Payload::BlockHeadersInsertResponse(s) => {
+                let s = s.into_result()?;
+                let canonical = s
+                    .canonical_header
+                    .ok_or_else(|| TrustRPCError::Other("canonical_header is None".into()))?
+                    .try_into()?;
+                let last = s
+                    .last_header
+                    .ok_or_else(|| TrustRPCError::Other("last_header is None".into()))?
+                    .try_into()?;
+                (s.insert_type, canonical, last, s.inserted_count)
+            }
+            p => {
+                return Err(TrustRPCError::UnexpectedResponse(p.command().to_string()));
+            }
+        };
+
+        Ok(pl)
     }
 
     pub fn sync_indexers_to_hash(&mut self, hash: bitcoin::BlockHash) -> Result<()> {
@@ -332,7 +749,8 @@ impl TrustRPC {
         let req = protocol::SyncIndexersToHashRequest {
             hash: hash.to_string(),
         };
-        let msg = protocol::encode(&id, &Payload::SyncIndexersToHashRequest(req))?;
+        let pl = Payload::SyncIndexersToHashRequest(req);
+        let msg = pl.encode(&id)?;
         let cancel = self.cancel.clone();
         self.rt.block_on(async {
             tokio::time::timeout(self.config.cmd_timeout, async {
@@ -342,7 +760,7 @@ impl TrustRPC {
                     let mut guard = self.write.lock().await;
                     tokio::select! {
                         _ = cancel.cancelled() => return Err(TrustRPCError::Cancelled),
-                        res = guard.send(tungstenite::Message::text(protocol::marshal(&msg)?)) => res?,
+                        res = guard.send(tungstenite::Message::text(msg.marshal()?)) => res?,
                     }
                 }
                 self.wait_for_job(&id, rcv, &self.write).await
@@ -382,7 +800,7 @@ impl TrustRPC {
                         JobStatus::Completed => return Ok(()),
                         JobStatus::Failed => {
                             let err = format!("job {} failed", notif.job.job_id);
-                            return Err(TrustRPCError::Other(err));
+                            return Err(TrustRPCError::JobFailed(err));
                         }
                         _ => continue,
                     }
@@ -402,18 +820,16 @@ impl TrustRPC {
                         Some(ref j) => j.clone(),
                         None => return Err(TrustRPCError::ConnectionLost),
                     };
-                    let sub = protocol::encode(
-                        id,
-                        &Payload::JobSubscribeRequest(protocol::JobSubscribeRequest {
-                            job_id: jid.clone(),
-                        }),
-                    )?;
+                    let sub = Payload::JobSubscribeRequest(protocol::JobSubscribeRequest {
+                        job_id: jid.clone(),
+                    })
+                    .encode(id)?;
                     {
                         let mut guard = write.lock().await;
                         tokio::select! {
                             _ = self.cancel.cancelled() => return Err(TrustRPCError::Cancelled),
-                            res = guard.send(tungstenite::Message::text(protocol::marshal(&sub)?)) => {
-                                res.map_err(|e| TrustRPCError::Other(
+                            res = guard.send(tungstenite::Message::text(sub.marshal()?)) => {
+                                res.map_err(|e| TrustRPCError::JobFailed(
                                     format!("resubscribe to job {} failed: {}", jid, e)
                                 ))?;
                             }
@@ -423,7 +839,7 @@ impl TrustRPC {
 
                 None => {
                     let err = "channel closed unexpectedly while waiting for job";
-                    return Err(TrustRPCError::Other(err.into()));
+                    return Err(TrustRPCError::JobFailed(err.into()));
                 }
             }
         }
@@ -441,9 +857,11 @@ impl TrustRPC {
         Ok((id.to_string(), rcv, ChanGuard(Arc::clone(&self.msg_chan))))
     }
 
-    #[allow(unused)] // XXX currently not needed
-    async fn close(&mut self) -> Result<()> {
-        self.write.lock().await.close().await?;
-        Ok(())
+    #[allow(unused)]
+    pub fn close(&mut self) -> Result<()> {
+        self.rt.block_on(async {
+            self.write.lock().await.close().await?;
+            Ok(())
+        })
     }
 }
