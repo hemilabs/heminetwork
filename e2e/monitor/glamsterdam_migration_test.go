@@ -35,7 +35,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -174,11 +173,6 @@ type glamsterdamFork struct {
 	first      l1Header
 }
 
-var (
-	glamsterdamForkMtx   sync.Mutex
-	glamsterdamForkFound *glamsterdamFork
-)
-
 // l1AmsterdamTime returns the Glamsterdam activation timestamp from the L1
 // genesis that e2e/genesisl2.sh wrote.
 func l1AmsterdamTime(ctx context.Context) (uint64, error) {
@@ -239,7 +233,7 @@ func findL1GlamsterdamFork(ctx context.Context, logf func(format string, args ..
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("the l1 did not activate Glamsterdam: %w", ctx.Err())
-		case <-time.After(5 * time.Second):
+		case <-time.After(5 * time.Second): // keep this below 6 seconds (l1 block time * 2)
 		}
 	}
 
@@ -279,17 +273,11 @@ func findL1GlamsterdamFork(ctx context.Context, logf func(format string, args ..
 func l1GlamsterdamFork(t *testing.T, ctx context.Context) glamsterdamFork {
 	t.Helper()
 
-	glamsterdamForkMtx.Lock()
-	defer glamsterdamForkMtx.Unlock()
-
-	if glamsterdamForkFound == nil {
-		fork, err := findL1GlamsterdamFork(ctx, t.Logf)
-		if err != nil {
-			t.Fatal(err)
-		}
-		glamsterdamForkFound = fork
+	fork, err := findL1GlamsterdamFork(ctx, t.Logf)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return *glamsterdamForkFound
+	return *fork
 }
 
 // ---- op-node ---------------------------------------------------------------
