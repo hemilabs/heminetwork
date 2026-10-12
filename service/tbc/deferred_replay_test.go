@@ -256,6 +256,7 @@ func contextWindow(t *testing.T) (*chaincfg.Params, *contextSpyDB, *wire.BlockHe
 	p := chaincfg.MainNetParams
 	p.PowLimit = chaincfg.RegressionNetParams.PowLimit
 	p.PowLimitBits = chaincfg.RegressionNetParams.PowLimitBits
+	p.Checkpoints = nil // not under test here
 
 	spy := &contextSpyDB{headers: make(map[chainhash.Hash]*tbcd.BlockHeader, 2018)}
 	base := time.Unix(1600000000, 0)
@@ -279,9 +280,8 @@ func contextWindow(t *testing.T) (*chaincfg.Params, *contextSpyDB, *wire.BlockHe
 	return &p, spy, tip
 }
 
-// Replaying an already-stored contiguous batch whose tip is a retarget
-// boundary must not trigger the ~2015-hop context walk: a stored tip plus
-// contiguity means the whole batch is already stored.
+// Replaying an already-stored batch whose tip is a retarget boundary must not
+// trigger the ~2015-hop context walk: every header in it is already stored.
 func TestHandleHeadersReplaySkipsContextWalk(t *testing.T) {
 	params, spy, tip := contextWindow(t)
 	s := &Server{cfg: &Config{Network: "mainnet"}, chainParams: params, db: spy}

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -163,6 +164,9 @@ func TestHandleHeadersRejectsWrongDifficulty(t *testing.T) {
 	params := chaincfg.MainNetParams
 	params.PowLimit = chaincfg.RegressionNetParams.PowLimit
 	params.PowLimitBits = chaincfg.RegressionNetParams.PowLimitBits
+	// params.Checkpoints is kept, so both the checkpoint and the context
+	// checks run, as in production. None of them is stored, so the floor is
+	// 0 and only the context check can reject the child.
 
 	// Parent at a non-retarget height (100000 % 2016 != 0) carrying harder
 	// bits than the child will claim.
@@ -531,5 +535,55 @@ func TestPeerHeightAcceptableUsesFrontierNotTip(t *testing.T) {
 	}
 	if accept {
 		t.Fatal("a peer below the indexed frontier must be rejected")
+	}
+}
+
+// TestHandleHeadersCheckpointOnRetargetingNetwork checks that the checkpoint
+// check runs where the context check also runs: a header that passes the
+// context check is refused when it contradicts a checkpoint.
+func TestHandleHeadersCheckpointOnRetargetingNetwork(t *testing.T) {
+	params := chaincfg.MainNetParams
+	params.PowLimit = chaincfg.RegressionNetParams.PowLimit
+	params.PowLimitBits = chaincfg.RegressionNetParams.PowLimitBits
+
+	parentWire := &wire.BlockHeader{
+		Version:   0x20000000,
+		Bits:      0x1f00ffff,
+		Timestamp: time.Unix(1600000000, 0),
+	}
+	parentHash := parentWire.BlockHash()
+	parentBH := &tbcd.BlockHeader{Hash: parentHash, Height: 100000, Header: h2b(parentWire)}
+	child := mineHeader(t, &parentHash, parentWire.Bits, 0x01) // same bits: context-valid
+	childHash := child.BlockHash()
+
+	run := func(cp *chainhash.Hash) (any, error) {
+		p := params
+		if cp != nil {
+			p.Checkpoints = append(slices.Clone(params.Checkpoints),
+				chaincfg.Checkpoint{Height: 100001, Hash: cp})
+		}
+		db := &parentStubDB{parentHash: parentHash, parent: parentBH}
+		s := &Server{cfg: &Config{Network: "mainnet"}, chainParams: &p, db: db}
+		msg := wire.NewMsgHeaders()
+		if err := msg.AddBlockHeader(child); err != nil {
+			t.Fatal(err)
+		}
+		return callHandleHeaders(t, s, msg)
+	}
+
+	// Premises: with no checkpoint at its height, or a matching one, the
+	// child passes both checks and reaches the store, where the stub panics.
+	if reached, err := run(nil); reached == nil {
+		t.Fatalf("premise: expected the child to reach the store, got %v", err)
+	}
+	if reached, err := run(&childHash); reached == nil {
+		t.Fatalf("premise: expected the child at a matching checkpoint to reach the store, got %v", err)
+	}
+	reached, err := run(&chainhash.Hash{0x01})
+	if reached != nil {
+		t.Fatalf("expected the contradicting header to be refused, but it reached the store: %v", reached)
+	}
+	if !errors.Is(err, ErrCheckpoint) {
+		t.Fatalf("expected %v, got %v", ErrCheckpoint, err)
 	}
 }

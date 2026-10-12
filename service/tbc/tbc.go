@@ -2109,6 +2109,30 @@ func verifyHeaderBatchShape(headers []*wire.BlockHeader) error {
 	return nil
 }
 
+// allHeadersStored reports whether every header of a batch is stored, at
+// consecutive heights. It scans from the last header, so a batch carrying new
+// headers usually costs one lookup. Checking the last header alone is not
+// enough: a store written by a version that did not check batch contiguity can
+// hold a header without its parent, or at the wrong height, and a batch ending
+// at such a header would otherwise skip the checkpoint and context checks. Any
+// lookup error counts as not stored, so a store fault runs the checks.
+func (s *Server) allHeadersStored(ctx context.Context, headers []*wire.BlockHeader) bool {
+	var next uint64
+	for i := len(headers) - 1; i >= 0; i-- {
+		bh, err := s.db.BlockHeaderByHash(ctx, headers[i].BlockHash())
+		if err != nil {
+			return false
+		}
+		// A legacy record at a height that breaks the run would be
+		// re-homed by the insert, so check such a batch.
+		if i < len(headers)-1 && bh.Height+1 != next {
+			return false
+		}
+		next = bh.Height
+	}
+	return true
+}
+
 func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgHeaders) error {
 	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
@@ -2208,10 +2232,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		pbhHash = &msg.Headers[k].PrevBlock
 	}
 
-	// Contiguity must be checked before the context gate below. It lets the
-	// gate treat a stored tip as proof that the whole batch is stored;
-	// otherwise a crafted batch [garbage, known_tip] would skip the context
-	// check. It is checked on the full batch, before future headers are
+	// Contiguity is checked on the full batch, before future headers are
 	// dropped, so a malformed batch is refused whatever it starts with.
 	if err := shapeErr; err != nil {
 		return fmt.Errorf("handle headers %v: %w", p, err)
@@ -2245,18 +2266,32 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		}
 		msg.Headers = msg.Headers[:n]
 	}
-	// The context check is expensive: a retarget-boundary header walks ~2015
-	// ancestors. Skip it when the batch tip is already stored, since then
-	// every header in the batch is too and the insert admits nothing new.
-	// This stops a peer from cheaply replaying a known boundary header to
-	// force that walk. PoW and contiguity above still run on every message.
+	// The checkpoint and context checks look up stored headers, and the
+	// context check walks up to ~2015 ancestors at a retarget boundary. Skip
+	// both when every header in the batch is already stored at consecutive
+	// heights: the insert then adds no new header record, and on a store
+	// written by a version that checks contiguity at most completes an earlier
+	// torn insert of these same headers. This stops a peer
+	// from cheaply replaying known headers to force those reads. PoW and
+	// contiguity above still run on every message.
 	//
-	// verifyHeaderContext is a no-op on PoWNoRetargeting networks, so skip
-	// the tip lookup there as well.
-	if !s.chainParams.PoWNoRetargeting {
-		if _, err := s.db.BlockHeaderByHash(ctx, msg.Headers[len(msg.Headers)-1].BlockHash()); err != nil {
-			if err := s.verifyHeaderContext(ctx, msg.Headers); err != nil {
-				return fmt.Errorf("handle headers context %v: %w", p, err)
+	// The checkpoint check runs first: it is cheaper and rejects a fork off a
+	// checkpointed part of the chain before the ancestor walk. Networks with
+	// no checkpoint above genesis and no difficulty retargeting need neither,
+	// so skip the lookups there.
+	checkCheckpoints := s.hasEnforcedCheckpoints()
+	checkContext := !s.chainParams.PoWNoRetargeting
+	if checkCheckpoints || checkContext {
+		if !s.allHeadersStored(ctx, msg.Headers) {
+			if checkCheckpoints {
+				if err := s.verifyHeaderCheckpoints(ctx, msg.Headers); err != nil {
+					return fmt.Errorf("handle headers checkpoint %v: %w", p, err)
+				}
+			}
+			if checkContext {
+				if err := s.verifyHeaderContext(ctx, msg.Headers); err != nil {
+					return fmt.Errorf("handle headers context %v: %w", p, err)
+				}
 			}
 		}
 	}
@@ -2372,11 +2407,12 @@ func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeader
 	if err := verifyHeaderBatchShape(headers.Headers); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0, err
 	}
-	// Difficulty is deliberately not checked here nor in AddExternalHeaders.
-	// Both are driven by op-geth, which does its own hVM difficulty
-	// enforcement and expects TBC to trust what it pushes; checking here
-	// would reject headers op-geth considers valid. Untrusted headers arrive
-	// via handleHeaders, which checks PoW and verifyHeaderContext.
+	// Difficulty and checkpoints are deliberately not checked here nor in
+	// AddExternalHeaders. op-geth drives both doors and expects TBC to trust
+	// what it pushes: it enforces difficulty itself, does not enforce
+	// checkpoints, and must be able to store headers its L2 consensus
+	// references. Bitcoin P2P headers arrive via handleHeaders, which checks
+	// PoW, checkpoints and verifyHeaderContext.
 	return s.db.BlockHeadersInsert(ctx, headers, nil)
 }
 

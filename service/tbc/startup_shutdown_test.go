@@ -24,15 +24,16 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 )
 
-// TestHandleHeadersContextSkipKeysOnLastHeader verifies that handleHeaders
-// keys the context-check skip on the batch's last header being stored. Keyed
-// on the first header, [known, new] would admit new with the wrong difficulty.
+// TestHandleHeadersContextSkipKeysOnLastHeader verifies that the context-check
+// skip is not keyed on the batch's first header: [known, new] must still be
+// checked, or new would be admitted with the wrong difficulty.
 func TestHandleHeadersContextSkipKeysOnLastHeader(t *testing.T) {
 	// Mainnet-shaped retargeting rules with an easy PoW limit, so the batch
 	// can be genuinely mined and clear verifyHeadersPoW.
 	p := chaincfg.MainNetParams
 	p.PowLimit = chaincfg.RegressionNetParams.PowLimit
 	p.PowLimitBits = chaincfg.RegressionNetParams.PowLimitBits
+	p.Checkpoints = nil // not under test here
 
 	kp := &wire.BlockHeader{
 		Version: 1, PrevBlock: chainhash.Hash{0xc1},
