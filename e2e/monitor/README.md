@@ -56,8 +56,7 @@ stack is running, so that the stack has to follow the L1 across the fork like
 it has to on a live network.  The L2 does not activate Glamsterdam.
 
 The tests in `glamsterdam_migration_test.go` check that the op-nodes keep
-recognising L1 blocks (every L1 block they refer to is compared with what the
-L1 itself has) and that the L2 is unchanged.  The `EIPNNNN_` functions in the
+recognising L1 blocks and that the L2 is unchanged.  The `EIPNNNN_` functions in the
 `eipNNNN_test.go` files only show that the L1 has Glamsterdam active.
 
 The following environment variables are read by `docker compose up`:
