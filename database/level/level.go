@@ -51,6 +51,7 @@ type Database struct {
 	mtx     sync.RWMutex
 	pool    Pool    // database pool
 	rawPool RawPool // raw database pool
+	closed  bool    // set by Close; keeps Close idempotent
 
 	cfg *Config
 }
@@ -79,6 +80,13 @@ func (l *Database) Close() error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
+	// The pools are not emptied (see below), so guard against closing every
+	// handle twice.
+	if l.closed {
+		return nil
+	}
+	l.closed = true
+
 	var errSeen error
 
 	for k, v := range l.rawPool {
@@ -87,7 +95,6 @@ func (l *Database) Close() error {
 			log.Errorf("close %v: %v", k, err)
 			errSeen = errors.Join(errSeen, err)
 		}
-		delete(l.rawPool, k)
 	}
 
 	for k, v := range l.pool {
@@ -96,8 +103,13 @@ func (l *Database) Close() error {
 			log.Errorf("close %v: %v", k, err)
 			errSeen = errors.Join(errSeen, err)
 		}
-		delete(l.pool, k)
 	}
+
+	// Don't delete the handles from the pools. The tbcd accessors read the
+	// pools without holding the lock and service/tbc goroutines may still be
+	// running during shutdown; deleting would race the map and hand them a
+	// nil handle. Left in place, late calls fail with leveldb.ErrClosed, as
+	// rawdb.Close does for its index.
 
 	return errSeen
 }

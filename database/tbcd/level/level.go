@@ -24,6 +24,7 @@ import (
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/database"
@@ -376,7 +377,21 @@ func (l *ldb) Version(ctx context.Context) (int, error) {
 	if err != nil {
 		return -1, fmt.Errorf("version: %w", err)
 	}
+	// A short record must be an ERROR, not a panic. binary.BigEndian.Uint64 panics on fewer than 8
+	// bytes, and this is the FIRST read the upgrade loop in New() performs -- so a torn write of
+	// this single 8-byte record turned every subsequent start into a runtime panic inside database
+	// open, naming no record. It is also the record an interrupted upgrade is most likely to tear,
+	// because it is the one that decides whether the store gets upgraded.
+	if len(value) != 8 {
+		return -1, fmt.Errorf("version: corrupt record: want 8 bytes, got %d", len(value))
+	}
 	dbVersion := binary.BigEndian.Uint64(value)
+	// int(uint64) is lossy on the way to the caller's switch: 0xffffffffffffffff arrives as -1,
+	// which is also this function's error sentinel, so a corrupt record could be mistaken for a
+	// failed read. Reject anything that cannot be a version.
+	if dbVersion > math.MaxInt32 {
+		return -1, fmt.Errorf("version: implausible value %d", dbVersion)
+	}
 
 	return int(dbVersion), nil
 }
@@ -571,6 +586,16 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 	log.Tracef("BlockHeadersByHeight")
 	defer log.Tracef("BlockHeadersByHeight exit")
 
+	// height+2 wraps for the top two uint64 values, giving Limit < Start,
+	// which makes goleveldb panic with "slice bounds out of range". A
+	// tip-1000 or tip-1999 locator underflows to exactly these values when
+	// the tip is 998, 999, 1997 or 1998, so refuse them here rather than in
+	// each caller.
+	if height+2 < height {
+		return nil, database.NotFoundError(fmt.Sprintf(
+			"block headers by height not found: %v", height))
+	}
+
 	bhs := make([]tbcd.BlockHeader, 0, 4)
 	start := make([]byte, 8)
 	binary.BigEndian.PutUint64(start, height)
@@ -581,7 +606,14 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 	it := hhDB.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
 	defer it.Release()
 	for it.Next() {
-		fh, hash := keyToHeightHash(it.Key())
+		fh, hash, ok := keyToHeightHash(it.Key())
+		if !ok {
+			// findCommonParent decides "all these headers share a common parent" from this
+			// function's result, so silently dropping one sibling at a fork height makes it
+			// choose an incorrect common ancestor.
+			return nil, fmt.Errorf("malformed height-index key of %d bytes at height %d; the "+
+				"store is damaged and should be reindexed", len(it.Key()), height)
+		}
 		if fh != height {
 			// all done
 			break
@@ -591,6 +623,11 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 			return nil, fmt.Errorf("headers by height: %w", err)
 		}
 		bhs = append(bhs, *bh)
+	}
+	// An iterator error must not look like "not found", or callers treat a
+	// damaged store as a missing header.
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("block headers by height iterator: %w", err)
 	}
 	if len(bhs) == 0 {
 		return nil, database.NotFoundError("block headers not found")
@@ -631,13 +668,22 @@ func heightHashToKey(height uint64, hash []byte) []byte {
 	return key
 }
 
-// keyToHeightHash reverses the process of heightHashToKey.
-func keyToHeightHash(key []byte) (uint64, *chainhash.Hash) {
+// keyToHeightHash decodes a height-index key, reporting false for a key it cannot interpret.
+
+// The two callers deliberately DIFFER on what to do with a bad key. BlocksMissing skips it -- the
+// block simply is not requested, which is benign and that function already documents that it may
+// under-report. BlockHeadersByHeight fails, because findCommonParent (service/tbc/crawler.go)
+// decides "these headers share a common parent" from its result, so silently dropping one sibling at
+// a fork height picks the wrong common ancestor and unwinds to the wrong place.
+func keyToHeightHash(key []byte) (uint64, *chainhash.Hash, bool) {
+	if len(key) != heighthashSize {
+		return 0, nil, false
+	}
 	hash, err := chainhash.NewHash(key[9:])
 	if err != nil {
-		panic(fmt.Sprintf("chain hash new: %v", len(key)))
+		return 0, nil, false
 	}
-	return binary.BigEndian.Uint64(key[0:8]), hash
+	return binary.BigEndian.Uint64(key[0:8]), hash, true
 }
 
 // encodeBlockHeader encodes a database block header as
@@ -650,9 +696,30 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 	return
 }
 
+// blockheaderDifficultyBits is the width of the cumulative-work field encodeBlockHeader writes.
+// FillBytes panics rather than truncating, so every writer must bound the value against this.
+const blockheaderDifficultyBits = (blockheaderSize - 88) * 8
+
+// testInsertCommitFault lets tests abort BlockHeadersInsert right after its
+// "bhs", "bm" or "hh" commit, leaving the partial store a crash or a failed
+// later commit would. It never fails in production.
+var testInsertCommitFault = func(string) error { return nil }
+
 // decodeBlockHeader reverse the process of encodeBlockHeader.
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
+	// Every writer into BlockHeadersDB puts exactly blockheaderSize bytes, so any other length is
+	// corruption. Checking it here closes two panics at one point: a record shorter than 88 bytes
+	// slice-panics on ebh[8:88] below, and a record LONGER than blockheaderSize yields a cumulative
+	// work value wider than the 32-byte field, which then panics inside FillBytes on the next write.
+	//
+	// This is deliberately a panic and not an error: the signature has no error return and every
+	// caller treats the result as authoritative, so returning a zero value would silently substitute
+	// a wrong header. A named panic is strictly better than an opaque slice panic.
+	if len(ebh) != blockheaderSize {
+		panic(fmt.Sprintf("decode block header: record is %d bytes, want %d; store is corrupt",
+			len(ebh), blockheaderSize))
+	}
 	bh := &tbcd.BlockHeader{
 		Hash:   *headerHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
@@ -725,6 +792,15 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	if diff != nil && diff.Cmp(big.NewInt(0)) > 0 {
 		cdiff = diff
 	}
+	// Same bound as BlockHeadersInsert, and for the same reason: encodeBlockHeader writes cdiff
+	// into a fixed 32-byte field with FillBytes, which panics rather than truncating. Here the
+	// value comes from the embedder via Config.GenesisDifficultyOffset with nothing bounding it,
+	// so a misconfigured offset was a panic during startup rather than a diagnosable error.
+	if cdiff.BitLen() > blockheaderDifficultyBits {
+		return fmt.Errorf("effective genesis cumulative difficulty overflow: %v bits exceeds %v",
+			cdiff.BitLen(), blockheaderDifficultyBits)
+	}
+
 	ebh := encodeBlockHeader(height, h2b(&wbh), cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
@@ -1207,6 +1283,30 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	// Iterate over the block headers and skip block headers we already
 	// have in the database. Rely on caching to make this not suck terribly.
 	var x int
+	var knownHeight uint64
+	var haveHeight bool
+	// knownCdiff is the cumulative work of the header at knownHeight. It is
+	// seeded from the first stored record and advanced by each header's work,
+	// which avoids a record Get per header. It stays nil if the seed record is
+	// too short to carry cdiff, which forces the full insert.
+	var knownCdiff *big.Int
+	// The canonical tip is written separately, after the height index; see
+	// the commit block below.
+	var tipRecord []byte
+	hhDedupeDB := l.pool[level.HeightHashDB]
+
+	// Cumulative work of the stored canonical tip, for the completeness
+	// check below. Comparing work rather than height also catches a fork
+	// that wins on work without being taller. A missing or short tip record
+	// makes every header look incomplete, so the full insert then fails
+	// (the tip read returns NotFound, or decodeBlockHeader panics).
+	storedTipCdiff := new(big.Int)
+	haveStoredTip := false
+	if tb, terr := bhsTx.Get([]byte(bhsCanonicalTipKey), nil); terr == nil && len(tb) >= blockheaderSize {
+		storedTipCdiff = new(big.Int).SetBytes(tb[88:blockheaderSize])
+		haveStoredTip = true
+	}
+
 	for _, rbh := range bhs.Headers {
 		bhash := rbh.BlockHash()
 		has, err := bhsTx.Has(bhash[:], nil)
@@ -1217,6 +1317,71 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		if !has {
 			break
 		}
+
+		// The header record alone does not prove we have the header.
+		// Records commit before the height index, so a crash in between
+		// leaves a record with no height-index entry. Skipping on the
+		// record alone would return DuplicateError on every
+		// re-announcement while BlockHeadersByHeight never finds the
+		// header.
+		//
+		// Only the first record is read for its height, to avoid a Get
+		// per header; the batch is a chain, so each following height is
+		// the previous plus one. A non-contiguous batch just misses the
+		// Has below and falls through to the full insert.
+		if !haveHeight {
+			ebh, err := bhsTx.Get(bhash[:], nil)
+			if err != nil {
+				return tbcd.ITInvalid, nil, nil, 0,
+					fmt.Errorf("block headers insert get: %w", err)
+			}
+			if len(ebh) < 8 {
+				// Return NotFound rather than a plain error: a
+				// malformed record is permanent local damage,
+				// and op-geth treats NotFound as a corrupt
+				// store to rebuild instead of rejecting the
+				// block.
+				return tbcd.ITInvalid, nil, nil, 0,
+					database.NotFoundError(fmt.Sprintf(
+						"block headers insert: record for %v is %d bytes; store is corrupt",
+						bhash, len(ebh)))
+			}
+			knownHeight = binary.BigEndian.Uint64(ebh[0:8])
+			if len(ebh) >= blockheaderSize {
+				knownCdiff = new(big.Int).SetBytes(ebh[88:blockheaderSize])
+			}
+			haveHeight = true
+		} else if knownCdiff != nil {
+			// The batch is a chain, so add this header's work to
+			// the previous cumulative work, as the insert loop
+			// below does.
+			knownCdiff = new(big.Int).Add(knownCdiff, blockchain.CalcWork(rbh.Bits))
+		}
+
+		hhOK, err := hhDedupeDB.Has(heightHashToKey(knownHeight, bhash[:]), nil)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("block headers insert height hash has: %w", err)
+		}
+		if !hhOK {
+			// Torn write. Fall through so the normal path rewrites the
+			// record and puts the missing height-index entry.
+			break
+		}
+
+		// The height-index entry is not enough either: a crash or write
+		// error after the height-index commit but before the tip write
+		// leaves the batch indexed with the tip behind it, and every
+		// re-announcement would return DuplicateError forever. Count a
+		// header as known only if the stored tip carries at least its
+		// cumulative work. Blocks-missing commits before the height
+		// index, so a header passing both checks was queued for
+		// download.
+		if !haveStoredTip || knownCdiff == nil || storedTipCdiff.Cmp(knownCdiff) < 0 {
+			break // the tip write did not land; redo
+		}
+
+		knownHeight++
 		x++
 	}
 	bhs.Headers = bhs.Headers[x:]
@@ -1231,6 +1396,29 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	if err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers insert: %w", err)
+	}
+
+	// Refuse to extend a parent that was only partially stored. The dedupe
+	// loop above only repairs headers in this batch, and a batch starting
+	// just past a torn parent would bury it for good: a parent with no
+	// height-index entry is never found by BlockHeadersByHeight. Given the
+	// commit order below, a parent torn after its height-index commit is
+	// only missing the tip write and is safe to extend (see the ITChainFork
+	// case below). A completed insert always writes the height index, so an
+	// honest parent is never refused.
+	//
+	// On the live P2P path this drops the peer. The parent is re-sent by
+	// the next getheaders from our tip or the periodic header refresh, and
+	// the dedupe loop above repairs it.
+	pKey := heightHashToKey(pbh.Height, pbh.Hash[:])
+	pHH, err := hhDedupeDB.Has(pKey, nil)
+	if err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("block headers insert parent height hash has: %w", err)
+	}
+	if !pHH {
+		return tbcd.ITInvalid, nil, nil, 0,
+			database.NotFoundError("block headers insert: parent is incompletely stored")
 	}
 
 	// blocks missing
@@ -1300,6 +1488,13 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		height++
 		cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
 
+		// Extra sanity check for cumulative difficulty
+		if cdiff.BitLen() > blockheaderDifficultyBits {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("cumulative difficulty overflow at height %v: %v bits exceeds %v",
+					height, cdiff.BitLen(), blockheaderDifficultyBits)
+		}
+
 		// Store height_hash for future reference
 		hhKey := heightHashToKey(height, bhash[:])
 		ok, err := hhTx.Has(hhKey, nil)
@@ -1312,7 +1507,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 
 		// Insert a synthesized height_hash key that serves as an index
 		// to see which blocks are missing.
-		ok, err = blocksDB.Has(hhKey)
+		ok, err = blocksDB.Has(bhash[:])
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("blocks has: %w", err)
@@ -1362,15 +1557,26 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			// log.Infof("%v", spew.Sdump(bestBH.Hash[:]))
 			// log.Infof("%v", spew.Sdump(firstHash))
 			// pick the right return value based on ancestor
-			bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
+			tipRecord = lastRecord
 			it = tbcd.ITChainFork
+
+			// A crash between a batch's height-index commit and its
+			// tip write leaves the tip behind headers that descend
+			// from it, so a batch extending them lands here
+			// although nothing is unwound. The label is harmless:
+			// the tip moves the same way, and the synced-fork panic
+			// in handleHeaders needs the indexers at the new tip,
+			// which with AutoIndex they cannot be yet.
+			// XXX with op-geth driving the indexers they may
+			// already be past a torn tip, so a batch starting
+			// inside the torn range could still hit that panic.
 
 		default:
 			panic("bug: impossible cmp value")
 		}
 	} else {
 		// Extend current best tip
-		bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
+		tipRecord = lastRecord
 		it = tbcd.ITChainExtend
 	}
 
@@ -1413,10 +1619,27 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			fmt.Errorf("metadata insert: %w", err)
 	}
 
-	// height hash commit
-	if err = hhCommit(); err != nil {
+	// Commit order: header records, blocks-missing, height index, then the
+	// canonical tip (below). These are separate leveldb transactions, so
+	// the order decides what a concurrent reader or a crash can observe.
+	//
+	// Records go first so the height index never names a missing record;
+	// BlockHeadersByHeight fails on such a hash and syncBlocks panics on
+	// that error. An unindexed record is merely invisible to height queries
+	// and is repaired when that header is inserted again.
+	// BlockHeadersRemove commits the index first for the same reason.
+	//
+	// Blocks-missing goes before the height index so that an indexed header
+	// always has its blocks-missing entry. Otherwise a crash in between
+	// leaves a header that looks complete but whose block is never queued;
+	// if its fork later wins, that canonical block is never downloaded.
+	// Readers are unaffected since the records are already committed.
+	if err = bhsCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash commit: %w", err)
+			fmt.Errorf("block headers commit: %w", err)
+	}
+	if err = testInsertCommitFault("bhs"); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0, err
 	}
 
 	// blocks missing commit
@@ -1424,11 +1647,34 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
+	if err = testInsertCommitFault("bm"); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0, err
+	}
 
-	// block headers commit
-	if err = bhsCommit(); err != nil {
+	// height hash commit
+	if err = hhCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("block headers commit: %w", err)
+			fmt.Errorf("height hash commit: %w", err)
+	}
+	if err = testInsertCommitFault("hh"); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0, err
+	}
+
+	// Publish the canonical tip last, in its own write. A reader that sees
+	// the new tip can then always look it up by height, and a crash cannot
+	// persist an advanced tip while its blocks-missing entries are lost;
+	// that gap is anchored at the tip and nothing would re-derive it.
+	if tipRecord != nil {
+		bhsDB := l.pool[level.BlockHeadersDB]
+		// Synced, like the metadata commit below (the upstream state ID in
+		// external header mode); otherwise a power failure could keep the
+		// metadata and lose the tip. A one-key transaction commit syncs
+		// too, so it would be no cheaper than this Put.
+		if err = bhsDB.Put([]byte(bhsCanonicalTipKey), tipRecord,
+			&opt.WriteOptions{Sync: true}); err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("canonical tip put: %w", err)
+		}
 	}
 
 	// metadata commit
@@ -1457,13 +1703,26 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 	defer it.Release()
 	for it.Next() {
 		bh := tbcd.BlockIdentifier{}
-		bh.Height, bh.Hash = keyToHeightHash(it.Key())
+		var ok bool
+		bh.Height, bh.Hash, ok = keyToHeightHash(it.Key())
+		if !ok {
+			log.Errorf("skipping malformed blocks-missing key of %v bytes; the store has debris "+
+				"and should be reindexed", len(it.Key()))
+			continue
+		}
 		bis = append(bis, bh)
 
 		x++
 		if x >= count {
 			break
 		}
+	}
+
+	// An iterator error must not look like "nothing is missing", which
+	// would stall the block downloader instead of surfacing a damaged
+	// store.
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("blocks missing iterator: %w", err)
 	}
 
 	log.Debugf("BlocksMissing returning %v cached %v", len(bis), blockCacheLen)
