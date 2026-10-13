@@ -289,6 +289,20 @@ func (pm *PeerManager) All(ctx context.Context, f func(ctx context.Context, p *r
 	}
 }
 
+// Connected returns the connected peers.
+func (pm *PeerManager) Connected() []*rawpeer.RawPeer {
+	pm.mtx.RLock()
+	defer pm.mtx.RUnlock()
+
+	peers := make([]*rawpeer.RawPeer, 0, len(pm.peers))
+	for _, p := range pm.peers {
+		if p.IsConnected() {
+			peers = append(peers, p)
+		}
+	}
+	return peers
+}
+
 func (pm *PeerManager) AllBlock(ctx context.Context, f func(ctx context.Context, p *rawpeer.RawPeer)) {
 	log.Tracef("AllBlock")
 	defer log.Tracef("AllBlock")

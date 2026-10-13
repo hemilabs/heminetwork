@@ -286,6 +286,17 @@ type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
+	// dbUsers joins the goroutines that use the database but are not
+	// in wg: peer handlers, syncBlocks, auto indexing, headers
+	// requests, block expiry, RPC and admin RPC requests and admin
+	// jobs.  dbClose waits for them before it closes the database.
+	// dbUsersMtx orders every start against dbClose: once
+	// dbUsersClosed is set, no new goroutine starts, so no Add races
+	// the Wait.
+	dbUsersMtx    sync.Mutex
+	dbUsers       sync.WaitGroup
+	dbUsersClosed bool
+
 	cfg *Config
 
 	// fixup cache strategy
@@ -606,6 +617,15 @@ func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	}
 }
 
+// headersAll asks every connected peer for the headers that follow our
+// best header.  headersPeer reads the database, so it runs in a goroutine
+// that dbClose joins.
+func (s *Server) headersAll(ctx context.Context) {
+	for _, p := range s.pm.Connected() {
+		s.goDB(func() { s.headersPeer(ctx, p) })
+	}
+}
+
 func (s *Server) headersPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	log.Tracef("headersPeer %v", p)
 	defer log.Tracef("headersPeer %v exit", p)
@@ -705,6 +725,12 @@ func peerBehind(lastBlock int32, best uint64) bool {
 
 func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	log.Tracef("handlePeer %v", p)
+
+	// The read loop below blocks in p.Read without a deadline.  Close
+	// the peer when ctx is canceled, so that handlePeer returns and
+	// dbClose can join it.
+	stop := context.AfterFunc(ctx, func() { _ = p.Close() })
+	defer stop()
 
 	var readError error
 	defer func() {
@@ -1251,7 +1277,7 @@ func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block chainhas
 		return fmt.Errorf("random peer %v: %w", block, err)
 	}
 	s.blocks.Put(ctx, defaultBlockPendingTimeout, block.String(), rp,
-		s.blockExpired, nil)
+		s.blockExpiredDB, nil)
 	s.bm.blockRequested()
 	// Not an error. Checking and logging this will fill up logs with EOF.
 	//nolint:errcheck // Error is intentionally ignored.
@@ -1345,6 +1371,13 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	return fmt.Errorf("timeout %v", key)
 }
 
+// blockExpiredDB is the expiry callback of a block request.  It runs
+// blockExpired, which reads the database, in a goroutine that dbClose
+// joins.
+func (s *Server) blockExpiredDB(ctx context.Context, key any, value any) {
+	s.goDB(func() { s.blockExpired(ctx, key, value) })
+}
+
 func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	log.Tracef("blockExpired")
 	defer log.Tracef("blockExpired exit")
@@ -1370,7 +1403,7 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	default:
 	}
 	s.bm.blockExpired(err != nil)
-	go s.syncBlocks(ctx)
+	s.goDB(func() { s.syncBlocks(ctx) })
 }
 
 func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
@@ -1527,7 +1560,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			return
 		}
 		// XXX rethink closure, this is because of index flag mutex.
-		go func() {
+		s.goDB(func() {
 			var (
 				eval  database.BlockNotFoundError
 				block chainhash.Hash
@@ -1591,12 +1624,12 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				// retrieves them -- the same request the not-synced
 				// branch below makes.
 				log.Debugf("download missed block headers %v", len(ib))
-				s.pm.All(ctx, s.headersPeer)
+				s.headersAll(ctx)
 			} else {
 				log.Debugf("handle all")
-				s.pm.All(ctx, s.headersPeer)
+				s.headersAll(ctx)
 			}
-		}()
+		})
 		return
 	}
 
@@ -1809,7 +1842,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 
 		// Always call syncBlocks, it either downloads more blocks or
 		// kicks of indexing.
-		go s.syncBlocks(ctx)
+		s.goDB(func() { s.syncBlocks(ctx) })
 
 		return nil
 	}
@@ -2004,7 +2037,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 		_, _ = s.blocks.Delete(bhs) // regardless of insert result
 
 		// kick cache
-		go s.syncBlocks(ctx)
+		s.goDB(func() { s.syncBlocks(ctx) })
 	}()
 
 	height, err := s.insertBlock(ctx, block) // XXX see if we can use raw here
@@ -2862,7 +2895,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 		s.mtx.Unlock()
 
 		// Get block headers
-		s.pm.All(ctx, s.headersPeer)
+		s.headersAll(ctx)
 	}()
 
 	log.Debugf("Syncing indexes to: %v", hash)
@@ -3208,6 +3241,10 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	log.Tracef("dbOpen")
 	defer log.Tracef("dbOpen exit")
 
+	s.dbUsersMtx.Lock()
+	s.dbUsersClosed = false
+	s.dbUsersMtx.Unlock()
+
 	// This should have been verified but let's not make assumptions.
 	// XXX should we create a geometry thing/object?
 	switch s.cfg.Network {
@@ -3334,7 +3371,61 @@ func (s *Server) dbClose() error {
 	log.Tracef("dbClose")
 	defer log.Tracef("dbClose")
 
+	// Stop new database users from starting and join the running
+	// ones before the database goes away.
+	s.dbUsersMtx.Lock()
+	s.dbUsersClosed = true
+	s.dbUsersMtx.Unlock()
+	s.dbUsers.Wait()
+
+	// The ordinal populator runs outside of the server wait groups and
+	// holds database transactions; join it too.  The goroutines joined
+	// above start it, so join it after them.
+	if oi, ok := s.oi.(*ordinalIndexer); ok {
+		oi.wait()
+	}
+
 	return s.g.db.Close()
+}
+
+// goDB runs f in a new goroutine that dbClose joins before it closes
+// the database.  It does not run f once dbClose has started, and then
+// returns false.
+func (s *Server) goDB(f func()) bool {
+	s.dbUsersMtx.Lock()
+	defer s.dbUsersMtx.Unlock()
+	if s.dbUsersClosed {
+		return false
+	}
+	s.dbUsers.Go(f)
+	return true
+}
+
+// connectPeers runs handlePeer on every peer the peer manager connects,
+// until ctx is canceled.  handlePeer uses the database, so it runs in a
+// goroutine that dbClose joins.
+func (s *Server) connectPeers(ctx context.Context) {
+	for {
+		p, err := s.pm.RandomConnect(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			// Should not be reached
+			log.Errorf("random connect: %v", err)
+			return
+		}
+		started := s.goDB(func() {
+			err := s.handlePeer(ctx, p)
+			if err != nil {
+				log.Debugf("%v: %v", p, err)
+			}
+		})
+		if !started {
+			// The database is closing; drop the peer.
+			_ = p.Close()
+		}
+	}
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -3579,6 +3670,9 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("open level database: %w", err)
 	}
 	defer func() {
+		// Stop and join the database users before closing.
+		cancel()
+		s.wg.Wait()
 		err := s.dbClose()
 		if err != nil {
 			log.Errorf("db close: %v", err)
@@ -3642,7 +3736,9 @@ func (s *Server) Run(pctx context.Context) error {
 
 		// Admin WebSocket route (JWT authenticated)
 		if len(s.adminJWTSecret) > 0 {
-			s.adminSessions = *NewHub(ctx)
+			// Admin jobs use the database; run them in
+			// goroutines that dbClose joins.
+			s.adminSessions = *newHub(ctx, s.goDB)
 			log.Infof("handle (tbc admin): %s", tbcadminapi.RouteAdminWs)
 			mux.HandleFunc(tbcadminapi.RouteAdminWs, s.handleAdminWebsocket)
 		}
@@ -3728,25 +3824,7 @@ func (s *Server) Run(pctx context.Context) error {
 		})
 
 		// connected peers
-		s.wg.Go(func() {
-			for {
-				p, err := s.pm.RandomConnect(ctx)
-				if err != nil {
-					if errors.Is(err, context.Canceled) {
-						return
-					}
-					// Should not be reached
-					log.Errorf("random connect: %v", err)
-					return
-				}
-				go func(pp *rawpeer.RawPeer) {
-					err := s.handlePeer(ctx, pp)
-					if err != nil {
-						log.Debugf("%v: %v", pp, err)
-					}
-				}(p)
-			}
-		})
+		s.wg.Go(func() { s.connectPeers(ctx) })
 
 		// ping loop
 		s.wg.Go(func() {

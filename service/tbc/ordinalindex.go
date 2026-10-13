@@ -33,10 +33,13 @@ type ordinalIndexer struct {
 	workCache       map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue
 	computeInscSat  func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error)
 	watermarkGap    time.Duration
-	populating      atomic.Uint32 // reentrancy guard for onSyncComplete
-	warm            bool          // auto-managed: true at tip (gap<=1), false during catchup
-	cacheByteBudget int           // cache flush budget in bytes; 0 = default
-	verifyBigO      bool          // cross-check 'O' outputValue against tx index
+	populating      atomic.Uint32  // reentrancy guard for onSyncComplete
+	populator       sync.WaitGroup // joins the populateWork goroutine
+	populatorMtx    sync.Mutex     // orders populator starts against wait
+	populatorClosed bool           // set by wait; no populator starts after it
+	warm            bool           // auto-managed: true at tip (gap<=1), false during catchup
+	cacheByteBudget int            // cache flush budget in bytes; 0 = default
+	verifyBigO      bool           // cross-check 'O' outputValue against tx index
 
 	// cache is the live write cache created by newCache; retained so
 	// readCacheInfo can report the byte dimension. Accessed only from
@@ -1601,10 +1604,28 @@ func (i *ordinalIndexer) beforeWind(startHeight, endHeight uint64) {
 }
 
 func (i *ordinalIndexer) onSyncComplete() {
+	// Any goroutine that indexes can get here, so start the populator
+	// under populatorMtx; that way it never starts after wait began.
+	i.populatorMtx.Lock()
+	defer i.populatorMtx.Unlock()
+	if i.populatorClosed {
+		return
+	}
 	if !i.populating.CompareAndSwap(0, 1) {
 		return
 	}
-	go i.populateWork()
+	i.populator.Go(i.populateWork)
+}
+
+// wait blocks until the populateWork goroutine, if any, returns, and
+// prevents a new one from starting. The populator reads and writes the
+// database, so the owner of the database must call wait before it
+// closes the database.
+func (i *ordinalIndexer) wait() {
+	i.populatorMtx.Lock()
+	i.populatorClosed = true
+	i.populatorMtx.Unlock()
+	i.populator.Wait()
 }
 
 func (i *ordinalIndexer) populateWork() {
@@ -1634,6 +1655,11 @@ func (i *ordinalIndexer) populateWork() {
 
 	bestHeight := bestBH.Height
 	for {
+		// Abort on shutdown.
+		if ctx.Err() != nil {
+			return
+		}
+
 		// Abort if a new block arrived.
 		bh, err := i.g.db.BlockHeaderBest(ctx)
 		if err != nil {
