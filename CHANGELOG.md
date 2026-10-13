@@ -116,6 +116,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `bitcoin/zuul.TSSNamedKey` storage for keys controlled by an external
   threshold signature scheme, alongside symmetrical `PutTSSKey` /
   `GetTSSKey` / `PurgeTSSKey` / `LookupTSSKeyByAddr` interface methods.
+- Add the location of an inscription (outpoint and sat offset) to the
+  `tbc` inscriptions by address response, so that a wallet can spend
+  an inscription and keep inscriptions out of its fee inputs
+  ([#1222](https://github.com/hemilabs/heminetwork/pull/1222)).
 
 ### Changed
 
