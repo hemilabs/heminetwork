@@ -14,7 +14,10 @@ import (
 	tapi "github.com/hemilabs/heminetwork/v2/api/tbcadminapi"
 )
 
-var ErrJobNotFound = errors.New("job not found")
+var (
+	ErrJobNotFound   = errors.New("job not found")
+	ErrJobNotStarted = errors.New("job not started")
+)
 
 type jobStatus string
 
@@ -84,6 +87,10 @@ type AdminHub struct {
 	mtx sync.RWMutex
 	ctx context.Context // Long-lived context
 
+	// start runs a job in a new goroutine.  It returns false when it
+	// did not start the job.
+	start func(f func()) bool
+
 	// JobID -> Job
 	jobs map[string]*job
 
@@ -94,12 +101,14 @@ type AdminHub struct {
 	subscriptions map[string]map[string]*Notifier
 }
 
-func NewHub(ctx context.Context) *AdminHub {
+// newHub returns a hub that runs its jobs with start.
+func newHub(ctx context.Context, start func(f func()) bool) *AdminHub {
 	return &AdminHub{
 		jobs:          make(map[string]*job),
 		sessions:      make(map[string]*client),
 		subscriptions: make(map[string]map[string]*Notifier),
 		ctx:           ctx,
+		start:         start,
 	}
 }
 
@@ -155,7 +164,9 @@ func (h *AdminHub) StartJob(jobID string) error {
 		return ErrJobNotFound
 	}
 
-	go j.run(j.ctx, jobID)
+	if !h.start(func() { j.run(j.ctx, jobID) }) {
+		return ErrJobNotStarted
+	}
 	return nil
 }
 

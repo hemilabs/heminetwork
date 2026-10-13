@@ -34,8 +34,18 @@ func newDifficultyTestServer(t *testing.T, params *chaincfg.Params) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s := &Server{
+		cfg: &Config{},
+		g: geometryParams{
+			db:    db,
+			chain: params,
+		},
+	}
+	// Close through dbClose, so that the goroutines the test starts
+	// through the server (syncBlocks from handleBlock, for example)
+	// are joined before the database closes.
 	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
+		if err := s.dbClose(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -45,13 +55,7 @@ func newDifficultyTestServer(t *testing.T, params *chaincfg.Params) *Server {
 		t.Fatal(err)
 	}
 
-	return &Server{
-		cfg: &Config{},
-		g: geometryParams{
-			db:    db,
-			chain: params,
-		},
-	}
+	return s
 }
 
 // insertHeaders inserts a slice of wire headers into the DB as a connected chain.
