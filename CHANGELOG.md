@@ -178,7 +178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix a flaky `tbc` test panic. The fake bitcoin node in the tests could
-  log after its test returned; stopping it now waits for it to exit.
+  log after its test returned; stopping it now waits for it to exit
+  ([#1225](https://github.com/hemilabs/heminetwork/pull/1225)).
 - Fix `tbc` block download stalling on a low-work header fork. Headers
   that fork off at or below the last checkpoint the best header passed,
   or that contradict a checkpoint, are now rejected, and the download
