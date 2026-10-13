@@ -32,6 +32,7 @@ COPY --from=builder /build/bin/fakebeacon /usr/local/bin/fakebeacon
 # Environment variables
 ENV FAKEBEACON_L1_RPC_URL=""
 ENV FAKEBEACON_BEACON_ADDRESS=""
+ENV FAKEBEACON_BEACON_LEGACY_ADDRESS=""
 ENV FAKEBEACON_RPC_ADDRESS=""
 
 ENTRYPOINT ["/usr/local/bin/fakebeacon"]
