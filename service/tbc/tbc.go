@@ -4145,6 +4145,11 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 				if err != nil {
 					return nil, err
 				}
+				insc.Location = &tbcapi.OrdinalLocation{
+					TxID:   *utxo.ChainHash(),
+					Vout:   utxo.OutputIndex(),
+					Offset: li.Offset,
+				}
 				result = append(result, insc)
 				if uint32(len(result)) >= need {
 					goto paginate
