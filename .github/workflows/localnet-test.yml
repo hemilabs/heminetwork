@@ -120,10 +120,16 @@ jobs:
           TAR_SIZE=$(du -hs $LOCALNET_OPTIMISM_STACK_CACHE_FILE | cut -f1)
           echo "Saved compressed tarball size: $TAR_SIZE"
 
+      # The L1 starts before Glamsterdam and activates it 7 minutes after its
+      # genesis (L1_AMSTERDAM_OFFSET_SECONDS, see e2e/genesisl2.sh), when the
+      # Hemi stack is up and has been deriving the L2 for a few minutes.  The
+      # migration tests fail if the sequencer or the batcher were not up in
+      # time; raise the offset rather than lowering it.
       - name: "run localnet"
         env:
           LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
+          L1_AMSTERDAM_OFFSET_SECONDS: "420"
         run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
 
       - name: "remove more dangling"

@@ -370,6 +370,12 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 				eipMtx.Lock()
 				defer eipMtx.Unlock()
 
+				// the localnet L1 activates Glamsterdam while running, the
+				// checks below only hold once it has
+				if !testingFork() {
+					l1GlamsterdamFork(t, ctx)
+				}
+
 				// check for the existence of EIP-7976, do not exhaustively test it
 				EIP7976_RejectsInsufficientGasLimit(t, privateKey)
 
