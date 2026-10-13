@@ -189,7 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   index, headers request, block expiry, RPC request, admin RPC request,
   admin job, ordinal populator and canceled UTXO fixup fetch goroutines
   were not joined, so the database could close while one of them held
-  a transaction; the database is now closed only after they return.
+  a transaction; the database is now closed only after they return
+  ([#1224](https://github.com/hemilabs/heminetwork/pull/1224)).
 - Fix `tbc` block download stalling on a low-work header fork. Headers
   that fork off at or below the last checkpoint the best header passed,
   or that contradict a checkpoint, are now rejected, and the download
