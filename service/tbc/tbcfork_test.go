@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -112,6 +113,18 @@ type btcNode struct {
 	keystones map[string]*hemi.L2Keystone // keystones found in various tx'
 
 	ln net.Listener
+
+	// Run and Stop state, protected by mtx.
+	conn    net.Conn      // accepted connection
+	running bool          // Run started and will close done
+	stopped bool          // Stop was called
+	done    chan struct{} // closed when Run returns
+
+	// Test hooks.  accepting is closed by Run after it set running and
+	// before it calls Accept.  exitHook, when set before Run starts, is
+	// called by Run on return, before it closes done.
+	accepting chan struct{}
+	exitHook  func()
 }
 
 func newFakeNode(t *testing.T) (*btcNode, error) {
@@ -135,6 +148,8 @@ func newFakeNode(t *testing.T) (*btcNode, error) {
 		keys:           make(map[string]*namedKey, 10),
 		keystones:      make(map[string]*hemi.L2Keystone, 10),
 		msgCh:          make(chan string, 10),
+		done:           make(chan struct{}),
+		accepting:      make(chan struct{}),
 	}
 
 	// Add miner key to key pool
@@ -1250,11 +1265,35 @@ func (b *btcNode) MineAndSendFake(ctx context.Context, prevHash *chainhash.Hash,
 }
 
 func (b *btcNode) Run(ctx context.Context) error {
+	b.mtx.Lock()
+	if b.stopped {
+		b.mtx.Unlock()
+		return net.ErrClosed
+	}
+	b.running = true
+	b.mtx.Unlock()
+	defer func() {
+		if b.exitHook != nil {
+			b.exitHook()
+		}
+		close(b.done)
+	}()
+
+	close(b.accepting)
 	b.logf("waiting for connection")
 	conn, err := b.ln.Accept()
 	if err != nil {
 		return err
 	}
+
+	b.mtx.Lock()
+	if b.stopped {
+		b.mtx.Unlock()
+		_ = conn.Close()
+		return net.ErrClosed
+	}
+	b.conn = conn
+	b.mtx.Unlock()
 
 	return b.handleRPC(ctx, conn)
 }
@@ -1264,20 +1303,136 @@ func (b *btcNode) Address() string {
 	return b.ln.Addr().String()
 }
 
+// Stop closes the listener and the connection and waits for Run to return.
+// Run logs through the test, and a log after the test returned panics, so
+// Stop must not return while Run still runs.  A Run that starts after Stop
+// returns at once.
 func (b *btcNode) Stop() error {
 	b.mtx.Lock()
-	p := b.p
+	b.stopped = true
+	running := b.running
+	conn := b.conn
+	b.conn = nil
 	b.p = nil
 	b.mtx.Unlock()
-	if p == nil {
-		return nil
+
+	err := b.ln.Close()
+	if conn != nil {
+		err = errors.Join(err, conn.Close())
+	}
+	if running {
+		<-b.done
 	}
 
-	if err := p.Close(); err != nil {
-		return err
+	return err
+}
+
+// TestFakeNodeStop checks that Stop returns only after Run returned, in
+// every state Run can be in.
+func TestFakeNodeStop(t *testing.T) {
+	isClosed := func(done chan struct{}) bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
 	}
 
-	return b.ln.Close()
+	t.Run("before run", func(t *testing.T) {
+		n, err := newFakeNode(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := n.Stop(); err != nil {
+			t.Fatal(err)
+		}
+		// Run must not block in Accept on a stopped node.
+		if err := n.Run(t.Context()); !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("run: %v", err)
+		}
+	})
+
+	t.Run("accept", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			n, err := newFakeNode(t)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Hold Run on its way out, so that a Stop that does not
+			// wait for Run is seen to return while Run still runs.
+			exiting := make(chan struct{})
+			hold := make(chan struct{})
+			n.exitHook = func() {
+				close(exiting)
+				<-hold
+			}
+			errCh := make(chan error, 1)
+			go func() { errCh <- n.Run(t.Context()) }()
+			<-n.accepting
+
+			n.mtx.Lock()
+			running := n.running
+			n.mtx.Unlock()
+			if !running {
+				t.Fatal("run not running")
+			}
+
+			stopErr := make(chan error, 1)
+			go func() { stopErr <- n.Stop() }()
+
+			// Stop must close the listener, so Run leaves Accept.
+			<-exiting
+			// Run now waits on hold and Stop, which must wait for
+			// Run, on done; both are durably blocked.
+			synctest.Wait()
+			select {
+			case err := <-stopErr:
+				t.Fatalf("stop returned before run: %v", err)
+			default:
+			}
+
+			close(hold)
+			if err := <-stopErr; err != nil {
+				t.Fatal(err)
+			}
+			if !isClosed(n.done) {
+				t.Fatal("stop returned before run")
+			}
+			if err := <-errCh; !errors.Is(err, net.ErrClosed) {
+				t.Fatalf("run: %v", err)
+			}
+		})
+	})
+
+	t.Run("connected", func(t *testing.T) {
+		n, err := newFakeNode(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		errCh := make(chan error, 1)
+		go func() { errCh <- n.Run(t.Context()) }()
+
+		var d net.Dialer
+		conn, err := d.DialContext(t.Context(), "tcp", n.Address())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		// The node sends its version right after Accept, so a read
+		// means Run is in handleRPC.
+		if _, err := conn.Read(make([]byte, 1)); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := n.Stop(); err != nil {
+			t.Fatal(err)
+		}
+		if !isClosed(n.done) {
+			t.Fatal("stop returned before run")
+		}
+		<-errCh
+	})
 }
 
 type zkTxInfo struct {
