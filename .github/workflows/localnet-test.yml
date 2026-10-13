@@ -22,8 +22,82 @@ permissions:
   contents: read
 
 jobs:
+  build-and-cache:
+    name: "Build and Cache"
+    runs-on: "ubuntu-latest"
+    env:
+      DOCKERFILE_NAME: ./e2e/optimism-stack.Dockerfile
+      DOCKER_IMAGE_TAG: optimism-stack:latest
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: "Calculate optimism-stack.Dockerfile hash"
+        id: dockerfile-hash
+        run: echo "hash=$(sha256sum $DOCKERFILE_NAME | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: "Restore cached optimism-stack image"
+        id: cache-optimism-stack
+        env:
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.LOCALNET_OPTIMISM_STACK_CACHE_FILE }}
+          key: optimism-stack-${{ steps.dockerfile-hash.outputs.hash }}
+
+      - name: "Load cached optimism-stack image"
+        env:
+          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
+        if: env.OPTIMISM_STACK_CACHE_HIT == 'true'
+        run: |
+          echo "Loading cached optimism-stack image (Dockerfile unchanged)"
+          zstd -dc $LOCALNET_OPTIMISM_STACK_CACHE_FILE | docker load
+
+          # remove the tar.zst file to save space
+          rm $LOCALNET_OPTIMISM_STACK_CACHE_FILE
+
+          echo "Successfully loaded cached image and tagged as $DOCKER_IMAGE_TAG"
+
+      - name: "Build optimism-stack image"
+        env:
+          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+        if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
+        run: |
+          echo "Building optimism-stack image from Dockerfile (no cache or Dockerfile changed)"
+          docker build -f ./$DOCKERFILE_NAME -t $DOCKER_IMAGE_TAG .
+          docker image prune -f
+          docker system prune -f
+      
+      - name: "remove dangling"
+        run: |
+          docker system prune -f
+          docker image prune -f
+
+      - name: "Save optimism-stack image to cache"
+        env:
+          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
+          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
+        if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
+        run: |
+          echo "Saving $DOCKER_IMAGE_TAG image to cache"
+          IMAGE_ID=$(docker images -q $DOCKER_IMAGE_TAG)
+          if [ -z "$IMAGE_ID" ]; then
+            echo "Error: Could not find $DOCKER_IMAGE_TAG image"
+            exit 1
+          fi
+          echo "Image ID: $IMAGE_ID"
+          IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_ID")
+          echo "Image size: $IMAGE_SIZE"
+          docker save $DOCKER_IMAGE_TAG | zstd > $LOCALNET_OPTIMISM_STACK_CACHE_FILE
+          TAR_SIZE=$(du -hs $LOCALNET_OPTIMISM_STACK_CACHE_FILE | cut -f1)
+          echo "Saved compressed tarball size: $TAR_SIZE"
+  
   test:
     name: "Test"
+    needs: ["build-and-cache"]
     runs-on: "ubuntu-latest"
     env:
       DOCKERFILE_NAME: ./e2e/optimism-stack.Dockerfile
@@ -34,6 +108,8 @@ jobs:
       matrix:
         go-version: [ "1.26.x" ]
         proposer_mode: ["l2oo", "fault"]
+        l1: ["http://geth-l1:8545", "ws://geth-l1:8546"]
+        l1_rpckind: ["basic", "any", "standard"]
         gethl1:
           # the release that Sepolia runs through the Glamsterdam activation
           - "ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64"
@@ -73,16 +149,6 @@ jobs:
 
           echo "Successfully loaded cached image and tagged as $DOCKER_IMAGE_TAG"
 
-      - name: "Build optimism-stack image"
-        env:
-          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
-        if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
-        run: |
-          echo "Building optimism-stack image from Dockerfile (no cache or Dockerfile changed)"
-          docker build -f ./$DOCKERFILE_NAME -t $DOCKER_IMAGE_TAG .
-          docker image prune -f
-          docker system prune -f
-
       - name: "build localnet"
         env:
           OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
@@ -101,25 +167,6 @@ jobs:
           docker system prune -f
           docker image prune -f
 
-      - name: "Save optimism-stack image to cache"
-        env:
-          OPTIMISM_STACK_CACHE_HIT: "${{ steps.cache-optimism-stack.outputs.cache-hit }}"
-          LOCALNET_OPTIMISM_STACK_CACHE_FILE: optimism-stack-image.tar.zst
-        if: env.OPTIMISM_STACK_CACHE_HIT != 'true'
-        run: |
-          echo "Saving $DOCKER_IMAGE_TAG image to cache"
-          IMAGE_ID=$(docker images -q $DOCKER_IMAGE_TAG)
-          if [ -z "$IMAGE_ID" ]; then
-            echo "Error: Could not find $DOCKER_IMAGE_TAG image"
-            exit 1
-          fi
-          echo "Image ID: $IMAGE_ID"
-          IMAGE_SIZE=$(docker images --format "{{.Size}}" "$IMAGE_ID")
-          echo "Image size: $IMAGE_SIZE"
-          docker save $DOCKER_IMAGE_TAG | zstd > $LOCALNET_OPTIMISM_STACK_CACHE_FILE
-          TAR_SIZE=$(du -hs $LOCALNET_OPTIMISM_STACK_CACHE_FILE | cut -f1)
-          echo "Saved compressed tarball size: $TAR_SIZE"
-
       # The L1 starts before Glamsterdam and activates it 7 minutes after its
       # genesis (L1_AMSTERDAM_OFFSET_SECONDS, see e2e/genesisl2.sh), when the
       # Hemi stack is up and has been deriving the L2 for a few minutes.  The
@@ -130,6 +177,8 @@ jobs:
           LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
           PROPOSER_MODE: ${{ matrix.proposer_mode }}
           L1_AMSTERDAM_OFFSET_SECONDS: "420"
+          LOCALNET_L1: ${{ matrix.l1 }}
+          LOCALNET_L1_RPCKIND: ${{ matrix.l1_rpckind }}
         run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
 
       - name: "remove more dangling"

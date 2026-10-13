@@ -239,6 +239,10 @@ services:
       - "/shared-dir/gethl1datadir"
       - "--gpo.percentile=0"
       - --http.api=web3,debug,eth,txpool,net,engine,miner
+      - "--ws"
+      - "--ws.addr=0.0.0.0"
+      - "--ws.port=8546"
+      - "--ws.origins=*"
       - --ws.api=debug,eth,txpool,net,engine,miner
       - --rpc.txfeecap=0
       # keep the 200M block gas limit set in genesisl2.sh (geth would move it
@@ -360,8 +364,8 @@ services:
       # transactions and receipts of the block against it.  This is what
       # fails first if op-node does not understand the blocks of the L1,
       # for example after the L1 activated a hard fork.
-      - "--l1=http://geth-l1:8545"
-      - "--l1.rpckind=standard"
+      - "--l1=${LOCALNET_L1:-'http://geth-l1:8545'}"
+      - "--l1.rpckind=${LOCALNET_L1_RPCKIND:-standard}"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
       # poll the L1 safe and finalized labels every 30 seconds instead of
@@ -413,9 +417,10 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
-      # the L1 is not trusted, see op-node
-      - "--l1=http://geth-l1:8545"
-      - "--l1.rpckind=standard"
+      # the L1 is not trusted, see op-node; this one follows the L1 head
+      # with a WebSocket subscription
+      - "--l1=${LOCALNET_L1:-'http://geth-l1:8545'}"
+      - "--l1.rpckind=${LOCALNET_L1_RPCKIND:-standard}"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
       # poll the L1 safe and finalized labels every 30 seconds instead of
@@ -502,9 +507,10 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
-      # the L1 is not trusted, see op-node
-      - "--l1=http://geth-l1:8545"
-      - "--l1.rpckind=standard"
+      # the L1 is not trusted, see op-node; this one fetches the receipts
+      # of an L1 block one transaction at a time
+      - "--l1=${LOCALNET_L1:-'http://geth-l1:8545'}"
+      - "--l1.rpckind=${LOCALNET_L1_RPCKIND:-standard}"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
       # poll the L1 safe and finalized labels every 30 seconds instead of
@@ -723,9 +729,14 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
-      # the L1 is not trusted, see op-node
-      - "--l1=http://geth-l1:8545"
-      - "--l1.rpckind=standard"
+      # the L1 is not trusted, see op-node; this one lets op-node find out
+      # how to fetch receipts (the production setting, on geth it settles on
+      # their consensus encoding after trying the provider-specific methods),
+      # follows the L1 one block behind its head, and reloads the runtime
+      # config from L1 storage proofs every 30 seconds
+      - "--l1=${LOCALNET_L1:-'http://geth-l1:8545'}"
+      - "--l1.rpckind=${LOCALNET_L1_RPCKIND:-standard}"
+      - "--l1.runtime-config-reload-interval=30s"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
       # poll the L1 safe and finalized labels every 30 seconds instead of
