@@ -1437,6 +1437,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	bmBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
 	mdBatch := new(leveldb.Batch)
+	tipBatch := new(leveldb.Batch) // written last, see commit order below
 
 	cdiff := &pbh.Difficulty
 	height := pbh.Height
@@ -1517,7 +1518,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			// log.Infof("%v", spew.Sdump(bestBH.Hash[:]))
 			// log.Infof("%v", spew.Sdump(firstHash))
 			// pick the right return value based on ancestor
-			bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
+			tipBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 			it = tbcd.ITChainFork
 
 		default:
@@ -1525,7 +1526,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		}
 	} else {
 		// Extend current best tip
-		bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
+		tipBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 		it = tbcd.ITChainExtend
 	}
 
@@ -1568,22 +1569,40 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			fmt.Errorf("metadata insert: %w", err)
 	}
 
-	// height hash commit
-	if err = hhCommit(); err != nil {
+	// Readers take no lock and each database commits on its own, so
+	// commit what is referenced before what refers to it: the headers,
+	// then blocks missing, then the height index, then the canonical
+	// tip.  A reader never sees a height or a tip without its header.
+
+	// block headers commit
+	if err = bhsCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash commit: %w", err)
+			fmt.Errorf("block headers commit: %w", err)
 	}
+	headersInsertCommit(level.BlockHeadersDB)
 
 	// blocks missing commit
 	if err = bmCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
+	headersInsertCommit(level.BlocksMissingDB)
 
-	// block headers commit
-	if err = bhsCommit(); err != nil {
+	// height hash commit
+	if err = hhCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("block headers commit: %w", err)
+			fmt.Errorf("height hash commit: %w", err)
+	}
+	headersInsertCommit(level.HeightHashDB)
+
+	// canonical tip, still serialized by the metadata transaction
+	if tipBatch.Len() > 0 {
+		err = l.pool[level.BlockHeadersDB].Write(tipBatch, nil)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("canonical tip: %w", err)
+		}
+		headersInsertCommit("canonicaltip")
 	}
 
 	// metadata commit
@@ -1593,6 +1612,17 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	}
 
 	return it, cbh, lbh, len(bhs.Headers), nil
+}
+
+// headersInsertCommitted is called by BlockHeadersInsert after each commit
+// with the name of the database that it committed.  It is nil except in
+// tests, which use it to read the database between the commits.
+var headersInsertCommitted func(db string)
+
+func headersInsertCommit(db string) {
+	if headersInsertCommitted != nil {
+		headersInsertCommitted(db)
+	}
 }
 
 // XXX return hash and height only
