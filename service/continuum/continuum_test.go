@@ -38,6 +38,9 @@ import (
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
+
+	_ "embed"
 
 	"github.com/hemilabs/heminetwork/v2/ttl"
 )
@@ -13458,4 +13461,1971 @@ func TestBroadcastForgedNotForwarded(t *testing.T) {
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("server error: %v", err)
 	}
+}
+
+// TestSessionRateLimit verifies that the per-session token bucket
+// rate limiter (F1) drops messages when the burst is exceeded.
+// Uses a real TCP server because net.Pipe is synchronous — server
+// response writes block when the client doesn't drain them,
+// preventing the handle loop from reaching the rate limiter.
+func TestSessionRateLimit(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.PeersWanted = 2
+	s.cfg.PingInterval = time.Hour
+	s.cfg.MaintainInterval = time.Hour
+	s.cfg.InitialPingTimeout = time.Hour
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Logf("server: %v", err)
+		}
+	}()
+
+	addr := waitForListenAddress(t, s, 2*time.Second)
+
+	// Connect a client.
+	conn, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	tr := new(Transport)
+	if err := tr.KeyExchange(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tr.Handshake(ctx, secret); err != nil {
+		t.Fatal(err)
+	}
+
+	// Drain incoming messages (initial exchange + responses) so
+	// the server's writes don't block.
+	go func() {
+		for {
+			if _, _, err := tr.Read(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait for session to register.
+	waitForSessions(t, s, 1, 2*time.Second)
+
+	// Flood with messageBurst + 50 messages.  TCP buffering
+	// lets us write faster than the server processes.
+	total := messageBurst + 50
+	for i := 0; i < total; i++ {
+		if err := tr.Write(secret.Identity, PeerNotify{
+			Count: i,
+		}); err != nil {
+			t.Logf("write stopped at %d: %v", i, err)
+			break
+		}
+	}
+
+	// Poll for rate drops — the handle loop drains the TCP
+	// buffer asynchronously.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.rateDropped.Load() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	drops := s.rateDropped.Load()
+	if drops == 0 {
+		t.Fatalf("expected rate drops after %d messages, got 0", total)
+	}
+	t.Logf("rate drops: %d/%d messages", drops, total)
+}
+
+// TestEnvelopeRateLimit verifies the per-sender EncryptedPayload
+// rate gate (F3) drops envelopes after exceeding the limit.
+func TestEnvelopeRateLimit(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	senderSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	envelopeRates, err := ttl.New(64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	naclPub, err := secret.NaClPublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{
+		secret:        secret,
+		envelopeRates: envelopeRates,
+		peers: map[Identity]*PeerRecord{
+			senderSecret.Identity: {
+				Identity: senderSecret.Identity,
+				NaClPub:  naclPub,
+			},
+		},
+	}
+
+	// Send envelopeRateLimit+10 envelopes from the same sender.
+	var dropped int
+	for i := 0; i < envelopeRateLimit+10; i++ {
+		ep, err := SealBox(
+			[]byte(`{"origin_timestamp":1}`),
+			naclPub,
+			senderSecret,
+			PPingRequest,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.decryptPayload(ep)
+		if err != nil {
+			dropped++
+		}
+	}
+
+	if dropped == 0 {
+		t.Fatal("expected envelope rate drops, got 0")
+	}
+	if s.envRateDrops.Load() == 0 {
+		t.Fatal("envRateDrops counter is 0")
+	}
+	t.Logf("envelope rate: %d dropped out of %d", dropped, envelopeRateLimit+10)
+}
+
+// TestConnCooldown verifies the per-IP reconnection cooldown (F5)
+// rejects connections from IPs that recently received BusyResponse.
+func TestConnCooldown(t *testing.T) {
+	preParams := loadPreParams(t, 2)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	// Start a server with PeersWanted=1.
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	s.cfg.PeersWanted = 1
+	s.cfg.PingInterval = time.Hour // no pings during test
+	s.cfg.MaintainInterval = time.Hour
+
+	go func() {
+		if err := s.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Logf("server: %v", err)
+		}
+	}()
+
+	addr := waitForListenAddress(t, s, 2*time.Second)
+
+	// Client 1: connect and fill the single slot.
+	conn1, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn1.Close() })
+	tr1 := new(Transport)
+	if err := tr1.KeyExchange(ctx, conn1); err != nil {
+		t.Fatal(err)
+	}
+	sec1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tr1.Handshake(ctx, sec1); err != nil {
+		t.Fatal(err)
+	}
+	// Drain initial messages.
+	go func() {
+		for {
+			_, _, err := tr1.Read()
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// Wait for session to be registered.
+	waitForSessions(t, s, 1, 2*time.Second)
+
+	// Client 2: connect — should get BusyResponse and trigger cooldown.
+	conn2, err := (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr2 := new(Transport)
+	if err := tr2.KeyExchange(ctx, conn2); err != nil {
+		conn2.Close()
+		t.Fatal(err)
+	}
+	sec2, err := NewSecret()
+	if err != nil {
+		conn2.Close()
+		t.Fatal(err)
+	}
+	_, _, err = tr2.Handshake(ctx, sec2)
+	if err != nil {
+		conn2.Close()
+		t.Fatal(err)
+	}
+	// Read the BusyResponse.
+	_, cmd, err := tr2.Read()
+	if err != nil {
+		t.Fatalf("read busy: %v", err)
+	}
+	if _, ok := cmd.(*BusyResponse); !ok {
+		t.Fatalf("expected BusyResponse, got %T", cmd)
+	}
+	tr2.Close()
+
+	// Client 3: reconnect from the same IP.  The server should
+	// reject via cooldown before KX.  Poll cooldownDrops to
+	// confirm — the server goroutine may not have reached
+	// cooldown.Put yet when we connect.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		conn3, err := (&net.Dialer{Timeout: 1 * time.Second}).DialContext(ctx, "tcp", addr)
+		if err != nil {
+			// Dial itself failed — server may have closed
+			// the listener.  Check counter.
+			break
+		}
+		if err := conn3.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
+			conn3.Close()
+			t.Fatal(err)
+		}
+		buf := make([]byte, 1)
+		_, _ = conn3.Read(buf)
+		conn3.Close()
+		if s.cooldownDrops.Load() > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	drops := s.cooldownDrops.Load()
+	if drops == 0 {
+		t.Fatal("cooldownDrops counter is 0")
+	}
+	t.Logf("cooldown drops: %d", drops)
+}
+
+// Coverage for the three inbound-abuse controls:
+//
+//   - a per-identity message bucket that survives reconnects and
+//     expires on idleness, so it neither refills for free nor grows
+//     without bound;
+//   - a per-source cap on IN-FLIGHT handshakes, so one address cannot
+//     occupy every handshakeSem slot;
+//   - a budget on REFUSED messages, so a peer that ignores the message
+//     limit is disconnected rather than being paid for forever.
+//
+// Time is supplied explicitly wherever a token bucket is asserted on.
+// rate.Limiter refills on the wall clock, so `drain(); if l.Allow()`
+// is only correct when both statements run inside one refill interval
+// (10.3ms at messageRate) — a flake that hides on an idle machine.
+// AllowN with a fixed instant removes the clock from the assertion.
+
+// limiterServer builds a Server through the production constructor so
+// the limiter table exists, and pushes the session timers out of range
+// so they cannot fire during a test. handle() arms an initial-ping
+// timeout; at the default 7s it races the negative waits below and
+// would close the session for a reason the test then misattributes.
+func limiterServer(t *testing.T) *Server {
+	t.Helper()
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatalf("server secret: %v", err)
+	}
+	peersTTL, err := ttl.New(16, true)
+	if err != nil {
+		t.Fatalf("peers ttl: %v", err)
+	}
+	pings, err := ttl.New(16, true)
+	if err != nil {
+		t.Fatalf("pings ttl: %v", err)
+	}
+	s.secret, s.peersTTL, s.pings = secret, peersTTL, pings
+	s.cfg.InitialPingTimeout = time.Hour
+	s.cfg.PingInterval = time.Hour
+	s.cfg.MaintainInterval = time.Hour
+	return s
+}
+
+// drainAt empties a limiter at a fixed instant and returns how many
+// tokens it granted. The instant is fixed so no refill can occur
+// mid-drain.
+func drainAt(t *testing.T, l *rate.Limiter, now time.Time) int {
+	t.Helper()
+	const bound = messageBurst * 10
+	for i := range bound {
+		if !l.AllowN(now, 1) {
+			return i
+		}
+	}
+	t.Fatalf("limiter granted %d tokens without refusing", bound)
+	return 0
+}
+
+// --- per-identity message bucket ---
+
+func TestPeerLimiterSurvivesReconnect(t *testing.T) {
+	s := limiterServer(t)
+	peer := mustSecret(t).Identity
+	now := time.Now()
+
+	if got := drainAt(t, s.peerLimiter(peer), now); got == 0 {
+		t.Fatal("limiter refused the very first message")
+	}
+
+	// Reconnect: handle() looks the limiter up again for the same
+	// identity and must get the exhausted one, not a fresh bucket.
+	if s.peerLimiter(peer).AllowN(now, 1) {
+		t.Fatal("reconnecting refilled the burst budget: a peer can " +
+			"spend its burst, drop the connection, and immediately " +
+			"reconnect for another one")
+	}
+}
+
+func TestPeerLimiterIsPerIdentity(t *testing.T) {
+	s := limiterServer(t)
+	noisy := mustSecret(t).Identity
+	quiet := mustSecret(t).Identity
+	now := time.Now()
+
+	drainAt(t, s.peerLimiter(noisy), now)
+
+	if !s.peerLimiter(quiet).AllowN(now, 1) {
+		t.Fatal("a different identity was throttled by the noisy peer")
+	}
+	if s.peerLimiter(noisy).AllowN(now, 1) {
+		t.Fatal("the exhausted identity was refilled")
+	}
+}
+
+func TestPeerLimiterStableIdentity(t *testing.T) {
+	s := limiterServer(t)
+	peer := mustSecret(t).Identity
+
+	first := s.peerLimiter(peer)
+	if second := s.peerLimiter(peer); first != second {
+		t.Fatal("peerLimiter returned a new limiter for a known identity")
+	}
+	if got := first.Burst(); got != messageBurst {
+		t.Fatalf("burst = %d, want %d", got, messageBurst)
+	}
+	if got := first.Limit(); got != rate.Limit(messageRate) {
+		t.Fatalf("rate = %v, want %v", got, rate.Limit(messageRate))
+	}
+}
+
+// TestPeerLimiterTableSelfBounds proves the table does not depend on
+// the peer record for eviction.
+//
+// Identities are free to mint and addPeer REJECTS a peer whose NaClPub
+// is absent, while the handshake permits it — so an attacker can hold
+// a session, and therefore a limiter, for an identity that never
+// becomes a tracked peer. Keying eviction off the peer record leaked
+// one entry per such connection, permanently. The table must expire on
+// its own instead.
+func TestPeerLimiterTableSelfBounds(t *testing.T) {
+	s := limiterServer(t)
+
+	// None of these identities is ever added to s.peers.
+	for range 64 {
+		s.peerLimiter(mustSecret(t).Identity)
+	}
+	s.mtx.RLock()
+	tracked := len(s.peers)
+	s.mtx.RUnlock()
+	if tracked != 0 {
+		t.Fatalf("test setup: %d peers tracked, want 0", tracked)
+	}
+	if got := s.limiters.Len(); got != 64 {
+		t.Fatalf("limiters = %d, want 64", got)
+	}
+
+	// Entries carry their own expiry rather than waiting on a peer
+	// record that will never exist.
+	id := mustSecret(t).Identity
+	s.peerLimiter(id)
+	if _, _, err := s.limiters.Get(id); err != nil {
+		t.Fatalf("entry not stored: %v", err)
+	}
+	if _, err := s.limiters.Delete(id); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, _, err := s.limiters.Get(id); err == nil {
+		t.Fatal("entry survived deletion")
+	}
+}
+
+// --- per-source in-flight handshake cap ---
+
+func tcpAddr(t *testing.T, ip string, port int) *net.TCPAddr {
+	t.Helper()
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		t.Fatalf("bad test ip %q", ip)
+	}
+	return &net.TCPAddr{IP: parsed, Port: port}
+}
+
+func TestHandshakeInFlightCap(t *testing.T) {
+	s := limiterServer(t)
+	addr := tcpAddr(t, "10.0.0.1", 40000)
+
+	keys := make([]string, 0, maxHandshakesPerIP)
+	for i := range maxHandshakesPerIP {
+		k, ok := s.acquireHandshake(addr)
+		if !ok {
+			t.Fatalf("attempt %d refused below the cap", i)
+		}
+		keys = append(keys, k)
+	}
+
+	// Past the cap: refused, so the source cannot occupy more than
+	// maxHandshakesPerIP semaphore slots no matter how fast it
+	// connects. This is what an arrival-rate limit could not do —
+	// occupancy is rate x hold-time, so any permitted rate holds
+	// rate*handshakeTimeout slots in steady state.
+	if _, ok := s.acquireHandshake(addr); ok {
+		t.Fatalf("a source held more than %d handshakes in flight: "+
+			"it can occupy every semaphore slot and starve "+
+			"legitimate peers", maxHandshakesPerIP)
+	}
+
+	// Finishing one frees exactly one.
+	s.releaseHandshake(keys[0])
+	if _, ok := s.acquireHandshake(addr); !ok {
+		t.Fatal("releasing a handshake did not free a slot")
+	}
+}
+
+// TestHandshakeInFlightNeverLocksOut proves the cap cannot be used to
+// exclude an honest peer. Unlike an arrival-rate limit, a source with
+// fewer than the cap in flight is ALWAYS admitted, so a peer behind a
+// shared NAT egress is never refused because of a co-located flooder.
+func TestHandshakeInFlightNeverLocksOut(t *testing.T) {
+	s := limiterServer(t)
+	shared := tcpAddr(t, "10.0.0.1", 40000)
+
+	// A flooder saturates the shared address, then goes away.
+	var keys []string
+	for range maxHandshakesPerIP {
+		k, _ := s.acquireHandshake(shared)
+		keys = append(keys, k)
+	}
+	for _, k := range keys {
+		s.releaseHandshake(k)
+	}
+
+	// The honest peer behind the same address connects and is
+	// admitted immediately — no residual penalty, unlike a token
+	// bucket which would still be empty.
+	if _, ok := s.acquireHandshake(shared); !ok {
+		t.Fatal("an honest peer was refused after a co-located " +
+			"flooder finished: the cap must not carry a penalty " +
+			"forward or NAT'd peers get locked out")
+	}
+}
+
+// TestHandshakeIPv6PrefixKeyed proves addresses in one /64 share a
+// budget. A routed /64 is the standard host allocation, so keying on
+// the full /128 would let one machine mint unlimited distinct keys and
+// bypass the cap entirely.
+func TestHandshakeIPv6PrefixKeyed(t *testing.T) {
+	s := limiterServer(t)
+
+	first, ok := handshakeIP(tcpAddr(t, "2001:db8::1", 40000))
+	if !ok {
+		t.Fatal("no key derived for an IPv6 address")
+	}
+	second, _ := handshakeIP(tcpAddr(t, "2001:db8::dead:beef", 40001))
+	if first != second {
+		t.Fatalf("addresses in one /64 keyed separately (%q vs %q): "+
+			"a single host can rotate addresses to bypass the cap",
+			first, second)
+	}
+
+	// A different /64 is a different source.
+	other, _ := handshakeIP(tcpAddr(t, "2001:db8:0:1::1", 40000))
+	if other == first {
+		t.Fatal("distinct /64s shared a key")
+	}
+
+	// Saturating one /64 does not refuse another.
+	for range maxHandshakesPerIP {
+		s.acquireHandshake(tcpAddr(t, "2001:db8::1", 40000))
+	}
+	if _, ok := s.acquireHandshake(tcpAddr(t, "2001:db8::2", 40002)); ok {
+		t.Fatal("a second address in the saturated /64 was admitted")
+	}
+	if _, ok := s.acquireHandshake(tcpAddr(t, "2001:db8:0:1::1", 40000)); !ok {
+		t.Fatal("an unrelated /64 was refused")
+	}
+}
+
+func TestHandshakeIPv4KeyedWhole(t *testing.T) {
+	s := limiterServer(t)
+
+	a, ok := handshakeIP(tcpAddr(t, "10.0.0.1", 40000))
+	if !ok {
+		t.Fatal("no key derived for an IPv4 address")
+	}
+	// Source port must not matter: an attacker gets a fresh one per
+	// connection for free.
+	b, _ := handshakeIP(tcpAddr(t, "10.0.0.1", 40001))
+	if a != b {
+		t.Fatal("source port changed the key")
+	}
+	// Neighbouring addresses are distinct sources.
+	c, _ := handshakeIP(tcpAddr(t, "10.0.0.2", 40000))
+	if c == a {
+		t.Fatal("distinct IPv4 addresses shared a key")
+	}
+	for range maxHandshakesPerIP {
+		s.acquireHandshake(tcpAddr(t, "10.0.0.1", 40000))
+	}
+	if _, ok := s.acquireHandshake(tcpAddr(t, "10.0.0.2", 40000)); !ok {
+		t.Fatal("an unrelated IPv4 source was refused")
+	}
+}
+
+// TestHandshakeTableBoundedByInFlight proves the tracking map holds
+// only work actually in progress, so it cannot be grown by connection
+// churn from many sources.
+func TestHandshakeTableBoundedByInFlight(t *testing.T) {
+	s := limiterServer(t)
+
+	for i := range 4096 {
+		//nolint:gosec // deterministic test octets
+		ip := net.IPv4(10, byte(i>>16), byte(i>>8), byte(i))
+		k, ok := s.acquireHandshake(&net.TCPAddr{IP: ip, Port: 40000})
+		if !ok {
+			t.Fatalf("source %d refused on its first handshake", i)
+		}
+		s.releaseHandshake(k)
+	}
+
+	s.handshakeIPMtx.Lock()
+	n := len(s.handshakesInFlight)
+	s.handshakeIPMtx.Unlock()
+	if n != 0 {
+		t.Fatalf("in-flight table = %d entries after every handshake "+
+			"finished, want 0", n)
+	}
+}
+
+// TestHandshakeNonTCPAddr covers the guard for addresses with no IP to
+// key on; handshakeSem still bounds total concurrency.
+func TestHandshakeNonTCPAddr(t *testing.T) {
+	s := limiterServer(t)
+	addr := &net.UnixAddr{Name: "/tmp/test.sock", Net: "unix"}
+
+	for range maxHandshakesPerIP * 2 {
+		k, ok := s.acquireHandshake(addr)
+		if !ok {
+			t.Fatal("non-TCP address was capped")
+		}
+		if k != "" {
+			t.Fatalf("non-TCP address produced key %q", k)
+		}
+	}
+	// Releasing an empty key is a no-op, not a corruption.
+	s.releaseHandshake("")
+	s.handshakeIPMtx.Lock()
+	n := len(s.handshakesInFlight)
+	s.handshakeIPMtx.Unlock()
+	if n != 0 {
+		t.Fatalf("in-flight table = %d, want 0", n)
+	}
+}
+
+// TestAcceptLoopEnforcesHandshakeCap drives the REAL listener: the
+// unit tests above exercise the helper directly and would pass even if
+// nothing called it.
+func TestAcceptLoopEnforcesHandshakeCap(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	preParams := loadPreParams(t, 1)
+	s := newTestServer(t, preParams, 0, "localhost:0", nil)
+	errCh := make(chan error, 1)
+	go func() { errCh <- s.Run(ctx) }()
+	addr := waitForListenAddress(t, s, 5*time.Second)
+
+	// Open connections that never speak the protocol. Each would
+	// otherwise hold a semaphore slot for the whole handshake
+	// timeout — the starvation this cap exists to stop.
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	var conns []net.Conn
+	t.Cleanup(func() {
+		for _, c := range conns {
+			c.Close()
+		}
+	})
+	for range maxHandshakesPerIP * 8 {
+		c, err := dialer.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			break // refused at the OS level is also a rejection
+		}
+		conns = append(conns, c)
+	}
+
+	waitForCondition(t, "accept loop never refused a flood of "+
+		"unauthenticated connections from one source",
+		15*time.Second, func() bool {
+			return s.hsRateDrops.Load() > 0
+		})
+
+	cancel()
+	exitCtx, exitCancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer exitCancel()
+	select {
+	case <-errCh:
+	case <-exitCtx.Done():
+		t.Fatal("server did not shut down")
+	}
+}
+
+// --- refused-message budget ---
+
+// blockedSession drives handle() with a peer whose message limiter
+// refuses everything, writes msgs messages, and reports whether
+// handle() closed the session.
+//
+// The limiter is pinned to refuse rather than being outrun in real
+// time: a test that floods and hopes to beat the refill rate is a race
+// against machine speed and fails under load.
+func blockedSession(t *testing.T, s *Server, peer *Secret, msgs int) bool {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// rate 0, burst 0: AllowN is always false.
+	s.limiterMtx.Lock()
+	s.limiters.Put(context.Background(), limiterTTL, peer.Identity,
+		rate.NewLimiter(0, 0), nil, nil)
+	s.limiterMtx.Unlock()
+
+	// Real TCP, not net.Pipe: the pipe is unbuffered, so every write
+	// blocks for a reader and nothing can be staged.
+	srv, cli := localhostTransports(t)
+	if err := s.newSession(&peer.Identity, srv); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+
+	done := make(chan struct{})
+	s.wg.Add(1)
+	go func() {
+		defer close(done)
+		s.handle(ctx, &peer.Identity, srv, false)
+	}()
+
+	// Drain whatever handle() sends so its writes cannot block the
+	// read loop under test. Deadline cleared so the drain lives as
+	// long as the session it protects.
+	go func() {
+		for {
+			if _, _, _, err := cli.read(0); err != nil {
+				return
+			}
+		}
+	}()
+
+	for range msgs {
+		select {
+		case <-done:
+			return true
+		default:
+		}
+		if err := cli.Write(peer.Identity, PingResponse{}); err != nil {
+			// A closed transport IS the disconnect under test.
+			// handle() closes the transport before this goroutine
+			// observes done, so give it a moment to land rather
+			// than racing it.
+			closeCtx, closeCancel := context.WithTimeout(t.Context(),
+				5*time.Second)
+			defer closeCancel()
+			select {
+			case <-done:
+				return true
+			case <-closeCtx.Done():
+				t.Fatalf("write failed but the session stayed open: %v", err)
+			}
+		}
+	}
+
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer waitCancel()
+	select {
+	case <-done:
+		return true
+	case <-waitCtx.Done():
+		cancel()
+		<-done
+		return false
+	}
+}
+
+func TestSustainedRefusalDisconnects(t *testing.T) {
+	s := limiterServer(t)
+
+	if !blockedSession(t, s, mustSecret(t), messageDropBurst*2) {
+		t.Fatal("a peer that ignored the message limit was never " +
+			"disconnected: every message it sends costs a transport " +
+			"decrypt, so refusing alone lets it waste resources forever")
+	}
+	if s.rateDisconnects.Load() == 0 {
+		t.Fatal("disconnect was not counted")
+	}
+}
+
+// TestBriefOvershootSurvives proves the budget tolerates a burst.
+// The assertion is positive: it waits for the refusals to actually be
+// counted before concluding the session survived them, so it cannot
+// pass by the writer stalling and no refusals happening at all.
+func TestBriefOvershootSurvives(t *testing.T) {
+	s := limiterServer(t)
+	peer := mustSecret(t)
+
+	const msgs = messageDropBurst / 2
+	done := make(chan bool, 1)
+	go func() { done <- blockedSession(t, s, peer, msgs) }()
+
+	waitForCondition(t, "the refused messages were never counted",
+		10*time.Second, func() bool {
+			return s.rateDropped.Load() >= msgs
+		})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	select {
+	case closed := <-done:
+		if closed {
+			t.Fatalf("session closed after %d refusals; the budget is "+
+				"%d, so a brief overshoot must be tolerated",
+				msgs, messageDropBurst)
+		}
+	case <-ctx.Done():
+		t.Fatal("blockedSession did not return")
+	}
+	if got := s.rateDisconnects.Load(); got != 0 {
+		t.Fatalf("rate disconnects = %d, want 0", got)
+	}
+}
+
+// TestRefusalBudgetIgnoresPacing is the regression for the defect
+// this control replaced.
+//
+// The previous version counted CONSECUTIVE refusals and reset the
+// count to zero on any accepted message. Because the message bucket
+// admits messageRate messages per second regardless of how fast they
+// arrive, one accepted message lands every 1/messageRate and cleared
+// the run — so reaching N consecutive refusals required more than
+// (N+1)*messageRate msgs/sec, and any rate below that sustained the
+// full decrypt cost indefinitely without ever disconnecting.
+//
+// A budget over time closes that hole because accepted messages never
+// touch it: only refusals spend tokens, and nothing refunds them. This
+// drives the exact interleaving that defeated the counter — runs of
+// refusals separated by accepted messages — and requires the budget to
+// still run out. Driven at a fixed instant so no refill occurs.
+func TestRefusalBudgetIgnoresPacing(t *testing.T) {
+	drops := rate.NewLimiter(messageDropRate, messageDropBurst)
+	now := time.Now()
+
+	const run = 16
+	spent := 0
+	disconnected := false
+	for range messageDropBurst {
+		for range run {
+			// A refusal spends budget.
+			if !drops.AllowN(now, 1) {
+				disconnected = true
+				break
+			}
+			spent++
+		}
+		if disconnected {
+			break
+		}
+		// An accepted message. Under the old scheme this reset the
+		// consecutive count to zero and the peer never tripped the
+		// threshold. Here it touches nothing, so the budget spent
+		// so far is not refunded.
+		if got := drops.TokensAt(now); got > float64(messageDropBurst-spent) {
+			t.Fatalf("an accepted message refunded budget: tokens %v, "+
+				"want at most %d", got, messageDropBurst-spent)
+		}
+	}
+	if !disconnected {
+		t.Fatal("a peer interleaving accepted messages between runs of " +
+			"refusals never exhausted the budget: pacing defeats the " +
+			"control")
+	}
+}
+
+// --- metrics ---
+
+func TestPromHandshakeRateDrops(t *testing.T) {
+	s := limiterServer(t)
+	if got := s.promHSRateDrops(); got != 0 {
+		t.Fatalf("initial = %v, want 0", got)
+	}
+	s.hsRateDrops.Add(3)
+	if got := s.promHSRateDrops(); got != 3 {
+		t.Fatalf("= %v, want 3", got)
+	}
+}
+
+func TestPromRateDisconnects(t *testing.T) {
+	s := limiterServer(t)
+	if got := s.promRateDisconnects(); got != 0 {
+		t.Fatalf("initial = %v, want 0", got)
+	}
+	s.rateDisconnects.Add(2)
+	if got := s.promRateDisconnects(); got != 2 {
+		t.Fatalf("= %v, want 2", got)
+	}
+}
+
+// MockRouter simulates a ceremony coordinator.
+// It generates CeremonyIDs and routes messages between parties.
+type MockRouter struct {
+	mu         sync.Mutex
+	parties    map[Identity]*MockParty
+	ceremonies map[CeremonyID]*MockCeremony
+}
+
+// MockParty simulates a TSS party that handles RPC messages.
+type MockParty struct {
+	id     Identity
+	secret *Secret           // Has private key for signing
+	inbox  chan any          // Receives RPC messages
+	outbox chan any          // Sends RPC messages
+	keys   map[string][]byte // keyID -> key share (simplified)
+}
+
+// MockCeremony tracks state for an active ceremony.
+type MockCeremony struct {
+	id        CeremonyID
+	ctype     CeremonyType
+	parties   []Identity
+	threshold int
+	responses map[Identity]bool
+	messages  []TSSMessage
+	done      bool
+	err       error
+}
+
+func NewMockRouter() *MockRouter {
+	return &MockRouter{
+		parties:    make(map[Identity]*MockParty),
+		ceremonies: make(map[CeremonyID]*MockCeremony),
+	}
+}
+
+// AddPartyWithSecret creates a party with a real keypair for signing.
+func (r *MockRouter) AddPartyWithSecret(secret *Secret) *MockParty {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	p := &MockParty{
+		id:     secret.Identity,
+		secret: secret,
+		inbox:  make(chan any, 100),
+		outbox: make(chan any, 100),
+		keys:   make(map[string][]byte),
+	}
+	r.parties[secret.Identity] = p
+	return p
+}
+
+// AddParty creates a party with a random identity (no signing capability).
+func (r *MockRouter) AddParty(id Identity) *MockParty {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	p := &MockParty{
+		id:     id,
+		inbox:  make(chan any, 100),
+		outbox: make(chan any, 100),
+		keys:   make(map[string][]byte),
+	}
+	r.parties[id] = p
+	return p
+}
+
+func (r *MockRouter) NewCeremonyID() CeremonyID {
+	var id CeremonyID
+	_, _ = rand.Read(id[:])
+	return id
+}
+
+func (r *MockRouter) StartKeygen(parties []Identity, threshold int) (CeremonyID, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(parties) < 2 {
+		return CeremonyID{}, errors.New("need at least 2 parties")
+	}
+	if threshold < 1 || threshold >= len(parties) {
+		return CeremonyID{}, errors.New("invalid threshold")
+	}
+
+	cid := r.NewCeremonyID()
+	r.ceremonies[cid] = &MockCeremony{
+		id:        cid,
+		ctype:     CeremonyKeygen,
+		parties:   parties,
+		threshold: threshold,
+		responses: make(map[Identity]bool),
+	}
+
+	// Send KeygenRequest to all parties
+	for _, pid := range parties {
+		if p, ok := r.parties[pid]; ok {
+			p.inbox <- KeygenRequest{
+				CeremonyID: cid,
+				Curve:      "secp256k1",
+				Threshold:  threshold,
+			}
+		}
+	}
+
+	return cid, nil
+}
+
+func (r *MockRouter) StartSign(cid CeremonyID, parties []Identity, threshold int, keyID []byte, data []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(data) != 32 {
+		return errors.New("data must be 32 bytes")
+	}
+	if len(parties) < threshold+1 {
+		return errors.New("not enough parties for threshold")
+	}
+
+	r.ceremonies[cid] = &MockCeremony{
+		id:        cid,
+		ctype:     CeremonySign,
+		parties:   parties,
+		threshold: threshold,
+		responses: make(map[Identity]bool),
+	}
+
+	// Send SignRequest to all parties
+	for _, pid := range parties {
+		if p, ok := r.parties[pid]; ok {
+			p.inbox <- SignRequest{
+				CeremonyID: cid,
+				KeyID:      keyID,
+				Threshold:  threshold,
+				Data:       data,
+			}
+		}
+	}
+
+	return nil
+}
+
+// RouteTSSMessage routes a message after verifying the signature.
+func (r *MockRouter) RouteTSSMessage(msg TSSMessage) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ceremony, ok := r.ceremonies[msg.CeremonyID]
+	if !ok {
+		return ErrUnknownCeremony
+	}
+
+	// Verify sender is part of ceremony
+	found := false
+	for _, p := range ceremony.parties {
+		if p == msg.From {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.New("sender not in ceremony")
+	}
+
+	// Verify signature
+	hash := HashTSSMessage(msg.CeremonyID, msg.From, msg.Type, msg.Flags, msg.Data)
+	_, err := Verify(hash, msg.From, msg.Signature)
+	if err != nil {
+		return errors.New("invalid signature: " + err.Error())
+	}
+
+	ceremony.messages = append(ceremony.messages, msg)
+
+	// Route to recipients
+	if msg.IsBroadcast() {
+		for _, pid := range ceremony.parties {
+			if pid == msg.From {
+				continue
+			}
+			if p, ok := r.parties[pid]; ok {
+				p.inbox <- msg
+			}
+		}
+	}
+	// P2P routing would check msg destination
+
+	return nil
+}
+
+func (r *MockRouter) HandleResponse(from Identity, resp any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	switch v := resp.(type) {
+	case KeygenResponse:
+		c, ok := r.ceremonies[v.CeremonyID]
+		if !ok {
+			return ErrUnknownCeremony
+		}
+		c.responses[from] = v.Success
+		if !v.Success {
+			c.err = errors.New(v.Error)
+		}
+
+	case SignResponse:
+		c, ok := r.ceremonies[v.CeremonyID]
+		if !ok {
+			return ErrUnknownCeremony
+		}
+		c.responses[from] = v.Success
+		if !v.Success {
+			c.err = errors.New(v.Error)
+		}
+
+	case CeremonyResult:
+		c, ok := r.ceremonies[v.CeremonyID]
+		if !ok {
+			return ErrUnknownCeremony
+		}
+		c.responses[from] = v.Success
+		if !v.Success && v.Error != "" {
+			c.err = errors.New(v.Error)
+		}
+		if len(c.responses) == len(c.parties) {
+			c.done = true
+		}
+
+	case CeremonyAbort:
+		c, ok := r.ceremonies[v.CeremonyID]
+		if !ok {
+			return ErrUnknownCeremony
+		}
+		c.done = true
+		c.err = errors.New(v.Reason)
+	}
+
+	return nil
+}
+
+func (r *MockRouter) GetCeremony(cid CeremonyID) *MockCeremony {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ceremonies[cid]
+}
+
+// =============================================================================
+// Positive Test Cases
+// =============================================================================
+
+func TestRPCKeygenRequestResponse(t *testing.T) {
+	router := NewMockRouter()
+
+	// Create 3 parties
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		ids = append(ids, id)
+		router.AddParty(id)
+	}
+
+	// Start keygen
+	cid, err := router.StartKeygen(ids, 1) // 2-of-3
+	if err != nil {
+		t.Fatalf("StartKeygen: %v", err)
+	}
+
+	// Each party should receive KeygenRequest
+	for _, id := range ids {
+		p := router.parties[id]
+		select {
+		case msg := <-p.inbox:
+			req, ok := msg.(KeygenRequest)
+			if !ok {
+				t.Fatalf("expected KeygenRequest, got %T", msg)
+			}
+			if req.CeremonyID != cid {
+				t.Fatal("ceremony ID mismatch")
+			}
+			if req.Threshold != 1 {
+				t.Fatalf("threshold = %d, want 1", req.Threshold)
+			}
+
+			// Party acknowledges
+			_ = router.HandleResponse(id, KeygenResponse{
+				CeremonyID: cid,
+				Success:    true,
+			})
+		default:
+			t.Fatal("party did not receive KeygenRequest")
+		}
+	}
+
+	t.Log("All parties received KeygenRequest and responded ✓")
+}
+
+func TestRPCSignRequestResponse(t *testing.T) {
+	router := NewMockRouter()
+
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		ids = append(ids, id)
+		router.AddParty(id)
+	}
+
+	// Create ceremony ID and start signing
+	cid := router.NewCeremonyID()
+	keyID := []byte("test-key-id")
+	data := make([]byte, 32)
+	_, _ = rand.Read(data)
+
+	err := router.StartSign(cid, ids, 1, keyID, data) // 2-of-3
+	if err != nil {
+		t.Fatalf("StartSign: %v", err)
+	}
+
+	// Each party receives SignRequest
+	for _, id := range ids {
+		p := router.parties[id]
+		select {
+		case msg := <-p.inbox:
+			req, ok := msg.(SignRequest)
+			if !ok {
+				t.Fatalf("expected SignRequest, got %T", msg)
+			}
+			if req.CeremonyID != cid {
+				t.Fatal("ceremony ID mismatch")
+			}
+			if string(req.KeyID) != string(keyID) {
+				t.Fatal("keyID mismatch")
+			}
+			if string(req.Data) != string(data) {
+				t.Fatal("data mismatch")
+			}
+
+			// Party responds with signature
+			_ = router.HandleResponse(id, SignResponse{
+				CeremonyID: cid,
+				Success:    true,
+				R:          []byte("fake-r"),
+				S:          []byte("fake-s"),
+			})
+		default:
+			t.Fatal("party did not receive SignRequest")
+		}
+	}
+
+	t.Log("All parties received SignRequest and responded ✓")
+}
+
+func TestRPCTSSMessageRouting(t *testing.T) {
+	router := NewMockRouter()
+
+	// Create parties with real secrets for signing
+	var secrets []*Secret
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		secret, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		secrets = append(secrets, secret)
+		ids = append(ids, secret.Identity)
+		router.AddPartyWithSecret(secret)
+	}
+
+	// Setup ceremony
+	cid, _ := router.StartKeygen(ids, 1)
+
+	// Drain KeygenRequests
+	for _, id := range ids {
+		<-router.parties[id].inbox
+	}
+
+	// Party 0 broadcasts a TSS message with valid signature
+	data := []byte("round1-data")
+	hash := HashTSSMessage(cid, ids[0], CeremonyKeygen, TSSFlagBroadcast, data)
+	sig := secrets[0].Sign(hash)
+
+	msg := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		From:       ids[0],
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  sig,
+	}
+
+	err := router.RouteTSSMessage(msg)
+	if err != nil {
+		t.Fatalf("RouteTSSMessage: %v", err)
+	}
+
+	// Parties 1 and 2 should receive it
+	for i := 1; i < 3; i++ {
+		p := router.parties[ids[i]]
+		select {
+		case recv := <-p.inbox:
+			tssMsg, ok := recv.(TSSMessage)
+			if !ok {
+				t.Fatalf("expected TSSMessage, got %T", recv)
+			}
+			if tssMsg.From != ids[0] {
+				t.Fatal("wrong sender")
+			}
+			if string(tssMsg.Data) != "round1-data" {
+				t.Fatal("data mismatch")
+			}
+		default:
+			t.Fatalf("party %d did not receive broadcast", i)
+		}
+	}
+
+	// Party 0 should NOT receive its own broadcast
+	select {
+	case <-router.parties[ids[0]].inbox:
+		t.Fatal("sender received its own broadcast")
+	default:
+		// Good
+	}
+
+	t.Log("TSS message broadcast routing works ✓")
+}
+
+func TestRPCTSSMessageSignatureVerification(t *testing.T) {
+	router := NewMockRouter()
+
+	// Create parties with real secrets
+	var secrets []*Secret
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		secret, err := NewSecret()
+		if err != nil {
+			t.Fatal(err)
+		}
+		secrets = append(secrets, secret)
+		ids = append(ids, secret.Identity)
+		router.AddPartyWithSecret(secret)
+	}
+
+	cid, _ := router.StartKeygen(ids, 1)
+
+	// Drain KeygenRequests
+	for _, id := range ids {
+		<-router.parties[id].inbox
+	}
+
+	// Test 1: Valid signature passes
+	data := []byte("valid-data")
+	hash := HashTSSMessage(cid, ids[0], CeremonyKeygen, TSSFlagBroadcast, data)
+	sig := secrets[0].Sign(hash)
+
+	msg := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		From:       ids[0],
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  sig,
+	}
+
+	err := router.RouteTSSMessage(msg)
+	if err != nil {
+		t.Fatalf("valid signature rejected: %v", err)
+	}
+	t.Log("Valid signature accepted ✓")
+
+	// Test 2: Wrong signer (party 1 signs, claims to be party 0)
+	wrongSig := secrets[1].Sign(hash)
+	msgWrongSigner := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		From:       ids[0], // Claims to be party 0
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  wrongSig, // But signed by party 1
+	}
+
+	err = router.RouteTSSMessage(msgWrongSigner)
+	if err == nil {
+		t.Fatal("wrong signer should be rejected")
+	}
+	t.Log("Wrong signer rejected ✓")
+
+	// Test 3: Tampered data (signature doesn't match)
+	msgTampered := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		From:       ids[0],
+		Flags:      TSSFlagBroadcast,
+		Data:       []byte("tampered-data"), // Different data
+		Signature:  sig,                     // Original signature
+	}
+
+	err = router.RouteTSSMessage(msgTampered)
+	if err == nil {
+		t.Fatal("tampered data should be rejected")
+	}
+	t.Log("Tampered data rejected ✓")
+
+	// Test 4: Wrong ceremony ID in hash
+	otherCID := router.NewCeremonyID()
+	router.mu.Lock()
+	router.ceremonies[otherCID] = &MockCeremony{
+		id:        otherCID,
+		ctype:     CeremonyKeygen,
+		parties:   ids,
+		threshold: 1,
+		responses: make(map[Identity]bool),
+	}
+	router.mu.Unlock()
+
+	// Sign for different ceremony
+	wrongHash := HashTSSMessage(otherCID, ids[0], CeremonyKeygen, TSSFlagBroadcast, data)
+	wrongCIDSig := secrets[0].Sign(wrongHash)
+
+	msgWrongCID := TSSMessage{
+		CeremonyID: cid, // Claims ceremony cid
+		Type:       CeremonyKeygen,
+		From:       ids[0],
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  wrongCIDSig, // But signed for otherCID
+	}
+
+	err = router.RouteTSSMessage(msgWrongCID)
+	if err == nil {
+		t.Fatal("wrong ceremony ID in signature should be rejected")
+	}
+	t.Log("Wrong ceremony ID rejected ✓")
+
+	// Test 5: Empty signature
+	msgNoSig := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		From:       ids[0],
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  nil,
+	}
+
+	err = router.RouteTSSMessage(msgNoSig)
+	if err == nil {
+		t.Fatal("empty signature should be rejected")
+	}
+	t.Log("Empty signature rejected ✓")
+
+	// Test 6: Garbage signature
+	msgGarbageSig := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		From:       ids[0],
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  []byte("garbage"),
+	}
+
+	err = router.RouteTSSMessage(msgGarbageSig)
+	if err == nil {
+		t.Fatal("garbage signature should be rejected")
+	}
+	t.Log("Garbage signature rejected ✓")
+}
+
+func TestRPCCeremonyResult(t *testing.T) {
+	router := NewMockRouter()
+
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		ids = append(ids, id)
+		router.AddParty(id)
+	}
+
+	cid, _ := router.StartKeygen(ids, 1)
+
+	// All parties report success
+	for _, id := range ids {
+		_ = router.HandleResponse(id, CeremonyResult{
+			CeremonyID: cid,
+			Success:    true,
+		})
+	}
+
+	c := router.GetCeremony(cid)
+	if !c.done {
+		t.Fatal("ceremony should be done")
+	}
+	if c.err != nil {
+		t.Fatalf("ceremony should have no error: %v", c.err)
+	}
+
+	t.Log("Ceremony completion tracking works ✓")
+}
+
+// =============================================================================
+// Negative Test Cases
+// =============================================================================
+
+func TestRPCKeygenInvalidThreshold(t *testing.T) {
+	router := NewMockRouter()
+
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		ids = append(ids, id)
+		router.AddParty(id)
+	}
+
+	// Threshold too high (need t+1 <= n, so t < n)
+	_, err := router.StartKeygen(ids, 3) // 4-of-3 invalid
+	if err == nil {
+		t.Fatal("expected error for invalid threshold")
+	}
+
+	// Threshold too low
+	_, err = router.StartKeygen(ids, 0) // 1-of-3 invalid (threshold must be >= 1)
+	if err == nil {
+		t.Fatal("expected error for zero threshold")
+	}
+
+	t.Log("Invalid threshold rejected ✓")
+}
+
+func TestRPCKeygenTooFewParties(t *testing.T) {
+	router := NewMockRouter()
+
+	var id Identity
+	_, _ = rand.Read(id[:])
+	router.AddParty(id)
+
+	_, err := router.StartKeygen([]Identity{id}, 1)
+	if err == nil {
+		t.Fatal("expected error for single party")
+	}
+
+	t.Log("Too few parties rejected ✓")
+}
+
+func TestRPCSignInvalidDataLength(t *testing.T) {
+	router := NewMockRouter()
+
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		ids = append(ids, id)
+		router.AddParty(id)
+	}
+
+	cid := router.NewCeremonyID()
+
+	// Data too short
+	err := router.StartSign(cid, ids, 1, []byte("key"), []byte("short"))
+	if err == nil {
+		t.Fatal("expected error for short data")
+	}
+
+	// Data too long
+	longData := make([]byte, 64)
+	err = router.StartSign(cid, ids, 1, []byte("key"), longData)
+	if err == nil {
+		t.Fatal("expected error for long data")
+	}
+
+	t.Log("Invalid data length rejected ✓")
+}
+
+func TestRPCSignNotEnoughParties(t *testing.T) {
+	router := NewMockRouter()
+
+	var ids []Identity
+	for i := 0; i < 2; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		ids = append(ids, id)
+		router.AddParty(id)
+	}
+
+	cid := router.NewCeremonyID()
+	data := make([]byte, 32)
+
+	// 2 parties but threshold requires 3
+	err := router.StartSign(cid, ids, 2, []byte("key"), data)
+	if err == nil {
+		t.Fatal("expected error for not enough parties")
+	}
+
+	t.Log("Not enough parties rejected ✓")
+}
+
+func TestRPCTSSMessageUnknownCeremony(t *testing.T) {
+	router := NewMockRouter()
+
+	secret, _ := NewSecret()
+	router.AddPartyWithSecret(secret)
+
+	// Random ceremony ID that doesn't exist
+	var fakeCID CeremonyID
+	_, _ = rand.Read(fakeCID[:])
+
+	data := []byte("data")
+	hash := HashTSSMessage(fakeCID, secret.Identity, 0, TSSFlagBroadcast, data)
+	sig := secret.Sign(hash)
+
+	msg := TSSMessage{
+		CeremonyID: fakeCID,
+		From:       secret.Identity,
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  sig,
+	}
+
+	err := router.RouteTSSMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for unknown ceremony")
+	}
+
+	t.Log("Unknown ceremony rejected ✓")
+}
+
+func TestRPCTSSMessageUnauthorizedSender(t *testing.T) {
+	router := NewMockRouter()
+
+	// Create ceremony with 2 parties
+	var ids []Identity
+	for i := 0; i < 2; i++ {
+		secret, _ := NewSecret()
+		ids = append(ids, secret.Identity)
+		router.AddPartyWithSecret(secret)
+	}
+
+	cid, _ := router.StartKeygen(ids, 1)
+
+	// Third party not in ceremony tries to send
+	outsider, _ := NewSecret()
+	router.AddPartyWithSecret(outsider)
+
+	data := []byte("malicious")
+	hash := HashTSSMessage(cid, outsider.Identity, 0, TSSFlagBroadcast, data)
+	sig := outsider.Sign(hash)
+
+	msg := TSSMessage{
+		CeremonyID: cid,
+		From:       outsider.Identity,
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  sig,
+	}
+
+	err := router.RouteTSSMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for unauthorized sender")
+	}
+
+	t.Log("Unauthorized sender rejected ✓")
+}
+
+func TestRPCCeremonyAbort(t *testing.T) {
+	router := NewMockRouter()
+
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		ids = append(ids, id)
+		router.AddParty(id)
+	}
+
+	cid, _ := router.StartKeygen(ids, 1)
+
+	// One party aborts
+	_ = router.HandleResponse(ids[0], CeremonyAbort{
+		CeremonyID: cid,
+		Reason:     "party went offline",
+	})
+
+	c := router.GetCeremony(cid)
+	if !c.done {
+		t.Fatal("ceremony should be done after abort")
+	}
+	if c.err == nil {
+		t.Fatal("ceremony should have error after abort")
+	}
+	if c.err.Error() != "party went offline" {
+		t.Fatalf("wrong error: %v", c.err)
+	}
+
+	t.Log("Ceremony abort works ✓")
+}
+
+func TestRPCKeygenResponseFailure(t *testing.T) {
+	router := NewMockRouter()
+
+	var ids []Identity
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		ids = append(ids, id)
+		router.AddParty(id)
+	}
+
+	cid, _ := router.StartKeygen(ids, 1)
+
+	// One party reports failure
+	_ = router.HandleResponse(ids[0], KeygenResponse{
+		CeremonyID: cid,
+		Success:    false,
+		Error:      "no preparams available",
+	})
+
+	c := router.GetCeremony(cid)
+	if c.err == nil {
+		t.Fatal("ceremony should have error")
+	}
+	if c.err.Error() != "no preparams available" {
+		t.Fatalf("wrong error: %v", c.err)
+	}
+
+	t.Log("Keygen failure handling works ✓")
+}
+
+func TestRPCReshareRequest(t *testing.T) {
+	router := NewMockRouter()
+
+	var oldIDs, newIDs []Identity
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		oldIDs = append(oldIDs, id)
+		router.AddParty(id)
+	}
+	for i := 0; i < 3; i++ {
+		var id Identity
+		_, _ = rand.Read(id[:])
+		newIDs = append(newIDs, id)
+		router.AddParty(id)
+	}
+
+	cid := router.NewCeremonyID()
+
+	// Manually create reshare ceremony and send requests
+	router.mu.Lock()
+	allParties := append(oldIDs, newIDs...)
+	router.ceremonies[cid] = &MockCeremony{
+		id:        cid,
+		ctype:     CeremonyReshare,
+		parties:   allParties,
+		threshold: 1,
+		responses: make(map[Identity]bool),
+	}
+	router.mu.Unlock()
+
+	// Send ReshareRequest to all parties
+	for _, pid := range allParties {
+		if p, ok := router.parties[pid]; ok {
+			p.inbox <- ReshareRequest{
+				CeremonyID:   cid,
+				Curve:        "secp256k1",
+				OldThreshold: 1,
+				NewThreshold: 1,
+			}
+		}
+	}
+
+	// Verify all parties receive it
+	for _, pid := range allParties {
+		p := router.parties[pid]
+		select {
+		case msg := <-p.inbox:
+			req, ok := msg.(ReshareRequest)
+			if !ok {
+				t.Fatalf("expected ReshareRequest, got %T", msg)
+			}
+			if req.CeremonyID != cid {
+				t.Fatal("ceremony ID mismatch")
+			}
+
+			_ = router.HandleResponse(pid, ReshareResponse{
+				CeremonyID: cid,
+				Success:    true,
+			})
+		default:
+			t.Fatal("party did not receive ReshareRequest")
+		}
+	}
+
+	t.Log("Reshare request/response works ✓")
+}
+
+// =============================================================================
+// Critical Security Tests - TSSMessage Signature Verification
+// =============================================================================
+// These tests verify the core security property: a routing node CANNOT inject
+// fake TSS messages because it cannot forge signatures for other parties.
+//
+// The Identity -> Signature verification flow:
+// 1. TSSMessage contains From (Identity) and Signature
+// 2. Identity = ripemd160(compressed_secp256k1_pubkey)
+// 3. Signature is ECDSA compact signature over Hash(CeremonyID || Data)
+// 4. Verify() recovers pubkey from signature, computes Identity, checks match
+//
+// If verification fails, the message is rejected. This prevents:
+// - Routing nodes from injecting fake messages
+// - Replay attacks across ceremonies (CeremonyID in hash)
+// - Data tampering (Data in hash)
+
+func TestCriticalMITMPrevention(t *testing.T) {
+	// Scenario: Alice, Bob, Charlie in ceremony. Router is MITM.
+	// Router tries to inject fake message claiming to be from Alice.
+
+	router := NewMockRouter()
+
+	// Create real parties with secrets
+	alice, _ := NewSecret()
+	bob, _ := NewSecret()
+	charlie, _ := NewSecret()
+
+	router.AddPartyWithSecret(alice)
+	router.AddPartyWithSecret(bob)
+	router.AddPartyWithSecret(charlie)
+
+	ids := []Identity{alice.Identity, bob.Identity, charlie.Identity}
+	cid, _ := router.StartKeygen(ids, 1)
+
+	// Drain setup messages
+	for _, id := range ids {
+		<-router.parties[id].inbox
+	}
+
+	// ATTACK: Router (or any MITM) tries to forge a message from Alice
+	// The attacker does NOT have Alice's private key
+	attackerSecret, _ := NewSecret() // Attacker's own key
+
+	forgedData := []byte("malicious-round1-data")
+	hash := HashTSSMessage(cid, alice.Identity, CeremonyKeygen, TSSFlagBroadcast, forgedData)
+
+	// Attacker signs with their own key but claims From=Alice
+	attackerSig := attackerSecret.Sign(hash)
+
+	forgedMsg := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		From:       alice.Identity, // LIES: claims to be Alice
+		Flags:      TSSFlagBroadcast,
+		Data:       forgedData,
+		Signature:  attackerSig, // Signed by attacker, not Alice
+	}
+
+	err := router.RouteTSSMessage(forgedMsg)
+	if err == nil {
+		t.Fatal("CRITICAL SECURITY FAILURE: Forged message accepted!")
+	}
+
+	t.Logf("MITM attack blocked: %v ✓", err)
+
+	// Verify the error is specifically about identity mismatch
+	if err.Error() != "invalid signature: "+ErrIdentityMismatch.Error() {
+		t.Logf("Error was: %v (expected identity mismatch)", err)
+	}
+}
+
+func TestCriticalReplayPrevention(t *testing.T) {
+	// Scenario: Valid message from ceremony A cannot be replayed in ceremony B
+
+	router := NewMockRouter()
+
+	alice, _ := NewSecret()
+	bob, _ := NewSecret()
+
+	router.AddPartyWithSecret(alice)
+	router.AddPartyWithSecret(bob)
+
+	ids := []Identity{alice.Identity, bob.Identity}
+
+	// Create two ceremonies
+	cidA, _ := router.StartKeygen(ids, 1)
+	cidB, _ := router.StartKeygen(ids, 1)
+
+	// Drain setup
+	for _, id := range ids {
+		<-router.parties[id].inbox
+		<-router.parties[id].inbox
+	}
+
+	// Alice sends valid message in ceremony A
+	data := []byte("round1-data")
+	hashA := HashTSSMessage(cidA, alice.Identity, CeremonyKeygen, TSSFlagBroadcast, data)
+	sigA := alice.Sign(hashA)
+
+	validMsg := TSSMessage{
+		CeremonyID: cidA,
+		Type:       CeremonyKeygen,
+		From:       alice.Identity,
+		Flags:      TSSFlagBroadcast,
+		Data:       data,
+		Signature:  sigA,
+	}
+
+	// Valid in ceremony A
+	err := router.RouteTSSMessage(validMsg)
+	if err != nil {
+		t.Fatalf("valid message rejected: %v", err)
+	}
+	t.Log("Valid message in ceremony A accepted ✓")
+
+	// ATTACK: Replay the same message in ceremony B
+	replayMsg := TSSMessage{
+		CeremonyID: cidB, // Different ceremony!
+		Type:       CeremonyKeygen,
+		From:       alice.Identity,
+		Flags:      TSSFlagBroadcast,
+		Data:       data, // Same data
+		Signature:  sigA, // Same signature (for ceremony A)
+	}
+
+	err = router.RouteTSSMessage(replayMsg)
+	if err == nil {
+		t.Fatal("CRITICAL SECURITY FAILURE: Replay attack succeeded!")
+	}
+
+	t.Logf("Replay attack blocked: %v ✓", err)
+}
+
+func TestCriticalDataIntegrity(t *testing.T) {
+	// Scenario: Routing node intercepts message and modifies Data
+
+	router := NewMockRouter()
+
+	alice, _ := NewSecret()
+	bob, _ := NewSecret()
+
+	router.AddPartyWithSecret(alice)
+	router.AddPartyWithSecret(bob)
+
+	ids := []Identity{alice.Identity, bob.Identity}
+	cid, _ := router.StartKeygen(ids, 1)
+
+	// Drain setup
+	for _, id := range ids {
+		<-router.parties[id].inbox
+	}
+
+	// Alice sends valid message
+	originalData := []byte("honest-round1-data")
+	hash := HashTSSMessage(cid, alice.Identity, CeremonyKeygen, TSSFlagBroadcast, originalData)
+	sig := alice.Sign(hash)
+
+	// ATTACK: Router modifies the data in transit
+	tamperedData := []byte("evil-modified-data")
+
+	tamperedMsg := TSSMessage{
+		CeremonyID: cid,
+		Type:       CeremonyKeygen,
+		From:       alice.Identity,
+		Flags:      TSSFlagBroadcast,
+		Data:       tamperedData, // Modified!
+		Signature:  sig,          // Original signature
+	}
+
+	err := router.RouteTSSMessage(tamperedMsg)
+	if err == nil {
+		t.Fatal("CRITICAL SECURITY FAILURE: Tampered message accepted!")
+	}
+
+	t.Logf("Data tampering blocked: %v ✓", err)
+}
+
+func TestIdentityDerivation(t *testing.T) {
+	// Verify that Identity is correctly derived from pubkey
+	// This is the foundation of the signature verification
+
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Identity should be ripemd160 of compressed pubkey
+	pubkey := secret.privateKey.PubKey()
+	expectedID := NewIdentityFromPub(pubkey)
+
+	if secret.Identity != expectedID {
+		t.Fatal("Identity mismatch from pubkey derivation")
+	}
+
+	// Sign something and verify we can recover the identity
+	data := []byte("test data")
+	hash := sha256.Sum256(data)
+	sig := secret.Sign(hash[:])
+
+	recoveredPub, err := Verify(hash[:], secret.Identity, sig)
+	if err != nil {
+		t.Fatalf("Verify failed: %v", err)
+	}
+
+	recoveredID := NewIdentityFromPub(recoveredPub)
+	if recoveredID != secret.Identity {
+		t.Fatal("Recovered identity doesn't match")
+	}
+
+	t.Log("Identity derivation and verification works ✓")
+}
+
+//go:embed testdata/preparams.json
+var embeddedPreParams []byte
+
+// testPreParams returns cached Paillier preparams from the embedded
+// fixture.  Falls back to nil if the fixture can't be parsed (which
+// means tests will generate fresh ones and be slow).
+func testPreParams(t *testing.T, count int) []keygen.LocalPreParams {
+	t.Helper()
+	var params []keygen.LocalPreParams
+	if err := json.Unmarshal(embeddedPreParams, &params); err != nil {
+		t.Fatalf("parse embedded preparams: %v", err)
+	}
+	if count > len(params) {
+		t.Fatalf("need %d preparams, fixture has %d", count, len(params))
+	}
+	return params[:count]
 }

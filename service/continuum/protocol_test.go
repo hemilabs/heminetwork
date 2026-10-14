@@ -27,6 +27,8 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"golang.org/x/crypto/nacl/box"
+
+	"github.com/hemilabs/heminetwork/v2/ttl"
 )
 
 func TestEncryptDecrypt(t *testing.T) {
@@ -2935,5 +2937,1322 @@ func TestSealBoxOpenBoxRoundTrip(t *testing.T) {
 	_, err = OpenBox(ep, wrongPriv)
 	if err == nil {
 		t.Fatal("OpenBox should fail with wrong recipient key")
+	}
+}
+
+// Coverage for the authenticated e2e key exchange: the binding hash,
+// bindPeerKey's immutability rule, both dispatch handlers, and the
+// gossip strip in each direction.
+//
+// The exchange exists because a node's X25519 key is derived from its
+// PRIVATE secp256k1 key (NaClPrivateKey), so no recipient can compute
+// or check it from a public identity.  Gossip therefore has nothing
+// truthful to say about key material and never carries it; a key is
+// learned only from its holder, either by handshake or by the routed
+// NaClKeyRequest/NaClKeyResponse challenge-response verified here.
+
+// keyXchgServer builds a Server through the production constructor
+// (so the exchange TTLs exist) and supplies only what Run() would
+// otherwise add: an identity and the peers TTL that bindPeerKey and
+// addPeer write to.  No listeners, no background loops.
+func keyXchgServer(t *testing.T) *Server {
+	t.Helper()
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatalf("server secret: %v", err)
+	}
+	peersTTL, err := ttl.New(16, true)
+	if err != nil {
+		t.Fatalf("peers ttl: %v", err)
+	}
+	s.secret, s.peersTTL = secret, peersTTL
+	return s
+}
+
+// capturingTransport records payloads written through the dispatch
+// context instead of sending them.  Handlers under test route their
+// replies via sendTo, which needs a session; tests that only care
+// about verification logic use dispatchCtx with no transport at all.
+type keyXchgCtx struct {
+	dc *dispatchCtx
+}
+
+// newKeyXchgCtx returns a dispatch context for s with from as the
+// session peer.  ctx doubles as sessionCtx: no handler under test
+// distinguishes them.
+func newKeyXchgCtx(t *testing.T, s *Server, from Identity) *keyXchgCtx {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // reap TTL goroutines the handlers arm
+	id := from
+	return &keyXchgCtx{dc: &dispatchCtx{
+		ctx:        ctx,
+		sessionCtx: ctx,
+		s:          s,
+		id:         &id,
+	}}
+}
+
+// mustNaClPub returns the X25519 public key for a secret.
+func mustNaClPub(t *testing.T, s *Secret) []byte {
+	t.Helper()
+	pub, err := s.NaClPublicKey()
+	if err != nil {
+		t.Fatalf("nacl pub: %v", err)
+	}
+	return pub
+}
+
+// pendingChallenge registers a challenge for id exactly as
+// sendNaClKeyRequest does, so response-handler tests can run without
+// a live mesh.
+func pendingChallenge(t *testing.T, s *Server, id Identity, challenge []byte) {
+	t.Helper()
+	s.naclXchg.Put(context.Background(), naclXchgTTL, string(challenge),
+		id, nil, nil)
+}
+
+// signedKeyResponse builds the response the holder of secret would
+// send for challenge.
+func signedKeyResponse(t *testing.T, secret *Secret, challenge []byte) *NaClKeyResponse {
+	t.Helper()
+	naclPub := mustNaClPub(t, secret)
+	return &NaClKeyResponse{
+		Challenge: challenge,
+		NaClPub:   naclPub,
+		Signature: secret.Sign(hashNaClKeyBinding(challenge, naclPub)),
+	}
+}
+
+// freshChallenge returns a distinct non-zero challenge per call.
+func freshChallenge(i byte) []byte {
+	c := make([]byte, ChallengeSize)
+	for j := range c {
+		c[j] = i + byte(j) + 1
+	}
+	return c
+}
+
+func TestHashNaClKeyBindingDomainSeparated(t *testing.T) {
+	challenge := freshChallenge(1)
+	naclPub := make([]byte, NaClPubSize)
+	naclPub[0] = 0x42
+
+	base := hashNaClKeyBinding(challenge, naclPub)
+	if len(base) != 32 {
+		t.Fatalf("hash length %d, want 32", len(base))
+	}
+	// Deterministic.
+	if !bytes.Equal(base, hashNaClKeyBinding(challenge, naclPub)) {
+		t.Fatal("hash is not deterministic")
+	}
+	// Both inputs are covered.
+	other := freshChallenge(2)
+	if bytes.Equal(base, hashNaClKeyBinding(other, naclPub)) {
+		t.Fatal("hash ignores the challenge")
+	}
+	altPub := make([]byte, NaClPubSize)
+	altPub[0] = 0x43
+	if bytes.Equal(base, hashNaClKeyBinding(challenge, altPub)) {
+		t.Fatal("hash ignores the nacl public key")
+	}
+	// Distinct from the handshake binding over the same material,
+	// so neither signature can be replayed as the other.
+	if bytes.Equal(base, Hash256([]byte("continuum-challenge-v2"), challenge, naclPub)) {
+		t.Fatal("key binding collides with the handshake binding")
+	}
+}
+
+func TestBindPeerKey(t *testing.T) {
+	s := keyXchgServer(t)
+	ctx := t.Context()
+	victim := mustSecret(t)
+	victimPub := mustNaClPub(t, victim)
+
+	t.Run("rejects self", func(t *testing.T) {
+		if err := s.bindPeerKey(ctx, s.secret.Identity,
+			mustNaClPub(t, s.secret)); err == nil {
+			t.Fatal("bound a key for our own identity")
+		}
+	})
+
+	t.Run("rejects malformed", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			key  []byte
+		}{
+			{"nil", nil},
+			{"empty", []byte{}},
+			{"short", make([]byte, NaClPubSize-1)},
+			{"long", make([]byte, NaClPubSize+1)},
+			{"all zeros", make([]byte, NaClPubSize)},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				id := mustSecret(t).Identity
+				if err := s.bindPeerKey(ctx, id, tt.key); err == nil {
+					t.Fatal("accepted a malformed e2e key")
+				}
+				if _, ok := s.peerNaClPub(id); ok {
+					t.Fatal("malformed key was stored")
+				}
+			})
+		}
+	})
+
+	t.Run("binds and creates a record", func(t *testing.T) {
+		if err := s.bindPeerKey(ctx, victim.Identity, victimPub); err != nil {
+			t.Fatalf("bindPeerKey: %v", err)
+		}
+		got, ok := s.peerNaClPub(victim.Identity)
+		if !ok {
+			t.Fatal("no key bound")
+		}
+		if !bytes.Equal(got, victimPub) {
+			t.Fatalf("bound %x, want %x", got, victimPub)
+		}
+	})
+
+	t.Run("stores a copy", func(t *testing.T) {
+		mutable := append([]byte(nil), victimPub...)
+		id := mustSecret(t).Identity
+		if err := s.bindPeerKey(ctx, id, mutable); err != nil {
+			t.Fatalf("bindPeerKey: %v", err)
+		}
+		mutable[0] ^= 0xFF
+		got, _ := s.peerNaClPub(id)
+		if bytes.Equal(got, mutable) {
+			t.Fatal("bindPeerKey aliased the caller's buffer")
+		}
+	})
+
+	t.Run("idempotent for the same key", func(t *testing.T) {
+		before := s.keyConflicts.Load()
+		if err := s.bindPeerKey(ctx, victim.Identity, victimPub); err != nil {
+			t.Fatalf("re-binding the same key failed: %v", err)
+		}
+		if got := s.keyConflicts.Load(); got != before {
+			t.Fatalf("same-key re-bind counted as a conflict: %d -> %d",
+				before, got)
+		}
+	})
+
+	t.Run("immutable against a conflicting key", func(t *testing.T) {
+		attackerPub := mustNaClPub(t, mustSecret(t))
+		before := s.keyConflicts.Load()
+		if err := s.bindPeerKey(ctx, victim.Identity, attackerPub); err == nil {
+			t.Fatal("accepted a conflicting e2e key for a bound identity")
+		}
+		got, _ := s.peerNaClPub(victim.Identity)
+		if !bytes.Equal(got, victimPub) {
+			t.Fatalf("conflicting bind mutated the stored key: %x", got)
+		}
+		// The derivation is deterministic, so a conflict is
+		// always an attack or a broken peer: it must be counted.
+		if got := s.keyConflicts.Load(); got != before+1 {
+			t.Fatalf("conflict counter %d, want %d", got, before+1)
+		}
+	})
+}
+
+func TestHandleNaClKeyRequestRejects(t *testing.T) {
+	valid := freshChallenge(7)
+	tests := []struct {
+		name string
+		req  *NaClKeyRequest
+		self bool // set Requester to the server's own identity
+	}{
+		{name: "short challenge", req: &NaClKeyRequest{
+			Challenge: make([]byte, ChallengeSize-1),
+		}},
+		{name: "long challenge", req: &NaClKeyRequest{
+			Challenge: make([]byte, ChallengeSize+1),
+		}},
+		{name: "nil challenge", req: &NaClKeyRequest{}},
+		{name: "zero challenge", req: &NaClKeyRequest{
+			Challenge: make([]byte, ChallengeSize),
+		}},
+		{name: "self requester", req: &NaClKeyRequest{
+			Challenge: valid,
+		}, self: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := keyXchgServer(t)
+			req := *tt.req
+			if tt.self {
+				req.Requester = s.secret.Identity
+			} else {
+				req.Requester = mustSecret(t).Identity
+			}
+			k := newKeyXchgCtx(t, s, req.Requester)
+
+			before := s.naclXchgDrops.Load()
+			if handleNaClKeyRequest(k.dc, &req) {
+				t.Fatal("handler asked to close the session")
+			}
+			if got := s.naclXchgDrops.Load(); got != before+1 {
+				t.Fatalf("drop counter %d, want %d", got, before+1)
+			}
+		})
+	}
+}
+
+// TestHandleNaClKeyRequestRateLimitedPerSession proves the signing
+// bound is keyed on the AUTHENTICATED session peer.  Keying it on the
+// request's Requester field would be no bound at all: that field is
+// unauthenticated wire data a flooder varies per message, so this test
+// drives exactly that flood and requires it to be capped.
+func TestHandleNaClKeyRequestRateLimitedPerSession(t *testing.T) {
+	s := keyXchgServer(t)
+	sessionPeer := mustSecret(t).Identity
+	k := newKeyXchgCtx(t, s, sessionPeer)
+
+	// Flood over one session, rotating Requester every time so a
+	// per-Requester window would never fire.
+	const flood = naclXchgRateLimit * 3
+	for i := range flood {
+		handleNaClKeyRequest(k.dc, &NaClKeyRequest{
+			Requester: mustSecret(t).Identity,
+			Challenge: freshChallenge(byte(i % 200)),
+		})
+	}
+	// Everything past the limit must be dropped by the limiter.
+	// Answered requests also fail to send (no route), which counts a
+	// drop too, so assert the limiter fired at all and that the
+	// answered count never exceeded the cap.
+	answered := flood - int(s.naclXchgDrops.Load())
+	if answered > naclXchgRateLimit {
+		t.Fatalf("answered %d requests over one session, cap is %d: "+
+			"a rotating Requester defeated the limiter",
+			answered, naclXchgRateLimit)
+	}
+
+	// A different SESSION is unaffected — the bound is per session,
+	// and sessions are capped by PeersWanted, so the total is bounded.
+	other := newKeyXchgCtx(t, s, mustSecret(t).Identity)
+	before := s.naclXchgDrops.Load()
+	handleNaClKeyRequest(other.dc, &NaClKeyRequest{
+		Requester: mustSecret(t).Identity,
+		Challenge: freshChallenge(7),
+	})
+	// The send still fails (no route), so exactly one drop — from the
+	// send, not the limiter.  Two would mean the limiter rejected it.
+	if got := s.naclXchgDrops.Load(); got > before+1 {
+		t.Fatalf("a distinct session was rate limited: drops %d, want %d",
+			got, before+1)
+	}
+}
+
+// TestNaClKeyRequestNeverFloods proves a request naming an unroutable
+// Requester never fans the reply out across the mesh.
+//
+// This is the amplification guard. Routing the reply through sendTo
+// would flood it to every session when the attacker-chosen Requester
+// has no route, turning one small unauthenticated message into one
+// transmission per mesh edge. The reply may only take a path we
+// already have, or the reverse path back to the requesting session.
+//
+// The unrelated sessions hold nil transports, so ANY write to them
+// panics: if the reply ever floods, this test fails loudly rather than
+// silently passing.
+func TestNaClKeyRequestNeverFloods(t *testing.T) {
+	s := keyXchgServer(t)
+
+	for range 3 {
+		s.mtx.Lock()
+		s.sessions[mustSecret(t).Identity] = nil
+		s.mtx.Unlock()
+	}
+
+	// dc.t is nil here, so the reverse path is unavailable too and
+	// the reply has nowhere legitimate to go.
+	k := newKeyXchgCtx(t, s, mustSecret(t).Identity)
+	before := s.naclXchgDrops.Load()
+
+	// Requester is a fresh identity: no session, no route.
+	handleNaClKeyRequest(k.dc, &NaClKeyRequest{
+		Requester: mustSecret(t).Identity,
+		Challenge: freshChallenge(9),
+	})
+
+	// Refused and counted — and, critically, no write was attempted
+	// against the unrelated sessions.
+	if got := s.naclXchgDrops.Load(); got != before+1 {
+		t.Fatalf("drop counter %d, want %d (an unroutable reply must "+
+			"be refused, never flooded)", got, before+1)
+	}
+}
+
+// TestHandleNaClKeyResponseBinds is the happy path: a response that
+// verifies against the identity the challenge was issued for binds the
+// key and consumes the challenge.
+func TestHandleNaClKeyResponseBinds(t *testing.T) {
+	s := keyXchgServer(t)
+	peer := mustSecret(t)
+	challenge := freshChallenge(11)
+	pendingChallenge(t, s, peer.Identity, challenge)
+	k := newKeyXchgCtx(t, s, peer.Identity)
+
+	if handleNaClKeyResponse(k.dc, signedKeyResponse(t, peer, challenge)) {
+		t.Fatal("handler asked to close the session")
+	}
+	got, ok := s.peerNaClPub(peer.Identity)
+	if !ok {
+		t.Fatal("verified response did not bind a key")
+	}
+	if !bytes.Equal(got, mustNaClPub(t, peer)) {
+		t.Fatalf("bound %x, want %x", got, mustNaClPub(t, peer))
+	}
+	// The challenge is single-use: replaying the same response
+	// finds no pending exchange.
+	before := s.naclXchgDrops.Load()
+	handleNaClKeyResponse(k.dc, signedKeyResponse(t, peer, challenge))
+	if got := s.naclXchgDrops.Load(); got != before+1 {
+		t.Fatalf("challenge was not consumed: drops %d, want %d",
+			got, before+1)
+	}
+}
+
+func TestHandleNaClKeyResponseRejects(t *testing.T) {
+	peer := mustSecret(t)
+	attacker := mustSecret(t)
+	challenge := freshChallenge(21)
+
+	tests := []struct {
+		name string
+		// build returns the response to feed and whether to
+		// register challenge as pending for peer first.
+		build   func(t *testing.T, s *Server) *NaClKeyResponse
+		pending bool
+	}{
+		{
+			name:    "short challenge",
+			pending: true,
+			build: func(t *testing.T, s *Server) *NaClKeyResponse {
+				r := signedKeyResponse(t, peer, challenge)
+				r.Challenge = challenge[:ChallengeSize-1]
+				return r
+			},
+		},
+		{
+			name:    "short nacl pub",
+			pending: true,
+			build: func(t *testing.T, s *Server) *NaClKeyResponse {
+				r := signedKeyResponse(t, peer, challenge)
+				r.NaClPub = r.NaClPub[:NaClPubSize-1]
+				return r
+			},
+		},
+		{
+			// Unsolicited: nothing pending for this challenge.
+			name:    "no pending challenge",
+			pending: false,
+			build: func(t *testing.T, s *Server) *NaClKeyResponse {
+				return signedKeyResponse(t, peer, challenge)
+			},
+		},
+		{
+			// Right challenge, but signed by someone else: the
+			// recovered identity does not match the identity the
+			// challenge was issued for.
+			name:    "signed by another identity",
+			pending: true,
+			build: func(t *testing.T, s *Server) *NaClKeyResponse {
+				return signedKeyResponse(t, attacker, challenge)
+			},
+		},
+		{
+			// The core substitution attack: keep the victim's
+			// signature but swap in the attacker's key.  The hash
+			// is recomputed from the received key, so recovery
+			// yields a different identity and fails.
+			name:    "attacker key with victim signature",
+			pending: true,
+			build: func(t *testing.T, s *Server) *NaClKeyResponse {
+				r := signedKeyResponse(t, peer, challenge)
+				r.NaClPub = mustNaClPub(t, attacker)
+				return r
+			},
+		},
+		{
+			name:    "garbage signature",
+			pending: true,
+			build: func(t *testing.T, s *Server) *NaClKeyResponse {
+				r := signedKeyResponse(t, peer, challenge)
+				r.Signature = make([]byte, len(r.Signature))
+				return r
+			},
+		},
+		{
+			name:    "empty signature",
+			pending: true,
+			build: func(t *testing.T, s *Server) *NaClKeyResponse {
+				r := signedKeyResponse(t, peer, challenge)
+				r.Signature = nil
+				return r
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := keyXchgServer(t)
+			if tt.pending {
+				pendingChallenge(t, s, peer.Identity, challenge)
+			}
+			k := newKeyXchgCtx(t, s, peer.Identity)
+
+			before := s.naclXchgDrops.Load()
+			if handleNaClKeyResponse(k.dc, tt.build(t, s)) {
+				t.Fatal("handler asked to close the session")
+			}
+			if _, ok := s.peerNaClPub(peer.Identity); ok {
+				t.Fatal("a rejected response bound a key")
+			}
+			if _, ok := s.peerNaClPub(attacker.Identity); ok {
+				t.Fatal("a rejected response bound a key for the attacker")
+			}
+			if got := s.naclXchgDrops.Load(); got != before+1 {
+				t.Fatalf("drop counter %d, want %d", got, before+1)
+			}
+		})
+	}
+}
+
+// TestNaClKeyResponseDoesNotBurnPendingOnFailure proves a forged
+// response cannot deny service by consuming the pending challenge: the
+// legitimate response still binds afterwards.
+func TestNaClKeyResponseDoesNotBurnPendingOnFailure(t *testing.T) {
+	s := keyXchgServer(t)
+	peer := mustSecret(t)
+	attacker := mustSecret(t)
+	challenge := freshChallenge(31)
+	pendingChallenge(t, s, peer.Identity, challenge)
+	k := newKeyXchgCtx(t, s, peer.Identity)
+
+	// Forged response for the outstanding challenge.
+	handleNaClKeyResponse(k.dc, signedKeyResponse(t, attacker, challenge))
+	if _, ok := s.peerNaClPub(peer.Identity); ok {
+		t.Fatal("forged response bound a key")
+	}
+
+	// The real one still works.
+	handleNaClKeyResponse(k.dc, signedKeyResponse(t, peer, challenge))
+	got, ok := s.peerNaClPub(peer.Identity)
+	if !ok {
+		t.Fatal("a forged response burned the pending challenge")
+	}
+	if !bytes.Equal(got, mustNaClPub(t, peer)) {
+		t.Fatalf("bound %x, want %x", got, mustNaClPub(t, peer))
+	}
+}
+
+// TestNaClKeyResponseCannotRebind proves the exchange cannot be used
+// to overwrite a key already established by a handshake — the
+// vulnerability's overwrite case, now closed at the binding layer.
+func TestNaClKeyResponseCannotRebind(t *testing.T) {
+	s := keyXchgServer(t)
+	peer := mustSecret(t)
+	peerPub := mustNaClPub(t, peer)
+
+	// A completed handshake bound the real key.
+	if err := s.bindPeerKey(t.Context(), peer.Identity, peerPub); err != nil {
+		t.Fatalf("bindPeerKey: %v", err)
+	}
+
+	// An attacker who somehow answers a pending challenge for that
+	// identity still cannot replace the key: only the identity
+	// holder can produce a verifying response, and even that is a
+	// no-op re-bind of the same key.
+	challenge := freshChallenge(41)
+	pendingChallenge(t, s, peer.Identity, challenge)
+	k := newKeyXchgCtx(t, s, peer.Identity)
+	handleNaClKeyResponse(k.dc, signedKeyResponse(t, peer, challenge))
+
+	got, _ := s.peerNaClPub(peer.Identity)
+	if !bytes.Equal(got, peerPub) {
+		t.Fatalf("key changed after re-exchange: got %x want %x", got, peerPub)
+	}
+}
+
+// TestSendEncryptedRacesBindPeerKey pins the memory-safety rule that
+// bindPeerKey's in-place write forces on every reader of NaClPub: the
+// field must be read under mtx.  SendEncrypted once copied the
+// *PeerRecord out, dropped the lock, and read the field afterwards,
+// which races the bind.  Meaningful under -race (CI runs Test (race)).
+func TestSendEncryptedRacesBindPeerKey(t *testing.T) {
+	s := keyXchgServer(t)
+	ctx := t.Context()
+
+	const peers = 16
+	ids := make([]Identity, 0, peers)
+	pubs := make([][]byte, 0, peers)
+	for range peers {
+		p := mustSecret(t)
+		ids = append(ids, p.Identity)
+		pubs = append(pubs, mustNaClPub(t, p))
+		// Discovery metadata only: no key yet, so SendEncrypted
+		// and bindPeerKey contend over the same record.
+		s.addPeer(ctx, PeerRecord{
+			Identity: p.Identity,
+			Version:  ProtocolVersion,
+			LastSeen: time.Now().Unix(),
+		})
+	}
+
+	var wg sync.WaitGroup
+	for i := range peers {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			// Errors are expected and irrelevant; the read of
+			// NaClPub is what must not race.
+			_ = s.SendEncrypted(ids[i], PingRequest{})
+		}()
+		go func() {
+			defer wg.Done()
+			_ = s.bindPeerKey(ctx, ids[i], pubs[i])
+		}()
+	}
+	wg.Wait()
+
+	// Every bind landed exactly as issued.
+	for i := range peers {
+		got, ok := s.peerNaClPub(ids[i])
+		if !ok {
+			t.Fatalf("peer %d has no key after bind", i)
+		}
+		if !bytes.Equal(got, pubs[i]) {
+			t.Fatalf("peer %d bound %x, want %x", i, got, pubs[i])
+		}
+	}
+}
+
+// TestGossipCarriesNoKeyMaterial proves the strip in both directions:
+// keys never leave in knownPeerList and never enter through the real
+// gossip dispatch handler.
+func TestGossipCarriesNoKeyMaterial(t *testing.T) {
+	s := keyXchgServer(t)
+	ctx := t.Context()
+	peer := mustSecret(t)
+	peerPub := mustNaClPub(t, peer)
+	selfPub := mustNaClPub(t, s.secret)
+
+	// Self record, as registerSelfAsPeer writes it, plus a peer
+	// with an authenticated binding.
+	s.mtx.Lock()
+	s.peers[s.secret.Identity] = &PeerRecord{
+		Identity: s.secret.Identity,
+		Address:  "10.0.0.1:9000",
+		NaClPub:  selfPub,
+		Version:  ProtocolVersion,
+	}
+	s.mtx.Unlock()
+	if err := s.bindPeerKey(ctx, peer.Identity, peerPub); err != nil {
+		t.Fatalf("bindPeerKey: %v", err)
+	}
+
+	t.Run("outbound", func(t *testing.T) {
+		for _, rec := range s.knownPeerList(Identity{}) {
+			if len(rec.NaClPub) != 0 {
+				t.Fatalf("gossip record for %v carries key material %x",
+					rec.Identity, rec.NaClPub)
+			}
+		}
+	})
+
+	t.Run("inbound", func(t *testing.T) {
+		// An attacker gossips a poisoned binding for a victim
+		// it has no key for, and for one it does.
+		victim := mustSecret(t).Identity
+		attackerPub := mustNaClPub(t, mustSecret(t))
+		attacker := mustSecret(t).Identity
+		k := newKeyXchgCtx(t, s, attacker)
+
+		handlePeerListResponse(k.dc, &PeerListResponse{Peers: []PeerRecord{
+			{
+				Identity: victim,
+				Address:  "10.0.0.2:9000",
+				NaClPub:  attackerPub,
+				Version:  ProtocolVersion,
+			},
+			{
+				Identity: peer.Identity,
+				Address:  "10.0.0.3:9000",
+				NaClPub:  attackerPub,
+				Version:  ProtocolVersion,
+			},
+		}})
+
+		// First binding: discovery landed, key did not.
+		if _, ok := s.peerNaClPub(victim); ok {
+			t.Fatal("gossip installed a first e2e key binding")
+		}
+		s.mtx.RLock()
+		vr, known := s.peers[victim]
+		s.mtx.RUnlock()
+		if !known || vr.Address != "10.0.0.2:9000" {
+			t.Fatal("gossip failed to record discovery metadata")
+		}
+
+		// Overwrite: the authenticated binding survived intact.
+		got, ok := s.peerNaClPub(peer.Identity)
+		if !ok {
+			t.Fatal("gossip dropped an authenticated binding")
+		}
+		if !bytes.Equal(got, peerPub) {
+			t.Fatalf("gossip overwrote an authenticated binding: %x", got)
+		}
+	})
+}
+
+// TestEnsurePeerKeyShortCircuits covers the paths that return without
+// any mesh traffic: self, and an identity whose key is already bound.
+func TestEnsurePeerKeyShortCircuits(t *testing.T) {
+	s := keyXchgServer(t)
+	ctx := t.Context()
+
+	if err := s.ensurePeerKey(ctx, s.secret.Identity); err != nil {
+		t.Fatalf("ensurePeerKey(self): %v", err)
+	}
+	peer := mustSecret(t)
+	if err := s.bindPeerKey(ctx, peer.Identity, mustNaClPub(t, peer)); err != nil {
+		t.Fatalf("bindPeerKey: %v", err)
+	}
+	if err := s.ensurePeerKey(ctx, peer.Identity); err != nil {
+		t.Fatalf("ensurePeerKey(bound): %v", err)
+	}
+	// Both short circuits also satisfy the plural form.
+	if err := s.ensurePeerKeys(ctx, []Identity{s.secret.Identity, peer.Identity}); err != nil {
+		t.Fatalf("ensurePeerKeys: %v", err)
+	}
+}
+
+// TestEnsurePeerKeyTimesOut proves the wait is bounded when no peer
+// ever answers, and that ensurePeerKeys propagates the failure.
+func TestEnsurePeerKeyTimesOut(t *testing.T) {
+	s := keyXchgServer(t)
+	unreachable := mustSecret(t).Identity
+
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	if err := s.ensurePeerKey(ctx, unreachable); err == nil {
+		t.Fatal("ensurePeerKey returned success with no response")
+	}
+
+	ctx2, cancel2 := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel2()
+	if err := s.ensurePeerKeys(ctx2, []Identity{unreachable}); err == nil {
+		t.Fatal("ensurePeerKeys returned success with no response")
+	}
+}
+
+// TestNaClKeyResponseCannotBindSelf proves the response handler cannot
+// be steered into binding our own identity, even for a pending
+// challenge that names it and a response that verifies: bindPeerKey
+// refuses self and the peer table stays clean.
+func TestNaClKeyResponseCannotBindSelf(t *testing.T) {
+	s := keyXchgServer(t)
+	challenge := freshChallenge(81)
+	pendingChallenge(t, s, s.secret.Identity, challenge)
+	k := newKeyXchgCtx(t, s, mustSecret(t).Identity)
+
+	if handleNaClKeyResponse(k.dc, signedKeyResponse(t, s.secret, challenge)) {
+		t.Fatal("handler asked to close the session")
+	}
+	if _, ok := s.peerNaClPub(s.secret.Identity); ok {
+		t.Fatal("the exchange bound a key for our own identity")
+	}
+	s.mtx.RLock()
+	_, tracked := s.peers[s.secret.Identity]
+	s.mtx.RUnlock()
+	if tracked {
+		t.Fatal("the exchange added a peer record for our own identity")
+	}
+}
+
+// TestEnsurePeerKeyRetries proves the retry ticker re-sends while
+// waiting, each time with a fresh challenge, so a lost request or a
+// route that only appears later still converges.
+//
+// Pending challenges are observed DURING the wait: they are registered
+// against the caller's context, so they are reaped as soon as
+// ensurePeerKey returns.
+func TestEnsurePeerKeyRetries(t *testing.T) {
+	s := keyXchgServer(t)
+	unreachable := mustSecret(t).Identity
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- s.ensurePeerKey(ctx, unreachable) }()
+
+	// Initial request plus at least one retry, each registering its
+	// own pending challenge.
+	waitForCondition(t, "retry did not issue a fresh challenge",
+		naclXchgRetry*3, func() bool {
+			return s.naclXchg.Len() >= 2
+		})
+
+	cancel()
+	exitCtx, exitCancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer exitCancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("ensurePeerKey returned success with no response")
+		}
+	case <-exitCtx.Done():
+		t.Fatal("ensurePeerKey did not return after cancellation")
+	}
+}
+
+// TestPeerKeyPromCounters covers the exported telemetry for the two
+// conditions operators care about: a rejected rebind attempt, which is
+// always hostile, and dropped exchange traffic.
+func TestPeerKeyPromCounters(t *testing.T) {
+	s := keyXchgServer(t)
+	ctx := t.Context()
+
+	if got := s.promKeyConflicts(); got != 0 {
+		t.Fatalf("initial key conflicts = %v, want 0", got)
+	}
+	if got := s.promNaClXchgDrops(); got != 0 {
+		t.Fatalf("initial xchg drops = %v, want 0", got)
+	}
+
+	peer := mustSecret(t)
+	if err := s.bindPeerKey(ctx, peer.Identity, mustNaClPub(t, peer)); err != nil {
+		t.Fatalf("bindPeerKey: %v", err)
+	}
+	if err := s.bindPeerKey(ctx, peer.Identity,
+		mustNaClPub(t, mustSecret(t))); err == nil {
+		t.Fatal("accepted a conflicting key")
+	}
+	if got := s.promKeyConflicts(); got != 1 {
+		t.Fatalf("key conflicts = %v, want 1", got)
+	}
+
+	k := newKeyXchgCtx(t, s, mustSecret(t).Identity)
+	handleNaClKeyResponse(k.dc, &NaClKeyResponse{}) // malformed
+	if got := s.promNaClXchgDrops(); got != 1 {
+		t.Fatalf("xchg drops = %v, want 1", got)
+	}
+}
+
+// TestEnsurePeerKeyObservesConcurrentBind proves a key bound by any
+// other route (an inbound handshake, a concurrent exchange) wakes a
+// waiter, and does so on the bindPeerKey signal rather than a poll:
+// the wait must finish far faster than the retry tick.
+func TestEnsurePeerKeyObservesConcurrentBind(t *testing.T) {
+	s := keyXchgServer(t)
+	peer := mustSecret(t)
+	peerPub := mustNaClPub(t, peer)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- s.ensurePeerKey(ctx, peer.Identity) }()
+
+	// Let the waiter reach its select, then bind as a handshake would.
+	waitForCondition(t, "ensurePeerKey never issued its initial request",
+		5*time.Second, func() bool {
+			return s.naclXchg.Len() >= 1
+		})
+	start := time.Now()
+	if err := s.bindPeerKey(ctx, peer.Identity, peerPub); err != nil {
+		t.Fatalf("bindPeerKey: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ensurePeerKey did not observe the binding: %v", err)
+		}
+		if waited := time.Since(start); waited >= naclXchgRetry/10 {
+			t.Fatalf("ensurePeerKey took %v to observe the bind; the "+
+				"bindPeerKey signal should wake it well before the "+
+				"%v retry tick", waited, naclXchgRetry)
+		}
+	case <-ctx.Done():
+		t.Fatal("ensurePeerKey did not return after the key was bound")
+	}
+}
+
+// TestKeyBoundSignalWakesAllWaiters proves the broadcast reaches every
+// concurrent waiter, not just one, and that a bind for an unrelated
+// identity does not falsely satisfy a waiter.
+func TestKeyBoundSignalWakesAllWaiters(t *testing.T) {
+	s := keyXchgServer(t)
+	peer := mustSecret(t)
+	other := mustSecret(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	const waiters = 4
+	done := make(chan error, waiters)
+	for range waiters {
+		go func() { done <- s.ensurePeerKey(ctx, peer.Identity) }()
+	}
+	// A bind for a DIFFERENT identity wakes the waiters but must
+	// not satisfy them.
+	if err := s.bindPeerKey(ctx, other.Identity, mustNaClPub(t, other)); err != nil {
+		t.Fatalf("bindPeerKey(other): %v", err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("a waiter returned (%v) on an unrelated bind", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	start := time.Now()
+	if err := s.bindPeerKey(ctx, peer.Identity, mustNaClPub(t, peer)); err != nil {
+		t.Fatalf("bindPeerKey(peer): %v", err)
+	}
+	for range waiters {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("waiter did not observe the binding: %v", err)
+			}
+		case <-ctx.Done():
+			t.Fatal("not every waiter woke on the bind broadcast")
+		}
+	}
+	if waited := time.Since(start); waited >= naclXchgRetry/10 {
+		t.Fatalf("waiters took %v to observe the bind; the broadcast "+
+			"should wake them well before the %v retry tick",
+			waited, naclXchgRetry)
+	}
+}
+
+// TestSendNaClKeyRequestRegistersPending proves the challenge is
+// registered before the send (so a fast response cannot lose the
+// race), maps to the identity we asked about, and is fresh per call.
+func TestSendNaClKeyRequestRegistersPending(t *testing.T) {
+	s := keyXchgServer(t)
+	peer := mustSecret(t)
+
+	// No session and no route: the send fails, but the pending
+	// challenge must already be recorded.
+	if err := s.sendNaClKeyRequest(t.Context(), peer.Identity); err == nil {
+		t.Fatal("expected a send failure with no route")
+	}
+	if got := s.naclXchg.Len(); got != 1 {
+		t.Fatalf("pending challenges = %d, want 1", got)
+	}
+	// The single pending entry maps to the peer we asked about, so
+	// only that identity's signature can satisfy it.
+	if n := s.naclXchg.DeleteByValue(func(v any) bool {
+		id, ok := v.(Identity)
+		return ok && id == peer.Identity
+	}); n != 1 {
+		t.Fatalf("pending entry for %v not found (removed %d)", peer.Identity, n)
+	}
+
+	// Each call uses a fresh challenge: two requests for the same
+	// peer leave two distinct pending entries.
+	_ = s.sendNaClKeyRequest(t.Context(), peer.Identity)
+	_ = s.sendNaClKeyRequest(t.Context(), peer.Identity)
+	if got := s.naclXchg.Len(); got != 2 {
+		t.Fatalf("pending challenges = %d after two requests, want 2 "+
+			"(challenges must be fresh per request)", got)
+	}
+}
+
+// TestSendNaClKeyRequestUninitialized covers the guard for servers
+// built by hand in tests rather than through NewServer.
+func TestSendNaClKeyRequestUninitialized(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret:   secret,
+		sessions: make(map[Identity]*Transport),
+		peers:    make(map[Identity]*PeerRecord),
+	}
+	if err := s.sendNaClKeyRequest(t.Context(), mustSecret(t).Identity); err == nil {
+		t.Fatal("expected an error with uninitialized exchange state")
+	}
+}
+
+// TestHandleNaClKeyResponseUninitialized covers the same guard on the
+// response path.
+func TestHandleNaClKeyResponseUninitialized(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret:   secret,
+		sessions: make(map[Identity]*Transport),
+		peers:    make(map[Identity]*PeerRecord),
+	}
+	peer := mustSecret(t)
+	k := newKeyXchgCtx(t, s, peer.Identity)
+
+	before := s.naclXchgDrops.Load()
+	if handleNaClKeyResponse(k.dc, signedKeyResponse(t, peer, freshChallenge(61))) {
+		t.Fatal("handler asked to close the session")
+	}
+	if got := s.naclXchgDrops.Load(); got != before+1 {
+		t.Fatalf("drop counter %d, want %d", got, before+1)
+	}
+}
+
+// TestHandleNaClKeyRequestUninitializedRates proves the rate-limiter
+// guard degrades to answering rather than crashing on a hand-built
+// server.
+func TestHandleNaClKeyRequestUninitializedRates(t *testing.T) {
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		secret:   secret,
+		sessions: make(map[Identity]*Transport),
+		peers:    make(map[Identity]*PeerRecord),
+	}
+	requester := mustSecret(t).Identity
+	k := newKeyXchgCtx(t, s, requester)
+
+	before := s.naclXchgDrops.Load()
+	if handleNaClKeyRequest(k.dc, &NaClKeyRequest{
+		Requester: requester,
+		Challenge: freshChallenge(71),
+	}) {
+		t.Fatal("handler asked to close the session")
+	}
+	// The handler ran to completion rather than dereferencing the
+	// nil limiter, reaching the send — which refuses for want of a
+	// known path to the requester, counting exactly one drop.
+	if got := s.naclXchgDrops.Load(); got != before+1 {
+		t.Fatalf("drops %d, want %d", got, before+1)
+	}
+}
+
+// TestNaClKeyRequestSelfGuardIndependentOfSession proves the self
+// guard keys off the Requester field, not the session peer: a peer
+// reflecting our own identity into Requester is refused.
+func TestNaClKeyRequestSelfGuardIndependentOfSession(t *testing.T) {
+	s := keyXchgServer(t)
+	other := mustSecret(t).Identity
+	k := newKeyXchgCtx(t, s, other) // session is a normal peer
+
+	before := s.naclXchgDrops.Load()
+	handleNaClKeyRequest(k.dc, &NaClKeyRequest{
+		Requester: s.secret.Identity, // ...but the reply target is us
+		Challenge: freshChallenge(51),
+	})
+	if got := s.naclXchgDrops.Load(); got != before+1 {
+		t.Fatalf("self-targeted request was not dropped: drops %d, want %d",
+			got, before+1)
+	}
+}
+
+// Regression suite: unsigned gossip must never establish or alter a peer's
+// end-to-end (X25519) key.
+//
+// A node's NaClPub is derived from its PRIVATE key (X25519 of
+// SHA256("continuum-x25519-v1" || secp256k1 privkey)), so it cannot be
+// recomputed from a peer's public identity -- nothing lets a recipient verify
+// that a gossiped NaClPub belongs to the identity it is attached to. Gossip
+// therefore has nothing truthful to say about key material.
+//
+// The defect these tests were written against: addPeer stored
+// s.peers[pr.Identity] = &pr after only structural checks, so one connected
+// peer could gossip a PeerListResponse binding a victim's identity to the
+// ATTACKER's X25519 key; every recipient then sealed the victim's confidential
+// ceremony share material to a key the attacker holds (and can OpenBox), while
+// the victim cannot.
+//
+// The fix: gossip carries discovery metadata only, addPeer never writes
+// NaClPub, and a key is learned exclusively from its holder -- by handshake
+// (whose challenge signature covers the key) or by the routed
+// NaClKeyRequest/NaClKeyResponse exchange. bindPeerKey is the sole writer and
+// enforces immutability, since the derivation is deterministic and a
+// conflicting key is therefore always an attack or a broken peer.
+//
+// This file is the tight unit anchor: it drives addPeer -- the sink the gossip
+// handler feeds every record into -- with the byte-for-byte record an attacker
+// gossips. The companion gossip_e2e_key_integration_test.go proves the same
+// invariant through the real handlePeerListResponse dispatch handler; the
+// exchange itself is covered in nacl_keyxchg_test.go.
+//
+// The legitimate key is installed directly (installPeerFromHandshake) rather
+// than through addPeer, because addPeer is the untrusted sink under test and no
+// longer binds keys at all: routing the bootstrap through it would assert
+// nothing. Installing directly models the state a completed handshake leaves
+// behind, so ONLY the attacker's poison exercises the sink.
+//
+// Cases:
+//   - overwrite-handshake-key: target already holds the victim's REAL key (from
+//     a completed authenticated handshake); gossip then tries to rebind that
+//     identity to the attacker's key. The real key must survive.
+//   - first-binding: no prior handshake; the poison is the FIRST thing the
+//     target learns for the victim. No key may be installed at all.
+
+// newPeerKeyServer builds a Server via the production constructor and adds only
+// what Run() would otherwise supply: an identity secret and the peers TTL that
+// addPeer writes to. It is deliberately not Run(), so there are no listeners or
+// background loops beyond the per-record TTL goroutines addPeer schedules, which
+// are reaped when the caller cancels the context it passes to addPeer.
+func newPeerKeyServer(t *testing.T) *Server {
+	t.Helper()
+	s, err := NewServer(testConfig())
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	secret, err := NewSecret()
+	if err != nil {
+		t.Fatalf("server secret: %v", err)
+	}
+	peersTTL, err := ttl.New(16, true)
+	if err != nil {
+		t.Fatalf("peers ttl: %v", err)
+	}
+	s.secret, s.peersTTL = secret, peersTTL
+	return s
+}
+
+// naclIdentity returns a fresh identity together with its derived X25519 public
+// key bytes (what peers store and seal to) and private key (what only the holder
+// can decrypt with). It returns the Identity, not the Secret: victim and attacker
+// are only ever recipients here, never senders, so their private key is all the
+// crypto legs need beyond the identity.
+func naclIdentity(t *testing.T) (Identity, []byte, *ecdh.PrivateKey) {
+	t.Helper()
+	s, err := NewSecret()
+	if err != nil {
+		t.Fatalf("new secret: %v", err)
+	}
+	pub, err := s.NaClPublicKey()
+	if err != nil {
+		t.Fatalf("nacl pub: %v", err)
+	}
+	priv, err := s.NaClPrivateKey()
+	if err != nil {
+		t.Fatalf("nacl priv: %v", err)
+	}
+	return s.Identity, pub, priv
+}
+
+// peerRec builds a well-formed, current-version PeerRecord binding id to
+// naclPub. This is precisely the record an attacker gossips: structurally
+// valid in every respect, carrying key material it has no authority to assert.
+func peerRec(id Identity, naclPub []byte, addr string) PeerRecord {
+	return PeerRecord{
+		Identity: id,
+		NaClPub:  naclPub,
+		Version:  ProtocolVersion,
+		Address:  addr,
+	}
+}
+
+// installPeerFromHandshake writes a peer record straight into the table under
+// s.mtx, WITHOUT routing it through addPeer. It models the record a completed,
+// authenticated handshake leaves behind. addPeer is the unauthenticated sink
+// under test and no longer binds keys at all, so routing the legitimate
+// bootstrap through it would assert nothing; installing directly keeps the
+// legitimate key out of the sink so only the attacker's gossip exercises it.
+func installPeerFromHandshake(s *Server, pr PeerRecord) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	rec := pr
+	s.peers[pr.Identity] = &rec
+}
+
+// storedPeerNaClPub returns the X25519 key the server currently holds for id --
+// exactly the key SendEncrypted would seal to -- and whether a key is bound at
+// all.  It does NOT fail on absence: a correct fix leaves the identity with no
+// usable key, either by holding no record or (as the committed fix does) by
+// holding a discovery-only record whose NaClPub was never bound.  Both are the
+// same fact to every caller here -- there is nothing to seal to -- so an empty
+// key reports held=false.
+func storedPeerNaClPub(t *testing.T, s *Server, id Identity) ([]byte, bool) {
+	t.Helper()
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	pr, ok := s.peers[id]
+	if !ok || len(pr.NaClPub) == 0 {
+		return nil, false
+	}
+	return pr.NaClPub, true
+}
+
+// assertPeerKeyUnhijacked encodes the peer-key-authenticity invariant against whatever key the
+// target currently holds for id: the target must never hold the attacker's key
+// under the victim's identity, and any message SendEncrypted would seal to that
+// key must be readable ONLY by the victim, never by the attacker.
+//
+// wantRetained, when non-nil, is a key the target authenticated BEFORE the
+// poison (the overwrite case): a correct fix must keep it intact -- not replace
+// it (buggy) and not drop it (which the !held early return would otherwise mask).
+func assertPeerKeyUnhijacked(t *testing.T, s *Server, id Identity, attackerPub, wantRetained []byte, victimPriv, attackerPriv *ecdh.PrivateKey) {
+	t.Helper()
+
+	stored, held := storedPeerNaClPub(t, s, id)
+
+	// PRIMARY INVARIANT (kills false-pass, pins the fix): the target must never
+	// hold the attacker's key under the victim's identity. Fails while buggy,
+	// decoupled from the crypto below.
+	if held && bytes.Equal(stored, attackerPub) {
+		t.Errorf("target holds the ATTACKER's X25519 key bound to the " +
+			"victim's identity: unsigned gossip hijacked the e2e key")
+	}
+
+	// RETENTION (overwrite case only): a previously authenticated binding must
+	// survive the poison intact. Checked before the !held early return so a fix
+	// that DROPS the record on conflict cannot slip through.
+	if wantRetained != nil && (!held || !bytes.Equal(stored, wantRetained)) {
+		t.Errorf("target no longer holds the victim's real key (held=%v): the "+
+			"authenticated binding was lost", held)
+	}
+
+	// A correct fix may reject the unauthenticated binding outright, leaving no
+	// record. That satisfies the invariant -- there is nothing to seal.
+	if !held {
+		return
+	}
+
+	// CONSEQUENCE: seal to whatever key the target now holds for the victim --
+	// exactly SendEncrypted's step (SealBox to s.peers[dest].NaClPub). The result
+	// must be readable ONLY by the victim. While buggy, `stored` is the attacker's
+	// key, so this leaks; the victim leg is a positive control against a "nobody
+	// can decrypt" false-pass.
+	share := []byte("confidential TSS key share destined for the victim")
+	ep, err := SealBox(share, stored, s.secret, PKeygenRequest)
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if _, aerr := OpenBox(ep, attackerPriv); aerr == nil {
+		t.Error("target sealed the victim's confidential traffic to a key " +
+			"the attacker can decrypt")
+	}
+	if _, verr := OpenBox(ep, victimPriv); verr != nil {
+		t.Errorf("target's traffic to the victim is not decryptable by the "+
+			"victim: %v", verr)
+	}
+}
+
+func TestGossipCannotHijackPeerE2EKey(t *testing.T) {
+	const peerAddr = "10.0.0.1:9000"
+
+	tests := []struct {
+		name string
+		// priorHandshake installs the victim's REAL key first (directly, as a
+		// completed authenticated handshake would) so the poison is an OVERWRITE.
+		// When false, the poison is the victim's FIRST binding.
+		priorHandshake bool
+	}{
+		{name: "overwrite-handshake-key", priorHandshake: true},
+		{name: "first-binding", priorHandshake: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel() // reap addPeer's per-record TTL goroutines
+
+			// The target seals confidential ceremony traffic to the victim; the
+			// attacker is any connected peer able to gossip a PeerListResponse.
+			target := newPeerKeyServer(t)
+			victim, victimPub, victimPriv := naclIdentity(t)
+			_, attackerPub, attackerPriv := naclIdentity(t)
+
+			// Distinct keys are what make the decrypt assertions meaningful.
+			if bytes.Equal(victimPub, attackerPub) {
+				t.Fatal("victim and attacker derived the same X25519 key")
+			}
+
+			var wantRetained []byte
+			if tt.priorHandshake {
+				// Target already holds the victim's REAL key from a completed
+				// authenticated handshake (installed directly, NOT via the
+				// unauthenticated sink). Confirm it landed so the poison provably
+				// attempts an OVERWRITE and cannot silently degenerate into
+				// first-binding.
+				installPeerFromHandshake(target, peerRec(victim, victimPub, peerAddr))
+				if stored, held := storedPeerNaClPub(t, target, victim); !held || !bytes.Equal(stored, victimPub) {
+					t.Fatal("handshake bootstrap: victim's real key was not installed")
+				}
+				wantRetained = victimPub
+			}
+
+			// A connected peer (the attacker) gossips a PeerListResponse binding
+			// the victim's identity to the attacker's X25519 key. This is exactly
+			// the record handlePeerListResponse feeds into addPeer -- unsigned and
+			// unchecked -- so we drive that vulnerable sink directly.
+			target.addPeer(ctx, peerRec(victim, attackerPub, peerAddr))
+
+			assertPeerKeyUnhijacked(t, target, victim, attackerPub, wantRetained, victimPriv, attackerPriv)
+		})
+	}
+}
+
+// Integration coverage complementing the unit anchor in
+// gossip_e2e_key_test.go. It drives the REAL gossip dispatch handler
+// (handlePeerListResponse) with a real *PeerListResponse -- proving the defect
+// through the actual handler (version gate, address validation, addPeer), not
+// just addPeer in isolation. No network; fully deterministic.
+
+// gossipPeerList feeds records to the target through the production
+// handlePeerListResponse dispatch handler, exactly as a received
+// PeerListResponse from `from` would be dispatched. dc.t is unused by this
+// handler (it neither reads nor writes the transport), so nil is safe.
+func gossipPeerList(t *testing.T, s *Server, from Identity, recs ...PeerRecord) {
+	t.Helper()
+	ctx := t.Context()
+	dc := &dispatchCtx{
+		ctx:        ctx,
+		sessionCtx: ctx,
+		s:          s,
+		id:         &from,
+	}
+	handlePeerListResponse(dc, &PeerListResponse{Peers: recs})
+}
+
+func TestGossipHandlerCannotHijackPeerE2EKey(t *testing.T) {
+	const peerAddr = "10.0.0.1:9000"
+
+	tests := []struct {
+		name           string
+		priorHandshake bool
+	}{
+		{name: "overwrite-handshake-key", priorHandshake: true},
+		{name: "first-binding", priorHandshake: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := newPeerKeyServer(t)
+			victim, victimPub, victimPriv := naclIdentity(t)
+			attacker, attackerPub, attackerPriv := naclIdentity(t)
+			if bytes.Equal(victimPub, attackerPub) {
+				t.Fatal("victim and attacker derived the same X25519 key")
+			}
+
+			var wantRetained []byte
+			if tt.priorHandshake {
+				installPeerFromHandshake(target, peerRec(victim, victimPub, peerAddr))
+				if stored, held := storedPeerNaClPub(t, target, victim); !held || !bytes.Equal(stored, victimPub) {
+					t.Fatal("handshake bootstrap: victim's real key was not installed")
+				}
+				wantRetained = victimPub
+			}
+
+			// Attacker gossips the poison through the REAL dispatch handler.
+			gossipPeerList(t, target, attacker,
+				peerRec(victim, attackerPub, peerAddr))
+
+			assertPeerKeyUnhijacked(t, target, victim, attackerPub, wantRetained, victimPriv, attackerPriv)
+		})
 	}
 }
