@@ -191,6 +191,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were not joined, so the database could close while one of them held
   a transaction; the database is now closed only after they return
   ([#1224](https://github.com/hemilabs/heminetwork/pull/1224)).
+- Fix `tbcgozer` sending a request for a context that was already
+  cancelled, and sometimes returning its reply instead of the context
+  error ([#1227](https://github.com/hemilabs/heminetwork/pull/1227)).
 - Fix `tbc` block download stalling on a low-work header fork. Headers
   that fork off at or below the last checkpoint the best header passed,
   or that contradict a checkpoint, are now rejected, and the download
