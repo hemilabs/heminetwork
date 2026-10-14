@@ -7,6 +7,10 @@ set -ex
 
 MY_ADDRESS="0x78697c88847dfbbb40523e42c1f2e28a13a170be"
 
+# the address of BATCHER_PRIVATE_KEY in .env, op-batcher has an account of
+# its own
+BATCHER_ADDRESS="0x5155b5c501fc980A6c54ACd3B783e0875530C516"
+
 # need an older version of op-deployer here, need to update the repo
 # to use the new one but this will do for our purposes now
 # this should only affect the op-geth-l2-setup container (no others)
@@ -32,7 +36,7 @@ echo "$(tomlq -t ".chains[0].roles.systemConfigOwner = \"$MY_ADDRESS\"" .deploye
 echo "$(tomlq -t ".chains[0].roles.unsafeBlockSigner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.l1ProxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.l2ProxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
-echo "$(tomlq -t ".chains[0].roles.batcher = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.batcher = \"$BATCHER_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.proposer = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.challenger = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].eip1559Denominator = 1" .deployer/intent.toml)" > .deployer/intent.toml
@@ -124,6 +128,7 @@ cat l1allocs.json
 # this adds an allocation line to fund our address on L1, this allows us
 # to transact with the L1
 echo "$(jq '.alloc."0x78697c88847dfbbb40523e42c1f2e28a13a170be".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
+echo "$(jq ".alloc.\"$BATCHER_ADDRESS\".balance = \"0x999999999999999999\"" /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.alloc."0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.alloc."0xf0faD6E77d55509484F93Ace13AAFa37138bc370".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.alloc."0x5663a22EAF74371d1765FdA4635fa81ee1c88fa8".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
