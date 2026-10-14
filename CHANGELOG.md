@@ -177,6 +177,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix `tbc` reading a block header height entry before the header was
+  committed. The indexer could panic on a fork at the tip and leave the
+  height entry on disk without its header; headers now commit before
+  their height entries, and the canonical tip commits last
+  ([#1226](https://github.com/hemilabs/heminetwork/pull/1226)).
 - Fix `tbc` block download stalling on a low-work header fork. Headers
   that fork off at or below the last checkpoint the best header passed,
   or that contradict a checkpoint, are now rejected, and the download
