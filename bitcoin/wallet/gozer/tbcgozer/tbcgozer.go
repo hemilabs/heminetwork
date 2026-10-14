@@ -309,6 +309,13 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	log.Tracef("callTBC %T", msg)
 	defer log.Tracef("callTBC exit %T", msg)
 
+	// Do not queue a request for a context that is already done: the
+	// select below picks at random between ready cases, so it would
+	// send it about half of the time.
+	if err := pctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if !t.Connected() {
 		return nil, errors.New("not connected to tbc")
 	}

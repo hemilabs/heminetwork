@@ -718,6 +718,31 @@ func TestTBCGozerTxByIDContextCancelled(t *testing.T) {
 	}
 }
 
+// TestCallTBCCancelledContextNotQueued checks that a call with a context
+// that is already done returns its error and never queues a request.  The
+// send select picks at random between ready cases, so without the early
+// check about half of these calls queued a request, and a fast reply could
+// then win over the cancelled context.
+func TestCallTBCCancelledContextNotQueued(t *testing.T) {
+	const calls = 64
+	tg := &tbcGozer{
+		cmdCh:     make(chan tbcCmd, calls),
+		connected: true,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	txid := chainhash.Hash{0xde, 0xad}
+	for range calls {
+		if _, err := tg.TxByID(ctx, &txid); !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got: %v", err)
+		}
+	}
+	if n := len(tg.cmdCh); n != 0 {
+		t.Fatalf("%v of %v cancelled calls queued a request", n, calls)
+	}
+}
+
 func FuzzTBCGozerTxByID(f *testing.F) {
 	f.Add(make([]byte, 32))         // zero hash
 	f.Add([]byte{0xaa, 0xbb, 0xcc}) // short
