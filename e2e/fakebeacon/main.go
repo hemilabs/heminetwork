@@ -407,7 +407,8 @@ func (b *beacon) handleGenesis(w http.ResponseWriter, r *http.Request) {
 }
 
 // slotBlobs returns the blobs of the L1 block in a slot, in the order they
-// appear in the block, or an error with an HTTP status.
+// appear in the block, or an error with an HTTP status.  A blob that is not
+// known has no contents, it is up to the caller to fail if it is asked for.
 func (b *beacon) slotBlobs(r *http.Request) ([]blockBlob, int, error) {
 	slot, err := strconv.ParseUint(r.PathValue("block_id"), 10, 64)
 	if err != nil {
@@ -429,11 +430,8 @@ func (b *beacon) slotBlobs(r *http.Request) ([]blockBlob, int, error) {
 	var blobs []blockBlob
 	for _, tx := range block.Transactions {
 		for _, hash := range tx.BlobVersionedHashes {
-			kept, ok := b.store.get(hash)
-			if !ok {
-				// The transaction was not submitted through the proxy.
-				return nil, http.StatusNotFound, fmt.Errorf("blob %v of l1 block %d (slot %d) is not known", hash, block.Number, slot)
-			}
+			// is nil if unknown
+			kept, _ := b.store.get(hash)
 			blobs = append(blobs, blockBlob{index: uint64(len(blobs)), hash: hash, keptBlob: kept})
 		}
 	}
@@ -474,6 +472,10 @@ func (b *beacon) handleBlobs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		delete(wanted, blob.hash)
+		if blob.blob == nil {
+			writeError(w, http.StatusNotFound, "blob %v is not known", blob.hash)
+			return
+		}
 		data = append(data, blob.blob)
 	}
 	for hash := range wanted {
@@ -523,6 +525,10 @@ func (b *beacon) handleBlobSidecars(w http.ResponseWriter, r *http.Request) {
 	for _, blob := range blobs {
 		if _, ok := wanted[blob.index]; len(wanted) > 0 && !ok {
 			continue
+		}
+		if blob.blob == nil {
+			writeError(w, http.StatusNotFound, "blob %v is not known", blob.hash)
+			return
 		}
 		data = append(data, sidecar{
 			Index:         strconv.FormatUint(blob.index, 10),
