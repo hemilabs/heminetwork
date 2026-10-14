@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Update rustls to 0.23.46 for RUSTSEC-2026-0346, RUSTSEC-2026-0347,
+  RUSTSEC-2026-0348 and RUSTSEC-2026-0349
+  ([#1228](https://github.com/hemilabs/heminetwork/pull/1228)).
+
 - Fix a remote crash vulnerability in `tbc` caused by the first element
   of an inventory message list being accessed before ensuring the slice
   isn't empty ([#1039](https://github.com/hemilabs/heminetwork/pull/1039)).
