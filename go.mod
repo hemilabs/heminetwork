@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork/v2
 
 go 1.26
 
-toolchain go1.26.6
+toolchain go1.26.9
 
 require (
 	codeberg.org/miekg/dns v0.5.26
@@ -21,6 +21,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hemilabs/x/leveldb v0.1.0
 	github.com/hemilabs/x/tss/v3 v3.0.0-alpha.1
+	github.com/holiman/uint256 v1.3.2
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/moby/moby/api v1.54.2
@@ -71,7 +72,6 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
 	github.com/ipfs/go-log/v2 v2.1.3 // indirect
 	github.com/kcalvinalvin/anet v0.0.0-20251112173137-d8ddc1f6dbee // indirect
