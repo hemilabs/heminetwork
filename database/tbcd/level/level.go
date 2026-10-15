@@ -1575,34 +1575,32 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	// tip.  A reader never sees a height or a tip without its header.
 
 	// block headers commit
-	if err = bhsCommit(); err != nil {
+	if err = headersInsertCommit(level.BlockHeadersDB, bhsCommit); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers commit: %w", err)
 	}
-	headersInsertCommit(level.BlockHeadersDB)
 
 	// blocks missing commit
-	if err = bmCommit(); err != nil {
+	if err = headersInsertCommit(level.BlocksMissingDB, bmCommit); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
-	headersInsertCommit(level.BlocksMissingDB)
 
 	// height hash commit
-	if err = hhCommit(); err != nil {
+	if err = headersInsertCommit(level.HeightHashDB, hhCommit); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash commit: %w", err)
 	}
-	headersInsertCommit(level.HeightHashDB)
 
 	// canonical tip, still serialized by the metadata transaction
 	if tipBatch.Len() > 0 {
-		err = l.pool[level.BlockHeadersDB].Write(tipBatch, nil)
+		err = headersInsertCommit(bhsCanonicalTipKey, func() error {
+			return l.pool[level.BlockHeadersDB].Write(tipBatch, nil)
+		})
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("canonical tip: %w", err)
 		}
-		headersInsertCommit("canonicaltip")
 	}
 
 	// metadata commit
@@ -1614,15 +1612,11 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	return it, cbh, lbh, len(bhs.Headers), nil
 }
 
-// headersInsertCommitted is called by BlockHeadersInsert after each commit
-// with the name of the database that it committed.  It is nil except in
-// tests, which use it to read the database between the commits.
-var headersInsertCommitted func(db string)
-
-func headersInsertCommit(db string) {
-	if headersInsertCommitted != nil {
-		headersInsertCommitted(db)
-	}
+// headersInsertCommit runs one commit of BlockHeadersInsert, named by the
+// database it commits.  Tests replace it to read the database between the
+// commits.
+var headersInsertCommit = func(_ string, commit func() error) error {
+	return commit()
 }
 
 // XXX return hash and height only
