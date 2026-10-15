@@ -1508,7 +1508,8 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 	}
 	var burnerBlocks []uint64
 	for _, tx := range burners {
-		waitForTxReceipt(t, ctx, l1Client, tx)
+		receipt := waitForTxReceipt(t, ctx, l1Client, tx)
+		burnerBlocks = append(burnerBlocks, receipt.BlockNumber.Uint64())
 	}
 	lastBlock := burnerBlocks[len(burnerBlocks)-1]
 	t.Logf("the %d gas burners are in l1 blocks %v", len(burners), burnerBlocks)
