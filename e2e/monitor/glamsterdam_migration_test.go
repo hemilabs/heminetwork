@@ -125,13 +125,16 @@ var opStackNodes = []opStackNode{
 func batcherDAType(t *testing.T) string {
 	t.Helper()
 
-	switch da := os.Getenv("BATCHER_DA_TYPE"); da {
+	const batcherDaTypeEnv = "BATCHER_DA_TYPE"
+
+	switch da := os.Getenv(batcherDaTypeEnv); da {
 	case "":
-		return "calldata"
+		t.Fatalf("%s not set", batcherDaTypeEnv)
+		return ""
 	case "calldata", "blobs":
 		return da
 	default:
-		t.Fatalf("unknown BATCHER_DA_TYPE %q, expected calldata or blobs", da)
+		t.Fatalf("unknown %s %q, expected calldata or blobs", batcherDaTypeEnv, da)
 		return ""
 	}
 }
@@ -1089,9 +1092,19 @@ func batcherTransactions(t *testing.T, ctx context.Context, l1 *rpc.Client, fork
 			t.Fatal(err)
 		}
 		for _, tx := range block.Transactions {
-			if tx.From != batcher || tx.To == nil || *tx.To != inbox {
+			if tx.From != batcher {
 				continue
 			}
+
+			if tx.To == nil || *tx.To != inbox {
+				toStr := "nil"
+				if tx.To != nil {
+					toStr = fmt.Sprintf("%v", *tx.To)
+				}
+
+				t.Fatalf("received a batcher transaction to an unexpected inbox: %s", toStr)
+			}
+
 			txs = append(txs, batcherTx{
 				l1Tx:        tx,
 				block:       n,
