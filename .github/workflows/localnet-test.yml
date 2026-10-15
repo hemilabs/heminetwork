@@ -110,6 +110,7 @@ jobs:
         proposer_mode: ["l2oo", "fault"]
         l1: ["http://geth-l1:8545", "ws://geth-l1:8546"]
         l1_rpckind: ["basic", "any", "standard"]
+        batcher_da: ["calldata", "blobs"]
         gethl1:
           # the release that Sepolia runs through the Glamsterdam activation
           - "ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64"
