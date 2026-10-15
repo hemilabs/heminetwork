@@ -1334,9 +1334,13 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	return l.blockHeadersInsert(ctx, bhs, batchHook, nil)
 }
 
-func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batchHook tbcd.BatchHook, committed func(db string)) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batchHook tbcd.BatchHook, testCommitted func(db string)) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
+
+	if testCommitted == nil {
+		testCommitted = func(string) {}
+	}
 
 	if bhs == nil || len(bhs.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
@@ -1578,27 +1582,21 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers commit: %w", err)
 	}
-	if committed != nil {
-		committed(level.BlockHeadersDB)
-	}
+	testCommitted(level.BlockHeadersDB)
 
 	// blocks missing commit
 	if err = bmCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
-	if committed != nil {
-		committed(level.BlocksMissingDB)
-	}
+	testCommitted(level.BlocksMissingDB)
 
 	// height hash commit
 	if err = hhCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash commit: %w", err)
 	}
-	if committed != nil {
-		committed(level.HeightHashDB)
-	}
+	testCommitted(level.HeightHashDB)
 
 	if tipBatch.Len() > 0 {
 		err = l.pool[level.BlockHeadersDB].Write(tipBatch, nil)
@@ -1606,9 +1604,7 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("canonical tip: %w", err)
 		}
-		if committed != nil {
-			committed(bhsCanonicalTipKey)
-		}
+		testCommitted(bhsCanonicalTipKey)
 	}
 
 	// metadata commit
