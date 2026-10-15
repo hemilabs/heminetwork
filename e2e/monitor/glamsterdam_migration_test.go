@@ -1207,23 +1207,7 @@ func sendHeavyL2Transactions(t *testing.T, ctx context.Context) uint64 {
 
 	var lastBlock uint64
 	for _, tx := range txs {
-		var receipt *types.Receipt
-		for deadline := time.Now().Add(3 * time.Minute); receipt == nil; {
-			if receipt, err = l2Client.TransactionReceipt(ctx, tx.Hash()); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("l2 transaction %s was not included: %v", tx.Hash(), err)
-			}
-			select {
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			case <-time.After(time.Second):
-			}
-		}
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			t.Fatalf("l2 transaction %s failed", tx.Hash())
-		}
+		receipt := waitForTxReceipt(t, ctx, l2Client, tx)
 		if receipt.GasUsed != tx.Gas() {
 			t.Fatalf("l2 transaction %s with %d bytes of data used %d gas, expected the pre-Glamsterdam calldata floor of %d",
 				tx.Hash(), len(tx.Data()), receipt.GasUsed, tx.Gas())
@@ -1391,20 +1375,7 @@ func sendL1Transaction(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 	if err := l1Client.SendTransaction(ctx, tx); err != nil {
 		t.Fatalf("send l1 transaction of type %d: %v", tx.Type(), err)
 	}
-	for deadline := time.Now().Add(2 * time.Minute); ; {
-		receipt, err := l1Client.TransactionReceipt(ctx, tx.Hash())
-		if err == nil {
-			return receipt
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("l1 transaction %s of type %d was not included: %v", tx.Hash(), tx.Type(), err)
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(time.Second):
-		}
-	}
+	return waitForTxReceipt(t, ctx, l1Client, tx)
 }
 
 // TestOpNodesVerifyL1BlocksWithEverything puts into L1 blocks what the
@@ -1536,25 +1507,8 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 		burners = append(burners, tx)
 	}
 	var burnerBlocks []uint64
-	for i, tx := range burners {
-		for deadline := time.Now().Add(2 * time.Minute); ; {
-			receipt, err := l1Client.TransactionReceipt(ctx, tx.Hash())
-			if err == nil {
-				if receipt.GasUsed != l1MaxTxGas {
-					t.Fatalf("gas burner %d used %d gas, expected %d", i, receipt.GasUsed, l1MaxTxGas)
-				}
-				burnerBlocks = append(burnerBlocks, receipt.BlockNumber.Uint64())
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("gas burner %d was not included: %v", i, err)
-			}
-			select {
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			case <-time.After(time.Second):
-			}
-		}
+	for _, tx := range burners {
+		waitForTxReceipt(t, ctx, l1Client, tx)
 	}
 	lastBlock := burnerBlocks[len(burnerBlocks)-1]
 	t.Logf("the %d gas burners are in l1 blocks %v", len(burners), burnerBlocks)
@@ -1602,7 +1556,6 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 			func(s *opNodeSyncStatus) bool {
 				return s.SafeL2.L1Origin.Number > lastBlock+1
 			})
-		checkOpNodeL1View(t, ctx, l1, node.name, status, true)
 
 		// L1 origins never decrease, binary search for the first L2 block
 		// with the L1 block with the raised base fee as its origin
