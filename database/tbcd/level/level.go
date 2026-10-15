@@ -1334,8 +1334,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	return l.blockHeadersInsert(ctx, bhs, batchHook, nil)
 }
 
-// blockHeadersInsert is BlockHeadersInsert. If committed is not nil, it is
-// called after each commit with the name of the committed database.
 func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batchHook tbcd.BatchHook, committed func(db string)) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
@@ -1443,7 +1441,7 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	bmBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
 	mdBatch := new(leveldb.Batch)
-	tipBatch := new(leveldb.Batch) // written last, see commit order below
+	tipBatch := new(leveldb.Batch)
 
 	cdiff := &pbh.Difficulty
 	height := pbh.Height
@@ -1575,11 +1573,6 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			fmt.Errorf("metadata insert: %w", err)
 	}
 
-	// Readers take no lock and each database commits on its own, so
-	// commit what is referenced before what refers to it: the headers,
-	// then blocks missing, then the height index, then the canonical
-	// tip.  A reader never sees a height or a tip without its header.
-
 	// block headers commit
 	if err = bhsCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
@@ -1607,7 +1600,6 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		committed(level.HeightHashDB)
 	}
 
-	// canonical tip, still serialized by the metadata transaction
 	if tipBatch.Len() > 0 {
 		err = l.pool[level.BlockHeadersDB].Write(tipBatch, nil)
 		if err != nil {

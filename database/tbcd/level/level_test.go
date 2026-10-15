@@ -2475,9 +2475,6 @@ func TestBlockTxRawByLocRealBlock(t *testing.T) {
 	}
 }
 
-// checkHeaderReaders reads the database like a reader that takes no lock.
-// It returns an error when a height entry has no header, or when the
-// canonical tip has no height entry.
 func checkHeaderReaders(ctx context.Context, db *ldb) error {
 	it := db.pool[level.HeightHashDB].NewIterator(nil, nil)
 	defer it.Release()
@@ -2507,12 +2504,6 @@ func checkHeaderReaders(ctx context.Context, db *ldb) error {
 	return nil
 }
 
-// TestBlockHeadersInsertCommitOrder checks that no reader can see a height
-// entry before its header, or a canonical tip before its height entry,
-// between the commits of BlockHeadersInsert.  The commits go to separate
-// databases and readers take no lock, so the order of the commits is all
-// that protects them.  On testnet4 the indexer read a fork header's height
-// entry before the header was committed, and panicked.
 func TestBlockHeadersInsertCommitOrder(t *testing.T) {
 	ctx := t.Context()
 	db := createOrdinalDB(ctx, t)
@@ -2523,8 +2514,8 @@ func TestBlockHeadersInsertCommitOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := createTestBlock(genesis.Hash(), 1)
-	b := createTestBlock(genesis.Hash(), 2) // fork of a, same height
-	c := createTestBlock(a.Hash(), 3)       // extends a, moves the tip
+	b := createTestBlock(genesis.Hash(), 2)
+	c := createTestBlock(a.Hash(), 3)
 
 	tests := []struct {
 		name   string
@@ -2556,8 +2547,6 @@ func TestBlockHeadersInsertCommitOrder(t *testing.T) {
 			if it != tt.want {
 				t.Fatalf("insert type %v, want %v", it, tt.want)
 			}
-			// Every database the insert writes must have committed
-			// through the hook, or the checks above did not run.
 			if len(commits) < 3 {
 				t.Fatalf("checked after %v, want every commit", commits)
 			}
