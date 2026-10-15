@@ -2538,24 +2538,18 @@ func TestBlockHeadersInsertCommitOrder(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var commits []string
-			commit := headersInsertCommit
-			headersInsertCommit = func(name string, f func() error) error {
-				if err := commit(name, f); err != nil {
-					return err
-				}
+			committed := func(name string) {
 				commits = append(commits, name)
 				if err := checkHeaderReaders(ctx, db); err != nil {
 					t.Errorf("after %v commit: %v", name, err)
 				}
-				return nil
 			}
-			t.Cleanup(func() { headersInsertCommit = commit })
 
 			msg := wire.NewMsgHeaders()
 			if err := msg.AddBlockHeader(tt.header); err != nil {
 				t.Fatal(err)
 			}
-			it, _, _, _, err := db.BlockHeadersInsert(ctx, msg, nil)
+			it, _, _, _, err := db.blockHeadersInsert(ctx, msg, nil, committed)
 			if err != nil {
 				t.Fatal(err)
 			}
