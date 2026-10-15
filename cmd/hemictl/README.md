@@ -1,44 +1,38 @@
 ## hemictl
 
-The `hemictl` command is a generic tool to manipulate script commands to various daemons and their internal framework.
+`hemictl` is a developer CLI for talking directly to Hemi daemons and their underlying databases.
+Commands are grouped by subsystem (e.g. `tbcdb` for direct `tbcd` database access, `hproxy` for the
+hVM proxy, `p2p` for the Bitcoin p2p network, `api`, `level`), and each group exposes a set of named
+actions.
 
 ### Usage
+
 ```bash
-hemictl <command> <action> [parameters]
+hemictl <command> <action> [key=value...]
 ```
 
-### Components
+- `command`: the subsystem to talk to (e.g. `tbcdb`)
+- `action`: the action to run within that subsystem (e.g. `blockheaderbyhash`)
+- `key=value`: arguments for the action, passed as space-separated `key=value` pairs
 
-- `command`: Determines the daemon / module to be manipulated (e.g., `tbcdb` is used to manipulated a TBC database)
-- `action`: Specifies which command will be called (e.g., `ping`)
-- `parameters`: Key-value pair or JSON encoded parameters for the `action` (e.g., `timestamp=1` or `{"timestamp":1}`)
+Running `hemictl <command>` with no action prints the list of actions for that command, along with
+their arguments and whether each is required, optional, or part of a mutually exclusive group (e.g.
+`hash=` or `address=`, but not both).
+
+### Help
+
+```bash
+hemictl -help               # list all commands
+hemictl <command> -help     # list a command's actions and their arguments
+```
 
 ### Environment Variables
 
-- `HEMICTL_LOG_LEVEL`: Sets the logging level (e.g., `INFO`, `DEBUG`)
-- `HEMICTL_LEVELDB_HOME`: The tbcdb leveldb home directory (default: `~/.tbcd`)
-- `HEMICTL_NETWORK`: Bitcoin network (e.g., `mainnet`, `testnet3`, `testnet4`)
+- `HEMICTL_LOG_LEVEL`: logging level for hemictl and the services it drives (default: `hemictl=INFO;protocol=INFO`)
+- `HEMICTL_LEVELDB_HOME`: leveldb home directory used by `tbcdb` (default: `~/.tbcd`)
+- `HEMICTL_NETWORK`: Bitcoin network to operate on, e.g. `mainnet`, `testnet3`, `testnet4` (default: `mainnet`)
 
-### Detailed Overview
+### Adding commands
 
-For a detailed overview of the available modules, use:
-```bash
-hemictl -help
-```
-
-For a detailed overview of a specific module's subcommands, use:
-```bash
-hemictl <command> -help
-```
-
-### Error Handling
-
-The tool provides detailed error messages with:
-- Timestamp of the error
-- Trace ID for debugging
-- Human-readable error message
-
-### Notes
-- Always ensure proper formatting in parameters
-- Use appropriate environment variables for production deployments
-- Check logs when troubleshooting failed commands
+New commands live in their own file under `cmd/hemictl/` and register themselves with
+`registerCommand` from an `init()` function; see `tbcdb.go` or `hproxy.go` for examples.
