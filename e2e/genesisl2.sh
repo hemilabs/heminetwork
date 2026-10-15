@@ -132,6 +132,9 @@ echo "$(jq ".alloc.\"$BATCHER_ADDRESS\".balance = \"0x999999999999999999\"" /sha
 echo "$(jq '.alloc."0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.alloc."0xf0faD6E77d55509484F93Ace13AAFa37138bc370".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.alloc."0x5663a22EAF74371d1765FdA4635fa81ee1c88fa8".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
+# used by the Glamsterdam migration tests to put load on the batcher, see
+# glamsterdamLoadKey in e2e/monitor/glamsterdam_migration_test.go
+echo "$(jq '.alloc."0x6b2619fD26d8D6178E6aF51fF69c150E8E88e58C".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.config.cancunTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.config.pragueTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.config.osakaTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
