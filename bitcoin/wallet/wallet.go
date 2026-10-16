@@ -67,8 +67,8 @@ type PrevOuts map[string]*wire.TxOut
 // estimateVSize returns the estimated virtual size of a transaction with
 // numInputs inputs spending from the address type encoded in script.  The
 // script is classified once; all inputs are assumed to be the same type
-// (the wallet's own UTXOs).  Unknown script types fall through to P2PKH
-// which overestimates — safe for fee calculation, never underpays.
+// (the wallet's own UTXOs).  Unknown script types are estimated using the
+// P2PKH input size.
 func estimateVSize(numInputs int, script []byte, txOuts []*wire.TxOut) int {
 	changeSize := len(script)
 	switch {

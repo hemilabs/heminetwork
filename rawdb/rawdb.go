@@ -24,7 +24,7 @@ const (
 	indexDir = "index"
 	DataDir  = "data"
 
-	DefaultMaxFileSize = 256 * 1024 * 1024 // 256MB file max; will never be bigger.
+	DefaultMaxFileSize = 256 * 1024 * 1024 // Default data-file limit; configurable via Config.MaxSize.
 )
 
 var (
