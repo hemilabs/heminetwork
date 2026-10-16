@@ -47,6 +47,9 @@ type ordinalDBSeed struct {
 	inscID2 [36]byte
 	sat2    uint64
 
+	// The second inscription moved to a third outpoint, at an offset.
+	location2 tbcd.Outpoint
+
 	// Address for InscriptionsByAddress testing.
 	address string
 }
@@ -128,9 +131,12 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	entry1.Inscriptions[0] = encodeOutpointValue(
 		seed.inscID, srcKindReveal, 0, ordinalRevealSentinel, 0)
 
-	// Second 'o' entry: inscID2 at a second outpoint (txid2:0).
+	// Second 'o' entry: inscID2 moved to a third outpoint (txid3:1) at
+	// offset 330, so that its location differs from its inscription ID.
 	// Tests that InscriptionsByAddress accumulates across UTXOs.
-	entry2.Inscriptions[0] = encodeOutpointValue(
+	seed.location2 = tbcd.NewOutpoint(chainhash.Hash{0x21, 0x22, 0x23}, 1)
+	entry3 := rawGetEntry(cache, seed.location2)
+	entry3.Inscriptions[330] = encodeOutpointValue(
 		seed.inscID2, srcKindReveal, 0, ordinalRevealSentinel, 0)
 
 	// 'O': point-Get acceleration index for each inscription outpoint.
@@ -144,8 +150,8 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	var bigO2 [40]byte
 	copy(bigO2[:32], seed.blockHash[:])
 	binary.BigEndian.PutUint64(bigO2[32:], 10_000_000_000)
-	entry2.BigO = bigO2[:]
-	entry2.BigOSet = true
+	entry3.BigO = bigO2[:]
+	entry3.BigOSet = true
 
 	// 'a': sat→inscription mapping for InscriptionsBySat.
 	entry1.Aux[ordinalSatInscriptionKey(seed.satNumber, seed.inscID)] = []byte{}
@@ -169,11 +175,12 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	pkScript, _ := txscript.PayToAddrScript(p2pkhAddr)
 	sh := tbcd.NewScriptHashFromScript(pkScript)
 	co := tbcd.NewCacheOutput([32]byte(sh), 5_000_000_000, 0)
-	co2 := tbcd.NewCacheOutput([32]byte(sh), 10_000_000_000, 0)
+	co2 := tbcd.NewCacheOutput([32]byte(sh), 10_000_000_000,
+		seed.location2.TxIndex())
 
 	utxoCache := map[tbcd.Outpoint]tbcd.CacheOutput{
-		seed.outpoint: co,
-		outpoint2:     co2,
+		seed.outpoint:  co,
+		seed.location2: co2,
 	}
 	if err := db.BlockUtxoUpdate(ctx, 1, utxoCache, chainhash.Hash{}); err != nil {
 		t.Fatal(err)
@@ -265,7 +272,7 @@ func TestRpcOrdinal(t *testing.T) {
 			t.Fatalf("E2E 'O' outputValue 1: got %d, want 5000000000", gotOV)
 		}
 
-		op2 := tbcd.NewOutpoint(seed.txid2, 0)
+		op2 := seed.location2
 		bigO2, err := s.g.db.OrdinalBigOByOutpoint(ctx, op2)
 		if err != nil {
 			t.Fatalf("E2E 'O' lookup op2: %v", err)
@@ -294,7 +301,7 @@ func TestRpcOrdinal(t *testing.T) {
 			t.Fatalf("E2E 'o' inscID mismatch: got %x, want %x", o1[0], seed.inscID)
 		}
 
-		op2 := tbcd.NewOutpoint(seed.txid2, 0)
+		op2 := seed.location2
 		o2, err := s.g.db.OrdinalInscriptionsByOutpoint(ctx, op2)
 		if err != nil {
 			t.Fatalf("E2E 'o' lookup op2: %v", err)
@@ -625,6 +632,24 @@ func TestRpcOrdinal(t *testing.T) {
 				}
 				if !found[seed.txid] || !found[seed.txid2] {
 					return protocol.Errorf("missing inscription: found %v", found)
+				}
+				want := map[chainhash.Hash]tbcapi.OrdinalLocation{
+					seed.txid: {TxID: seed.txid, Vout: 0, Offset: 0},
+					seed.txid2: {
+						TxID:   *seed.location2.TxIdHash(),
+						Vout:   seed.location2.TxIndex(),
+						Offset: 330,
+					},
+				}
+				for _, insc := range r.Inscriptions {
+					if insc.Location == nil {
+						return protocol.Errorf("inscription %v: no location",
+							insc.TxID)
+					}
+					if *insc.Location != want[insc.TxID] {
+						return protocol.Errorf("inscription %v: location %+v, want %+v",
+							insc.TxID, *insc.Location, want[insc.TxID])
+					}
 				}
 				return nil
 			},
