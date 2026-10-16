@@ -6,6 +6,7 @@ package level
 
 import (
 	"math/big"
+	"strconv"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -13,6 +14,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 
+	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/lru"
 )
@@ -186,6 +188,52 @@ func TestHeaderCache(t *testing.T) {
 	}
 
 	t.Log(spew.Sdump(s))
+}
+
+// TestDatabaseHeaderCache checks that the block header cache of an open
+// database charges BlockHeaderCacheCost for each header, so a cache of
+// n * BlockHeaderCacheCost bytes holds n headers and not one header more.
+func TestDatabaseHeaderCache(t *testing.T) {
+	const n = 10
+	cfg, err := NewConfig("localnet", t.TempDir(),
+		strconv.Itoa(n*BlockHeaderCacheCost), "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	bhsDB := db.pool[level.BlockHeadersDB]
+	prevHash := chainhash.Hash{}
+	for i := range n + 1 {
+		h, bh := newHeader(&prevHash, uint32(i))
+		ebh := encodeBlockHeader(bh.Height, bh.Header, &bh.Difficulty)
+		if err := bhsDB.Put(h[:], ebh[:], nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.BlockHeaderByHash(t.Context(), h); err != nil {
+			t.Fatal(err)
+		}
+		prevHash = h
+
+		s := db.BlockHeaderCacheStats()
+		want := min(i+1, n)
+		if s.Items != want || s.Size != want*BlockHeaderCacheCost {
+			t.Fatalf("header %v: cache holds %v headers of %v bytes, "+
+				"want %v headers of %v bytes", i, s.Items, s.Size,
+				want, want*BlockHeaderCacheCost)
+		}
+	}
+	if s := db.BlockHeaderCacheStats(); s.Purges != 1 {
+		t.Fatalf("cache purges %v, want 1", s.Purges)
+	}
 }
 
 func TestLruStatsToCacheStats(t *testing.T) {
