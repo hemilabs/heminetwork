@@ -80,7 +80,10 @@ const (
 	// l1GasBurners transactions that each burn l1MaxTxGas are sent to the
 	// L1 in one block so that its gas used exceeds the target and the base
 	// fee of the following block rises.
-	l1GasBurners = 8
+	// 11 is the most that fit in one 200M gas block, and if they are
+	// split across two blocks, one of them still holds 6 and exceeds
+	// the 100M gas target.
+	l1GasBurners = 11
 
 	// opStackContainers are the containers of the OP stack services.
 	batcherContainer = "e2e-op-batcher-1"
@@ -1526,22 +1529,27 @@ func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
 		case <-time.After(time.Second):
 		}
 	}
-	baseFees := make(map[string]int)
+	baseFees := make(map[uint64]string)
 	var raised uint64
+	burnerBaseFee := mustL1Header(t, ctx, l1, burnerBlocks[0]).BaseFee
+	if burnerBaseFee == nil {
+		t.Fatalf("l1 block %d has no base fee", burnerBlocks[0])
+	}
 	for n := firstBlock; n <= lastBlock+1; n++ {
 		h := mustL1Header(t, ctx, l1, n)
 		if h.BaseFee == nil {
 			t.Fatalf("l1 block %d has no base fee", n)
 		}
-		baseFees[h.BaseFee.String()]++
-		if n > burnerBlocks[0] && h.BaseFee.ToInt().Cmp(mustL1Header(t, ctx, l1, burnerBlocks[0]).BaseFee.ToInt()) > 0 && raised == 0 {
+		baseFees[n] = h.BaseFee.String()
+		if n > burnerBlocks[0] && raised == 0 && h.BaseFee.ToInt().Cmp(burnerBaseFee.ToInt()) > 0 {
 			raised = n
 		}
 	}
 	if raised == 0 {
 		t.Fatalf("the l1 base fee did not rise after the gas burners (base fees seen: %v)", baseFees)
 	}
-	t.Logf("l1 blocks %d to %d carry base fees %v, the base fee rose in block %d", firstBlock, lastBlock+1, baseFees, raised)
+	t.Logf("the base fee rose from %q -> %q in block %d",
+		baseFees[raised-1], baseFees[raised], raised)
 
 	if firstBlock < uint64(fork.first.Number) {
 		t.Fatalf("l1 block %d is before Glamsterdam (l1 block %d)", firstBlock, fork.first.Number)
