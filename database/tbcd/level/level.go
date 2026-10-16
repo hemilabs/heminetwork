@@ -1331,8 +1331,16 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 // the same.
 // This call uses the database to prevent reentrancy.
 func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batchHook tbcd.BatchHook) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+	return l.blockHeadersInsert(ctx, bhs, batchHook, nil)
+}
+
+func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batchHook tbcd.BatchHook, testCommitted func(db string)) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
+
+	if testCommitted == nil {
+		testCommitted = func(string) {}
+	}
 
 	if bhs == nil || len(bhs.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
@@ -1437,6 +1445,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	bmBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
 	mdBatch := new(leveldb.Batch)
+	tipBatch := new(leveldb.Batch)
 
 	cdiff := &pbh.Difficulty
 	height := pbh.Height
@@ -1517,7 +1526,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			// log.Infof("%v", spew.Sdump(bestBH.Hash[:]))
 			// log.Infof("%v", spew.Sdump(firstHash))
 			// pick the right return value based on ancestor
-			bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
+			tipBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 			it = tbcd.ITChainFork
 
 		default:
@@ -1525,7 +1534,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		}
 	} else {
 		// Extend current best tip
-		bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
+		tipBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 		it = tbcd.ITChainExtend
 	}
 
@@ -1568,22 +1577,34 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			fmt.Errorf("metadata insert: %w", err)
 	}
 
-	// height hash commit
-	if err = hhCommit(); err != nil {
+	// block headers commit
+	if err = bhsCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash commit: %w", err)
+			fmt.Errorf("block headers commit: %w", err)
 	}
+	testCommitted(level.BlockHeadersDB)
 
 	// blocks missing commit
 	if err = bmCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
+	testCommitted(level.BlocksMissingDB)
 
-	// block headers commit
-	if err = bhsCommit(); err != nil {
+	// height hash commit
+	if err = hhCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("block headers commit: %w", err)
+			fmt.Errorf("height hash commit: %w", err)
+	}
+	testCommitted(level.HeightHashDB)
+
+	if tipBatch.Len() > 0 {
+		err = l.pool[level.BlockHeadersDB].Write(tipBatch, nil)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("canonical tip: %w", err)
+		}
+		testCommitted(bhsCanonicalTipKey)
 	}
 
 	// metadata commit
