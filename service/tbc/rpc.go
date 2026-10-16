@@ -310,7 +310,15 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 		}
 
-		go s.handleRequest(ctx, ws, id, cmd, handler)
+		// handleRequest uses the database, so run it in a goroutine
+		// that dbClose joins.  Once the database closes, stop reading.
+		started := s.goDB(func() {
+			s.handleRequest(ctx, ws, id, cmd, handler)
+		})
+		if !started {
+			log.Debugf("handleWebsocketRead %v: database closed", ws.addr)
+			return
+		}
 	}
 }
 

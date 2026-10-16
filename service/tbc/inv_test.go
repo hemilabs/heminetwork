@@ -96,13 +96,13 @@ func TestHandleInvEmpty(t *testing.T) {
 // of the wedge.
 //
 // After indexing, syncBlocks recovers missed headers with
-// s.pm.All(ctx, s.headersPeer).  It must NOT build the getheaders from
-// the hashes it is missing.  A getheaders locator is a list of blocks
-// the sender already has, and the peer replies with the headers that
-// follow the first one it recognizes -- so a missing hash makes the
-// peer start after the block we need, which is never delivered.  This
-// checks that headersPeer, the function recovery uses, locates from our
-// best (owned) header.
+// s.headersAll(ctx), which runs headersPeer on every connected peer.
+// It must NOT build the getheaders from the hashes it is missing.  A
+// getheaders locator is a list of blocks the sender already has, and
+// the peer replies with the headers that follow the first one it
+// recognizes -- so a missing hash makes the peer start after the block
+// we need, which is never delivered.  This checks that headersPeer,
+// the function recovery uses, locates from our best (owned) header.
 func TestHeadersRecoveryUsesHaveLocator(t *testing.T) {
 	s := newDifficultyTestServer(t, &chaincfg.MainNetParams)
 

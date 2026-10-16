@@ -237,7 +237,17 @@ func (s *Server) handleAdminWebsocketRead(ctx context.Context, ws *tbcAdminWs) {
 			return
 		}
 
-		go s.handleAdminRequest(ctx, ws, id, cmd, handler)
+		// handleAdminRequest uses the database, so run it in a
+		// goroutine that dbClose joins.  Once the database closes,
+		// stop reading.
+		started := s.goDB(func() {
+			s.handleAdminRequest(ctx, ws, id, cmd, handler)
+		})
+		if !started {
+			log.Debugf("handleAdminWebsocketRead %v: database closed",
+				ws.addr)
+			return
+		}
 	}
 }
 
@@ -264,10 +274,8 @@ func (s *Server) handleAdminRequest(ctx context.Context, ws *tbcAdminWs, id stri
 
 	if jobID != "" {
 		if err := s.adminSessions.StartJob(jobID); err != nil {
-			// This should never happen, as the only possible error
-			// would be from the hub not knowing the job. Still, if
-			// more errors are added, this may become relevant.
-
+			// The hub does not know the job, or the database is
+			// closing and the job did not start.
 			log.Errorf("Failed to start job %s: %v", jobID, err)
 			if err := s.adminSessions.CancelJob(jobID); err != nil {
 				log.Errorf("Failed to cancel job %s: %v", jobID, err)
