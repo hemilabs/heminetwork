@@ -45,11 +45,12 @@ func init() {
 	}
 }
 
-// tbcCmd wraps tbc commands.
+// tbcCmd wraps tbc commands.  The worker sends msg and waits for its reply
+// under ctx, so the request is aborted as soon as the caller is done.
 type tbcCmd struct {
-	msg     any
-	ch      chan any
-	timeout time.Duration
+	ctx context.Context
+	msg any
+	ch  chan any
 }
 
 // tbcGozer implements [gozer.Gozer] and retrieves Bitcoin data from a TBC
@@ -309,13 +310,6 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	log.Tracef("callTBC %T", msg)
 	defer log.Tracef("callTBC exit %T", msg)
 
-	// Do not queue a request for a context that is already done: the
-	// select below picks at random between ready cases, so it would
-	// send it about half of the time.
-	if err := pctx.Err(); err != nil {
-		return nil, err
-	}
-
 	if !t.Connected() {
 		return nil, errors.New("not connected to tbc")
 	}
@@ -324,14 +318,14 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 		timeout = DefaultRequestTimeout
 	}
 
-	bc := tbcCmd{
-		msg:     msg,
-		ch:      make(chan any),
-		timeout: timeout,
-	}
-
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
+
+	bc := tbcCmd{
+		ctx: ctx,
+		msg: msg,
+		ch:  make(chan any),
+	}
 
 	// attempt to send
 	select {
@@ -382,11 +376,18 @@ func (t *tbcGozer) handleTBCWebsocketCall(pctx context.Context, conn *protocol.C
 			go func(bc tbcCmd) {
 				defer func() { <-sem }()
 
-				if bc.timeout == 0 {
-					bc.timeout = DefaultRequestTimeout
-				}
-				ctx, cancel := context.WithTimeout(pctx, bc.timeout)
+				// Abort the request, and free its slot, as soon
+				// as the caller or the connection is done.
+				ctx, cancel := context.WithCancel(bc.ctx)
 				defer cancel()
+				stop := context.AfterFunc(pctx, cancel)
+				defer stop()
+
+				// Do not send a request for a caller that is
+				// already done.
+				if ctx.Err() != nil {
+					return
+				}
 
 				_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
 				if err != nil {
