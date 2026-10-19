@@ -73,9 +73,6 @@ WORKDIR /git/optimism
 RUN git fetch origin
 RUN git checkout $OPTIMISM_COMMIT
 
-WORKDIR /git/optimism/packages/contracts-bedrock
-RUN forge install
-
 WORKDIR /git/optimism
 RUN go mod tidy
 
@@ -105,6 +102,9 @@ RUN just op-proposer
 COPY --from=foundry_build /git/foundry/target/release/forge /usr/bin/forge
 
 RUN forge --help
+
+WORKDIR /git/optimism/packages/contracts-bedrock
+RUN forge install
 
 WORKDIR /git/optimism
 
