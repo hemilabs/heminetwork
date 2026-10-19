@@ -737,8 +737,8 @@ type testTBC struct {
 
 // newTestTBC connects a tbcGozer to a test TBC server.  The server uses
 // listener l when it is not nil, sends the ping and then calls serve on each
-// connection.
-func newTestTBC(t *testing.T, l net.Listener, serve func(context.Context, *websocket.Conn)) *testTBC {
+// connection.  The tbcGozer reads replies only when reader is true.
+func newTestTBC(t *testing.T, l net.Listener, reader bool, serve func(context.Context, *websocket.Conn)) *testTBC {
 	t.Helper()
 
 	tt := &testTBC{}
@@ -778,12 +778,16 @@ func newTestTBC(t *testing.T, l net.Listener, serve func(context.Context, *webso
 		cmdCh:     make(chan tbcCmd, DefaultCommandQueueDepth),
 		connected: true,
 	}
-	tt.wg.Add(2)
-	go tt.handleTBCWebsocketRead(ctx, conn)
+	if reader {
+		tt.wg.Add(1)
+		go tt.handleTBCWebsocketRead(ctx, conn)
+	}
+	tt.wg.Add(1)
 	go tt.handleTBCWebsocketCall(ctx, conn)
 	t.Cleanup(func() {
 		cancel()
 		tt.wg.Wait()
+		conn.Close()
 	})
 	return tt
 }
@@ -801,12 +805,12 @@ func (tt *testTBC) requireOneConn(t *testing.T) {
 
 // newSilentTBC returns a testTBC whose server reads every request and never
 // replies, and a channel that carries the command of each request the
-// server reads.
-func newSilentTBC(t *testing.T) (*testTBC, <-chan protocol.Command) {
+// server reads.  The tbcGozer reads replies only when reader is true.
+func newSilentTBC(t *testing.T, reader bool) (*testTBC, <-chan protocol.Command) {
 	t.Helper()
 
 	reqCh := make(chan protocol.Command, 4*DefaultCommandQueueDepth)
-	tt := newTestTBC(t, nil, func(ctx context.Context, c *websocket.Conn) {
+	tt := newTestTBC(t, nil, reader, func(ctx context.Context, c *websocket.Conn) {
 		wc := protocol.NewWSConn(c)
 		for {
 			cmd, _, _, err := tbcapi.Read(ctx, wc)
@@ -826,6 +830,8 @@ func newSilentTBC(t *testing.T) (*testTBC, <-chan protocol.Command) {
 // carries the error of each request.  The test joins every caller before
 // it ends.
 func txByIDs(t *testing.T, tg *tbcGozer, ctx context.Context, n int) <-chan error {
+	t.Helper()
+
 	var wg sync.WaitGroup
 	t.Cleanup(wg.Wait)
 
@@ -875,7 +881,7 @@ func waitErr(t *testing.T, errCh <-chan error) error {
 // in-flight requests returns context.Canceled and at once frees their
 // worker slots, instead of after the request timeout.
 func TestCallTBCCancelledCallFreesSlot(t *testing.T) {
-	tt, reqCh := newSilentTBC(t)
+	tt, reqCh := newSilentTBC(t, true)
 	n := DefaultCommandQueueDepth
 
 	// Fill every slot with a request that the server never answers.
@@ -899,7 +905,7 @@ func TestCallTBCCancelledCallFreesSlot(t *testing.T) {
 // TestCallTBCQueuedCancelledNotSent checks that a request whose caller is
 // done while it waits for a worker slot is never sent and takes no slot.
 func TestCallTBCQueuedCancelledNotSent(t *testing.T) {
-	tt, reqCh := newSilentTBC(t)
+	tt, reqCh := newSilentTBC(t, true)
 	n := DefaultCommandQueueDepth
 
 	// Fill every slot with a request that the server never answers.
@@ -928,7 +934,7 @@ func TestCallTBCQueuedCancelledNotSent(t *testing.T) {
 // request in flight gets an error at once when the connection ends,
 // instead of waiting for its timeout.
 func TestCallTBCConnectionEndFailsCalls(t *testing.T) {
-	tt, reqCh := newSilentTBC(t)
+	tt, reqCh := newSilentTBC(t, true)
 	n := DefaultCommandQueueDepth
 
 	errCh := txByIDs(t, tt.tbcGozer, t.Context(), n)
@@ -939,6 +945,79 @@ func TestCallTBCConnectionEndFailsCalls(t *testing.T) {
 		if err := waitErr(t, errCh); err == nil {
 			t.Fatal("expected an error")
 		}
+	}
+}
+
+// TestCallTBCConnectionEndStopsWait checks that a request waiting for its
+// reply fails at once when the connection ends, even when the reader did
+// not fail it.  Here no reader runs, as for a call that registers after
+// the reader failed the calls in flight.
+func TestCallTBCConnectionEndStopsWait(t *testing.T) {
+	tt, reqCh := newSilentTBC(t, false)
+
+	errCh := txByIDs(t, tt.tbcGozer, t.Context(), 1)
+	waitRequests(t, reqCh, tbcapi.CmdTxByIdRequest, 1)
+
+	tt.cancel()
+	if err := waitErr(t, errCh); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+// TestCallTBCCancelledCallStopsDial checks that a caller that is done
+// stops the dial of a request that has to reconnect.  A dial that went on
+// would open a connection that nobody reads or closes.
+func TestCallTBCCancelledCallStopsDial(t *testing.T) {
+	// The server never answers the dial, and tells when the client
+	// gives up on it.
+	var (
+		dialed  = make(chan struct{})
+		aborted = make(chan struct{})
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(dialed)
+		select {
+		case <-r.Context().Done():
+			close(aborted)
+		case <-t.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	// The connection is not up, so the request has to dial.
+	conn, err := protocol.NewConn("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := &tbcGozer{
+		cmdCh:     make(chan tbcCmd, DefaultCommandQueueDepth),
+		connected: true,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	tg.wg.Add(1)
+	go tg.handleTBCWebsocketCall(ctx, conn)
+	t.Cleanup(func() {
+		cancel()
+		tg.wg.Wait()
+	})
+
+	cctx, ccancel := context.WithCancel(t.Context())
+	defer ccancel()
+	errCh := txByIDs(t, tg, cctx, 1)
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("request did not dial")
+	case <-dialed:
+	}
+
+	ccancel()
+	if err := waitErr(t, errCh); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("dial did not stop")
+	case <-aborted:
 	}
 }
 
@@ -985,7 +1064,7 @@ func TestCallTBCCancelledWriteKeepsConnection(t *testing.T) {
 		release    = make(chan struct{})
 	)
 	sl := &smallBufListener{Listener: l}
-	tt := newTestTBC(t, sl, func(ctx context.Context, c *websocket.Conn) {
+	tt := newTestTBC(t, sl, true, func(ctx context.Context, c *websocket.Conn) {
 		_, r, err := c.Reader(ctx)
 		if err != nil {
 			return

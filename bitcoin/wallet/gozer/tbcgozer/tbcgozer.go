@@ -46,7 +46,9 @@ func init() {
 }
 
 // tbcCmd wraps tbc commands.  The worker sends msg and waits for its reply
-// under ctx, so the request is aborted as soon as the caller is done.
+// under ctx.  When the caller is done, the worker stops the wait and frees
+// its slot at once, but a write that has started keeps the slot until the
+// write ends or the deadline of ctx passes.
 type tbcCmd struct {
 	ctx context.Context
 	msg any
@@ -376,10 +378,14 @@ func (t *tbcGozer) handleTBCWebsocketCall(pctx context.Context, conn *protocol.C
 			go func(bc tbcCmd) {
 				defer func() { <-sem }()
 
-				// Stop the wait for the reply, and free the slot,
-				// as soon as the caller or the connection is done.
+				// Stop the wait for the reply when the caller is
+				// done.  A write that has started keeps the slot
+				// until it ends.
 				ctx, cancel := context.WithCancel(bc.ctx)
 				defer cancel()
+				// The reader fails the calls in flight when the
+				// connection ends, but not a call that registers
+				// after that.  End its wait with the connection.
 				stop := context.AfterFunc(pctx, cancel)
 				defer stop()
 

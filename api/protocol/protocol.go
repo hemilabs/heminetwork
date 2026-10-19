@@ -115,9 +115,18 @@ func Read(ctx context.Context, c APIConn, api API) (Command, string, any, error)
 
 // Write encodes and sends a payload over the API connection.
 func Write(ctx context.Context, c APIConn, api API, id string, payload any) error {
+	msg, err := newMessage(api, id, payload)
+	if err != nil {
+		return err
+	}
+	return c.WriteJSON(ctx, msg)
+}
+
+// newMessage returns the message that carries payload with id.
+func newMessage(api API, id string, payload any) (*Message, error) {
 	cmd, ok := commandFromPayload(payload, api)
 	if !ok {
-		return fmt.Errorf("command unknown for payload %T", payload)
+		return nil, fmt.Errorf("command unknown for payload %T", payload)
 	}
 
 	msg := &Message{
@@ -126,10 +135,9 @@ func Write(ctx context.Context, c APIConn, api API, id string, payload any) erro
 
 	var err error
 	if msg.Payload, err = json.Marshal(payload); err != nil {
-		return err
+		return nil, err
 	}
-
-	return c.WriteJSON(ctx, msg)
+	return msg, nil
 }
 
 // Authenticator implements authentication between a client and a server.
@@ -495,6 +503,11 @@ func (ac *Conn) ReadJSON(ctx context.Context, v any) error {
 
 // WriteJSON writes marshals v and writes it to the wire.
 func (ac *Conn) WriteJSON(ctx context.Context, v any) error {
+	return ac.writeJSON(ctx, ctx, v)
+}
+
+// writeJSON (re)connects under ctx and writes v under wctx.
+func (ac *Conn) writeJSON(ctx, wctx context.Context, v any) error {
 	conn, err := ac.conn(ctx)
 	if err != nil {
 		return err
@@ -502,7 +515,7 @@ func (ac *Conn) WriteJSON(ctx context.Context, v any) error {
 
 	ac.wscWriteLock.Lock()
 	defer ac.wscWriteLock.Unlock()
-	if err := wsjson.Write(ctx, conn, v); err != nil {
+	if err := wsjson.Write(wctx, conn, v); err != nil {
 		ac.Close()
 		return err
 	}
@@ -536,9 +549,9 @@ func (ac *Conn) nextMsgID() uint64 {
 
 // Call is a blocking call that returns the command, id and unmarshaled payload.
 //
-// Cancelling ctx stops the wait for the reply, but not a write that has
-// started: a write that ends early closes the connection, which fails every
-// call on it.  The deadline of ctx still applies to the write.
+// Cancelling ctx stops a reconnect and the wait for the reply, but not a
+// write that has started: a write that ends early closes the connection,
+// which fails every call on it.  Only the deadline of ctx ends the write.
 func (ac *Conn) Call(ctx context.Context, api API, payload any) (Command, string, any, error) {
 	log.Tracef("Call: %T", payload)
 	defer log.Tracef("Call exit: %T", payload)
@@ -566,7 +579,11 @@ func (ac *Conn) Call(ctx context.Context, api API, payload any) (Command, string
 		ac.Unlock()
 	}()
 
-	if err := ac.Write(wctx, api, msgID, payload); err != nil {
+	msg, err := newMessage(api, msgID, payload)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if err := ac.writeJSON(ctx, wctx, msg); err != nil {
 		return "", "", nil, err
 	}
 	var result *readResult

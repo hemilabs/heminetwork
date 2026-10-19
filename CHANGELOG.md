@@ -194,8 +194,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix `tbcgozer` sending a request for a context that was already
   cancelled, and keeping a cancelled request in flight until its timeout.
   A request now stops waiting for its reply when its caller's context is
-  done, and frees its worker slot. A cancel during a write no longer
-  closes the connection
+  done, and frees its worker slot. `protocol.Conn.Call` no longer stops
+  a write that has started when its context is cancelled, so the cancel
+  does not close the connection; only the deadline ends the write
   ([#1227](https://github.com/hemilabs/heminetwork/pull/1227)).
 - Fix `tbc` block download stalling on a low-work header fork. Headers
   that fork off at or below the last checkpoint the best header passed,
