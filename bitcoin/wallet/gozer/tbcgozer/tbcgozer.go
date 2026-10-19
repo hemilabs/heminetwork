@@ -376,35 +376,36 @@ func (t *tbcGozer) handleTBCWebsocketCall(pctx context.Context, conn *protocol.C
 			go func(bc tbcCmd) {
 				defer func() { <-sem }()
 
-				// Abort the request, and free its slot, as soon
-				// as the caller or the connection is done.
+				// Stop the wait for the reply, and free the slot,
+				// as soon as the caller or the connection is done.
 				ctx, cancel := context.WithCancel(bc.ctx)
 				defer cancel()
 				stop := context.AfterFunc(pctx, cancel)
 				defer stop()
 
-				// Do not send a request for a caller that is
-				// already done.
-				if ctx.Err() != nil {
-					return
-				}
-
+				var reply any
 				_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
-				if err != nil {
+				switch {
+				case bc.ctx.Err() != nil:
+					// The caller is done and expects no reply.
+					log.Debugf("handleTBCWebsocketCall %T: %v",
+						bc.msg, bc.ctx.Err())
+					return
+				case err != nil:
 					// XXX very loud
 					log.Errorf("handleTBCWebsocketCall %T: %v",
 						bc.msg, err)
-					select {
-					case <-ctx.Done():
-					case bc.ch <- err:
-					}
-					return
+					reply = err
+				default:
+					reply = payload
 				}
+				// callTBC cancels bc.ctx when it returns, so this
+				// never blocks.
 				select {
-				case <-ctx.Done():
-				case bc.ch <- payload:
+				case <-bc.ctx.Done():
+				case bc.ch <- reply:
 					log.Tracef("handleTBCWebsocketCall returned: %v",
-						spew.Sdump(payload))
+						spew.Sdump(reply))
 				}
 			}(c)
 		}

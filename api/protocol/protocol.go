@@ -535,9 +535,23 @@ func (ac *Conn) nextMsgID() uint64 {
 }
 
 // Call is a blocking call that returns the command, id and unmarshaled payload.
+//
+// Cancelling ctx stops the wait for the reply, but not a write that has
+// started: a write that ends early closes the connection, which fails every
+// call on it.  The deadline of ctx still applies to the write.
 func (ac *Conn) Call(ctx context.Context, api API, payload any) (Command, string, any, error) {
 	log.Tracef("Call: %T", payload)
 	defer log.Tracef("Call exit: %T", payload)
+
+	if err := ctx.Err(); err != nil {
+		return "", "", nil, err
+	}
+	wctx := context.WithoutCancel(ctx)
+	if deadline, ok := ctx.Deadline(); ok {
+		var cancel context.CancelFunc
+		wctx, cancel = context.WithDeadline(wctx, deadline)
+		defer cancel()
+	}
 
 	msgID := strconv.FormatUint(ac.nextMsgID(), 10)
 	resultCh := make(chan *readResult, 1)
@@ -552,7 +566,7 @@ func (ac *Conn) Call(ctx context.Context, api API, payload any) (Command, string
 		ac.Unlock()
 	}()
 
-	if err := ac.Write(ctx, api, msgID, payload); err != nil {
+	if err := ac.Write(wctx, api, msgID, payload); err != nil {
 		return "", "", nil, err
 	}
 	var result *readResult
