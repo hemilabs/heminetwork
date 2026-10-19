@@ -73,6 +73,9 @@ WORKDIR /git/optimism
 RUN git fetch origin
 RUN git checkout $OPTIMISM_COMMIT
 
+WORKDIR /git/optimism/packages/contracts-bedrock
+RUN forge install
+
 WORKDIR /git/optimism
 RUN go mod tidy
 
