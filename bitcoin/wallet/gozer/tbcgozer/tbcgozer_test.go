@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1137,6 +1138,126 @@ func TestCallTBCCancelledWriteKeepsConnection(t *testing.T) {
 	if err := waitErr(t, smallErr); err != nil {
 		t.Fatalf("small request: %v", err)
 	}
+	tt.requireOneConn(t)
+}
+
+// waitWriteLockWaiter waits until a goroutine waits for the write lock of
+// a protocol.Conn.  The goroutine dump is the only state that shows it.
+func waitWriteLockWaiter(t *testing.T) {
+	t.Helper()
+
+	timeout := time.After(10 * time.Second)
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		for _, g := range strings.Split(string(buf[:n]), "\n\n") {
+			if strings.Contains(g, "[sync.Mutex.Lock") &&
+				strings.Contains(g, "protocol.(*Conn).writeJSON") {
+				return
+			}
+		}
+		select {
+		case <-timeout:
+			t.Fatal("no call waits for the write lock")
+		default:
+			runtime.Gosched()
+		}
+	}
+}
+
+// TestCallTBCCancelledLockWaiterNotSent checks that a request whose caller
+// is done while it waits for the write lock is never sent, and that the
+// connection is kept.
+func TestCallTBCCancelledLockWaiterNotSent(t *testing.T) {
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The server reads only the start of the large request and waits for
+	// release.  It then reads the rest and reports the command of every
+	// request after it.
+	var (
+		largeStart = make(chan struct{})
+		release    = make(chan struct{})
+		reqCh      = make(chan protocol.Command, 4*DefaultCommandQueueDepth)
+	)
+	sl := &smallBufListener{Listener: l}
+	tt := newTestTBC(t, sl, true, func(ctx context.Context, c *websocket.Conn) {
+		_, r, err := c.Reader(ctx)
+		if err != nil {
+			return
+		}
+		if _, err := io.ReadFull(r, make([]byte, 1024)); err != nil {
+			return
+		}
+		close(largeStart)
+		select {
+		case <-ctx.Done():
+			return
+		case <-release:
+		}
+		// A small buffer makes the rest of the read slow.
+		if err := sl.last.Load().SetReadBuffer(4 << 20); err != nil {
+			return
+		}
+		if _, err := io.Copy(io.Discard, r); err != nil {
+			return
+		}
+
+		wc := protocol.NewWSConn(c)
+		for {
+			cmd, _, _, err := tbcapi.Read(ctx, wc)
+			if err != nil {
+				return
+			}
+			select {
+			case reqCh <- cmd:
+			default: // never block the server
+			}
+		}
+	})
+
+	// The large request is far larger than the socket buffers, so it
+	// holds the write lock until the server reads it.  It then holds its
+	// slot, because the server never replies.
+	large := &tbcapi.MempoolUtxosRequest{
+		ScriptHashes: []api.ByteSlice{make([]byte, 8<<20)},
+	}
+	var wg sync.WaitGroup
+	t.Cleanup(wg.Wait)
+	wg.Go(func() {
+		_, _ = tt.callTBC(t.Context(), time.Hour, large)
+	})
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("server did not read the large request")
+	case <-largeStart:
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errCh := txByIDs(t, tt.tbcGozer, ctx, 1)
+	waitWriteLockWaiter(t)
+
+	cancel()
+	if err := waitErr(t, errCh); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	close(release)
+
+	// The last probe gets a slot only after the cancelled request freed
+	// its slot, so after it would have been written.  The server reads in
+	// write order, so it must read every probe and no TxByID request.
+	n := DefaultCommandQueueDepth - 1
+	for range n {
+		wg.Go(func() {
+			_, _ = tt.callTBC(t.Context(), time.Hour,
+				&tbcapi.BlockHeaderBestRequest{})
+		})
+	}
+	waitRequests(t, reqCh, tbcapi.CmdBlockHeaderBestRequest, n)
 	tt.requireOneConn(t)
 }
 

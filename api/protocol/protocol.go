@@ -506,7 +506,8 @@ func (ac *Conn) WriteJSON(ctx context.Context, v any) error {
 	return ac.writeJSON(ctx, ctx, v)
 }
 
-// writeJSON (re)connects under ctx and writes v under wctx.
+// writeJSON (re)connects under ctx and writes v under wctx.  It does not
+// write when ctx is done once it has the write lock.
 func (ac *Conn) writeJSON(ctx, wctx context.Context, v any) error {
 	conn, err := ac.conn(ctx)
 	if err != nil {
@@ -515,6 +516,9 @@ func (ac *Conn) writeJSON(ctx, wctx context.Context, v any) error {
 
 	ac.wscWriteLock.Lock()
 	defer ac.wscWriteLock.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := wsjson.Write(wctx, conn, v); err != nil {
 		ac.Close()
 		return err
@@ -549,9 +553,10 @@ func (ac *Conn) nextMsgID() uint64 {
 
 // Call is a blocking call that returns the command, id and unmarshaled payload.
 //
-// Cancelling ctx stops a reconnect and the wait for the reply, but not a
-// write that has started: a write that ends early closes the connection,
-// which fails every call on it.  Only the deadline of ctx ends the write.
+// Cancelling ctx stops a reconnect, a call that waits for the write lock,
+// and the wait for the reply, but not a write that has started: a write
+// that ends early closes the connection, which fails every call on it.
+// Only the deadline of ctx ends the write.
 func (ac *Conn) Call(ctx context.Context, api API, payload any) (Command, string, any, error) {
 	log.Tracef("Call: %T", payload)
 	defer log.Tracef("Call exit: %T", payload)
