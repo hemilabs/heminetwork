@@ -8,6 +8,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net"
+	"net/http"
 	"reflect"
 	"testing"
 	"testing/synctest"
@@ -435,4 +438,100 @@ func TestErrorIsOneOf(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPipeListener(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ln := NewPipeListener()
+		if got := ln.Addr().Network(); got != "pipe" {
+			t.Fatalf("network: got %q, want %q", got, "pipe")
+		}
+		if got := ln.Addr().String(); got != "pipe" {
+			t.Fatalf("address: got %q, want %q", got, "pipe")
+		}
+
+		accepted := make(chan net.Conn, 1)
+		go func() {
+			c, err := ln.Accept()
+			if err != nil {
+				t.Error(err)
+				close(accepted)
+				return
+			}
+			accepted <- c
+		}()
+		client, err := ln.DialContext(t.Context(), "tcp", "ignored")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer client.Close()
+		server, ok := <-accepted
+		if !ok {
+			t.Fatal("accept failed")
+		}
+		defer server.Close()
+
+		go func() { _, _ = client.Write([]byte("ping")) }()
+		b := make([]byte, 4)
+		if _, err := io.ReadFull(server, b); err != nil {
+			t.Fatal(err)
+		}
+		if string(b) != "ping" {
+			t.Fatalf("read: got %q, want %q", b, "ping")
+		}
+
+		// Dial returns once its context is canceled.
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := ln.DialContext(ctx, "", ""); !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("dial canceled: got %v, want %v", err, net.ErrClosed)
+		}
+
+		// Close is idempotent, and ends both Accept and Dial.
+		if err := ln.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := ln.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ln.Accept(); !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("accept closed: got %v, want %v", err, net.ErrClosed)
+		}
+		if _, err := ln.DialContext(t.Context(), "", ""); !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("dial closed: got %v, want %v", err, net.ErrClosed)
+		}
+	})
+}
+
+func TestPipeListenerHTTPClient(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ln := NewPipeListener()
+		srv := &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("pong"))
+			}),
+		}
+		go func() { _ = srv.Serve(ln) }()
+		defer srv.Close()
+
+		client := ln.HTTPClient()
+		defer client.CloseIdleConnections()
+		req, err := http.NewRequestWithContext(t.Context(),
+			http.MethodGet, "http://pipe/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(b) != "pong" {
+			t.Fatalf("body: got %q, want %q", b, "pong")
+		}
+	})
 }
