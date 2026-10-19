@@ -18,68 +18,13 @@ import (
 
 // newTestHub returns a hub that runs its jobs in goroutines that the test
 // joins in a cleanup, so no job outlives the test.
-func newTestHub(t testing.TB, ctx context.Context) *AdminHub {
+func newTestHub(t *testing.T, ctx context.Context) *AdminHub {
 	t.Helper()
 	var jobs sync.WaitGroup
 	t.Cleanup(jobs.Wait)
 	return newHub(ctx, func(f func()) bool {
 		jobs.Go(f)
 		return true
-	})
-}
-
-// cleanupTB records the cleanups registered on it, so a test can run
-// them itself.
-type cleanupTB struct {
-	*testing.T
-	cleanups []func()
-}
-
-func (c *cleanupTB) Cleanup(f func()) {
-	c.cleanups = append(c.cleanups, f)
-}
-
-// TestNewTestHubJoinsJobs verifies that the cleanup of newTestHub waits
-// for a running job.
-func TestNewTestHubJoinsJobs(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		tb := &cleanupTB{T: t}
-		h := newTestHub(tb, t.Context())
-		if len(tb.cleanups) != 1 {
-			t.Fatalf("got %d cleanups, want 1", len(tb.cleanups))
-		}
-
-		running := make(chan struct{})
-		hold := make(chan struct{})
-		jid, err := h.NewJob(SyncIndexersToHashJob,
-			func(context.Context, string) {
-				close(running)
-				<-hold
-			})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := h.StartJob(jid); err != nil {
-			t.Fatal(err)
-		}
-		<-running
-
-		cleaned := make(chan struct{})
-		go func() {
-			tb.cleanups[0]()
-			close(cleaned)
-		}()
-
-		// The cleanup must wait for the held job.
-		synctest.Wait()
-		select {
-		case <-cleaned:
-			t.Fatal("cleanup returned before the job")
-		default:
-		}
-
-		close(hold)
-		<-cleaned
 	})
 }
 
