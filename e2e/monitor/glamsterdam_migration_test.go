@@ -47,6 +47,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/holiman/uint256"
 )
 
 const (
@@ -72,6 +73,17 @@ const (
 	// production size.
 	glamsterdamHeavyTxs    = 6
 	glamsterdamHeavyTxSize = 30_000
+
+	// l1MaxTxGas is the gas limit of a single L1 transaction (EIP-7825).
+	l1MaxTxGas uint64 = 1 << 24
+
+	// l1GasBurners transactions that each burn l1MaxTxGas are sent to the
+	// L1 in one block so that its gas used exceeds the target and the base
+	// fee of the following block rises.
+	// 11 is the most that fit in one 200M gas block, and if they are
+	// split across two blocks, one of them still holds 6 and exceeds
+	// the 100M gas target.
+	l1GasBurners = 11
 
 	// opStackContainers are the containers of the OP stack services.
 	batcherContainer = "e2e-op-batcher-1"
@@ -1198,23 +1210,7 @@ func sendHeavyL2Transactions(t *testing.T, ctx context.Context) uint64 {
 
 	var lastBlock uint64
 	for _, tx := range txs {
-		var receipt *types.Receipt
-		for deadline := time.Now().Add(3 * time.Minute); receipt == nil; {
-			if receipt, err = l2Client.TransactionReceipt(ctx, tx.Hash()); err == nil {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("l2 transaction %s was not included: %v", tx.Hash(), err)
-			}
-			select {
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			case <-time.After(time.Second):
-			}
-		}
-		if receipt.Status != types.ReceiptStatusSuccessful {
-			t.Fatalf("l2 transaction %s failed", tx.Hash())
-		}
+		receipt := waitForTxReceipt(t, ctx, l2Client, tx)
 		if receipt.GasUsed != tx.Gas() {
 			t.Fatalf("l2 transaction %s with %d bytes of data used %d gas, expected the pre-Glamsterdam calldata floor of %d",
 				tx.Hash(), len(tx.Data()), receipt.GasUsed, tx.Gas())
@@ -1368,4 +1364,224 @@ func TestBatcherPostsAcrossGlamsterdam(t *testing.T) {
 	// a gas limit the L1 rejected is only visible in the logs
 	checkContainerNotRestarted(t, ctx, batcherContainer)
 	checkOpStackLogs(t, ctx, batcherContainer)
+}
+
+// sendL1Transaction signs and sends a transaction to the L1 and returns its
+// receipt once it is included.
+func sendL1Transaction(t *testing.T, ctx context.Context, l1Client *ethclient.Client, key *ecdsa.PrivateKey, txdata types.TxData) *types.Receipt {
+	t.Helper()
+
+	tx, err := types.SignNewTx(key, types.LatestSignerForChainID(l1ChainId()), txdata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l1Client.SendTransaction(ctx, tx); err != nil {
+		t.Fatalf("send l1 transaction of type %d: %v", tx.Type(), err)
+	}
+	return waitForTxReceipt(t, ctx, l1Client, tx)
+}
+
+// TestOpNodesVerifyL1BlocksWithEverything puts into L1 blocks what the
+// localnet does not otherwise put there and what the op-nodes have to verify
+// on a Glamsterdam L1: set code (type 4) transactions, withdrawals, and a
+// base fee that changes.  It then ensures that every op-node got past those
+// blocks and that the L2 carries the changed base fee.
+func TestOpNodesVerifyL1BlocksWithEverything(t *testing.T) {
+	if testingFork() {
+		t.Skip("only run against a fresh localnet")
+	}
+
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Minute)
+	defer cancel()
+
+	fork := l1GlamsterdamFork(t, ctx)
+	l1 := dialRPC(t, ctx, glamsterdamL1RPC)
+	l1Client := ethclient.NewClient(l1)
+
+	// An account of its own, funded on the L1 by e2e/genesisl2.sh; the
+	// other tests have their own accounts, so there is no nonce race.
+	key, err := crypto.ToECDSA(crypto.Keccak256([]byte("hemi localnet glamsterdam l1 transactions")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := crypto.PubkeyToAddress(key.PublicKey)
+
+	chainID := uint256.MustFromBig(l1ChainId())
+	gasFeeCap := uint256.NewInt(1_000_000_000)
+
+	// A plain transfer first, it marks the first L1 block of this test.  It
+	// goes to an account that exists: on Glamsterdam a transfer that creates
+	// the recipient pays state gas for the new account (EIP-8037), about ten
+	// times the gas of a transfer.
+	loadAddress := crypto.PubkeyToAddress(glamsterdamLoadKey(t).PublicKey)
+	nonce, err := l1Client.PendingNonceAt(ctx, from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := sendL1Transaction(t, ctx, l1Client, key, &types.DynamicFeeTx{
+		ChainID:   l1ChainId(),
+		Nonce:     nonce,
+		GasTipCap: big.NewInt(1),
+		GasFeeCap: gasFeeCap.ToBig(),
+		Gas:       100_000,
+		To:        &loadAddress,
+		Value:     big.NewInt(1),
+	})
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		t.Fatalf("the transfer from %s failed", from)
+	}
+	firstBlock := receipt.BlockNumber.Uint64()
+
+	// A withdrawal in the next L1 block.  The L1 is in dev mode and has no
+	// consensus layer to issue withdrawals, dev_addWithdrawal queues one.
+	if err := l1.CallContext(ctx, nil, "dev_addWithdrawal", &types.Withdrawal{
+		Index: 1, Validator: 1, Address: from, Amount: 1_000_000_000,
+	}); err != nil {
+		t.Fatalf("add a withdrawal to the l1: %v", err)
+	}
+
+	// A set code transaction (EIP-7702) that delegates the account to an
+	// address without code and one that removes the delegation again.
+	for i, delegate := range []common.Address{dummyRecipient, {}} {
+		nonce, err := l1Client.PendingNonceAt(ctx, from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		auth, err := types.SignSetCode(key, types.SetCodeAuthorization{
+			ChainID: *chainID,
+			Address: delegate,
+			Nonce:   nonce + 1, // the authorization is checked after the transaction's own nonce
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipt := sendL1Transaction(t, ctx, l1Client, key, &types.SetCodeTx{
+			ChainID:   chainID,
+			Nonce:     nonce,
+			GasTipCap: uint256.NewInt(1),
+			GasFeeCap: gasFeeCap,
+			Gas:       200_000,
+			To:        from,
+			AuthList:  []types.SetCodeAuthorization{auth},
+		})
+		if receipt.Status != types.ReceiptStatusSuccessful {
+			t.Fatalf("set code transaction %d failed", i)
+		}
+		if receipt.Type != types.SetCodeTxType {
+			t.Fatalf("set code transaction %d has type %d", i, receipt.Type)
+		}
+		code, err := l1Client.CodeAt(ctx, from, receipt.BlockNumber)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := (delegate != common.Address{}); (len(code) > 0) != want {
+			t.Fatalf("after set code transaction %d, account %s has code %x, delegated: %v", i, from, code, want)
+		}
+		t.Logf("set code transaction %d is in l1 block %d (delegated to %s)", i, receipt.BlockNumber, delegate)
+	}
+
+	// Transactions that each burn the most gas a transaction may use, all
+	// in one block, so that the block uses more than the gas target and the
+	// base fee of the next block rises.  A burner is a contract creation
+	// whose code runs out of gas at once by expanding memory to 4 GiB:
+	// PUSH0 PUSH4 0xffffffff MSTORE.
+	nonce, err = l1Client.PendingNonceAt(ctx, from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	burners := make([]*types.Transaction, 0, l1GasBurners)
+	for i := range uint64(l1GasBurners) {
+		tx, err := types.SignNewTx(key, types.LatestSignerForChainID(l1ChainId()), &types.DynamicFeeTx{
+			ChainID:   l1ChainId(),
+			Nonce:     nonce + i,
+			GasTipCap: big.NewInt(1),
+			GasFeeCap: gasFeeCap.ToBig(),
+			Gas:       l1MaxTxGas,
+			Data:      []byte{0x5f, 0x63, 0xff, 0xff, 0xff, 0xff, 0x52},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := l1Client.SendTransaction(ctx, tx); err != nil {
+			t.Fatalf("send gas burner %d: %v", i, err)
+		}
+		burners = append(burners, tx)
+	}
+	var burnerBlocks []uint64
+	for _, tx := range burners {
+		receipt := waitForTxReceipt(t, ctx, l1Client, tx)
+		burnerBlocks = append(burnerBlocks, receipt.BlockNumber.Uint64())
+	}
+	lastBlock := burnerBlocks[len(burnerBlocks)-1]
+	t.Logf("the %d gas burners are in l1 blocks %v", len(burners), burnerBlocks)
+
+	// the blocks after the burners have a higher base fee; the block after
+	// the last burner may not exist yet
+	for {
+		if _, err := l1HeaderByNumber(ctx, l1, lastBlock+1); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for l1 block %d: %v", lastBlock+1, ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+	baseFees := make(map[uint64]string)
+	var raised uint64
+	burnerBaseFee := mustL1Header(t, ctx, l1, burnerBlocks[0]).BaseFee
+	if burnerBaseFee == nil {
+		t.Fatalf("l1 block %d has no base fee", burnerBlocks[0])
+	}
+	for n := firstBlock; n <= lastBlock+1; n++ {
+		h := mustL1Header(t, ctx, l1, n)
+		if h.BaseFee == nil {
+			t.Fatalf("l1 block %d has no base fee", n)
+		}
+		baseFees[n] = h.BaseFee.String()
+		if n > burnerBlocks[0] && raised == 0 && h.BaseFee.ToInt().Cmp(burnerBaseFee.ToInt()) > 0 {
+			raised = n
+		}
+	}
+	if raised == 0 {
+		t.Fatalf("the l1 base fee did not rise after the gas burners (base fees seen: %v)", baseFees)
+	}
+	t.Logf("the base fee rose from %q -> %q in block %d",
+		baseFees[raised-1], baseFees[raised], raised)
+
+	if firstBlock < uint64(fork.first.Number) {
+		t.Fatalf("l1 block %d is before Glamsterdam (l1 block %d)", firstBlock, fork.first.Number)
+	}
+
+	// every op-node has to get past those blocks, and the L2 blocks with
+	// those L1 origins carry their base fees
+	for _, node := range opStackNodes {
+		rollup := dialRPC(t, ctx, node.rollupRPC)
+		l2 := dialRPC(t, ctx, node.l2RPC)
+		status := waitForSyncStatus(t, ctx, rollup, node.name,
+			fmt.Sprintf("for it to derive l2 blocks with l1 origins past l1 block %d", lastBlock+1),
+			func(s *opNodeSyncStatus) bool {
+				return s.SafeL2.L1Origin.Number > lastBlock+1
+			})
+
+		// L1 origins never decrease, binary search for the first L2 block
+		// with the L1 block with the raised base fee as its origin
+		lo, hi := uint64(1), status.SafeL2.Number
+		for lo < hi {
+			mid := lo + (hi-lo)/2
+			if _, attrs := l2L1Attributes(t, ctx, l2, node.name, mid); attrs.number < raised {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		attrs := checkL1AttributesOnL2(t, ctx, l1, l2, node.name, lo)
+		if attrs.number != raised {
+			t.Fatalf("%s: no l2 block has l1 block %d as its origin (l2 block %d has %d)", node.name, raised, lo, attrs.number)
+		}
+		t.Logf("%s: l2 block %d carries the raised base fee %s of l1 block %d", node.name, lo, attrs.baseFee, raised)
+		checkOpStackLogs(t, ctx, node.container())
+	}
 }

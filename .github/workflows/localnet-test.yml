@@ -116,7 +116,7 @@ jobs:
           - "ethereum/client-go:v1.17.7@sha256:6e9669cca5359cdb2c5571198d51e78fc18128b56bff50a1f8422d1c2946fd64"
     steps:
       - name: "random delay" # so we hope we don't get rate-limited when downloading deps
-        run: sleep $(($RANDOM % 120))
+        run: sleep $(($RANDOM % 240))
 
       - name: "Checkout repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

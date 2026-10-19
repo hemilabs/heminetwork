@@ -135,6 +135,10 @@ echo "$(jq '.alloc."0x5663a22EAF74371d1765FdA4635fa81ee1c88fa8".balance = "0x999
 # used by the Glamsterdam migration tests to put load on the batcher, see
 # glamsterdamLoadKey in e2e/monitor/glamsterdam_migration_test.go
 echo "$(jq '.alloc."0x6b2619fD26d8D6178E6aF51fF69c150E8E88e58C".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
+# used by the Glamsterdam migration tests to send transactions of every kind
+# on the L1, see TestOpNodesVerifyL1BlocksWithEverything in
+# e2e/monitor/glamsterdam_migration_test.go
+echo "$(jq '.alloc."0xf97E6F2cD4248247dce2C0b6792ac27F76D1552D".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.config.cancunTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.config.pragueTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 echo "$(jq '.config.osakaTime = 0' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
