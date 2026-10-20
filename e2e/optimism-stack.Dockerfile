@@ -103,6 +103,9 @@ COPY --from=foundry_build /git/foundry/target/release/forge /usr/bin/forge
 
 RUN forge --help
 
+WORKDIR /git/optimism/packages/contracts-bedrock
+RUN forge install
+
 WORKDIR /git/optimism
 
 RUN git reset --hard
