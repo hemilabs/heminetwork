@@ -393,7 +393,7 @@ services:
       # transactions and receipts of the block against it.  This is what
       # fails first if op-node does not understand the blocks of the L1,
       # for example after the L1 activated a hard fork.
-      - "--l1=${LOCALNET_L1:-'http://geth-l1:8545'}"
+      - "--l1=${LOCALNET_L1:-http://geth-l1:8545}"
       - "--l1.rpckind=${LOCALNET_L1_RPCKIND:-standard}"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
@@ -450,7 +450,7 @@ services:
       - "--rpc.enable-admin"
       # the L1 is not trusted, see op-node; this one follows the L1 head
       # with a WebSocket subscription
-      - "--l1=${LOCALNET_L1:-'http://geth-l1:8545'}"
+      - "--l1=${LOCALNET_L1:-http://geth-l1:8545}"
       - "--l1.rpckind=${LOCALNET_L1_RPCKIND:-standard}"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
@@ -542,7 +542,7 @@ services:
       - "--rpc.enable-admin"
       # the L1 is not trusted, see op-node; this one fetches the receipts
       # of an L1 block one transaction at a time
-      - "--l1=${LOCALNET_L1:-'http://geth-l1:8545'}"
+      - "--l1=${LOCALNET_L1:-http://geth-l1:8545}"
       - "--l1.rpckind=${LOCALNET_L1_RPCKIND:-standard}"
       - "--log.level=info"
       - "--l1.http-poll-interval=1s"
@@ -769,7 +769,7 @@ services:
       # their consensus encoding after trying the provider-specific methods),
       # follows the L1 one block behind its head, and reloads the runtime
       # config from L1 storage proofs every 30 seconds
-      - "--l1=${LOCALNET_L1:-'http://geth-l1:8545'}"
+      - "--l1=${LOCALNET_L1:-http://geth-l1:8545}"
       - "--l1.rpckind=${LOCALNET_L1_RPCKIND:-standard}"
       - "--l1.runtime-config-reload-interval=30s"
       - "--log.level=info"
