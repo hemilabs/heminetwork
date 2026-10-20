@@ -309,7 +309,7 @@ func TestTSSKeygen(t *testing.T) {
 
 	// Create 3 nodes
 	nodes := make([]*tssNode, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		nodes[i] = network.AddNode()
 	}
 
@@ -358,7 +358,7 @@ func TestTSSKeygenAndSign(t *testing.T) {
 	network := NewTSSNetwork(t)
 
 	nodes := make([]*tssNode, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		nodes[i] = network.AddNode()
 	}
 
@@ -478,7 +478,7 @@ func TestTSSNetworkRouting(t *testing.T) {
 	network := NewTSSNetwork(t)
 
 	nodes := make([]*tssNode, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		nodes[i] = network.AddNode()
 		t.Logf("Node %d: %s", i, nodes[i].id)
 	}
@@ -547,7 +547,7 @@ func TestTSSKeygenReshareSign(t *testing.T) {
 	keyIDs := make([][]byte, 3)
 	keygenErrors := make([]error, 3)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -577,7 +577,7 @@ func TestTSSKeygenReshareSign(t *testing.T) {
 	// All 4 nodes participate: node0 is old-only, node3 is new-only,
 	// nodes 1,2 are in both committees.
 	reshareErrors := make([]error, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -607,7 +607,7 @@ func TestTSSKeygenReshareSign(t *testing.T) {
 	rs := make([][2][]byte, 3)
 	signErrors := make([]error, 3)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -648,7 +648,7 @@ func TestTSSReshareDisjoint(t *testing.T) {
 	var wg sync.WaitGroup
 	keyIDs := make([][]byte, 3)
 	keygenErrors := make([]error, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -671,7 +671,7 @@ func TestTSSReshareDisjoint(t *testing.T) {
 	defer reshareCancel()
 
 	reshareErrors := make([]error, 6)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -696,7 +696,7 @@ func TestTSSReshareDisjoint(t *testing.T) {
 	defer signCancel()
 
 	signErrors := make([]error, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -754,7 +754,7 @@ func TestTSSReshareCancellation(t *testing.T) {
 	var wg sync.WaitGroup
 	keyIDs := make([][]byte, 3)
 	keygenErrors := make([]error, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -1672,7 +1672,7 @@ func TestStoreAtomicWriteNoLingering(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		keyID := []byte(fmt.Sprintf("atomic-%02d", i))
 		if err := store.SaveKeyShare(keyID, []byte("data")); err != nil {
 			t.Fatal(err)
@@ -1707,7 +1707,7 @@ func TestStoreConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -2685,9 +2685,7 @@ func newRPCTSSNode(t *testing.T, preParams *keygen.LocalPreParams) *rpcTSSNode {
 // =============================================================================
 
 func (n *rpcTSSNode) startReadLoop(tr *Transport, remoteID Identity) {
-	n.wg.Add(1)
-	go func() {
-		defer n.wg.Done()
+	n.wg.Go(func() {
 		for {
 			_, cmd, err := tr.Read()
 			if err != nil {
@@ -2714,7 +2712,7 @@ func (n *rpcTSSNode) startReadLoop(tr *Transport, remoteID Identity) {
 					n.id, remoteID, cmd)
 			}
 		}
-	}()
+	})
 }
 
 // dispatchTSSMsg verifies the signature and routes to HandleMessage.
@@ -2767,9 +2765,7 @@ func (n *rpcTSSNode) dispatchTSSMsg(msg TSSMessage) {
 	}
 
 	// Retry: ceremony not registered yet.
-	n.wg.Add(1)
-	go func() {
-		defer n.wg.Done()
+	n.wg.Go(func() {
 		for _, delay := range []time.Duration{
 			50 * time.Millisecond,
 			100 * time.Millisecond,
@@ -2795,7 +2791,7 @@ func (n *rpcTSSNode) dispatchTSSMsg(msg TSSMessage) {
 		}
 		n.t.Logf("node %s: handle msg from %s: %v (after retries)",
 			n.id, msg.From, err)
-	}()
+	})
 }
 
 // =============================================================================
@@ -2818,9 +2814,7 @@ func (n *rpcTSSNode) handleKeygen(req KeygenRequest) {
 	ch := n.registerResult(req.CeremonyID)
 	n.adapter.registerCeremony(req.CeremonyID, CeremonyKeygen)
 
-	n.wg.Add(1)
-	go func() {
-		defer n.wg.Done()
+	n.wg.Go(func() {
 		defer n.adapter.unregisterCeremony(req.CeremonyID)
 		keyID, err := n.tss.Keygen(n.ctx, req.CeremonyID,
 			parties, req.Threshold)
@@ -2831,7 +2825,7 @@ func (n *rpcTSSNode) handleKeygen(req KeygenRequest) {
 		n.t.Logf("node %s: keygen done, key=%x",
 			n.id, keyID)
 		ch <- keyID
-	}()
+	})
 }
 
 func (n *rpcTSSNode) handleSign(req SignRequest) {
@@ -2845,9 +2839,7 @@ func (n *rpcTSSNode) handleSign(req SignRequest) {
 	var data [32]byte
 	copy(data[:], req.Data)
 
-	n.wg.Add(1)
-	go func() {
-		defer n.wg.Done()
+	n.wg.Go(func() {
 		defer n.adapter.unregisterCeremony(req.CeremonyID)
 		r, s, err := n.tss.Sign(n.ctx, req.CeremonyID,
 			req.KeyID, parties, req.Threshold, data)
@@ -2858,7 +2850,7 @@ func (n *rpcTSSNode) handleSign(req SignRequest) {
 		n.t.Logf("node %s: sign done, r=%x..",
 			n.id, r[:8])
 		ch <- [2][]byte{r, s}
-	}()
+	})
 }
 
 func (n *rpcTSSNode) handleReshare(req ReshareRequest) {
@@ -2870,9 +2862,7 @@ func (n *rpcTSSNode) handleReshare(req ReshareRequest) {
 	ch := n.registerResult(req.CeremonyID)
 	n.adapter.registerCeremony(req.CeremonyID, CeremonyReshare)
 
-	n.wg.Add(1)
-	go func() {
-		defer n.wg.Done()
+	n.wg.Go(func() {
 		defer n.adapter.unregisterCeremony(req.CeremonyID)
 		err := n.tss.Reshare(n.ctx, req.CeremonyID, req.KeyID,
 			oldParties, newParties,
@@ -2883,7 +2873,7 @@ func (n *rpcTSSNode) handleReshare(req ReshareRequest) {
 		}
 		n.t.Logf("node %s: reshare done", n.id)
 		ch <- nil
-	}()
+	})
 }
 
 // =============================================================================
@@ -3073,7 +3063,7 @@ func connectRPCPair(t *testing.T, server, client *rpcTSSNode) {
 		errCh <- nil
 	}()
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if chErr := <-errCh; chErr != nil {
 			t.Fatalf("connectRPCPair: %v", chErr)
 		}
@@ -3105,7 +3095,7 @@ func setupRPCMesh(t *testing.T, n int) []*rpcTSSNode {
 
 	preParams := loadPreParams(t, n)
 	nodes := make([]*rpcTSSNode, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var pp *keygen.LocalPreParams
 		if i < len(preParams) {
 			pp = &preParams[i]
@@ -3113,7 +3103,7 @@ func setupRPCMesh(t *testing.T, n int) []*rpcTSSNode {
 		nodes[i] = newRPCTSSNode(t, pp)
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		for j := i + 1; j < n; j++ {
 			connectRPCPair(t, nodes[i], nodes[j])
 		}

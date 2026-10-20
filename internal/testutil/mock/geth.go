@@ -91,13 +91,11 @@ func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, ke
 	})
 
 	th := OpGethMockHandler{
-		mockHandler: mockHandler{
-			errCh: errCh,
-			msgCh: msgCh,
-			name:  "mockOpGeth",
-			pctx:  pctx,
-			conns: make([]*websocket.Conn, 0),
-		},
+		errCh:                errCh,
+		msgCh:                msgCh,
+		name:                 "mockOpGeth",
+		pctx:                 pctx,
+		conns:                make([]*websocket.Conn, 0),
 		keystones:            keystones,
 		initialKeystoneCount: initKssCount,
 	}
@@ -294,8 +292,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
-			var ce websocket.CloseError
-			if errors.As(err, &ce) {
+			if _, ok := errors.AsType[websocket.CloseError](err); ok {
 				return nil
 			}
 

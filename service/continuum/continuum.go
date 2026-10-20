@@ -3564,15 +3564,13 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create pprof server: %w", err)
 		}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
 				log.Errorf("pprof server terminated with error: %v", err)
 				return
 			}
 			log.Infof("pprof server clean shutdown")
-		}()
+		})
 	}
 
 	// Prometheus
@@ -3583,18 +3581,14 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
 			log.Infof("prometheus clean shutdown")
-		}()
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		})
+		s.wg.Go(func() {
 			err := s.promPoll(ctx)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
@@ -3602,7 +3596,7 @@ func (s *Server) Run(pctx context.Context) error {
 				}
 				return
 			}
-		}()
+		})
 	}
 
 	errC := make(chan error)

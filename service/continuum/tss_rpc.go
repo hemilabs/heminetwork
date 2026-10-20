@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/hemilabs/x/tss/v3/tss"
@@ -58,11 +59,9 @@ func (st *serverTSSTransport) registerCeremony(cid CeremonyID, ct CeremonyType) 
 // is about to run the rounds.
 func (st *serverTSSTransport) ceremonyRegistered(cid CeremonyID) {
 	s := st.server
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		s.drainPendingTSS(s.tssCtx, cid)
-	}()
+	})
 }
 
 func (st *serverTSSTransport) unregisterCeremony(cid CeremonyID) {
@@ -183,9 +182,7 @@ func (s *Server) dispatchKeygen(req CeremonyRequest) {
 
 	isCoordinator := req.Coordinator == s.secret.Identity
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
 		// Bind authenticated e2e keys for the whole committee
@@ -235,7 +232,7 @@ func (s *Server) dispatchKeygen(req CeremonyRequest) {
 					req.CeremonyID, berr)
 			}
 		}
-	}()
+	})
 }
 
 // dispatchSign handles a sign CeremonyRequest.  The completed
@@ -263,9 +260,7 @@ func (s *Server) dispatchSign(req CeremonyRequest) {
 	var data [32]byte
 	copy(data[:], req.Data)
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
 		// The signers' keys were bound during keygen, but a peer
@@ -292,7 +287,7 @@ func (s *Server) dispatchSign(req CeremonyRequest) {
 		}
 		s.mtx.Unlock()
 		s.completeCeremony(req.CeremonyID)
-	}()
+	})
 }
 
 // dispatchReshare handles a reshare CeremonyRequest.
@@ -307,13 +302,7 @@ func (s *Server) dispatchReshare(req CeremonyRequest) {
 	allParties := make([]Identity, 0, len(req.OldCommittee)+len(req.NewCommittee))
 	allParties = append(allParties, req.OldCommittee...)
 	for _, np := range req.NewCommittee {
-		found := false
-		for _, op := range req.OldCommittee {
-			if np == op {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(req.OldCommittee, np)
 		if !found {
 			allParties = append(allParties, np)
 		}
@@ -325,9 +314,7 @@ func (s *Server) dispatchReshare(req CeremonyRequest) {
 	}
 	s.stt.registerCeremony(req.CeremonyID, CeremonyReshare)
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		defer s.stt.unregisterCeremony(req.CeremonyID)
 
 		// Members joining in the new committee have no key bound
@@ -346,7 +333,7 @@ func (s *Server) dispatchReshare(req CeremonyRequest) {
 		}
 		log.Infof("reshare %s complete", req.CeremonyID)
 		s.completeCeremony(req.CeremonyID)
-	}()
+	})
 }
 
 // ensureCommitteeKeys binds authenticated e2e keys for all ceremony

@@ -141,7 +141,7 @@ func localhostTransports(t *testing.T) (*Transport, *Transport) {
 	errCh := make(chan error, 2)
 	go func() { errCh <- srv.KeyExchange(ctx, srvConn) }()
 	go func() { errCh <- cli.KeyExchange(ctx, cliConn) }()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errCh; err != nil {
 			t.Fatalf("KX: %v", err)
 		}

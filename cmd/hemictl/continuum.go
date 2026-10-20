@@ -155,7 +155,7 @@ var continuumActionHelp []string
 // message of a type other than gossip.  Returns an error after 20
 // reads without a match or if ctx is cancelled.
 func continuumReadResponse(ctx context.Context, t *continuum.Transport) (any, error) {
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

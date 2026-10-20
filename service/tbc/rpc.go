@@ -275,8 +275,7 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 	for {
 		cmd, id, payload, err := tbcapi.Read(ctx, ws.conn)
 		if err != nil {
-			var ce websocket.CloseError
-			if errors.As(err, &ce) {
+			if _, ok := errors.AsType[websocket.CloseError](err); ok {
 				log.Tracef("handleWebsocketRead: %v", err)
 				return
 			}
