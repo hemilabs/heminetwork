@@ -216,6 +216,11 @@ services:
     depends_on:
       geth-l1-setup:
         condition: "service_completed_successfully"
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "localhost", "7545"]
+      interval: 30s
+      timeout: 3s
+      retries: 5
     command:
       - "--dev"
       - "--dev.period"
@@ -369,7 +374,7 @@ services:
     image: optimism-stack:latest
     depends_on:
       geth-l1:
-        condition: "service_started"
+        condition: "service_healthy"
       l1-beacon:
         condition: "service_started"
       op-geth-l2:
