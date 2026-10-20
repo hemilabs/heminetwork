@@ -400,6 +400,10 @@ func TestRpcOrdinal(t *testing.T) {
 				if r.Inscription.TxID != seed.txid {
 					return protocol.Errorf("txid mismatch")
 				}
+				if r.Inscription.Location != nil {
+					return protocol.Errorf("location %+v, want none",
+						*r.Inscription.Location)
+				}
 				return nil
 			},
 		},

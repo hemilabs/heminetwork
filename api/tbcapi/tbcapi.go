@@ -702,28 +702,30 @@ type TxNotification struct {
 	Metadata  map[string]string  `json:"metadata,omitempty"`
 }
 
-// OrdinalInscription describes a single inscription and its current location.
+// OrdinalInscription describes a single inscription.
 type OrdinalInscription struct {
-	TxID               chainhash.Hash   `json:"tx_id"`
-	InputIndex         uint32           `json:"input_index"`
-	SatNumber          uint64           `json:"sat_number"`
-	Cursed             bool             `json:"cursed"`
-	BlockHash          chainhash.Hash   `json:"block_hash"`
-	BlockHeight        uint64           `json:"block_height"`
-	ParentTxID         *chainhash.Hash  `json:"parent_tx_id,omitempty"`
-	ParentInputIndex   *uint32          `json:"parent_input_index,omitempty"`
-	DelegateTxID       *chainhash.Hash  `json:"delegate_tx_id,omitempty"`
-	DelegateInputIndex *uint32          `json:"delegate_input_index,omitempty"`
-	Metaprotocol       *string          `json:"metaprotocol,omitempty"`
-	Location           *OrdinalLocation `json:"location,omitempty"`
+	TxID               chainhash.Hash  `json:"tx_id"`
+	InputIndex         uint32          `json:"input_index"`
+	SatNumber          uint64          `json:"sat_number"`
+	Cursed             bool            `json:"cursed"`
+	BlockHash          chainhash.Hash  `json:"block_hash"`
+	BlockHeight        uint64          `json:"block_height"`
+	ParentTxID         *chainhash.Hash `json:"parent_tx_id,omitempty"`
+	ParentInputIndex   *uint32         `json:"parent_input_index,omitempty"`
+	DelegateTxID       *chainhash.Hash `json:"delegate_tx_id,omitempty"`
+	DelegateInputIndex *uint32         `json:"delegate_input_index,omitempty"`
+	Metaprotocol       *string         `json:"metaprotocol,omitempty"`
+
+	// Location is set only in an OrdinalInscriptionsByAddressResponse.
+	// The other responses do not set it.
+	Location *OrdinalLocation `json:"location,omitempty"`
 }
 
-// OrdinalLocation is the unspent output that holds an inscription, and
-// the offset of the inscribed sat in that output.
+// OrdinalLocation is the unspent output that holds an inscription.
 type OrdinalLocation struct {
-	TxID   chainhash.Hash `json:"tx_id"`
-	Vout   uint32         `json:"vout"`
-	Offset uint64         `json:"offset"`
+	TxID   chainhash.Hash `json:"tx_id"`  // transaction of the output
+	Vout   uint32         `json:"vout"`   // index of the output
+	Offset uint64         `json:"offset"` // 0-based sat offset of the inscribed sat in the output
 }
 
 // SatRange represents a contiguous range of satoshi ordinals.
@@ -779,6 +781,7 @@ type OrdinalInscriptionsByBlockResponse struct {
 }
 
 // OrdinalInscriptionsByAddressRequest lists inscriptions held by UTXOs at an address.
+// Each inscription in the response has its Location.
 type OrdinalInscriptionsByAddressRequest struct {
 	Address string `json:"address"`
 	Start   uint32 `json:"start"`
