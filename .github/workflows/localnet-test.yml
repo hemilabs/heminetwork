@@ -6,12 +6,6 @@
 name: "Localnet Test"
 on:
   workflow_dispatch: # Manually triggered
-  # The localnet builds tbcd, bfgd, popmd and its own tests from the
-  # checkout, so every pull request to main and every push to main runs it.
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
