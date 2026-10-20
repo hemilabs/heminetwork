@@ -3361,6 +3361,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 			ComputeInscSat:       s.computeInscribedSat,
 			WatermarkGap:         s.cfg.OrdinalWatermarkGap,
 			OutputValueCacheSize: ovcSize,
+			GoDB:                 s.goDB,
 		})
 	}
 
@@ -3377,13 +3378,6 @@ func (s *Server) dbClose() error {
 	s.dbUsersClosed = true
 	s.dbUsersMtx.Unlock()
 	s.dbUsers.Wait()
-
-	// The ordinal populator runs outside of the server wait groups and
-	// holds database transactions; join it too.  The goroutines joined
-	// above start it, so join it after them.
-	if oi, ok := s.oi.(*ordinalIndexer); ok {
-		oi.wait()
-	}
 
 	return s.g.db.Close()
 }

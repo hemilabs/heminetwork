@@ -33,13 +33,11 @@ type ordinalIndexer struct {
 	workCache       map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue
 	computeInscSat  func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error)
 	watermarkGap    time.Duration
-	populating      atomic.Uint32  // reentrancy guard for onSyncComplete
-	populator       sync.WaitGroup // joins the populateWork goroutine
-	populatorMtx    sync.Mutex     // orders populator starts against wait
-	populatorClosed bool           // set by wait; no populator starts after it
-	warm            bool           // auto-managed: true at tip (gap<=1), false during catchup
-	cacheByteBudget int            // cache flush budget in bytes; 0 = default
-	verifyBigO      bool           // cross-check 'O' outputValue against tx index
+	populating      atomic.Uint32     // reentrancy guard for onSyncComplete
+	goDB            func(func()) bool // starts the populator, see OrdinalIndexerConfig
+	warm            bool              // auto-managed: true at tip (gap<=1), false during catchup
+	cacheByteBudget int               // cache flush budget in bytes; 0 = default
+	verifyBigO      bool              // cross-check 'O' outputValue against tx index
 
 	// cache is the live write cache created by newCache; retained so
 	// readCacheInfo can report the byte dimension. Accessed only from
@@ -239,6 +237,12 @@ type OrdinalIndexerConfig struct {
 	ComputeInscSat       func(ctx context.Context, txid chainhash.Hash, inputIndex uint32) (uint64, error)
 	WatermarkGap         time.Duration
 	OutputValueCacheSize int // LRU for parent tx output values; 0 disables
+
+	// GoDB starts the populator goroutine, which uses the database, so
+	// that the owner of the database joins it before it closes the
+	// database.  It returns false when it did not start it.  Nil disables
+	// the populator.
+	GoDB func(f func()) bool
 }
 
 func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexerConfig) Indexer {
@@ -249,6 +253,7 @@ func NewOrdinalIndexer(ctx context.Context, g geometryParams, cfg OrdinalIndexer
 		workCache:       make(map[tbcd.OrdinalWorkKey]tbcd.OrdinalWorkValue),
 		computeInscSat:  cfg.ComputeInscSat,
 		watermarkGap:    cfg.WatermarkGap,
+		goDB:            cfg.GoDB,
 	}
 	oi.indexerCommon = indexerCommon{
 		name:    "ordinal",
@@ -1604,28 +1609,12 @@ func (i *ordinalIndexer) beforeWind(startHeight, endHeight uint64) {
 }
 
 func (i *ordinalIndexer) onSyncComplete() {
-	// Any goroutine that indexes can get here, so start the populator
-	// under populatorMtx; that way it never starts after wait began.
-	i.populatorMtx.Lock()
-	defer i.populatorMtx.Unlock()
-	if i.populatorClosed {
-		return
-	}
 	if !i.populating.CompareAndSwap(0, 1) {
 		return
 	}
-	i.populator.Go(i.populateWork)
-}
-
-// wait blocks until the populateWork goroutine, if any, returns, and
-// prevents a new one from starting. The populator reads and writes the
-// database, so the owner of the database must call wait before it
-// closes the database.
-func (i *ordinalIndexer) wait() {
-	i.populatorMtx.Lock()
-	i.populatorClosed = true
-	i.populatorMtx.Unlock()
-	i.populator.Wait()
+	if i.goDB == nil || !i.goDB(i.populateWork) {
+		i.populating.Store(0)
+	}
 }
 
 func (i *ordinalIndexer) populateWork() {

@@ -2818,38 +2818,63 @@ func TestDBCloseJoinsOrdinalPopulator(t *testing.T) {
 			db:    populatorParkDB{db},
 			chain: &chaincfg.RegressionNetParams,
 		}
+		s := &Server{g: g}
 		oi := NewOrdinalIndexer(t.Context(), g, OrdinalIndexerConfig{
 			Enabled: true,
+			GoDB:    s.goDB,
 		}).(*ordinalIndexer)
-		s := &Server{g: g, oi: oi}
+		s.oi = oi
 
 		oi.onSyncComplete()
 		assertCloseJoins(t, s, db)
 	})
 }
 
-// TestOrdinalPopulatorNoStartAfterWait verifies that the ordinal
-// populator does not start once its owner waited for it.
-func TestOrdinalPopulatorNoStartAfterWait(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		db := newParkDB()
-		g := geometryParams{
-			db:    populatorParkDB{db},
-			chain: &chaincfg.RegressionNetParams,
-		}
-		oi := NewOrdinalIndexer(t.Context(), g, OrdinalIndexerConfig{
-			Enabled: true,
-		}).(*ordinalIndexer)
+// TestOrdinalPopulatorNoStartAfterClose verifies that the ordinal
+// populator does not start once the database is closed, or without a
+// GoDB, and that a later start is not blocked.
+func TestOrdinalPopulatorNoStartAfterClose(t *testing.T) {
+	tests := []struct {
+		name string
+		goDB bool
+	}{
+		{name: "closed", goDB: true},
+		{name: "no godb", goDB: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				db := newParkDB()
+				g := geometryParams{
+					db:    populatorParkDB{db},
+					chain: &chaincfg.RegressionNetParams,
+				}
+				s := &Server{g: g}
+				cfg := OrdinalIndexerConfig{Enabled: true}
+				if tt.goDB {
+					cfg.GoDB = s.goDB
+				}
+				oi := NewOrdinalIndexer(t.Context(), g, cfg).(*ordinalIndexer)
+				s.oi = oi
 
-		oi.wait()
-		oi.onSyncComplete()
-		synctest.Wait()
-		select {
-		case <-db.entered:
-			t.Fatal("populator started after wait")
-		default:
-		}
-	})
+				if tt.goDB {
+					if err := s.dbClose(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				oi.onSyncComplete()
+				synctest.Wait()
+				select {
+				case <-db.entered:
+					t.Fatal("populator started")
+				default:
+				}
+				if oi.populating.Load() != 0 {
+					t.Fatal("populator marked as running after a refused start")
+				}
+			})
+		})
+	}
 }
 
 // TestDBCloseJoinsAutoIndex verifies that the server does not close
