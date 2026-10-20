@@ -1613,7 +1613,9 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 	forkNumber := uint64(fork.first.Number)
 
 	// latest looks at the latest proposal and returns true once it is one
-	// made on Glamsterdam about Glamsterdam L1 blocks, or an error
+	// made on Glamsterdam about Glamsterdam L1 blocks.  It returns an error
+	// when an RPC failed, which may be retried, but fails the test when the
+	// proposal is wrong.
 	var latest func() (bool, error)
 	if testingL2OO() {
 		ooproxy := l2OutputOracle(t)
@@ -1656,7 +1658,7 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 			}
 			input := tx.Data()
 			if len(input) != 4+4*32 || hexutil.Encode(input[:4]) != "0x9aaab648" {
-				return false, fmt.Errorf("proposal transaction %s is not a proposeL2Output call (%d bytes, selector %s)",
+				t.Fatalf("proposal transaction %s is not a proposeL2Output call (%d bytes, selector %s)",
 					tx.Hash(), len(input), hexutil.Encode(input[:min(4, len(input))]))
 			}
 			var (
@@ -1664,16 +1666,19 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 				l1BlockNumber = new(big.Int).SetBytes(input[100:132])
 			)
 			if !l1BlockNumber.IsUint64() {
-				return false, fmt.Errorf("proposal %s names l1 block %s", tx.Hash(), l1BlockNumber)
+				t.Fatalf("proposal %s names l1 block %s", tx.Hash(), l1BlockNumber)
 			}
 			if l1BlockNumber.Uint64() < forkNumber {
 				t.Logf("the latest proposal (output %d, included at timestamp %d) is about l1 block %d, before Glamsterdam",
 					index, output.Timestamp, l1BlockNumber)
 				return false, nil
 			}
-			canonical := mustL1Header(t, ctx, l1, l1BlockNumber.Uint64())
+			canonical, err := l1HeaderByNumber(ctx, l1, l1BlockNumber.Uint64())
+			if err != nil {
+				return false, err
+			}
 			if canonical.Hash != l1BlockHash {
-				return false, fmt.Errorf("proposal %s names l1 block %d as %s but the l1 has %s",
+				t.Fatalf("proposal %s names l1 block %d as %s but the l1 has %s",
 					tx.Hash(), l1BlockNumber, l1BlockHash, canonical.Hash)
 			}
 
@@ -1721,7 +1726,7 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 				return false, err
 			}
 			if len(rootClaim) != 32 || len(l2BlockNumber) != 32 {
-				return false, fmt.Errorf("game %s returned %d and %d bytes for rootClaim and l2BlockNumber", game.Proxy, len(rootClaim), len(l2BlockNumber))
+				t.Fatalf("game %s returned %d and %d bytes for rootClaim and l2BlockNumber", game.Proxy, len(rootClaim), len(l2BlockNumber))
 			}
 			var outputAtBlock struct {
 				OutputRoot common.Hash `json:"outputRoot"`
@@ -1730,7 +1735,7 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 				return false, err
 			}
 			if outputAtBlock.OutputRoot != common.BytesToHash(rootClaim) {
-				return false, fmt.Errorf("game %s claims %x for l2 block %d but op-node has %s",
+				t.Fatalf("game %s claims %x for l2 block %d but op-node has %s",
 					game.Proxy, rootClaim, new(big.Int).SetBytes(l2BlockNumber), outputAtBlock.OutputRoot)
 			}
 			t.Logf("game %s for l2 block %d was created at timestamp %d (%d seconds after the l1 activated Glamsterdam) with op-node's output root",
@@ -1739,18 +1744,21 @@ func TestProposerProposesAfterGlamsterdam(t *testing.T) {
 		}
 	}
 
+	const maxRPCFailures = 5
 	var lastErr error
 	for errors := 0; ; {
 		done, err := latest()
 		if err != nil {
 			// the L1 or op-node RPC may fail now and then
-			if errors++; errors > 5 {
+			if errors++; errors > maxRPCFailures {
 				t.Fatalf("checking the latest proposal failed %d times, last: %v", errors, err)
 			}
 			lastErr = err
 			t.Logf("checking the latest proposal failed, will retry: %v", err)
 		} else if done {
 			break
+		} else {
+			errors = 0
 		}
 
 		select {
