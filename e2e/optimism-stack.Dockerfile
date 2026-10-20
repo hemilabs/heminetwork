@@ -13,6 +13,10 @@
 ARG OP_GETH_COMMIT=c1771608d7edd4224b05e9d224056984f87c1f5d
 ARG OPTIMISM_COMMIT=f04d7b3a8dd75a24b80f8fa0f7fd7f6d6346394c
 
+# need an older version of op-deployer for genesisl2.sh, need to update the
+# repo to use the new one but this will do for our purposes now
+ARG OP_DEPLOYER_OPTIMISM_COMMIT=12dba15e5e3fdc48620a81872b381b2e79fcb62b
+
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken
 ARG FOUNDRY_COMMIT=4072e48705af9d93e3c0f6e29e93b5e9a40caed8
@@ -109,3 +113,24 @@ RUN forge install
 WORKDIR /git/optimism
 
 RUN git reset --hard
+
+# op-deployer and the contracts it deploys, used by genesisl2.sh only.  built
+# in its own stage so that /git/optimism in the final image stays at
+# $OPTIMISM_COMMIT
+FROM build_2 AS op_deployer_build
+ARG OP_DEPLOYER_OPTIMISM_COMMIT
+
+WORKDIR /git/optimism
+RUN git checkout $OP_DEPLOYER_OPTIMISM_COMMIT
+RUN git submodule update --init --recursive
+
+WORKDIR /git/optimism/op-deployer
+RUN just build
+
+WORKDIR /git/optimism/packages/contracts-bedrock
+RUN forge build --deny never --skip test --out .artifacts
+
+FROM build_2
+
+COPY --from=op_deployer_build /git/optimism/op-deployer/bin/op-deployer /git/optimism-deployer/op-deployer/bin/op-deployer
+COPY --from=op_deployer_build /git/optimism/packages/contracts-bedrock /git/optimism-deployer/packages/contracts-bedrock

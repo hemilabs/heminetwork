@@ -11,20 +11,11 @@ MY_ADDRESS="0x78697c88847dfbbb40523e42c1f2e28a13a170be"
 # its own
 BATCHER_ADDRESS="0x5155b5c501fc980A6c54ACd3B783e0875530C516"
 
-# need an older version of op-deployer here, need to update the repo
-# to use the new one but this will do for our purposes now
-# this should only affect the op-geth-l2-setup container (no others)
-cd /git/optimism
-git checkout 12dba15e5e3fdc48620a81872b381b2e79fcb62b
-git submodule update --init --recursive
-cd /git/optimism/op-deployer
-just build
+# op-deployer and the contracts it deploys are built from an older optimism
+# commit in optimism-stack.Dockerfile
+cd /git/optimism-deployer/packages/contracts-bedrock
 
-cd /git/optimism/packages/contracts-bedrock
-
-forge build --deny never --skip test --out .artifacts
-
-/git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir .deployer --intent-type custom
+/git/optimism-deployer/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir .deployer --intent-type custom
 
 ARTIFACTS_AT="file://$(pwd)/.artifacts"
 
@@ -64,18 +55,18 @@ echo "$(tomlq -t ".globalDeployOverrides.enableGovernance = true" .deployer/inte
 cat .deployer/intent.toml
 cat .deployer/state.json
 
-/git/optimism/op-deployer/bin/op-deployer apply --workdir .deployer --deployment-target genesis
+/git/optimism-deployer/op-deployer/bin/op-deployer apply --workdir .deployer --deployment-target genesis
 
 ls -a .deployer
 
 cat .deployer/state.json
 
-/git/optimism/op-deployer/bin/op-deployer inspect genesis --workdir .deployer 901 > /shared-dir/genesis.json
-/git/optimism/op-deployer/bin/op-deployer inspect rollup --workdir .deployer 901 > /shared-dir/rollup.json
+/git/optimism-deployer/op-deployer/bin/op-deployer inspect genesis --workdir .deployer 901 > /shared-dir/genesis.json
+/git/optimism-deployer/op-deployer/bin/op-deployer inspect rollup --workdir .deployer 901 > /shared-dir/rollup.json
 
 cat /shared-dir/rollup.json
 
-/git/optimism/op-deployer/bin/op-deployer inspect deploy-config --workdir .deployer 901 > /shared-dir/deploy-config.json
+/git/optimism-deployer/op-deployer/bin/op-deployer inspect deploy-config --workdir .deployer 901 > /shared-dir/deploy-config.json
 
 echo "$(jq '.l1CancunTimeOffset = "0x0"' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 echo "$(jq '.disputeGameFinalityDelaySeconds = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
@@ -104,7 +95,7 @@ if [ "${PROPOSER_MODE:-fault}" = "l2oo" ]; then
 	echo "$(jq ".finalizationPeriodSeconds = ${L2OO_FINALIZATION_PERIOD_SECONDS:-4}" /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 fi
 
-/git/optimism/op-deployer/bin/op-deployer inspect l1 --workdir .deployer 901 > /shared-dir/l1deployments.json
+/git/optimism-deployer/op-deployer/bin/op-deployer inspect l1 --workdir .deployer 901 > /shared-dir/l1deployments.json
 
 echo "$(jq -r '.l1StateDump' .deployer/state.json)" > /shared-dir/l1StateDump.bin
 
