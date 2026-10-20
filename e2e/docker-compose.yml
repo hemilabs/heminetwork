@@ -619,6 +619,11 @@ services:
       wait-for-finalized:
         condition: "service_completed_successfully"
     image: optimism-stack:latest
+    deploy:
+      restart_policy:
+        condition: "on-failure"
+        max_attempts: 10
+        delay: "20s"
     volumes:
       - ./invalidate_blocks.sh:/tmp/invalidate_blocks.sh
       - shared-dir:/shared-dir
