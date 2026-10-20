@@ -130,7 +130,7 @@ docker run \
 
 #### Prerequisites
 
-* [Go v1.26+](https://go.dev/dl/)
+* [Go v1.27+](https://go.dev/dl/)
 * `make` (optional)
 
 #### Option 1: Using Makefile
