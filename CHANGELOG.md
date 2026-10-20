@@ -164,9 +164,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replace block and header caches in level package with generic `lru.Cache[K,V]`
   ([#1034](https://github.com/hemilabs/heminetwork/pull/1034)).
 
-- Update required Go version to [Go 1.26](https://tip.golang.org/doc/go1.26)
+- Update required Go version to [Go 1.27](https://tip.golang.org/doc/go1.27)
   ([#673](https://github.com/hemilabs/heminetwork/pull/673), [#698](https://github.com/hemilabs/heminetwork/pull/698),
-  [#896](https://github.com/hemilabs/heminetwork/pull/896)).
+  [#896](https://github.com/hemilabs/heminetwork/pull/896), [#1238](https://github.com/hemilabs/heminetwork/pull/1238)).
 
 - Move `localnode` to dedicated [hemilabs/hemi-node](https://github.com/hemilabs/hemi-node)
   repository ([#687](https://github.com/hemilabs/heminetwork/pull/687)).
