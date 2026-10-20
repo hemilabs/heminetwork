@@ -213,38 +213,38 @@ const (
 
 var (
 	pt2str = map[reflect.Type]PayloadType{
-		reflect.TypeOf(HelloRequest{}):     PHelloRequest,
-		reflect.TypeOf(HelloResponse{}):    PHelloResponse,
-		reflect.TypeOf(PingRequest{}):      PPingRequest,
-		reflect.TypeOf(PingResponse{}):     PPingResponse,
-		reflect.TypeOf(KeygenRequest{}):    PKeygenRequest,
-		reflect.TypeOf(KeygenResponse{}):   PKeygenResponse,
-		reflect.TypeOf(ReshareRequest{}):   PReshareRequest,
-		reflect.TypeOf(ReshareResponse{}):  PReshareResponse,
-		reflect.TypeOf(SignRequest{}):      PSignRequest,
-		reflect.TypeOf(SignResponse{}):     PSignResponse,
-		reflect.TypeOf(TSSMessage{}):       PTSSMessage,
-		reflect.TypeOf(CeremonyResult{}):   PCeremonyResult,
-		reflect.TypeOf(CeremonyAbort{}):    PCeremonyAbort,
-		reflect.TypeOf(PeerNotify{}):       PPeerNotify,
-		reflect.TypeOf(PeerListRequest{}):  PPeerListRequest,
-		reflect.TypeOf(PeerListResponse{}): PPeerListResponse,
-		reflect.TypeOf(EncryptedPayload{}): PEncryptedPayload,
-		reflect.TypeOf(NaClKeyRequest{}):   PNaClKeyRequest,
-		reflect.TypeOf(NaClKeyResponse{}):  PNaClKeyResponse,
+		reflect.TypeFor[HelloRequest]():     PHelloRequest,
+		reflect.TypeFor[HelloResponse]():    PHelloResponse,
+		reflect.TypeFor[PingRequest]():      PPingRequest,
+		reflect.TypeFor[PingResponse]():     PPingResponse,
+		reflect.TypeFor[KeygenRequest]():    PKeygenRequest,
+		reflect.TypeFor[KeygenResponse]():   PKeygenResponse,
+		reflect.TypeFor[ReshareRequest]():   PReshareRequest,
+		reflect.TypeFor[ReshareResponse]():  PReshareResponse,
+		reflect.TypeFor[SignRequest]():      PSignRequest,
+		reflect.TypeFor[SignResponse]():     PSignResponse,
+		reflect.TypeFor[TSSMessage]():       PTSSMessage,
+		reflect.TypeFor[CeremonyResult]():   PCeremonyResult,
+		reflect.TypeFor[CeremonyAbort]():    PCeremonyAbort,
+		reflect.TypeFor[PeerNotify]():       PPeerNotify,
+		reflect.TypeFor[PeerListRequest]():  PPeerListRequest,
+		reflect.TypeFor[PeerListResponse](): PPeerListResponse,
+		reflect.TypeFor[EncryptedPayload](): PEncryptedPayload,
+		reflect.TypeFor[NaClKeyRequest]():   PNaClKeyRequest,
+		reflect.TypeFor[NaClKeyResponse]():  PNaClKeyResponse,
 
 		// Admin
-		reflect.TypeOf(PeerListAdminRequest{}):   PPeerListAdminRequest,
-		reflect.TypeOf(PeerListAdminResponse{}):  PPeerListAdminResponse,
-		reflect.TypeOf(CeremonyStatusRequest{}):  PCeremonyStatusRequest,
-		reflect.TypeOf(CeremonyStatusResponse{}): PCeremonyStatusResponse,
-		reflect.TypeOf(CeremonyListRequest{}):    PCeremonyListRequest,
-		reflect.TypeOf(CeremonyListResponse{}):   PCeremonyListResponse,
-		reflect.TypeOf(PeerAddRequest{}):         PPeerAddRequest,
-		reflect.TypeOf(PeerAddResponse{}):        PPeerAddResponse,
+		reflect.TypeFor[PeerListAdminRequest]():   PPeerListAdminRequest,
+		reflect.TypeFor[PeerListAdminResponse]():  PPeerListAdminResponse,
+		reflect.TypeFor[CeremonyStatusRequest]():  PCeremonyStatusRequest,
+		reflect.TypeFor[CeremonyStatusResponse](): PCeremonyStatusResponse,
+		reflect.TypeFor[CeremonyListRequest]():    PCeremonyListRequest,
+		reflect.TypeFor[CeremonyListResponse]():   PCeremonyListResponse,
+		reflect.TypeFor[PeerAddRequest]():         PPeerAddRequest,
+		reflect.TypeFor[PeerAddResponse]():        PPeerAddResponse,
 
 		// Session management
-		reflect.TypeOf(BusyResponse{}): PBusyResponse,
+		reflect.TypeFor[BusyResponse](): PBusyResponse,
 	}
 
 	str2pt map[PayloadType]reflect.Type
@@ -731,8 +731,8 @@ var BroadcastDestination = Identity{}
 // are silently dropped.  Every entry must also be handled by
 // VerifyBroadcast, which fails closed on types it does not know.
 var broadcastWhitelist = map[reflect.Type]bool{
-	reflect.TypeOf(CeremonyResult{}): true,
-	reflect.TypeOf(CeremonyAbort{}):  true,
+	reflect.TypeFor[CeremonyResult](): true,
+	reflect.TypeFor[CeremonyAbort]():  true,
 }
 
 // IsBroadcastable reports whether cmd is a broadcast-type payload.

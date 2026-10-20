@@ -15,9 +15,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -903,20 +905,8 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 	defer log.Tracef("Reshare %x exit", ceremonyID)
 
 	// Determine self's committee membership.
-	inOld := false
-	for _, id := range oldParties {
-		if id == t.self {
-			inOld = true
-			break
-		}
-	}
-	inNew := false
-	for _, id := range newParties {
-		if id == t.self {
-			inNew = true
-			break
-		}
-	}
+	inOld := slices.Contains(oldParties, t.self)
+	inNew := slices.Contains(newParties, t.self)
 	if !inOld && !inNew {
 		return ErrNotInCommittee
 	}
@@ -961,12 +951,8 @@ func (t *tssImpl) Reshare(ctx context.Context, ceremonyID CeremonyID, keyID []by
 
 	// Combined pidToID for message routing.
 	allPidToID := make(map[string]Identity)
-	for k, v := range oldPidToID {
-		allPidToID[k] = v
-	}
-	for k, v := range newPidToID {
-		allPidToID[k] = v
-	}
+	maps.Copy(allPidToID, oldPidToID)
+	maps.Copy(allPidToID, newPidToID)
 
 	c := &ceremony{
 		ctype:   CeremonyReshare,

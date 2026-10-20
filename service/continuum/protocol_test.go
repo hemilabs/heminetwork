@@ -243,7 +243,7 @@ func TestWireEncryption(t *testing.T) {
 	errCh := make(chan error, 2)
 	go func() { errCh <- serverTr.KeyExchange(ctx, serverPipe) }()
 	go func() { errCh <- clientTr.KeyExchange(ctx, clientPipe) }()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errCh; err != nil {
 			t.Fatalf("KeyExchange: %v", err)
 		}
@@ -2241,9 +2241,7 @@ func TestPayloadHashVerification(t *testing.T) {
 	defer listener.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 
 		t.Logf("Listening: %v", port)
 		conn, err := listener.Accept()
@@ -2254,12 +2252,10 @@ func TestPayloadHashVerification(t *testing.T) {
 		if err := serverTransport.KeyExchange(ctx, conn); err != nil {
 			panic(err)
 		}
-	}()
+	})
 
 	// Client
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 
 		addr, err := net.ResolveTCPAddr("tcp",
 			net.JoinHostPort("127.0.0.1", "0"))
@@ -2276,7 +2272,7 @@ func TestPayloadHashVerification(t *testing.T) {
 		if err := clientTransport.KeyExchange(ctx, conn); err != nil {
 			panic(err)
 		}
-	}()
+	})
 
 	wg.Wait()
 
@@ -2292,24 +2288,20 @@ func TestPayloadHashVerification(t *testing.T) {
 	// Handshake
 	var derivedClient, derivedServer *Identity
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		var err error
 		derivedClient, _, err = serverTransport.Handshake(ctx, serverSecret)
 		if err != nil {
 			panic(err)
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		derivedServer, _, err = clientTransport.Handshake(ctx, clientSecret)
 		if err != nil {
 			panic(err)
 		}
-	}()
+	})
 
 	wg.Wait()
 
@@ -2355,15 +2347,11 @@ func TestPayloadHashVerification(t *testing.T) {
 	for _, tti := range tests {
 		t.Run(tti.name, func(t *testing.T) {
 			var msgErr error
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				_, _, msgErr = serverTransport.Read()
-			}()
+			})
 
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 
 				pt, ok := pt2str[reflect.TypeOf(tti.cmd)]
 				if !ok {
@@ -2393,7 +2381,7 @@ func TestPayloadHashVerification(t *testing.T) {
 				if err != nil {
 					panic(err)
 				}
-			}()
+			})
 
 			wg.Wait()
 
@@ -4158,8 +4146,7 @@ func TestGossipCannotHijackPeerE2EKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel() // reap addPeer's per-record TTL goroutines
+			ctx := t.Context() // reap addPeer's per-record TTL goroutines
 
 			// The target seals confidential ceremony traffic to the victim; the
 			// attacker is any connected peer able to gossip a PeerListResponse.

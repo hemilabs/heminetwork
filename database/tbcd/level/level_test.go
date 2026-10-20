@@ -1354,7 +1354,7 @@ func TestBlocksMissingSkipsExistingBlocks(t *testing.T) {
 	}
 
 	bDB := db.rawPool[level.BlocksDB]
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		raw, rerr := blocks[i].block.Bytes()
 		if rerr != nil {
 			t.Fatal(rerr)
@@ -2402,8 +2402,7 @@ func TestBlockTxRawByLoc(t *testing.T) {
 	var missing chainhash.Hash
 	missing[0] = 0x5c
 	_, err = db.BlockTxRawByLoc(ctx, missing, wire.TxLoc{TxStart: 0, TxLen: 1})
-	var bnf database.BlockNotFoundError
-	if !errors.As(err, &bnf) {
+	if _, ok := errors.AsType[database.BlockNotFoundError](err); !ok {
 		t.Fatalf("want BlockNotFoundError, got %v", err)
 	}
 }

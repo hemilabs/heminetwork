@@ -21,6 +21,7 @@ package continuum
 
 import (
 	"errors"
+	"maps"
 	"math/big"
 	"sync"
 	"testing"
@@ -203,11 +204,7 @@ func TestSendReshareBroadcastHonoursCommitteeFlags(t *testing.T) {
 
 func mergeMaps(a, b map[string]Identity) map[string]Identity {
 	out := make(map[string]Identity, len(a)+len(b))
-	for k, v := range a {
-		out[k] = v
-	}
-	for k, v := range b {
-		out[k] = v
-	}
+	maps.Copy(out, a)
+	maps.Copy(out, b)
 	return out
 }

@@ -450,7 +450,7 @@ func (b *beacon) handleBlobs(w http.ResponseWriter, r *http.Request) {
 
 	wanted := make(map[common.Hash]struct{})
 	for _, values := range r.URL.Query()["versioned_hashes"] {
-		for _, value := range strings.Split(values, ",") {
+		for value := range strings.SplitSeq(values, ",") {
 			raw, err := hexutil.Decode(value)
 			if err != nil || len(raw) != common.HashLength {
 				writeError(w, http.StatusBadRequest, "invalid versioned hash %q", value)
@@ -499,7 +499,7 @@ func (b *beacon) handleBlobSidecars(w http.ResponseWriter, r *http.Request) {
 
 	wanted := make(map[uint64]struct{})
 	for _, values := range r.URL.Query()["indices"] {
-		for _, value := range strings.Split(values, ",") {
+		for value := range strings.SplitSeq(values, ",") {
 			index, err := strconv.ParseUint(value, 10, 64)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid index %q", value)

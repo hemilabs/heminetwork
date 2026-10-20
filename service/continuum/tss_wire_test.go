@@ -31,7 +31,7 @@ func TestMarshalUnmarshalRoundTrip(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		content interface{}
+		content any
 	}{
 		// ecdsa keygen
 		{"ecdsa.keygen.KGRound1Message", &ecdsaKeygen.KGRound1Message{
@@ -227,7 +227,7 @@ func TestNewContentByTypeExhaustive(t *testing.T) {
 func TestReshareContentFromNew(t *testing.T) {
 	tests := []struct {
 		name    string
-		content interface{}
+		content any
 		want    bool
 		wantOK  bool
 	}{
@@ -265,7 +265,7 @@ func TestReshareContentFromNew(t *testing.T) {
 func TestValidTSSContentRejectsInvalid(t *testing.T) {
 	tests := []struct {
 		name  string
-		input interface{}
+		input any
 	}{
 		{"nil", nil},
 		{"no ValidateBasic", struct{}{}},
