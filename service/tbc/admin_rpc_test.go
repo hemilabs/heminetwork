@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
@@ -919,4 +920,164 @@ func TestAdminRPCNotFound(t *testing.T) {
 			}
 		})
 	}
+}
+
+// adminHeader returns the header that authenticates an admin RPC
+// connection.
+func adminHeader(t *testing.T) http.Header {
+	t.Helper()
+
+	return http.Header{
+		"Authorization": []string{"Bearer " + createAdminToken(t)},
+	}
+}
+
+// TestDBCloseJoinsAdminRPCRequest verifies that the server does not
+// close the database while an admin RPC request still uses it.
+func TestDBCloseJoinsAdminRPCRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		db := newParkDB()
+		s := newRPCTestServer(t, ctx, bestParkDB{db})
+		conn, _ := dialRPC(t, ctx, serveRPC(t, ctx, s),
+			tbcadminapi.RouteAdminWs, adminHeader(t))
+
+		err := tbcadminapi.Write(ctx, conn, "1",
+			tbcapi.BlockHeaderBestRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertCloseJoins(t, s, db)
+	})
+}
+
+// TestDBCloseJoinsAdminJob verifies that the server does not close the
+// database while an admin indexing job still uses it.
+func TestDBCloseJoinsAdminJob(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		db := newParkDB()
+		s := newRPCTestServer(t, ctx, hashParkDB{db})
+		conn, _ := dialRPC(t, ctx, serveRPC(t, ctx, s),
+			tbcadminapi.RouteAdminWs, adminHeader(t))
+
+		err := tbcadminapi.Write(ctx, conn, "1",
+			tbcadminapi.SyncIndexersToHashRequest{
+				Hash: *chaincfg.MainNetParams.GenesisHash,
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertCloseJoins(t, s, db)
+	})
+}
+
+// TestAdminJobNotStartedAfterClose verifies that an admin job does not
+// start once dbClose has started, and that the hub reports it.
+func TestAdminJobNotStartedAfterClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := &Server{g: geometryParams{db: newParkDB()}}
+		h := newHub(t.Context(), s.goDB)
+		if err := s.dbClose(); err != nil {
+			t.Fatal(err)
+		}
+
+		ran := make(chan struct{})
+		jid, err := h.NewJob(SyncIndexersToHashJob,
+			func(context.Context, string) { close(ran) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.StartJob(jid); !errors.Is(err, ErrJobNotStarted) {
+			t.Fatalf("start job: got %v, want %v", err,
+				ErrJobNotStarted)
+		}
+		synctest.Wait()
+		select {
+		case <-ran:
+			t.Fatal("job ran after dbClose")
+		default:
+		}
+	})
+}
+
+// TestAdminRPCReadStopsAfterClose verifies that the admin RPC read loop
+// returns, and does not start the request, when it reads a request
+// after dbClose has started.
+func TestAdminRPCReadStopsAfterClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		db := newParkDB()
+		s := newRPCTestServer(t, ctx, bestParkDB{db})
+
+		// Hand the server end of a websocket connection to the test,
+		// so that the test runs the read loop itself.
+		accepted := make(chan *websocket.Conn, 1)
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			c, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				t.Error(err)
+				close(accepted)
+				return
+			}
+			accepted <- c
+		})
+		srv := &http.Server{Handler: mux}
+		ln := testutil.NewPipeListener()
+		go func() { _ = srv.Serve(ln) }()
+		defer srv.Close()
+
+		c, _, err := websocket.Dial(ctx, "ws://pipe/", &websocket.DialOptions{
+			HTTPClient: ln.HTTPClient(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = c.CloseNow() }()
+		sc, ok := <-accepted
+		if !ok {
+			t.Fatal("accept failed")
+		}
+		defer func() { _ = sc.CloseNow() }()
+
+		if err := s.dbClose(); err != nil {
+			t.Fatal(err)
+		}
+
+		ws := &tbcAdminWs{
+			tbcWs: tbcWs{addr: "pipe", conn: protocol.NewWSConn(sc)},
+		}
+		ws.wg.Add(1)
+		returned := make(chan struct{})
+		go func() {
+			s.handleAdminWebsocketRead(ctx, ws)
+			close(returned)
+		}()
+
+		err = tbcadminapi.Write(ctx, protocol.NewWSConn(c), "1",
+			tbcapi.BlockHeaderBestRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The read loop either returned or waits in its next read.
+		synctest.Wait()
+		select {
+		case <-returned:
+		default:
+			t.Fatal("read loop did not return after dbClose")
+		}
+		ws.wg.Wait()
+		select {
+		case <-db.entered:
+			t.Fatal("request handled after dbClose")
+		default:
+		}
+	})
 }

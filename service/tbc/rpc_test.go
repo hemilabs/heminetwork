@@ -13,9 +13,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -32,6 +34,7 @@ import (
 	"github.com/go-test/deep"
 	"github.com/juju/loggo/v2"
 	"github.com/moby/moby/api/types/network"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/hemilabs/heminetwork/v2/api"
@@ -4091,4 +4094,134 @@ func TestRpcOrdinalInscriptionE2E(t *testing.T) {
 		p2pkhAddr.EncodeAddress(), addrResp.Inscriptions[0].TxID)
 
 	t.Log("all 6 ordinal RPCs verified end-to-end")
+}
+
+// newRPCTestServer returns a server with the state that the RPC and
+// admin RPC handlers use.  Its admin hub runs jobs the way Run does.
+func newRPCTestServer(t *testing.T, ctx context.Context, db tbcd.Database) *Server {
+	t.Helper()
+
+	s := newPeerTestServer(t, db)
+	s.cmdsProcessed = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "rpc_calls_total",
+		Help: "The total number of successful RPC commands",
+	})
+	s.sessions = make(map[string]*tbcWs)
+	s.requestTimeout = defaultRequestTimeout
+	s.notifier = NewNotifier(false)
+	s.adminJWTSecret = testJWTSecret
+	s.adminSessions = *newHub(ctx, s.goDB)
+	s.ui = NewUtxoIndexer(s.g, 0, nil, nil, nil)
+	return s
+}
+
+// serveRPC serves the RPC and admin RPC routes of s on an in-memory
+// listener until ctx is canceled, the way Run does.  It returns a
+// client that connects to that listener.
+func serveRPC(t *testing.T, ctx context.Context, s *Server) *http.Client {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(tbcapi.RouteWebsocket, s.handleWebsocket)
+	mux.HandleFunc(tbcadminapi.RouteAdminWs, s.handleAdminWebsocket)
+	srv := &http.Server{
+		Handler:     mux,
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
+	}
+	ln := testutil.NewPipeListener()
+	go func() { _ = srv.Serve(ln) }()
+	context.AfterFunc(ctx, func() { _ = srv.Close() })
+
+	return ln.HTTPClient()
+}
+
+// dialRPC connects to route and reads the ping that the server sends
+// first.  It drains every later message, so that the server never
+// blocks on a write, and closes the returned channel when the
+// connection ends.
+func dialRPC(t *testing.T, ctx context.Context, client *http.Client, route string, header http.Header) (*protocol.WSConn, <-chan struct{}) {
+	t.Helper()
+
+	c, _, err := websocket.Dial(ctx, "ws://pipe"+route, &websocket.DialOptions{
+		HTTPClient: client,
+		HTTPHeader: header,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+	conn := protocol.NewWSConn(c)
+
+	cmd, _, _, err := tbcadminapi.Read(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd != tbcapi.CmdPingRequest {
+		t.Fatalf("first message: got %v, want %v", cmd,
+			tbcapi.CmdPingRequest)
+	}
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		for {
+			if _, _, _, err := tbcadminapi.Read(ctx, conn); err != nil {
+				return
+			}
+		}
+	}()
+	return conn, ended
+}
+
+// TestDBCloseJoinsRPCRequest verifies that the server does not close
+// the database while an RPC request still uses it.
+func TestDBCloseJoinsRPCRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		db := newParkDB()
+		s := newRPCTestServer(t, ctx, bestParkDB{db})
+		conn, _ := dialRPC(t, ctx, serveRPC(t, ctx, s),
+			tbcapi.RouteWebsocket, nil)
+
+		err := tbcapi.Write(ctx, conn, "1", tbcapi.BlockHeaderBestRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertCloseJoins(t, s, db)
+	})
+}
+
+// TestRPCReadStopsAfterClose verifies that the RPC read loop does not
+// start a request once dbClose has started, and that the connection
+// then ends.
+func TestRPCReadStopsAfterClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		db := newParkDB()
+		s := newRPCTestServer(t, ctx, bestParkDB{db})
+		conn, ended := dialRPC(t, ctx, serveRPC(t, ctx, s),
+			tbcapi.RouteWebsocket, nil)
+		if err := s.dbClose(); err != nil {
+			t.Fatal(err)
+		}
+
+		err := tbcapi.Write(ctx, conn, "1", tbcapi.BlockHeaderBestRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		select {
+		case <-db.entered:
+			t.Fatal("request handled after dbClose")
+		default:
+		}
+		select {
+		case <-ended:
+		default:
+			t.Fatal("connection did not end")
+		}
+	})
 }

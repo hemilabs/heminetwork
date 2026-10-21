@@ -12,9 +12,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -256,4 +259,74 @@ func RunBitcoindCommand(ctx context.Context, bitcoindContainer testcontainers.Co
 
 	// first 8 bytes are header, there is also a newline character at the end of the response
 	return buf.String()[8 : len(buf.String())-1], nil
+}
+
+// pipeAddr is the address of a PipeListener.
+type pipeAddr struct{}
+
+func (pipeAddr) Network() string { return "pipe" }
+func (pipeAddr) String() string  { return "pipe" }
+
+// PipeListener is an in-memory net.Listener.  Its connections are pipes,
+// so a goroutine that waits on one is durably blocked in a synctest
+// bubble.
+type PipeListener struct {
+	conns chan net.Conn
+	done  chan struct{}
+	once  sync.Once
+}
+
+// NewPipeListener returns a PipeListener that accepts the connections
+// that DialContext makes.
+func NewPipeListener() *PipeListener {
+	return &PipeListener{
+		conns: make(chan net.Conn),
+		done:  make(chan struct{}),
+	}
+}
+
+// Accept waits for a connection from DialContext.  It returns
+// net.ErrClosed once the listener is closed.
+func (l *PipeListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.conns:
+		return c, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+// Close closes the listener.  It is safe to call more than once.
+func (l *PipeListener) Close() error {
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+
+// Addr returns the address of the listener.
+func (l *PipeListener) Addr() net.Addr {
+	return pipeAddr{}
+}
+
+// DialContext connects to the listener and ignores the network and the
+// address.  It returns net.ErrClosed when the listener closes or ctx is
+// canceled before Accept takes the connection.
+func (l *PipeListener) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	client, server := net.Pipe()
+	select {
+	case l.conns <- server:
+		return client, nil
+	case <-l.done:
+	case <-ctx.Done():
+	}
+	client.Close()
+	server.Close()
+	return nil, net.ErrClosed
+}
+
+// HTTPClient returns an HTTP client that connects to the listener for
+// every request.
+func (l *PipeListener) HTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{DialContext: l.DialContext},
+	}
 }

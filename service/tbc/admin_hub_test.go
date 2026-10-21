@@ -16,13 +16,25 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
+// newTestHub returns a hub that runs its jobs in goroutines that the test
+// joins in a cleanup, so no job outlives the test.
+func newTestHub(t *testing.T, ctx context.Context) *AdminHub {
+	t.Helper()
+	var jobs sync.WaitGroup
+	t.Cleanup(jobs.Wait)
+	return newHub(ctx, func(f func()) bool {
+		jobs.Go(f)
+		return true
+	})
+}
+
 func TestHubSubscribe(t *testing.T) {
 	const subCount = 3
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 
-		h := NewHub(ctx)
+		h := newTestHub(t, ctx)
 
 		cid, l, err := h.NewSession(ctx, true)
 		if err != nil {
@@ -107,7 +119,7 @@ func TestHubJobLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	h := NewHub(ctx)
+	h := newTestHub(t, ctx)
 	cid, l, err := h.NewSession(ctx, true)
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +276,7 @@ func TestHubMultipleBroadcasters(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 
-				h := NewHub(ctx)
+				h := newTestHub(t, ctx)
 
 				var wg sync.WaitGroup
 				jrun := func(jctx context.Context, id string) {
@@ -355,7 +367,7 @@ func TestHubSubscribeIdempotent(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		h := NewHub(ctx)
+		h := newTestHub(t, ctx)
 
 		jrun := func(jctx context.Context, id string) {
 			if err := h.BroadcastProgress(jctx, id, JobStatusRunning); err != nil {
@@ -415,7 +427,7 @@ func TestHubDeleteSession(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		h := NewHub(ctx)
+		h := newTestHub(t, ctx)
 
 		var done bool
 		jrun := func(jctx context.Context, id string) {
@@ -465,7 +477,7 @@ func TestHubDeleteSession(t *testing.T) {
 
 func TestHubNoop(t *testing.T) {
 	ctx := t.Context()
-	h := NewHub(ctx)
+	h := newTestHub(t, ctx)
 
 	h.Subscribe("fake_client", "fake_job")
 	h.Unsubscribe("fake_client", "fake_job")

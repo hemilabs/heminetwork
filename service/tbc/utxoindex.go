@@ -404,6 +404,10 @@ func (s *Server) fixupCacheChannel(ctx context.Context, b *btcutil.Block, utxos 
 			// get slot or wait
 			select {
 			case <-ctx.Done():
+				// The started fetches use the database and
+				// send on c, which the deferred close closes;
+				// join them first.
+				w.Wait()
 				return ctx.Err()
 			case <-c:
 			}
