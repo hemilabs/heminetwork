@@ -85,6 +85,9 @@ echo "$(jq '.l1BlockTime = 3' /shared-dir/deploy-config.json)" > /shared-dir/dep
 echo "$(jq '.proofMaturityDelaySeconds = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 echo "$(jq '.preimageOracleChallengePeriod = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 echo "$(jq 'del(.customGasTokenAddress)' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+# op-deployer at the pinned commit above still emits the ProtocolVersions
+# fields, which op-node no longer accepts in a deploy config
+echo "$(jq 'del(.requiredProtocolVersion, .recommendedProtocolVersion, .protocolVersionsProxy)' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 echo "$(jq '.operatorFeeVaultRecipient = "0x78697c88847dfbbb40523e42c1f2e28a13a170be"' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 echo "$(jq '.operatorFeeVaultWithdrawalNetwork = 1' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
 
