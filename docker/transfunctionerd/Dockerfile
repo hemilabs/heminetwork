@@ -3,7 +3,7 @@
 # which can be found in the LICENSE file.
 
 # Build stage
-FROM golang:1.26.1-alpine3.23@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS builder
+FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS builder
 
 ARG GO_LDFLAGS
 ARG CONTINUUM_DEBUG
@@ -22,7 +22,7 @@ COPY . .
 RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" CONTINUUM_DEBUG="$CONTINUUM_DEBUG" transfunctionerd
 
 # Run stage
-FROM cgr.dev/chainguard/static@sha256:2fdfacc8d61164aa9e20909dceec7cc28b9feb66580e8e1a65b9f2443c53b61b
+FROM cgr.dev/chainguard/static@sha256:60582b2ae6074f641094af0f370d4ab241aab271858a66223dcde7eee9f51638
 # Build metadata
 ARG VERSION
 ARG VCS_REF

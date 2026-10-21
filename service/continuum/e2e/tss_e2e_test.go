@@ -19,9 +19,8 @@ import (
 	"time"
 
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
-	dockercontainer "github.com/docker/docker/api/types/container"
-	dockerclient "github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
+	dockercontainer "github.com/moby/moby/api/types/container"
+	dockerclient "github.com/moby/moby/client"
 	"github.com/testcontainers/testcontainers-go"
 	tcnetwork "github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -175,14 +174,14 @@ func newDNSHandler(nodes []nodeInfo) *DNSHandler {
 func startDNSServer(ctx context.Context, t *testing.T, handler *DNSHandler) (port string) {
 	t.Helper()
 	srv := NewDNSServer(ctx, handler)
-	t.Cleanup(func() { srv.Shutdown(ctx) })
+	t.Cleanup(func() { srv.Shutdown(context.WithoutCancel(ctx)) })
 	_, port, _ = net.SplitHostPort(srv.Listener.Addr().String())
 	return port
 }
 
 func startDockerNetwork(ctx context.Context, t *testing.T) (*dockerclient.Client, *testcontainers.DockerNetwork) {
 	t.Helper()
-	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	cli, err := dockerclient.New(dockerclient.FromEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +195,7 @@ func startDockerNetwork(ctx context.Context, t *testing.T) (*dockerclient.Client
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err = network.Remove(ctx); err != nil {
+		if err = network.Remove(context.WithoutCancel(ctx)); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				t.Logf("error removing network: %v", err)
 			}
@@ -259,7 +258,7 @@ func startNodes(ctx context.Context, t *testing.T, cli *dockerclient.Client, net
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			if err = c.Terminate(ctx); err != nil {
+			if err = c.Terminate(context.WithoutCancel(ctx)); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					t.Logf("error terminating container %s: %v", n.name, err)
 				}
@@ -267,15 +266,15 @@ func startNodes(ctx context.Context, t *testing.T, cli *dockerclient.Client, net
 		})
 
 		prevPeer = fmt.Sprintf("%s:%d", n.hostname, trfListenPort)
-		info, err := cli.ContainerInspect(ctx, c.GetContainerID())
+		info, err := cli.ContainerInspect(ctx, c.GetContainerID(), dockerclient.ContainerInspectOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		ep, ok := info.NetworkSettings.Networks[networkName]
+		ep, ok := info.Container.NetworkSettings.Networks[networkName]
 		if !ok {
 			t.Fatalf("%s not on network %s", n.name, networkName)
 		}
-		nodeIPs = append(nodeIPs, ep.IPAddress)
+		nodeIPs = append(nodeIPs, ep.IPAddress.String())
 	}
 	return nodeIPs
 }
@@ -301,7 +300,7 @@ func startProxy(ctx context.Context, t *testing.T, cli *dockerclient.Client, net
 			Cmd:          []string{strings.Join(socatCmds, " & ") + " & wait"},
 			Networks:     []string{networkName},
 			ExposedPorts: exposedPorts,
-			WaitingFor:   wait.ForListeningPort(nat.Port(strconv.Itoa(trfListenPort) + "/tcp")).WithStartupTimeout(15 * time.Second),
+			WaitingFor:   wait.ForListeningPort(strconv.Itoa(trfListenPort) + "/tcp").WithStartupTimeout(15 * time.Second),
 		},
 		Started: true,
 	})
@@ -309,26 +308,26 @@ func startProxy(ctx context.Context, t *testing.T, cli *dockerclient.Client, net
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err = proxy.Terminate(ctx); err != nil {
+		if err = proxy.Terminate(context.WithoutCancel(ctx)); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				t.Logf("error terminating proxy: %v", err)
 			}
 		}
 	})
 
-	info, err := cli.ContainerInspect(ctx, proxy.GetContainerID())
+	info, err := cli.ContainerInspect(ctx, proxy.GetContainerID(), dockerclient.ContainerInspectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep, ok := info.NetworkSettings.Networks[networkName]
+	ep, ok := info.Container.NetworkSettings.Networks[networkName]
 	if !ok {
 		t.Fatalf("proxy not on network %s", networkName)
 	}
-	handler.addPTR(net.ParseIP(ep.IPAddress), "node-0")
+	handler.addPTR(ep.IPAddress.AsSlice(), "node-0")
 
 	addrs := make([]string, len(nodeIPs))
 	for i := range nodeIPs {
-		port, err := proxy.MappedPort(ctx, nat.Port(strconv.Itoa(trfListenPort+i)+"/tcp"))
+		port, err := proxy.MappedPort(ctx, strconv.Itoa(trfListenPort+i)+"/tcp")
 		if err != nil {
 			t.Fatal(err)
 		}
