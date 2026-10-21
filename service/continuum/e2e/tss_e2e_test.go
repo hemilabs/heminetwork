@@ -25,6 +25,7 @@ import (
 	tcnetwork "github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 	"github.com/hemilabs/heminetwork/v2/service/continuum"
 )
 
@@ -220,6 +221,7 @@ func startNodes(ctx context.Context, t *testing.T, cli *dockerclient.Client, net
 					Repo:       "hemilabs/transfunctionerd",
 					Dockerfile: "./docker/transfunctionerd/Dockerfile",
 					Context:    "./../../..",
+					KeepImage:  true,
 					BuildArgs: map[string]*string{
 						"GO_LDFLAGS":      new(string),
 						"CONTINUUM_DEBUG": &debug,
@@ -375,6 +377,8 @@ func setupTSSNodes(ctx context.Context, t *testing.T, nodeCount int) *tssSetup {
 }
 
 func TestE2EPeers(t *testing.T) {
+	testutil.SkipIfNoDocker(t)
+
 	const nodeCount = 10
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
@@ -406,6 +410,8 @@ func TestE2EPeers(t *testing.T) {
 }
 
 func TestE2EKeygen(t *testing.T) {
+	testutil.SkipIfNoDocker(t)
+
 	const nodeCount = 4
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
