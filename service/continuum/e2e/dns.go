@@ -216,7 +216,7 @@ func arpaToIPv4(arpa string) net.IP {
 func NewDNSServer(ctx context.Context, handler dns.Handler) *dns.Server {
 	started := make(chan struct{})
 	srv := &dns.Server{
-		Addr:              "127.0.0.1:0",
+		Addr:              "0.0.0.0:0",
 		Net:               "tcp",
 		Handler:           handler,
 		NotifyStartedFunc: func(_ context.Context) { close(started) },
