@@ -2474,3 +2474,82 @@ func TestBlockTxRawByLocRealBlock(t *testing.T) {
 		}
 	}
 }
+
+func checkHeaderReaders(ctx context.Context, db *ldb) error {
+	it := db.pool[level.HeightHashDB].NewIterator(nil, nil)
+	defer it.Release()
+	for it.Next() {
+		height, hash := keyToHeightHash(it.Key())
+		if _, err := db.BlockHeaderByHash(ctx, *hash); err != nil {
+			return fmt.Errorf("height %v entry %v: %w", height, hash, err)
+		}
+	}
+	if err := it.Error(); err != nil {
+		return err
+	}
+
+	best, err := db.BlockHeaderBest(ctx)
+	if err != nil {
+		return fmt.Errorf("best: %w", err)
+	}
+	ok, err := db.pool[level.HeightHashDB].Has(heightHashToKey(best.Height,
+		best.Hash[:]), nil)
+	if err != nil {
+		return fmt.Errorf("tip height entry: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("tip %v has no entry at height %v", best.Hash,
+			best.Height)
+	}
+	return nil
+}
+
+func TestBlockHeadersInsertCommitOrder(t *testing.T) {
+	ctx := t.Context()
+	db := createOrdinalDB(ctx, t)
+
+	genesis := createTestBlock(&chainhash.Hash{}, 0)
+	if err := db.BlockHeaderGenesisInsert(ctx, genesis.MsgBlock().Header, 0,
+		nil); err != nil {
+		t.Fatal(err)
+	}
+	a := createTestBlock(genesis.Hash(), 1)
+	b := createTestBlock(genesis.Hash(), 2)
+	c := createTestBlock(a.Hash(), 3)
+
+	tests := []struct {
+		name   string
+		header *wire.BlockHeader
+		want   tbcd.InsertType
+	}{
+		{"chain extend", &a.MsgBlock().Header, tbcd.ITChainExtend},
+		{"fork at the same height", &b.MsgBlock().Header, tbcd.ITForkExtend},
+		{"chain extend past the fork", &c.MsgBlock().Header, tbcd.ITChainExtend},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var commits []string
+			committed := func(name string) {
+				commits = append(commits, name)
+				if err := checkHeaderReaders(ctx, db); err != nil {
+					t.Errorf("after %v commit: %v", name, err)
+				}
+			}
+
+			msg := wire.NewMsgHeaders()
+			if err := msg.AddBlockHeader(tt.header); err != nil {
+				t.Fatal(err)
+			}
+			it, _, _, _, err := db.blockHeadersInsert(ctx, msg, nil, committed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if it != tt.want {
+				t.Fatalf("insert type %v, want %v", it, tt.want)
+			}
+			if len(commits) < 3 {
+				t.Fatalf("checked after %v, want every commit", commits)
+			}
+		})
+	}
+}
