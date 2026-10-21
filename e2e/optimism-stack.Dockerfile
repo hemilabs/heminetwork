@@ -2,7 +2,7 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-# increment me to break the cache: 2
+# increment me to break the cache: 3
 
 # hemilabs/op-geth hemi and hemilabs/optimism hemi with the Glamsterdam
 # changes merged (op-geth PR #111, optimism PR #53): the L2 keeps running
@@ -11,7 +11,7 @@
 # go.mod, so op-node, op-batcher and op-proposer are linked against the
 # same code that runs as the L2 execution client.
 ARG OP_GETH_COMMIT=c1771608d7edd4224b05e9d224056984f87c1f5d
-ARG OPTIMISM_COMMIT=f04d7b3a8dd75a24b80f8fa0f7fd7f6d6346394c
+ARG OPTIMISM_COMMIT=d30fe8be738dcc70022943b38c84f1612f39797e
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken
@@ -63,12 +63,17 @@ ARG OPTIMISM_COMMIT
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
 
 RUN apt-get update
-RUN apt-get install -y jq yq xxd
+RUN apt-get install -y jq yq xxd zip
 
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
-RUN git clone https://github.com/hemilabs/optimism
+# hemilabs/optimism is cloned from a local bare repository in the build
+# context rather than from GitHub, so unpublished commits can be built.
+# Populate it from a local optimism checkout before building:
+#   git clone --bare --single-branch -b <branch> /path/to/optimism e2e/optimism.git
+COPY e2e/optimism.git /git/optimism.git
+RUN git clone /git/optimism.git optimism
 WORKDIR /git/optimism
 RUN git fetch origin
 RUN git checkout $OPTIMISM_COMMIT
@@ -77,6 +82,13 @@ WORKDIR /git/optimism
 RUN go mod tidy
 
 RUN git submodule update --init --recursive
+
+# op-core/superchain embeds superchain-configs.zip, which is gitignored and
+# generated from the superchain-registry submodule.  The generator needs
+# mikefarah's yq v4 (the apt "yq" package is a different tool), installed
+# into its own directory so it doesn't shadow the apt one.
+RUN GOBIN=/opt/yq4 go install github.com/mikefarah/yq/v4@v4.44.3
+RUN PATH=/opt/yq4:$PATH bash op-core/superchain/sync-superchain.sh
 
 WORKDIR /git/optimism
 
