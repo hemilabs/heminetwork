@@ -1973,9 +1973,9 @@ func TestConnHandshake(t *testing.T) {
 }
 
 func TestDNSServerSetup(t *testing.T) {
-	// if runtime.GOOS != "linux" {
-	// 	t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
-	// }
+	if runtime.GOOS != "linux" {
+		t.Skip("skipping: test requires Linux loopback range (127.0.0.0/8)")
+	}
 	nodes := byte(200)
 	domain := "moop.gfy"
 	handler := createDNSNodes(domain, nodes)

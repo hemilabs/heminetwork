@@ -572,11 +572,24 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("nacl xchg rate ttl: %w", err)
 	}
 
+	var resolver *net.Resolver
+	if cfg.DNSServer != "" {
+		dnsAddr := cfg.DNSServer
+		resolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := &net.Dialer{Timeout: 10 * time.Second}
+				return d.DialContext(ctx, "tcp", dnsAddr)
+			},
+		}
+	}
+
 	return &Server{
 		limiters:           limiters,
 		cfg:                cfg,
+		resolver:           resolver,
 		listenConfig:       &net.ListenConfig{},
-		dialer:             net.Dialer{Timeout: dialTimeout},
+		dialer:             net.Dialer{Timeout: dialTimeout, Resolver: resolver},
 		sessions:           make(map[Identity]*Transport, cfg.PeersWanted),
 		ponged:             make(map[Identity]struct{}, cfg.PeersWanted),
 		peers:              make(map[Identity]*PeerRecord),
