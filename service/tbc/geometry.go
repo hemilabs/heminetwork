@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
 )
 
 func s2h(s string) *chainhash.Hash {
@@ -22,6 +23,16 @@ func s2h(s string) *chainhash.Hash {
 	}
 	return h
 }
+
+// CheckpointInterval is the largest height distance between two
+// checkpoints.  isCanonical walks back from the next checkpoint, so a
+// walk reads at most this many headers.
+const CheckpointInterval = 25000
+
+// HeaderCacheSize is a block header cache size that holds two checkpoint
+// intervals, so that an isCanonical walk and the headers around it fit.
+// A smaller LRU cache evicts the headers of a walk before the next one.
+const HeaderCacheSize = 2 * CheckpointInterval * level.BlockHeaderCacheCost
 
 var (
 	// checkpoints MUST be sorted high to low!
@@ -70,28 +81,54 @@ var (
 	}
 
 	testnet4Checkpoints = []chaincfg.Checkpoint{
+		{Height: 125000, Hash: s2h("000000000aaf5493271b02d38f6c502956fe2e60877e2f869596834ceedf109d")},
+		{Height: 100000, Hash: s2h("0000000000524911745ab6eee9348bca9843c2c2b1b27eada246e3dc2f80b6b1")},
 		{Height: 80000, Hash: s2h("0000000006af13c1117f3e2eb14f10eb9736e255713118cf7eb6659b1448efc1")},
+		{Height: 75000, Hash: s2h("000000005c2f5ba6c99abc590e3502b368faa969c80921164f49c1caef53e4e7")},
+		{Height: 50000, Hash: s2h("00000000e2c8c94ba126169a88997233f07a9769e2b009fb10cad0e893eff2cb")},
+		{Height: 25000, Hash: s2h("00000000000000c207c423ebb2d935e7b867b51710aaf72967666e83696f01e2")},
 		{Height: 0, Hash: s2h("00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043")},
 	}
 
 	mainnetCheckpoints = []chaincfg.Checkpoint{
+		{Height: 950000, Hash: s2h("000000000000000000010b93c9ea1c29fea277383f0f7d1f26de8b5802e885ff")},
+		{Height: 925000, Hash: s2h("0000000000000000000067f9f40ca6960173ebee423f6130138762dfc40630bf")},
+		{Height: 900000, Hash: s2h("000000000000000000010538edbfd2d5b809a33dd83f284aeea41c6d0d96968a")},
+		{Height: 875000, Hash: s2h("00000000000000000002923a7456aa3d4adce139cd16550c3ff36d07cc45d251")},
 		{Height: 850000, Hash: s2h("00000000000000000002a0b5db2a7f8d9087464c2586b546be7bce8eb53b8187")},
+		{Height: 825000, Hash: s2h("00000000000000000001432b1ea8b3b710c3fb7e628d605cf4a42c25d7822431")},
 		{Height: 800000, Hash: s2h("00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054")},
+		{Height: 775000, Hash: s2h("0000000000000000000181c97a248752bec586d92dacb226fe5dd93ded6f20d1")},
 		{Height: 750000, Hash: s2h("0000000000000000000592a974b1b9f087cb77628bb4a097d5c2c11b3476a58e")},
+		{Height: 725000, Hash: s2h("00000000000000000005f91517a043a19b452dc4e8cfd872651768dddf7bb8e5")},
 		{Height: 700000, Hash: s2h("0000000000000000000590fc0f3eba193a278534220b2b37e9849e1a770ca959")},
+		{Height: 675000, Hash: s2h("000000000000000000057b6df3f61f96fbdd4b9c4d76fcb975cb0e8a56577d51")},
 		{Height: 650000, Hash: s2h("0000000000000000000060e32d547b6ae2ded52aadbc6310808e4ae42b08cc6a")},
+		{Height: 625000, Hash: s2h("00000000000000000000140a7289f3aada855dfd23b0bb13bb5502b0ca60cdd7")},
 		{Height: 600000, Hash: s2h("00000000000000000007316856900e76b4f7a9139cfbfba89842c8d196cd5f91")},
+		{Height: 575000, Hash: s2h("00000000000000000007df59824a0c86d1cc21b90eb25259dd2dba5170cea5f5")},
 		{Height: 550000, Hash: s2h("000000000000000000223b7a2298fb1c6c75fb0efc28a4c56853ff4112ec6bc9")},
+		{Height: 525000, Hash: s2h("0000000000000000002ffaa108b110ff7fd64475841b6ab65abd9bb43f8ede1d")},
 		{Height: 500000, Hash: s2h("00000000000000000024fb37364cbf81fd49cc2d51c09c75c35433c3a1945d04")},
+		{Height: 475000, Hash: s2h("0000000000000000017c42fd88e78ab02c5f5c684f8344e1f5c9e4cebecde71c")},
 		{Height: 450000, Hash: s2h("0000000000000000014083723ed311a461c648068af8cef8a19dcd620c07a20b")},
+		{Height: 425000, Hash: s2h("00000000000000000142adfebcb9a0aa75f0c4980dd5c7dd17062bf7de77c16d")},
 		{Height: 400000, Hash: s2h("000000000000000004ec466ce4732fe6f1ed1cddc2ed4b328fff5224276e3f6f")},
+		{Height: 375000, Hash: s2h("000000000000000009733ff8f11fbb9575af7412df3fae97f382376709c965dc")},
 		{Height: 350000, Hash: s2h("0000000000000000053cf64f0400bb38e0c4b3872c38795ddde27acb40a112bb")},
+		{Height: 325000, Hash: s2h("00000000000000000409695bce21828b31a7143fa35fcab64670dd337a71425d")},
 		{Height: 300000, Hash: s2h("000000000000000082ccf8f1557c5d40b21edabb18d2d691cfbf87118bac7254")},
+		{Height: 275000, Hash: s2h("00000000000000044750d80a0d3f3e307e54e8802397ae840d91adc28068f5bc")},
 		{Height: 250000, Hash: s2h("000000000000003887df1f29024b06fc2200b55f8af8f35453d7be294df2d214")},
+		{Height: 225000, Hash: s2h("000000000000013d8781110987bf0e9f230e3cc85127d1ee752d5dd014f8a8e1")},
 		{Height: 200000, Hash: s2h("000000000000034a7dedef4a161fa058a2d67a173a90155f3a2fe6fc132e0ebf")},
+		{Height: 175000, Hash: s2h("00000000000006b975c097e9a5235de03d9024ddb205fd24dfcd508403fa907c")},
 		{Height: 150000, Hash: s2h("0000000000000a3290f20e75860d505ce0e948a1d1d846bec7e39015d242884b")},
+		{Height: 125000, Hash: s2h("00000000000042391c3620056af66ca9ad7cb962424a9b34611915cebb9e1a2a")},
 		{Height: 100000, Hash: s2h("000000000003ba27aa200b1cecaad478d2b00432346c3f1f3986da1afd33e506")},
+		{Height: 75000, Hash: s2h("00000000000ace2adaabf1baf9dc0ec54434db11e9fd63c1819d8d77df40afda")},
 		{Height: 50000, Hash: s2h("000000001aeae195809d120b5d66a39c83eb48792e068f8ea1fea19d84a4278a")},
+		{Height: 25000, Hash: s2h("00000000ae4b125eb183e689b7231eafa8c992d5b8c952d9f3cd30a79a788ddf")},
 		{Height: 0, Hash: s2h("000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f")},
 	}
 
