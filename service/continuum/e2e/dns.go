@@ -14,8 +14,7 @@ import (
 
 	"codeberg.org/miekg/dns"
 	"codeberg.org/miekg/dns/dnsutil"
-	dockernetwork "github.com/docker/docker/api/types/network"
-	dockerclient "github.com/docker/docker/client"
+	dockerclient "github.com/moby/moby/client"
 
 	"github.com/hemilabs/heminetwork/v2/service/continuum"
 )
@@ -129,7 +128,7 @@ func (h *DNSHandler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.
 }
 
 func (h *DNSHandler) dockerResolve(ctx context.Context, queryName string) ([]dns.RR, error) {
-	netInfo, err := h.DockerCli.NetworkInspect(ctx, h.DockerNetwork, dockernetwork.InspectOptions{})
+	netInfo, err := h.DockerCli.NetworkInspect(ctx, h.DockerNetwork, dockerclient.NetworkInspectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("docker network inspect: %w", err)
 	}
@@ -142,8 +141,8 @@ func (h *DNSHandler) dockerResolve(ctx context.Context, queryName string) ([]dns
 		if queryIP == nil {
 			return nil, fmt.Errorf("invalid arpa name: %s", queryName)
 		}
-		for _, ep := range netInfo.Containers {
-			ipStr, _, _ := strings.Cut(ep.IPv4Address, "/")
+		for _, ep := range netInfo.Network.Containers {
+			ipStr := ep.IPv4Address.Addr().String()
 			if net.ParseIP(ipStr).To4().Equal(queryIP) {
 				return []dns.RR{
 					&dns.PTR{
@@ -165,11 +164,11 @@ func (h *DNSHandler) dockerResolve(ctx context.Context, queryName string) ([]dns
 	containerName := strings.TrimSuffix(queryName, suffix)
 
 	// If querying for domain name, returns A and TXT record
-	for _, ep := range netInfo.Containers {
+	for _, ep := range netInfo.Network.Containers {
 		if ep.Name != containerName {
 			continue
 		}
-		ipStr, _, _ := strings.Cut(ep.IPv4Address, "/")
+		ipStr := ep.IPv4Address.Addr().String()
 		ip := net.ParseIP(ipStr).To4()
 		if ip == nil {
 			return nil, fmt.Errorf("invalid IP %q for %s", ep.IPv4Address, containerName)
