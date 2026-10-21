@@ -561,9 +561,6 @@ func (ac *Conn) Call(ctx context.Context, api API, payload any) (Command, string
 	log.Tracef("Call: %T", payload)
 	defer log.Tracef("Call exit: %T", payload)
 
-	if err := ctx.Err(); err != nil {
-		return "", "", nil, err
-	}
 	wctx := context.WithoutCancel(ctx)
 	if deadline, ok := ctx.Deadline(); ok {
 		var cancel context.CancelFunc
