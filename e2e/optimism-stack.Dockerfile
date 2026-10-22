@@ -2,7 +2,7 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-# increment me to break the cache: 3
+# increment me to break the cache: 4
 
 # hemilabs/op-geth hemi and hemilabs/optimism hemi with the Glamsterdam
 # changes merged (op-geth PR #111, optimism PR #53): the L2 keeps running
@@ -12,6 +12,12 @@
 # same code that runs as the L2 execution client.
 ARG OP_GETH_COMMIT=c1771608d7edd4224b05e9d224056984f87c1f5d
 ARG OPTIMISM_COMMIT=d30fe8be738dcc70022943b38c84f1612f39797e
+
+# hemilabs/optimism with Hemi's hVM ported into op-reth (branch op-reth-hemi,
+# based on 9892fe9b7ebe4b09cec4eae34f7874eeac512162).  op-reth runs as the L2
+# execution client; op-node, op-batcher and op-proposer stay on
+# OPTIMISM_COMMIT.
+ARG OP_RETH_COMMIT=37b5d86d87c51b5140cfee41a2ce15c1ca4414eb
 
 # commit near tip on "master" (main) branch.  the most recent release is
 # broken
@@ -42,6 +48,27 @@ WORKDIR /git/just
 RUN git checkout f028de5b258a0cc4696b9dea729cc7d4d5828baa
 RUN cargo install just
 
+# op-reth with Hemi hVM.  The hVM Go bridge (rust/op-reth/crates/hemi/hvm-go)
+# is compiled by cargo, so this stage needs both Go and Rust.
+FROM golang:1.26.5-trixie@sha256:4ee9ffa999b4583ce281939cdff828763083610292f252279a0cee77473bd9a7 AS opreth_build
+ARG OP_RETH_COMMIT
+
+RUN apt-get update && apt-get install -y --no-install-recommends clang libclang-dev pkg-config
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain none --profile minimal
+ENV PATH="${PATH}:/root/.cargo/bin"
+
+WORKDIR /git
+COPY e2e/optimism.git /git/optimism.git
+RUN git clone /git/optimism.git optimism
+WORKDIR /git/optimism
+RUN git checkout $OP_RETH_COMMIT
+# op-reth's chainspec embeds the superchain registry
+RUN git submodule update --init superchain-registry
+
+WORKDIR /git/optimism/rust
+RUN cargo build --profile release -p op-reth --bin op-reth
+RUN ./target/release/op-reth --version
+
 FROM golang:1.26.5-trixie@sha256:4ee9ffa999b4583ce281939cdff828763083610292f252279a0cee77473bd9a7 AS build_1
 ARG OP_GETH_COMMIT
 ARG OPTIMISM_COMMIT
@@ -59,8 +86,10 @@ FROM golang:1.26.5-trixie@sha256:4ee9ffa999b4583ce281939cdff828763083610292f2522
 ARG OP_GETH_COMMIT
 ARG OPTIMISM_COMMIT
 
-# store the latest geth here, build with go 1.23
+# store the latest geth here, build with go 1.23.  The L2 runs op-reth; geth
+# stays for "geth attach" used by e2e/monitor against op-reth's IPC endpoint.
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
+COPY --from=opreth_build /git/optimism/rust/target/release/op-reth /bin/op-reth
 
 RUN apt-get update
 RUN apt-get install -y jq yq xxd zip
