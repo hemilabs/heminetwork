@@ -191,6 +191,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were not joined, so the database could close while one of them held
   a transaction; the database is now closed only after they return
   ([#1224](https://github.com/hemilabs/heminetwork/pull/1224)).
+- Fix `tbcgozer` sending a request for a context that was already
+  cancelled, and keeping a cancelled request in flight until its timeout.
+  A request now stops waiting for its reply when its caller's context is
+  done, and frees its worker slot. `protocol.Conn.Call` no longer closes
+  the connection when its context is cancelled: a call that waits for the
+  write lock is not sent, and a write that has started ends only at the
+  deadline, so the context of `Call` must carry a deadline
+  ([#1227](https://github.com/hemilabs/heminetwork/pull/1227)).
 - Fix `tbc` block download stalling on a low-work header fork. Headers
   that fork off at or below the last checkpoint the best header passed,
   or that contradict a checkpoint, are now rejected, and the download

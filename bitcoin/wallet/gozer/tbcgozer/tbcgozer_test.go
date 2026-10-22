@@ -6,10 +6,17 @@ package tbcgozer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,9 +24,12 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/coder/websocket"
 	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api"
+	"github.com/hemilabs/heminetwork/v2/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
@@ -716,6 +726,539 @@ func TestTBCGozerTxByIDContextCancelled(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
+}
+
+// testTBC is a tbcGozer connected to a test TBC server.
+type testTBC struct {
+	*tbcGozer
+
+	cancel context.CancelFunc // ends the connection context
+	conns  atomic.Int32       // connections the server accepted
+}
+
+// newTestTBC connects a tbcGozer to a test TBC server.  The server uses
+// listener l when it is not nil, sends the ping and then calls serve on each
+// connection.  The tbcGozer reads replies only when reader is true.
+func newTestTBC(t *testing.T, l net.Listener, reader bool, serve func(context.Context, *websocket.Conn)) *testTBC {
+	t.Helper()
+
+	tt := &testTBC{}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tt.conns.Add(1)
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		c.SetReadLimit(-1)
+		ping := &tbcapi.PingRequest{Timestamp: time.Now().Unix()}
+		if err := tbcapi.Write(r.Context(), protocol.NewWSConn(c), "0", ping); err != nil {
+			return
+		}
+		serve(r.Context(), c)
+	}))
+	if l != nil {
+		srv.Listener.Close()
+		srv.Listener = l
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	tt.cancel = cancel
+	conn, err := protocol.NewConn("ws"+strings.TrimPrefix(srv.URL, "http"),
+		&protocol.ConnOptions{ReadLimit: tbcapi.MaxResponseSize})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Connect(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	tt.tbcGozer = &tbcGozer{
+		cmdCh:     make(chan tbcCmd, DefaultCommandQueueDepth),
+		connected: true,
+	}
+	if reader {
+		tt.wg.Add(1)
+		go tt.handleTBCWebsocketRead(ctx, conn)
+	}
+	tt.wg.Add(1)
+	go tt.handleTBCWebsocketCall(ctx, conn)
+	t.Cleanup(func() {
+		cancel()
+		tt.wg.Wait()
+		conn.Close()
+	})
+	return tt
+}
+
+// requireOneConn fails when the server accepted more than one connection.
+// A new connection means that the old one closed, which failed every
+// request in flight on it.
+func (tt *testTBC) requireOneConn(t *testing.T) {
+	t.Helper()
+
+	if n := tt.conns.Load(); n != 1 {
+		t.Fatalf("server accepted %v connections, want 1", n)
+	}
+}
+
+// newSilentTBC returns a testTBC whose server reads every request and never
+// replies, and a channel that carries the command of each request the
+// server reads.  The tbcGozer reads replies only when reader is true.
+func newSilentTBC(t *testing.T, reader bool) (*testTBC, <-chan protocol.Command) {
+	t.Helper()
+
+	reqCh := make(chan protocol.Command, 4*DefaultCommandQueueDepth)
+	tt := newTestTBC(t, nil, reader, func(ctx context.Context, c *websocket.Conn) {
+		wc := protocol.NewWSConn(c)
+		for {
+			cmd, _, _, err := tbcapi.Read(ctx, wc)
+			if err != nil {
+				return
+			}
+			select {
+			case reqCh <- cmd:
+			default: // never block the server
+			}
+		}
+	})
+	return tt, reqCh
+}
+
+// txByIDs starts n TxByID requests with ctx and returns a channel that
+// carries the error of each request.  The test joins every caller before
+// it ends.
+func txByIDs(t *testing.T, tg *tbcGozer, ctx context.Context, n int) <-chan error {
+	t.Helper()
+
+	var wg sync.WaitGroup
+	t.Cleanup(wg.Wait)
+
+	errCh := make(chan error, n)
+	req := &tbcapi.TxByIdRequest{TxID: chainhash.Hash{0xde, 0xad}}
+	for range n {
+		wg.Go(func() {
+			_, err := tg.callTBC(ctx, time.Hour, req)
+			errCh <- err
+		})
+	}
+	return errCh
+}
+
+// waitRequests waits until the server reads n requests with command cmd,
+// and fails when it reads a request with another command.
+func waitRequests(t *testing.T, reqCh <-chan protocol.Command, cmd protocol.Command, n int) {
+	t.Helper()
+
+	timeout := time.After(10 * time.Second)
+	for i := range n {
+		select {
+		case <-timeout:
+			t.Fatalf("server read %v of %v %v requests", i, n, cmd)
+		case got := <-reqCh:
+			if got != cmd {
+				t.Fatalf("server read %v, want %v", got, cmd)
+			}
+		}
+	}
+}
+
+// waitErr waits for an error on errCh.
+func waitErr(t *testing.T, errCh <-chan error) error {
+	t.Helper()
+
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("caller did not return")
+		return nil
+	case err := <-errCh:
+		return err
+	}
+}
+
+// TestCallTBCCancelledCallFreesSlot checks that cancelling the callers of
+// in-flight requests returns context.Canceled and at once frees their
+// worker slots, instead of after the request timeout.
+func TestCallTBCCancelledCallFreesSlot(t *testing.T) {
+	tt, reqCh := newSilentTBC(t, true)
+	n := DefaultCommandQueueDepth
+
+	// Fill every slot with a request that the server never answers.
+	ctx, cancel := context.WithCancel(t.Context())
+	errCh := txByIDs(t, tt.tbcGozer, ctx, n)
+	waitRequests(t, reqCh, tbcapi.CmdTxByIdRequest, n)
+
+	cancel()
+	for range n {
+		if err := waitErr(t, errCh); !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got: %v", err)
+		}
+	}
+
+	// All slots must be free again.
+	txByIDs(t, tt.tbcGozer, t.Context(), n)
+	waitRequests(t, reqCh, tbcapi.CmdTxByIdRequest, n)
+	tt.requireOneConn(t)
+}
+
+// TestCallTBCQueuedCancelledNotSent checks that a request whose caller is
+// done while it waits for a worker slot is never sent and takes no slot.
+func TestCallTBCQueuedCancelledNotSent(t *testing.T) {
+	tt, reqCh := newSilentTBC(t, true)
+	n := DefaultCommandQueueDepth
+
+	// Fill every slot with a request that the server never answers.
+	ctx, cancel := context.WithCancel(t.Context())
+	txByIDs(t, tt.tbcGozer, ctx, n)
+	waitRequests(t, reqCh, tbcapi.CmdTxByIdRequest, n)
+
+	// Queue a request for a caller that is done.
+	qctx, qcancel := context.WithTimeout(t.Context(), time.Hour)
+	qcancel()
+	tt.cmdCh <- tbcCmd{
+		ctx: qctx,
+		msg: &tbcapi.BlockHeaderBestRequest{},
+		ch:  make(chan any),
+	}
+
+	// Free the slots.  The server must read n new TxByID requests and
+	// never the queued request.
+	cancel()
+	txByIDs(t, tt.tbcGozer, t.Context(), n)
+	waitRequests(t, reqCh, tbcapi.CmdTxByIdRequest, n)
+	tt.requireOneConn(t)
+}
+
+// TestCallTBCConnectionEndFailsCalls checks that every caller with a
+// request in flight gets an error at once when the connection ends,
+// instead of waiting for its timeout.
+func TestCallTBCConnectionEndFailsCalls(t *testing.T) {
+	tt, reqCh := newSilentTBC(t, true)
+	n := DefaultCommandQueueDepth
+
+	errCh := txByIDs(t, tt.tbcGozer, t.Context(), n)
+	waitRequests(t, reqCh, tbcapi.CmdTxByIdRequest, n)
+
+	tt.cancel()
+	for range n {
+		if err := waitErr(t, errCh); err == nil {
+			t.Fatal("expected an error")
+		}
+	}
+}
+
+// TestCallTBCConnectionEndStopsWait checks that a request waiting for its
+// reply fails at once when the connection ends, even when the reader did
+// not fail it.  Here no reader runs, as for a call that registers after
+// the reader failed the calls in flight.
+func TestCallTBCConnectionEndStopsWait(t *testing.T) {
+	tt, reqCh := newSilentTBC(t, false)
+
+	errCh := txByIDs(t, tt.tbcGozer, t.Context(), 1)
+	waitRequests(t, reqCh, tbcapi.CmdTxByIdRequest, 1)
+
+	tt.cancel()
+	if err := waitErr(t, errCh); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+// TestCallTBCCancelledCallStopsDial checks that a caller that is done
+// stops the dial of a request that has to reconnect.  A dial that went on
+// would open a connection that nobody reads or closes.
+func TestCallTBCCancelledCallStopsDial(t *testing.T) {
+	// The server never answers the dial, and tells when the client
+	// gives up on it.
+	var (
+		dialed  = make(chan struct{})
+		aborted = make(chan struct{})
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(dialed)
+		select {
+		case <-r.Context().Done():
+			close(aborted)
+		case <-t.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	// The connection is not up, so the request has to dial.
+	conn, err := protocol.NewConn("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := &tbcGozer{
+		cmdCh:     make(chan tbcCmd, DefaultCommandQueueDepth),
+		connected: true,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	tg.wg.Add(1)
+	go tg.handleTBCWebsocketCall(ctx, conn)
+	t.Cleanup(func() {
+		cancel()
+		tg.wg.Wait()
+	})
+
+	cctx, ccancel := context.WithCancel(t.Context())
+	defer ccancel()
+	errCh := txByIDs(t, tg, cctx, 1)
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("request did not dial")
+	case <-dialed:
+	}
+
+	ccancel()
+	if err := waitErr(t, errCh); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("dial did not stop")
+	case <-aborted:
+	}
+}
+
+// smallBufListener sets a small receive buffer on each connection, so that
+// a large message does not fit in the socket buffers.  It keeps the last
+// connection, so that the buffer can grow again.
+type smallBufListener struct {
+	net.Listener
+
+	last atomic.Pointer[net.TCPConn]
+}
+
+func (l *smallBufListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	if tc, ok := c.(*net.TCPConn); ok {
+		if err := tc.SetReadBuffer(4096); err != nil {
+			c.Close()
+			return nil, err
+		}
+		l.last.Store(tc)
+	}
+	return c, nil
+}
+
+// TestCallTBCCancelledWriteKeepsConnection checks that a caller that
+// cancels while its request is being written does not close the
+// connection, so that the other requests in flight still get replies.
+func TestCallTBCCancelledWriteKeepsConnection(t *testing.T) {
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The server reads the small request, then only the start of the
+	// large one, and waits for release.  It then reads the rest of the
+	// large request and replies to the small one.
+	var (
+		smallRead  = make(chan struct{})
+		largeStart = make(chan struct{})
+		release    = make(chan struct{})
+	)
+	sl := &smallBufListener{Listener: l}
+	tt := newTestTBC(t, sl, true, func(ctx context.Context, c *websocket.Conn) {
+		_, r, err := c.Reader(ctx)
+		if err != nil {
+			return
+		}
+		var msg protocol.Message
+		if err := json.NewDecoder(r).Decode(&msg); err != nil {
+			return
+		}
+		close(smallRead)
+
+		_, r, err = c.Reader(ctx)
+		if err != nil {
+			return
+		}
+		if _, err := io.ReadFull(r, make([]byte, 1024)); err != nil {
+			return
+		}
+		close(largeStart)
+		select {
+		case <-ctx.Done():
+			return
+		case <-release:
+		}
+		// A small buffer makes the rest of the read slow.
+		if err := sl.last.Load().SetReadBuffer(4 << 20); err != nil {
+			return
+		}
+		if _, err := io.Copy(io.Discard, r); err != nil {
+			return
+		}
+
+		reply := &tbcapi.TxByIdResponse{Tx: &tbcapi.Tx{Version: 2}}
+		if err := tbcapi.Write(ctx, protocol.NewWSConn(c), msg.Header.ID, reply); err != nil {
+			return
+		}
+		<-ctx.Done()
+	})
+	waitClosed := func(ch <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-time.After(10 * time.Second):
+			t.Fatal("server did not read the request")
+		case <-ch:
+		}
+	}
+
+	smallErr := txByIDs(t, tt.tbcGozer, t.Context(), 1)
+	waitClosed(smallRead)
+
+	// The large request is far larger than the socket buffers, so its
+	// write blocks until the server reads it.
+	lctx, lcancel := context.WithCancel(t.Context())
+	defer lcancel()
+	largeErr := make(chan error, 1)
+	go func() {
+		large := &tbcapi.MempoolUtxosRequest{
+			ScriptHashes: []api.ByteSlice{make([]byte, 8<<20)},
+		}
+		_, err := tt.callTBC(lctx, time.Hour, large)
+		largeErr <- err
+	}()
+	waitClosed(largeStart)
+
+	lcancel()
+	if err := waitErr(t, largeErr); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+
+	close(release)
+	if err := waitErr(t, smallErr); err != nil {
+		t.Fatalf("small request: %v", err)
+	}
+	tt.requireOneConn(t)
+}
+
+// waitWriteLockWaiter waits until a goroutine waits for the write lock of
+// a protocol.Conn.  The goroutine dump is the only state that shows it.
+func waitWriteLockWaiter(t *testing.T) {
+	t.Helper()
+
+	timeout := time.After(10 * time.Second)
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		for _, g := range strings.Split(string(buf[:n]), "\n\n") {
+			if strings.Contains(g, "[sync.Mutex.Lock") &&
+				strings.Contains(g, "protocol.(*Conn).writeJSON") {
+				return
+			}
+		}
+		select {
+		case <-timeout:
+			t.Fatal("no call waits for the write lock")
+		default:
+			runtime.Gosched()
+		}
+	}
+}
+
+// TestCallTBCCancelledLockWaiterNotSent checks that a request whose caller
+// is done while it waits for the write lock is never sent, and that the
+// connection is kept.
+func TestCallTBCCancelledLockWaiterNotSent(t *testing.T) {
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The server reads only the start of the large request and waits for
+	// release.  It then reads the rest and reports the command of every
+	// request after it.
+	var (
+		largeStart = make(chan struct{})
+		release    = make(chan struct{})
+		reqCh      = make(chan protocol.Command, 4*DefaultCommandQueueDepth)
+	)
+	sl := &smallBufListener{Listener: l}
+	tt := newTestTBC(t, sl, true, func(ctx context.Context, c *websocket.Conn) {
+		_, r, err := c.Reader(ctx)
+		if err != nil {
+			return
+		}
+		if _, err := io.ReadFull(r, make([]byte, 1024)); err != nil {
+			return
+		}
+		close(largeStart)
+		select {
+		case <-ctx.Done():
+			return
+		case <-release:
+		}
+		// A small buffer makes the rest of the read slow.
+		if err := sl.last.Load().SetReadBuffer(4 << 20); err != nil {
+			return
+		}
+		if _, err := io.Copy(io.Discard, r); err != nil {
+			return
+		}
+
+		wc := protocol.NewWSConn(c)
+		for {
+			cmd, _, _, err := tbcapi.Read(ctx, wc)
+			if err != nil {
+				return
+			}
+			select {
+			case reqCh <- cmd:
+			default: // never block the server
+			}
+		}
+	})
+
+	// The large request is far larger than the socket buffers, so it
+	// holds the write lock until the server reads it.  It then holds its
+	// slot, because the server never replies.
+	large := &tbcapi.MempoolUtxosRequest{
+		ScriptHashes: []api.ByteSlice{make([]byte, 8<<20)},
+	}
+	var wg sync.WaitGroup
+	t.Cleanup(wg.Wait)
+	wg.Go(func() {
+		_, _ = tt.callTBC(t.Context(), time.Hour, large)
+	})
+	select {
+	case <-time.After(10 * time.Second):
+		t.Fatal("server did not read the large request")
+	case <-largeStart:
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errCh := txByIDs(t, tt.tbcGozer, ctx, 1)
+	waitWriteLockWaiter(t)
+
+	cancel()
+	if err := waitErr(t, errCh); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	close(release)
+
+	// The last probe gets a slot only after the cancelled request freed
+	// its slot, so after it would have been written.  The server reads in
+	// write order, so it must read every probe and no TxByID request.
+	n := DefaultCommandQueueDepth - 1
+	for range n {
+		wg.Go(func() {
+			_, _ = tt.callTBC(t.Context(), time.Hour,
+				&tbcapi.BlockHeaderBestRequest{})
+		})
+	}
+	waitRequests(t, reqCh, tbcapi.CmdBlockHeaderBestRequest, n)
+	tt.requireOneConn(t)
 }
 
 func FuzzTBCGozerTxByID(f *testing.F) {
