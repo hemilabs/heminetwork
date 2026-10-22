@@ -80,7 +80,7 @@ $(cmds):
 
 .PHONY: test
 test:
-	go test $(GO_TAGS_FLAG) -timeout=20m -coverprofile=$(PROJECTPATH)/coverage.out \
+	go test $(GO_TAGS_FLAG) -timeout=20m -coverpkg=./... -coverprofile=$(PROJECTPATH)/coverage.out \
 		-covermode=atomic -ldflags "$(GO_LDFLAGS)" ./...
 
 .PHONY: race
