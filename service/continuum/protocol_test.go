@@ -2009,7 +2009,7 @@ func TestDNSServerSetup(t *testing.T) {
 		}
 		// Note that the extra spaces match the TXT record that is generated.
 		txtExpected := fmt.Sprintf("v=%v; identity=%v;   port=%v;",
-			dnsAppName, v.Secret.Identity, defaultPort)
+			DNSAppName, v.Secret.Identity, defaultPort)
 		if txtRecords[0] != txtExpected {
 			t.Fatalf("got %v, wanted %v", txtRecords[0], txtExpected)
 		}

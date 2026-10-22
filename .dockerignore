@@ -2,4 +2,5 @@
 /dist/
 /pkg/
 /.gocache/
+/target/
 *.sw?
