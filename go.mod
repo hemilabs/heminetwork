@@ -1,6 +1,6 @@
 module github.com/hemilabs/heminetwork/v2
 
-go 1.26
+go 1.26.0
 
 toolchain go1.26.6
 
@@ -21,6 +21,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hemilabs/x/leveldb v0.1.0
 	github.com/hemilabs/x/tss/v3 v3.0.0-alpha.1
+	github.com/holiman/uint256 v1.3.2
 	github.com/juju/loggo/v2 v2.2.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/moby/moby/api v1.54.2
@@ -29,7 +30,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.6
 	github.com/testcontainers/testcontainers-go v0.43.0
 	github.com/tyler-smith/go-bip39 v1.1.0
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.57.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.12.0
 )
@@ -73,7 +74,6 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
 	github.com/ipfs/go-log/v2 v2.1.3 // indirect
 	github.com/kcalvinalvin/anet v0.0.0-20251112173137-d8ddc1f6dbee // indirect
@@ -119,8 +119,8 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/exp v0.0.0-20250711185948-6ae5c78190dc // indirect
-	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
