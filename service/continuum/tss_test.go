@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdh"
-	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -25,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/hemilabs/x/tss/v3/crypto"
 	"github.com/hemilabs/x/tss/v3/ecdsa/keygen"
 	resharing "github.com/hemilabs/x/tss/v3/ecdsa/resharing"
@@ -3350,10 +3351,10 @@ func TestRPCTSSKeygenAndSign(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load metadata: %v", err)
 	}
-	pubKey := &ecdsa.PublicKey{
-		Curve: tss.S256(),
-		X:     new(big.Int).SetBytes(meta.PublicKey[:32]),
-		Y:     new(big.Int).SetBytes(meta.PublicKey[32:]),
+	pubKey, err := secp256k1.ParsePubKey(
+		append([]byte{0x04}, meta.PublicKey...))
+	if err != nil {
+		t.Fatalf("parse public key: %v", err)
 	}
 
 	// === Sign ===
@@ -3369,9 +3370,11 @@ func TestRPCTSSKeygenAndSign(t *testing.T) {
 		if serr != nil {
 			t.Fatalf("sign: %v", serr)
 		}
-		rInt := new(big.Int).SetBytes(r)
-		sInt := new(big.Int).SetBytes(s)
-		if !ecdsa.Verify(pubKey, data[:], rInt, sInt) {
+		var rs, ss secp256k1.ModNScalar
+		if rs.SetByteSlice(r) || ss.SetByteSlice(s) {
+			t.Fatalf("node %s: signature scalar overflow", node.id)
+		}
+		if !ecdsa.NewSignature(&rs, &ss).Verify(data[:], pubKey) {
 			t.Fatalf("node %s: ECDSA verify failed", node.id)
 		}
 		t.Logf("node %s: signature verified ✓", node.id)
@@ -3413,10 +3416,10 @@ func TestRPCTSSReshare(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load metadata: %v", err)
 	}
-	pubKey := &ecdsa.PublicKey{
-		Curve: tss.S256(),
-		X:     new(big.Int).SetBytes(meta.PublicKey[:32]),
-		Y:     new(big.Int).SetBytes(meta.PublicKey[32:]),
+	pubKey, err := secp256k1.ParsePubKey(
+		append([]byte{0x04}, meta.PublicKey...))
+	if err != nil {
+		t.Fatalf("parse public key: %v", err)
 	}
 
 	// --- Reshare: {0,1,2} → {1,2,3} ---
@@ -3448,9 +3451,11 @@ func TestRPCTSSReshare(t *testing.T) {
 		if serr != nil {
 			t.Fatalf("node %s sign: %v", node.id, serr)
 		}
-		rInt := new(big.Int).SetBytes(r)
-		sInt := new(big.Int).SetBytes(s)
-		if !ecdsa.Verify(pubKey, data[:], rInt, sInt) {
+		var rs, ss secp256k1.ModNScalar
+		if rs.SetByteSlice(r) || ss.SetByteSlice(s) {
+			t.Fatalf("node %s: signature scalar overflow", node.id)
+		}
+		if !ecdsa.NewSignature(&rs, &ss).Verify(data[:], pubKey) {
 			t.Fatalf("node %s: ECDSA verify failed after reshare",
 				node.id)
 		}
