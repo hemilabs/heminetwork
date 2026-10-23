@@ -900,7 +900,7 @@ func (s *Server) promBlocksPending() float64 {
 func (s *Server) promBlocksMissing() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return deucalion.IntToFloat((s.prom.syncInfo.AtLeastMissing))
+	return deucalion.IntToFloat(s.prom.syncInfo.AtLeastMissing)
 }
 
 func (s *Server) promSynced() float64 {
