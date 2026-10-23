@@ -18,9 +18,9 @@ concurrency:
 
 env:
   # renovate: datasource=github-releases depName=golangci/golangci-lint versioning=semver
-  GOLANGCI_LINT_VERSION: "v2.12.2"
-  # renovate: datasource=github-releases depName=joshuasing/golicenser versioning=semver
-  GOLICENSER_VERSION: "v0.3.1"
+  GOLANGCI_LINT_VERSION: "v2.15.0"
+#  # renovate: datasource=github-releases depName=joshuasing/golicenser versioning=semver
+#  GOLICENSER_VERSION: "v0.3.1"
 
 permissions:
   contents: read
@@ -49,24 +49,25 @@ jobs:
       - name: "golangci-lint fmt"
         run: golangci-lint fmt --diff ./...
 
-      - name: "Cache golicenser"
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: "/home/runner/go/bin/golicenser"
-          key: "${{ runner.os }}-golicenser-${{ env.GOLICENSER_VERSION }}-go${{ steps.go.outputs.go-version }}"
-
-      - name: "golicenser"
-        env:
-          LICENSE_HEADER: |
-            Copyright (c) {{.year}} {{.author}}
-            Use of this source code is governed by the MIT License,
-            which can be found in the LICENSE file.
-        run: |
-          if ! (command -v 'golicenser' >/dev/null); then
-            go install github.com/joshuasing/golicenser/cmd/golicenser@$GOLICENSER_VERSION
-          fi
-          echo "$LICENSE_HEADER" > license_header.txt
-          golicenser -author="Hemi Labs, Inc." -year-mode=git-range ./...
+# TODO: re-enable once updated to support Go 1.27, or reconsider go-header in golangci-lint.
+#      - name: "Cache golicenser"
+#        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+#        with:
+#          path: "/home/runner/go/bin/golicenser"
+#          key: "${{ runner.os }}-golicenser-${{ env.GOLICENSER_VERSION }}-go${{ steps.go.outputs.go-version }}"
+#
+#      - name: "golicenser"
+#        env:
+#          LICENSE_HEADER: |
+#            Copyright (c) {{.year}} {{.author}}
+#            Use of this source code is governed by the MIT License,
+#            which can be found in the LICENSE file.
+#        run: |
+#          if ! (command -v 'golicenser' >/dev/null); then
+#            go install github.com/joshuasing/golicenser/cmd/golicenser@$GOLICENSER_VERSION
+#          fi
+#          echo "$LICENSE_HEADER" > license_header.txt
+#          golicenser -author="Hemi Labs, Inc." -year-mode=git-range ./...
 
   build:
     name: "Build"

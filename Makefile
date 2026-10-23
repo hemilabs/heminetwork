@@ -24,9 +24,10 @@ export GOBIN ?= $(shell go env GOPATH)/bin
 PROJECT_BIN := $(PROJECTPATH)/bin
 
 # renovate: datasource=github-releases depName=golangci/golangci-lint versioning=semver
-GOLANGCI_LINT_VERSION := v2.12.2
-# renovate: datasource=github-releases depName=joshuasing/golicenser versioning=semver
-GOLICENSER_VERSION := v0.3.1
+GOLANGCI_LINT_VERSION := v2.15.0
+# TODO: re-enable once updated to support Go 1.27, or reconsider go-header in golangci-lint
+# -renovate: datasource=github-releases depName=joshuasing/golicenser versioning=semver
+#GOLICENSER_VERSION := v0.3.1
 # renovate: datasource=github-releases depName=mvdan/gofumpt versioning=semver
 GOFUMPT_VERSION := v0.10.0
 # renovate: datasource=go depName=golang.org/x/vuln versioning=semver
@@ -107,7 +108,8 @@ LICENSE_AUTHOR := Hemi Labs, Inc.
 .PHONY: fmt
 fmt:
 	$(GOBIN)/golangci-lint fmt ./...
-	$(GOBIN)/golicenser -tmpl="$$LICENSE_HEADER" -author="$(LICENSE_AUTHOR)" -year-mode=git-range -fix ./...
+# TODO: re-enable once updated to support Go 1.27, or reconsider go-header in golangci-lint
+#$(GOBIN)/golicenser -tmpl="$$LICENSE_HEADER" -author="$(LICENSE_AUTHOR)" -year-mode=git-range -fix ./...
 
 .PHONY: lint
 lint: fmt
@@ -117,13 +119,15 @@ lint: fmt
 lint-check:
 	$(GOBIN)/golangci-lint fmt --diff ./...
 	$(GOBIN)/golangci-lint run $(LINT_TAGS_FLAG) ./...
-	$(GOBIN)/golicenser -tmpl="$$LICENSE_HEADER" -author="$(LICENSE_AUTHOR)" -year-mode=git-range ./...
+# TODO: re-enable once updated to support Go 1.27, or reconsider go-header in golangci-lint
+# $(GOBIN)/golicenser -tmpl="$$LICENSE_HEADER" -author="$(LICENSE_AUTHOR)" -year-mode=git-range ./...
 
 .PHONY: lint-deps
 lint-deps:
 	@echo "Installing with $(shell go version)"
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-	go install github.com/joshuasing/golicenser/cmd/golicenser@$(GOLICENSER_VERSION)
+# TODO: re-enable once updated to support Go 1.27, or reconsider go-header in golangci-lint
+# go install github.com/joshuasing/golicenser/cmd/golicenser@$(GOLICENSER_VERSION)
 	go install mvdan.cc/gofumpt@$(GOFUMPT_VERSION)
 
 .PHONY: vulncheck
