@@ -11,7 +11,7 @@
 # go.mod, so op-node, op-batcher and op-proposer are linked against the
 # same code that runs as the L2 execution client.
 ARG OP_GETH_COMMIT=c1771608d7edd4224b05e9d224056984f87c1f5d
-ARG OPTIMISM_COMMIT=d30fe8be738dcc70022943b38c84f1612f39797e
+ARG OPTIMISM_COMMIT=37b5d86d87c51b5140cfee41a2ce15c1ca4414eb
 
 # hemilabs/optimism with Hemi's hVM ported into op-reth (branch op-reth-hemi,
 # based on 9892fe9b7ebe4b09cec4eae34f7874eeac512162).  op-reth runs as the L2
