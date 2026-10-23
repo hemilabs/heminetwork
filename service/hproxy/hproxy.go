@@ -740,7 +740,6 @@ func (s *Server) nodeAdd(node string) error {
 				r.SetURL(u)
 				r.SetXForwarded()
 			},
-			Director: nil, // not needed
 			Transport: &http.Transport{
 				DialContext:           dialer,
 				TLSHandshakeTimeout:   5 * time.Second,
