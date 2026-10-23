@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,6 +25,7 @@ import (
 	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
+	"github.com/hemilabs/x/leveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/level"
@@ -705,7 +708,7 @@ func TestHeightHashEncoding(t *testing.T) {
 	hash := *hemi.L2KeystoneAbbreviate(hks).Hash()
 
 	// encode keystone and height
-	e := encodeKeystoneHeightHash(hks.L1BlockNumber, hash)
+	e := encodeIndexHeightHash(hks.L1BlockNumber, hash)
 
 	if e[0] != 'h' {
 		t.Fatal("not a height hash index")
@@ -726,7 +729,7 @@ func TestHeightHashEncoding(t *testing.T) {
 	}
 
 	// decode index
-	uheight, uhash := decodeKeystoneHeightHash(e[:])
+	uheight, uhash := decodeIndexHeightHash(e[:])
 
 	// test decoded height
 	if uheight != hks.L1BlockNumber {
@@ -856,9 +859,11 @@ func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
 //   - empty BlocksDB rawdb completely (both index and data);
 //   - populate BlocksMissingDB with one heightHashToKey entry per
 //     row in BlockHeadersDB (skipping the canonical-tip sentinel);
+//   - delete the heighthash database and rebuild its index as
+//     h[height][hash] keys inside BlockHeadersDB;
 //   - leave every other database untouched — specifically
-//     TransactionsDB, OutputsDB, KeystonesDB, BlockHeadersDB,
-//     HeightHashDB, and the indexer tips in MetadataDB — because
+//     TransactionsDB, OutputsDB, KeystonesDB, BlockHeadersDB
+//     header rows, and the indexer tips in MetadataDB — because
 //     those are all witness-independent;
 //   - bump the schema version from 4 to 5.
 func TestDbUpgradeV5(t *testing.T) {
@@ -943,6 +948,38 @@ func TestDbUpgradeV5(t *testing.T) {
 			preCount, blkNum)
 	}
 
+	// Simulate a v4 layout: strip the height index from
+	// BlockHeadersDB so v5 has to rebuild it, and plant a
+	// heighthash database directory that v5 must delete.
+	bhsDB := db.pool[level.BlockHeadersDB]
+	hIt := bhsDB.NewIterator(util.BytesPrefix([]byte{'h'}), nil)
+	var hKeys int
+	for hIt.Next() {
+		if len(hIt.Key()) != indexHeightHashSize {
+			continue
+		}
+		if err := bhsDB.Delete(hIt.Key(), nil); err != nil {
+			t.Fatal(err)
+		}
+		hKeys++
+	}
+	hIt.Release()
+	if err := hIt.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if hKeys != int(blkNum) {
+		t.Fatalf("pre-upgrade height index: got %v entries want %v",
+			hKeys, blkNum)
+	}
+	if _, err := db.BlockHeadersByHeight(ctx, 0); !errors.Is(err,
+		database.ErrNotFound) {
+		t.Fatalf("pre-upgrade height index not stripped: %v", err)
+	}
+	hhDir := filepath.Join(cfg.Home, legacyHeightHashDB)
+	if err := os.MkdirAll(hhDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
 	v4 := make([]byte, 8)
 	binary.BigEndian.PutUint64(v4, 4)
 	if err := db.MetadataPut(ctx, versionKey, v4); err != nil {
@@ -1021,9 +1058,10 @@ func TestDbUpgradeV5(t *testing.T) {
 		}
 	}
 
-	// Assertion 4: BlockHeadersDB and HeightHashDB are
-	// untouched.  Cheap way to confirm: every header hash we
-	// seeded is still retrievable and reports the same height.
+	// Assertion 4: BlockHeadersDB header rows are untouched and
+	// the height index was rebuilt.  Every header hash we seeded
+	// is still retrievable and reports the same height, both by
+	// hash and by height.
 	for _, h := range hashes {
 		bh, err := db2.BlockHeaderByHash(ctx, h)
 		if err != nil {
@@ -1033,9 +1071,22 @@ func TestDbUpgradeV5(t *testing.T) {
 			t.Fatalf("blockheader %v height: got %v want %v",
 				h, bh.Height, heights[h])
 		}
+		bhs, err := db2.BlockHeadersByHeight(ctx, heights[h])
+		if err != nil {
+			t.Fatalf("blockheaders by height %v: %v", heights[h], err)
+		}
+		if len(bhs) != 1 || !bhs[0].Hash.IsEqual(&h) {
+			t.Fatalf("blockheaders by height %v: got %v want %v",
+				heights[h], bhs, h)
+		}
 	}
 
-	// Assertion 5: schema version is now 6 (v5 + v6 upgrade).
+	// Assertion 5: the heighthash database is gone.
+	if _, err := os.Stat(hhDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("heighthash database not removed: %v", err)
+	}
+
+	// Assertion 6: schema version is now 7 (v5 + v6 + v7 upgrade).
 	got, err := db2.Version(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -1749,7 +1800,7 @@ func TestKeystonesByHeightSkipsMismatchedKeys(t *testing.T) {
 	if err := kssDB.Put(ksHash[:], encodeKeystoneToSlice(ks), nil); err != nil {
 		t.Fatal(err)
 	}
-	heightKey := encodeKeystoneHeightHashSlice(10, ksHash)
+	heightKey := encodeIndexHeightHashSlice(10, ksHash)
 	if err := kssDB.Put(heightKey, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -2475,11 +2526,15 @@ func TestBlockTxRawByLocRealBlock(t *testing.T) {
 }
 
 func checkHeaderReaders(ctx context.Context, db *ldb) error {
-	it := db.pool[level.HeightHashDB].NewIterator(nil, nil)
+	bhsDB := db.pool[level.BlockHeadersDB]
+	it := bhsDB.NewIterator(util.BytesPrefix([]byte{'h'}), nil)
 	defer it.Release()
 	for it.Next() {
-		height, hash := keyToHeightHash(it.Key())
-		if _, err := db.BlockHeaderByHash(ctx, *hash); err != nil {
+		if len(it.Key()) != indexHeightHashSize {
+			continue
+		}
+		height, hash := decodeIndexHeightHash(it.Key())
+		if _, err := db.BlockHeaderByHash(ctx, hash); err != nil {
 			return fmt.Errorf("height %v entry %v: %w", height, hash, err)
 		}
 	}
@@ -2491,8 +2546,8 @@ func checkHeaderReaders(ctx context.Context, db *ldb) error {
 	if err != nil {
 		return fmt.Errorf("best: %w", err)
 	}
-	ok, err := db.pool[level.HeightHashDB].Has(heightHashToKey(best.Height,
-		best.Hash[:]), nil)
+	ok, err := bhsDB.Has(encodeIndexHeightHashSlice(uint32(best.Height),
+		best.Hash), nil)
 	if err != nil {
 		return fmt.Errorf("tip height entry: %w", err)
 	}
@@ -2546,9 +2601,52 @@ func TestBlockHeadersInsertCommitOrder(t *testing.T) {
 			if it != tt.want {
 				t.Fatalf("insert type %v, want %v", it, tt.want)
 			}
-			if len(commits) < 3 {
+			if len(commits) < 2 {
 				t.Fatalf("checked after %v, want every commit", commits)
 			}
 		})
+	}
+}
+
+func TestBlockHeadersByHeightHashCollision(t *testing.T) {
+	ctx := t.Context()
+	db := createOrdinalDB(ctx, t)
+
+	genesis := createTestBlock(&chainhash.Hash{}, 0)
+	if err := db.BlockHeaderGenesisInsert(ctx, genesis.MsgBlock().Header, 0,
+		nil); err != nil {
+		t.Fatal(err)
+	}
+	a := createTestBlock(genesis.Hash(), 1)
+	b := createTestBlock(genesis.Hash(), 2)
+	for _, blk := range []*btcutil.Block{a, b} {
+		msg := wire.NewMsgHeaders()
+		if err := msg.AddBlockHeader(&blk.MsgBlock().Header); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, _, err := db.BlockHeadersInsert(ctx, msg, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Plant a 32-byte key that sorts inside the height 1 index range.
+	var fake chainhash.Hash
+	copy(fake[:], encodeIndexHeightHashSlice(1, chainhash.Hash{0xff}))
+	if err := db.pool[level.BlockHeadersDB].Put(fake[:], []byte{},
+		nil); err != nil {
+		t.Fatal(err)
+	}
+
+	bhs, err := db.BlockHeadersByHeight(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bhs) != 2 {
+		t.Fatalf("got %v headers at height 1, want 2", len(bhs))
+	}
+	for _, bh := range bhs {
+		if !bh.Hash.IsEqual(a.Hash()) && !bh.Hash.IsEqual(b.Hash()) {
+			t.Fatalf("unexpected header %v at height 1", bh.Hash)
+		}
 	}
 }
