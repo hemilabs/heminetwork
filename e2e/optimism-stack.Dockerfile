@@ -58,8 +58,7 @@ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain none --prof
 ENV PATH="${PATH}:/root/.cargo/bin"
 
 WORKDIR /git
-COPY e2e/optimism.git /git/optimism.git
-RUN git clone /git/optimism.git optimism
+RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
 RUN git checkout $OP_RETH_COMMIT
 # op-reth's chainspec embeds the superchain registry
@@ -97,12 +96,7 @@ RUN apt-get install -y jq yq xxd zip
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
-# hemilabs/optimism is cloned from a local bare repository in the build
-# context rather than from GitHub, so unpublished commits can be built.
-# Populate it from a local optimism checkout before building:
-#   git clone --bare --single-branch -b <branch> /path/to/optimism e2e/optimism.git
-COPY e2e/optimism.git /git/optimism.git
-RUN git clone /git/optimism.git optimism
+RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
 RUN git fetch origin
 RUN git checkout $OPTIMISM_COMMIT
