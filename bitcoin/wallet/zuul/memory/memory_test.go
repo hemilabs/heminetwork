@@ -170,7 +170,7 @@ func TestMemoryZuul(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, ki := range privKeys {
-						err = m.PurgeKey(*(ki.addr))
+						err = m.PurgeKey(*ki.addr)
 						if !command.fail {
 							if err != nil {
 								t.Fatal(err)
