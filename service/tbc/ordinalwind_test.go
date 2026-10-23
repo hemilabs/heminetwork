@@ -1085,8 +1085,7 @@ func TestWindBlockRangedReadErrors(t *testing.T) {
 			}
 			if tt.name == "legacyBlockMissing" {
 				// The typed error must survive the %w chain.
-				var bnf database.BlockNotFoundError
-				if !errors.As(err, &bnf) {
+				if _, ok := errors.AsType[database.BlockNotFoundError](err); !ok {
 					t.Fatalf("want BlockNotFoundError, got %v", err)
 				}
 			}

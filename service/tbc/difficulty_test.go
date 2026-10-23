@@ -64,10 +64,7 @@ func insertHeaders(t *testing.T, s *Server, headers []*wire.BlockHeader) {
 
 	const batchSize = 2000
 	for i := 0; i < len(headers); i += batchSize {
-		end := i + batchSize
-		if end > len(headers) {
-			end = len(headers)
-		}
+		end := min(i+batchSize, len(headers))
 		msg := wire.NewMsgHeaders()
 		for _, h := range headers[i:end] {
 			if err := msg.AddBlockHeader(h); err != nil {
@@ -491,10 +488,7 @@ func addExternalHeaders(t *testing.T, s *Server, headers []*wire.BlockHeader) (t
 	const batchSize = 2000
 	var lastIT tbcd.InsertType
 	for i := 0; i < len(headers); i += batchSize {
-		end := i + batchSize
-		if end > len(headers) {
-			end = len(headers)
-		}
+		end := min(i+batchSize, len(headers))
 		msg := &wire.MsgHeaders{Headers: headers[i:end]}
 		stateId := [32]byte{byte(i/batchSize + 2)}
 		it, _, _, _, err := s.AddExternalHeaders(t.Context(), msg, stateId[:])
@@ -1184,7 +1178,7 @@ func TestE2ERealMainnetRejectEveryBitFlip(t *testing.T) {
 	realHeader := headers[32255]
 
 	// Flip each bit in the Bits field and verify rejection.
-	for bit := 0; bit < 32; bit++ {
+	for bit := range 32 {
 		mutated := *realHeader
 		mutated.Bits = realHeader.Bits ^ (1 << bit)
 		mutated.Nonce = uint32(bit)
@@ -1273,10 +1267,7 @@ func TestBlockHeadersInsertRejectsBadContext(t *testing.T) {
 	// Insert a valid chain up to height 2015.
 	pre := makeMinedChain(2015, genesis, bits, 8*time.Minute)
 	for i := 0; i < len(pre); i += 2000 {
-		end := i + 2000
-		if end > len(pre) {
-			end = len(pre)
-		}
+		end := min(i+2000, len(pre))
 		msg := &wire.MsgHeaders{Headers: pre[i:end]}
 		if _, _, _, _, err := s.BlockHeadersInsert(t.Context(), msg); err != nil {
 			t.Fatalf("inserting pre-retarget headers via public API: %v", err)

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strings"
@@ -157,9 +158,7 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	entry1.Aux[ordinalSatInscriptionKey(seed.satNumber, seed.inscID)] = []byte{}
 
 	cloned := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, len(cache))
-	for k, v := range cache {
-		cloned[k] = v
-	}
+	maps.Copy(cloned, cache)
 	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, nil, chainhash.Hash{}); err != nil {
 		t.Fatal(err)
 	}
@@ -951,12 +950,12 @@ func BenchmarkLocatedAtOutpoint(b *testing.B) {
 	}
 	b.Cleanup(func() { _ = db.Close() })
 
-	oi := &ordinalIndexer{indexerCommon: indexerCommon{g: geometryParams{db: db}}}
+	oi := &ordinalIndexer{g: geometryParams{db: db}}
 	op := tbcd.NewOutpoint(chainhash.Hash{0xab}, 0)
 
 	for _, cacheSize := range []int{100, 1000, 10000} {
 		cache := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, cacheSize)
-		for n := 0; n < cacheSize; n++ {
+		for n := range cacheSize {
 			var txid chainhash.Hash
 			binary.BigEndian.PutUint64(txid[:8], uint64(n))
 			nop := tbcd.NewOutpoint(txid, 0)

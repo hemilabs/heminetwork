@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2029,19 +2030,19 @@ func TestFiveNodeMesh(t *testing.T) {
 
 	// Wait for full gossip convergence: every node knows all 5 peers
 	// (including itself).
-	for i := 0; i < n; i++ {
+	for i := range n {
 		waitForPeers(t, servers[i], n, 10*time.Second)
 	}
 	t.Log("gossip converged: all nodes know all peers")
 
 	// Verify every node knows every other node's identity.
-	for i := 0; i < n; i++ {
+	for i := range n {
 		peers := servers[i].KnownPeers()
 		known := make(map[Identity]bool)
 		for _, pr := range peers {
 			known[pr.Identity] = true
 		}
-		for j := 0; j < n; j++ {
+		for j := range n {
 			id := servers[j].Identity()
 			if !known[id] {
 				t.Fatalf("node %d does not know node %d (%v); "+
@@ -2059,7 +2060,7 @@ func TestFiveNodeMesh(t *testing.T) {
 	t.Log("endpoint nodes made gossip-initiated connections")
 
 	cancel()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if err := <-errChs[i]; err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("node %d: %v", i, err)
 		}
@@ -2146,7 +2147,7 @@ func TestHundredNodeMesh(t *testing.T) {
 	// we don't wait for full session establishment between each
 	// pair — that would add ~100 sequential handshakes.  The
 	// chain forms concurrently while nodes start.
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var connect []string
 		if i > 0 {
 			connect = []string{addrs[i-1]} //nolint:gosec // guarded by i > 0
@@ -2176,7 +2177,7 @@ func TestHundredNodeMesh(t *testing.T) {
 	// peers.  Chain topology means gossip must traverse up to 99
 	// hops.  120s allows headroom for loaded CI machines where
 	// goroutine scheduling adds latency per hop.
-	for i := 0; i < n; i++ {
+	for i := range n {
 		waitForPeers(t, servers[i], n, 120*time.Second)
 	}
 	t.Log("gossip converged: all nodes know all peers")
@@ -2189,14 +2190,14 @@ func TestHundredNodeMesh(t *testing.T) {
 	// Asserting >= peersWanted/2 proves maintain is working
 	// without depending on perfect graph packing.
 	minSessions := peersWanted / 2
-	for i := 0; i < n; i++ {
+	for i := range n {
 		waitForSessions(t, servers[i], minSessions, 60*time.Second)
 	}
 	t.Logf("all nodes reached at least %d sessions (target %d)",
 		minSessions, peersWanted)
 
 	cancel()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if err := <-errChs[i]; err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("node %d: %v", i, err)
 		}
@@ -2227,7 +2228,7 @@ func connectedTransports(t *testing.T) (*Transport, *Transport) {
 	errCh := make(chan error, 2)
 	go func() { errCh <- srv.KeyExchange(ctx, sp) }()
 	go func() { errCh <- cli.KeyExchange(ctx, cp) }()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errCh; err != nil {
 			t.Fatalf("KeyExchange: %v", err)
 		}
@@ -2882,7 +2883,7 @@ func BenchmarkForwardDirect(b *testing.B) {
 	errCh := make(chan error, 2)
 	go func() { errCh <- srv.KeyExchange(ctx, sp) }()
 	go func() { errCh <- cli.KeyExchange(ctx, cp) }()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if err := <-errCh; err != nil {
 			b.Fatalf("KeyExchange: %v", err)
 		}
@@ -2936,7 +2937,7 @@ func BenchmarkForwardFlood(b *testing.B) {
 
 	const numPeers = 10
 	sessions := make(map[Identity]*Transport, numPeers)
-	for i := 0; i < numPeers; i++ {
+	for i := range numPeers {
 		sp, cp := net.Pipe()
 		b.Cleanup(func() { sp.Close() })
 		b.Cleanup(func() { cp.Close() })
@@ -2949,7 +2950,7 @@ func BenchmarkForwardFlood(b *testing.B) {
 		errCh := make(chan error, 2)
 		go func() { errCh <- srv.KeyExchange(ctx, sp) }()
 		go func() { errCh <- cli.KeyExchange(ctx, cp) }()
-		for j := 0; j < 2; j++ {
+		for range 2 {
 			if err := <-errCh; err != nil {
 				b.Fatalf("KeyExchange: %v", err)
 			}
@@ -3126,7 +3127,7 @@ func handleTestServer(t *testing.T, ctx context.Context) (*Server, *Transport, I
 	// PeerListRequest, and liveness PingRequest.  Without draining,
 	// net.Pipe blocks handle()'s writes and it never enters the
 	// dispatch loop.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, _, _, err := cliTr.ReadEnvelope()
 		if err != nil {
 			t.Fatalf("drain initial message %d: %v", i, err)
@@ -6184,7 +6185,7 @@ func handleTestServerWithNaCl(t *testing.T, ctx context.Context, senderSecret *S
 	go s.handle(ctx, &peerID, srvTr, false)
 
 	// Drain initial PeerNotify + PeerListRequest + liveness PingRequest.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, _, _, err := cliTr.ReadEnvelope()
 		if err != nil {
 			t.Fatalf("drain initial message %d: %v", i, err)
@@ -6610,7 +6611,7 @@ func TestDecryptPayloadWrongRecipient(t *testing.T) {
 	go s.handle(ctx, &peerID, srvTr, false)
 
 	// Drain initial PeerNotify + PeerListRequest + liveness PingRequest.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, _, _, err := cliTr.ReadEnvelope()
 		if err != nil {
 			t.Fatalf("drain initial message %d: %v", i, err)
@@ -6936,7 +6937,7 @@ func TestSendEncryptedRoundTrip(t *testing.T) {
 	go receiver.handle(ctx, &peerID, recvTr, false)
 
 	// Drain initial PeerNotify + PeerListRequest + PingRequest.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, _, _, err := peerTr.ReadEnvelope()
 		if err != nil {
 			t.Fatalf("drain initial message %d: %v", i, err)
@@ -9427,7 +9428,7 @@ func TestThreeNodeBroadcast(t *testing.T) {
 
 	// Wait for gossip convergence: all 3 know all 3 peers.
 	waitForCondition(t, "gossip convergence", 10*time.Second, func() bool {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if servers[i].PeerCount() < 2 {
 				return false
 			}
@@ -9506,7 +9507,7 @@ func TestBroadcastDedup(t *testing.T) {
 
 	// Wait for gossip convergence.
 	waitForCondition(t, "gossip convergence", 10*time.Second, func() bool {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if servers[i].PeerCount() < 2 {
 				return false
 			}
@@ -9613,7 +9614,7 @@ func TestBroadcastTTLExpiry(t *testing.T) {
 
 	// Wait for gossip convergence.
 	waitForCondition(t, "gossip convergence", 10*time.Second, func() bool {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if servers[i].PeerCount() < 2 {
 				return false
 			}
@@ -9817,7 +9818,7 @@ func TestCeremonyKeyIDField(t *testing.T) {
 // arrives.  Fails the test after 20 reads without a match.
 func readAdminResponse[T any](t *testing.T, tr *Transport) T {
 	t.Helper()
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		_, cmd, err := tr.Read()
 		if err != nil {
 			t.Fatalf("read: %v", err)
@@ -10594,7 +10595,7 @@ func TestFiveNodeKeygen(t *testing.T) {
 	addrs := make([]string, n)
 
 	// Chain topology: 0→1→2→3→4.  PeersWanted=2 per SOW.
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var connect []string
 		if i > 0 {
 			connect = []string{addrs[i-1]} //nolint:gosec // guarded by i > 0
@@ -12064,7 +12065,7 @@ func TestFiveNodeKeygenAndSign(t *testing.T) {
 	servers := make([]*Server, n)
 	addrs := make([]string, n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		var connect []string
 		if i > 0 {
 			connect = []string{addrs[i-1]} //nolint:gosec // guarded by i > 0
@@ -12165,7 +12166,7 @@ func TestFiveNodeKeygenAndSign(t *testing.T) {
 func waitForFullMesh(t *testing.T, servers []*Server, n int, timeout time.Duration) {
 	t.Helper()
 	waitForCondition(t, "mesh did not converge", timeout, func() bool {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			if servers[i].PeerCount() < n-1 {
 				return false
 			}
@@ -12591,7 +12592,7 @@ func TestVerifyOutboundDNSIPRateLimited(t *testing.T) {
 	}
 
 	// Fill the rate limiter.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_ = s.dnsRateLimited(addr)
 	}
 
@@ -12623,7 +12624,7 @@ func TestVerifyInboundDNSRateLimited(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_ = s.dnsRateLimited(addr)
 	}
 
@@ -12842,7 +12843,7 @@ func TestVerifyOutboundDNSHostnameRateLimited(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_ = s.dnsRateLimited(addr)
 	}
 
@@ -13521,7 +13522,7 @@ func TestSessionRateLimit(t *testing.T) {
 	// Flood with messageBurst + 50 messages.  TCP buffering
 	// lets us write faster than the server processes.
 	total := messageBurst + 50
-	for i := 0; i < total; i++ {
+	for i := range total {
 		if err := tr.Write(secret.Identity, PeerNotify{
 			Count: i,
 		}); err != nil {
@@ -13582,7 +13583,7 @@ func TestEnvelopeRateLimit(t *testing.T) {
 
 	// Send envelopeRateLimit+10 envelopes from the same sender.
 	var dropped int
-	for i := 0; i < envelopeRateLimit+10; i++ {
+	for range envelopeRateLimit + 10 {
 		ep, err := SealBox(
 			[]byte(`{"origin_timestamp":1}`),
 			naclPub,
@@ -14458,13 +14459,7 @@ func (r *MockRouter) RouteTSSMessage(msg TSSMessage) error {
 	}
 
 	// Verify sender is part of ceremony
-	found := false
-	for _, p := range ceremony.parties {
-		if p == msg.From {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(ceremony.parties, msg.From)
 	if !found {
 		return errors.New("sender not in ceremony")
 	}
@@ -14559,7 +14554,7 @@ func TestRPCKeygenRequestResponse(t *testing.T) {
 
 	// Create 3 parties
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
@@ -14605,7 +14600,7 @@ func TestRPCSignRequestResponse(t *testing.T) {
 	router := NewMockRouter()
 
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
@@ -14663,7 +14658,7 @@ func TestRPCTSSMessageRouting(t *testing.T) {
 	// Create parties with real secrets for signing
 	var secrets []*Secret
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		secret, err := NewSecret()
 		if err != nil {
 			t.Fatal(err)
@@ -14737,7 +14732,7 @@ func TestRPCTSSMessageSignatureVerification(t *testing.T) {
 	// Create parties with real secrets
 	var secrets []*Secret
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		secret, err := NewSecret()
 		if err != nil {
 			t.Fatal(err)
@@ -14875,7 +14870,7 @@ func TestRPCCeremonyResult(t *testing.T) {
 	router := NewMockRouter()
 
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
@@ -14911,7 +14906,7 @@ func TestRPCKeygenInvalidThreshold(t *testing.T) {
 	router := NewMockRouter()
 
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
@@ -14952,7 +14947,7 @@ func TestRPCSignInvalidDataLength(t *testing.T) {
 	router := NewMockRouter()
 
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
@@ -14981,7 +14976,7 @@ func TestRPCSignNotEnoughParties(t *testing.T) {
 	router := NewMockRouter()
 
 	var ids []Identity
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
@@ -15035,7 +15030,7 @@ func TestRPCTSSMessageUnauthorizedSender(t *testing.T) {
 
 	// Create ceremony with 2 parties
 	var ids []Identity
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		secret, _ := NewSecret()
 		ids = append(ids, secret.Identity)
 		router.AddPartyWithSecret(secret)
@@ -15071,7 +15066,7 @@ func TestRPCCeremonyAbort(t *testing.T) {
 	router := NewMockRouter()
 
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
@@ -15104,7 +15099,7 @@ func TestRPCKeygenResponseFailure(t *testing.T) {
 	router := NewMockRouter()
 
 	var ids []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		ids = append(ids, id)
@@ -15135,13 +15130,13 @@ func TestRPCReshareRequest(t *testing.T) {
 	router := NewMockRouter()
 
 	var oldIDs, newIDs []Identity
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		oldIDs = append(oldIDs, id)
 		router.AddParty(id)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var id Identity
 		_, _ = rand.Read(id[:])
 		newIDs = append(newIDs, id)

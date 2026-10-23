@@ -8,7 +8,7 @@
 # Build stage
 # The steps up to "make go-deps" match the Dockerfiles of the daemons so that
 # their cached layers are shared when the localnet is built.
-FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS builder
+FROM golang:1.27.3-alpine3.24@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c AS builder
 
 # Add make and git
 RUN apk --no-cache add --update make git

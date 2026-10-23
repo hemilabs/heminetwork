@@ -41,8 +41,7 @@ func verifyInput(tx *wire.MsgTx, idx int, prevOuts PrevOuts) error {
 		return fmt.Errorf("new engine: %w", err)
 	}
 	if err := vm.Execute(); err != nil {
-		var se txscript.Error
-		if errors.As(err, &se) {
+		if se, ok := errors.AsType[txscript.Error](err); ok {
 			return fmt.Errorf("execute: code=%v desc=%q", se.ErrorCode, se.Description)
 		}
 		return fmt.Errorf("execute: %w", err)

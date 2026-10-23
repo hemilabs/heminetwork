@@ -14,6 +14,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2023,8 +2024,8 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 
 		prevHeaderHash := prevHeaderParsed.BlockHash()
 		t.Logf("Headers to remove:")
-		for k := len(headers) - 1; k >= 0; k-- {
-			nh, _ := bytes2Header(headers[k])
+		for k, header := range slices.Backward(headers) {
+			nh, _ := bytes2Header(header)
 			blockhashcalc := nh.BlockHash()
 			bh := blockhashcalc[:]
 			// slices.Reverse(bh)

@@ -58,13 +58,11 @@ func (f *TBCMockHandler) SetFeeEstimate(fee float64) {
 
 func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip, utxoNum uint) *TBCMockHandler {
 	th := TBCMockHandler{
-		mockHandler: mockHandler{
-			errCh: errCh,
-			msgCh: msgCh,
-			name:  "mockTBC",
-			pctx:  pctx,
-			conns: make([]*websocket.Conn, 0),
-		},
+		errCh:       errCh,
+		msgCh:       msgCh,
+		name:        "mockTBC",
+		pctx:        pctx,
+		conns:       make([]*websocket.Conn, 0),
 		keystones:   keystones,
 		btcTip:      btcTip,
 		utxoNum:     utxoNum,

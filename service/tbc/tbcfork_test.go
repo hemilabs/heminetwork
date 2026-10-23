@@ -13,6 +13,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -4724,13 +4725,7 @@ func TestOrdinalIndexFork(t *testing.T) {
 		if err != nil {
 			t.Fatalf("[%s] 'o' OrdinalInscriptionsByOutpoint: %v", label, err)
 		}
-		found := false
-		for _, id := range oInscs {
-			if id == inscID {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(oInscs, inscID)
 		if !found {
 			t.Fatalf("[%s] 'o' inscription not tracked at outpoint %v",
 				label, op)
@@ -5168,7 +5163,7 @@ func (b *btcNode) mineWithSplitterBlock(name string, parentBlk *block, payToAddr
 	if err != nil {
 		return nil, err
 	}
-	for i := 0; i < numOutputs; i++ {
+	for range numOutputs {
 		redeemTx.AddTxOut(wire.NewTxOut(perOutput, pkScript))
 	}
 

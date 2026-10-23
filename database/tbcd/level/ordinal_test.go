@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"maps"
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -96,9 +97,7 @@ func TestBlockOrdinalUpdateAndQuery(t *testing.T) {
 
 	indexHash := chainhash.Hash{0x11, 0x22}
 	cloned := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, len(cache))
-	for k, v := range cache {
-		cloned[k] = v
-	}
+	maps.Copy(cloned, cache)
 	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, nil, indexHash); err != nil {
 		t.Fatal(err)
 	}
@@ -347,9 +346,7 @@ func TestOrdinalInscriptionsByOutpointWithOffset(t *testing.T) {
 		entry.Inscriptions[w.offset] = id[:]
 	}
 	cloned := make(map[tbcd.Outpoint]*tbcd.OrdinalCacheEntry, len(cache))
-	for k, v := range cache {
-		cloned[k] = v
-	}
+	maps.Copy(cloned, cache)
 	if err := db.BlockOrdinalUpdate(ctx, 1, cloned, nil, chainhash.Hash{0x01}); err != nil {
 		t.Fatal(err)
 	}
