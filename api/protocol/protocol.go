@@ -196,14 +196,14 @@ func Errorf(msg string, args ...any) *Error {
 }
 
 // String pretty prints a protocol error.
-func (e Error) String() string {
+func (e *Error) String() string {
 	if len(e.Trace) == 0 {
 		return e.Message
 	}
 	return fmt.Sprintf("%v [%v:%v]", e.Message, e.Trace, e.Timestamp)
 }
 
-func (e Error) Error() string {
+func (e *Error) Error() string {
 	return e.String()
 }
 
