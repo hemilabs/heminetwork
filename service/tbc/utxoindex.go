@@ -175,7 +175,6 @@ func unprocessUtxos(ctx context.Context, db tbcd.Database, block *btcutil.Block,
 	txs := block.Transactions()
 	// Walk backwards through the txs
 	for _, tx := range slices.Backward(txs) {
-
 		// TxIn get data from disk and insert into the cache as insert
 		for _, txIn := range tx.MsgTx().TxIn {
 			if blockchain.IsCoinBase(tx) {

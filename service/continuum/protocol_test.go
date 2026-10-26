@@ -2242,7 +2242,6 @@ func TestPayloadHashVerification(t *testing.T) {
 	port := listener.Addr().(*net.TCPAddr).Port
 
 	wg.Go(func() {
-
 		t.Logf("Listening: %v", port)
 		conn, err := listener.Accept()
 		if err != nil {
@@ -2256,7 +2255,6 @@ func TestPayloadHashVerification(t *testing.T) {
 
 	// Client
 	wg.Go(func() {
-
 		addr, err := net.ResolveTCPAddr("tcp",
 			net.JoinHostPort("127.0.0.1", "0"))
 		if err != nil {
@@ -2352,7 +2350,6 @@ func TestPayloadHashVerification(t *testing.T) {
 			})
 
 			wg.Go(func() {
-
 				pt, ok := pt2str[reflect.TypeOf(tti.cmd)]
 				if !ok {
 					panic(fmt.Sprintf("invalid command type: %T", tti.cmd))

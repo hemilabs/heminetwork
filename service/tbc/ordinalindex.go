@@ -1346,7 +1346,6 @@ func (i *ordinalIndexer) unwindOutpointTracker(ctx context.Context, block *btcut
 	// Process txs in reverse order. Coinbase is NOT skipped — fee sats
 	// placed in coinbase outputs during wind must be reversed.
 	for _, tx := range slices.Backward(txs) {
-
 		for _, ob := range outpointsOf(tx) {
 			if err := i.unwindOutpointEntries(ctx, block, cache, ob.op); err != nil {
 				return err

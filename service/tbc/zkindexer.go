@@ -212,7 +212,6 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 	case -1:
 		txs := block.Transactions()
 		for _, tx := range slices.Backward(txs) {
-
 			err := i.processTx(ctx, direction, blockHeight, blockHash, tx, c)
 			if err != nil {
 				return err
