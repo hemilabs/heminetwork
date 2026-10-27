@@ -1,7 +1,6 @@
 # Hemi Network
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/hemilabs/heminetwork.svg)](https://pkg.go.dev/github.com/hemilabs/heminetwork)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hemilabs/heminetwork)](https://goreportcard.com/report/github.com/hemilabs/heminetwork)
 [![Go Build Status](https://github.com/hemilabs/heminetwork/actions/workflows/go.yml/badge.svg)](https://github.com/hemilabs/heminetwork/actions/workflows/go.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-ff6c15)](LICENSE)
 
