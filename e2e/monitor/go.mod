@@ -12,7 +12,7 @@ replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308
 
 require (
 	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
-	github.com/btcsuite/btcd/chaincfg/chainhash v1.2.0
+	github.com/btcsuite/btcd/chainhash/v2 v2.0.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/ethereum-optimism/optimism v0.0.0-00010101000000-000000000000
 	github.com/ethereum-optimism/optimism/op-bindings v0.10.14
@@ -20,6 +20,7 @@ require (
 	github.com/go-test/deep v1.1.1
 	github.com/gosuri/uilive v0.0.4
 	github.com/hemilabs/heminetwork v1.6.4-0.20250716150413-22552f1a5442
+	github.com/holiman/uint256 v1.3.2
 	github.com/jedib0t/go-pretty/v6 v6.8.2
 )
 
@@ -34,6 +35,7 @@ require (
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.3.5 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.6 // indirect
+	github.com/btcsuite/btcd/chaincfg/chainhash v1.2.0 // indirect
 	github.com/btcsuite/btclog v1.0.0 // indirect
 	github.com/btcsuite/go-socks v0.0.0-20170105172521-4720035b7bfd // indirect
 	github.com/btcsuite/websocket v0.0.0-20150119174127-31079b680792 // indirect
@@ -72,7 +74,6 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/holiman/billy v0.0.0-20250108194907-5352da567d3e // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
-	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/juju/loggo v1.0.0 // indirect
@@ -97,7 +98,6 @@ require (
 	github.com/pion/dtls/v2 v2.2.12 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/stun/v2 v2.0.0 // indirect
-	github.com/pion/stun/v3 v3.0.0 // indirect
 	github.com/pion/transport/v2 v2.2.10 // indirect
 	github.com/pion/transport/v3 v3.0.7 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
