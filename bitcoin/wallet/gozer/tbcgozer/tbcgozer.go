@@ -45,11 +45,15 @@ func init() {
 	}
 }
 
-// tbcCmd wraps tbc commands.
+// tbcCmd wraps tbc commands.  The worker sends msg and waits for its reply
+// under ctx.  When the caller is done, the worker does not send a request
+// that waits for the write lock, stops the wait for the reply and frees its
+// slot.  A write that has started keeps the slot until the write ends or
+// the deadline of ctx passes.
 type tbcCmd struct {
-	msg     any
-	ch      chan any
-	timeout time.Duration
+	ctx context.Context
+	msg any
+	ch  chan any
 }
 
 // tbcGozer implements [gozer.Gozer] and retrieves Bitcoin data from a TBC
@@ -317,14 +321,14 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 		timeout = DefaultRequestTimeout
 	}
 
-	bc := tbcCmd{
-		msg:     msg,
-		ch:      make(chan any),
-		timeout: timeout,
-	}
-
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
+
+	bc := tbcCmd{
+		ctx: ctx,
+		msg: msg,
+		ch:  make(chan any),
+	}
 
 	// attempt to send
 	select {
@@ -375,28 +379,41 @@ func (t *tbcGozer) handleTBCWebsocketCall(pctx context.Context, conn *protocol.C
 			go func(bc tbcCmd) {
 				defer func() { <-sem }()
 
-				if bc.timeout == 0 {
-					bc.timeout = DefaultRequestTimeout
-				}
-				ctx, cancel := context.WithTimeout(pctx, bc.timeout)
+				// When the caller is done, do not send a request
+				// that waits for the write lock, and stop the wait
+				// for the reply.  A write that has started keeps
+				// the slot until it ends.
+				ctx, cancel := context.WithCancel(bc.ctx)
 				defer cancel()
+				// The reader fails the calls in flight when the
+				// connection ends, but not a call that registers
+				// after that.  End its wait with the connection.
+				stop := context.AfterFunc(pctx, cancel)
+				defer stop()
 
+				var reply any
 				_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
-				if err != nil {
+				switch {
+				case bc.ctx.Err() != nil:
+					// The caller is done and expects no reply.
+					log.Debugf("handleTBCWebsocketCall %T: %v",
+						bc.msg, bc.ctx.Err())
+					return
+				case err != nil:
 					// XXX very loud
 					log.Errorf("handleTBCWebsocketCall %T: %v",
 						bc.msg, err)
-					select {
-					case <-ctx.Done():
-					case bc.ch <- err:
-					}
-					return
+					reply = err
+				default:
+					reply = payload
 				}
+				// callTBC cancels bc.ctx when it returns, so this
+				// never blocks.
 				select {
-				case <-ctx.Done():
-				case bc.ch <- payload:
+				case <-bc.ctx.Done():
+				case bc.ch <- reply:
 					log.Tracef("handleTBCWebsocketCall returned: %v",
-						spew.Sdump(payload))
+						spew.Sdump(reply))
 				}
 			}(c)
 		}
