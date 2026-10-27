@@ -19,7 +19,7 @@ thiserror = "=2.0.21"
 rustls = "=0.23.46"
 tokio = { version = "=1.53.3", features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 tokio-tungstenite = { version = "=0.30.0", features = ["rustls-tls-native-roots"] }
-tokio-util = "=0.7.19"
+tokio-util = "=0.7.20"
 tungstenite = "=0.30.0"
 
 [dev-dependencies]
