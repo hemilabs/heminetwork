@@ -336,7 +336,7 @@ func TestManyTransactions(t *testing.T) {
 	mb := wire.NewMsgBlock(&wire.BlockHeader{Version: 0x20000000})
 	mustAddTx(t, mb, coinbase)
 
-	for i := 0; i < 49; i++ {
+	for i := range 49 {
 		tx := wire.NewMsgTx(2)
 		tx.AddTxIn(&wire.TxIn{
 			PreviousOutPoint: wire.OutPoint{Hash: coinbase.TxHash(), Index: 0},
@@ -348,7 +348,7 @@ func TestManyTransactions(t *testing.T) {
 		}
 		// Variable number of outputs per tx.
 		numOutputs := (i % 5) + 1
-		for o := 0; o < numOutputs; o++ {
+		for o := range numOutputs {
 			tx.AddTxOut(&wire.TxOut{
 				Value:    int64(10000*(i+1) + o),
 				PkScript: bytes.Repeat([]byte{byte(o)}, 22),
@@ -767,7 +767,7 @@ func BenchmarkLazyBlockSegwitFindTx(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		tx := wire.NewMsgTx(2)
 		tx.AddTxIn(&wire.TxIn{
 			PreviousOutPoint: wire.OutPoint{Hash: coinbase.TxHash(), Index: 0},

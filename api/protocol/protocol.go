@@ -204,14 +204,14 @@ func Errorf(msg string, args ...any) *Error {
 }
 
 // String pretty prints a protocol error.
-func (e Error) String() string {
+func (e *Error) String() string {
 	if len(e.Trace) == 0 {
 		return e.Message
 	}
 	return fmt.Sprintf("%v [%v:%v]", e.Message, e.Trace, e.Timestamp)
 }
 
-func (e Error) Error() string {
+func (e *Error) Error() string {
 	return e.String()
 }
 
@@ -420,8 +420,7 @@ func (ac *Conn) Connect(ctx context.Context) error {
 	// level instead...
 	var msg Message
 	if err := NewWSConn(conn).ReadJSON(connectCtx, &msg); err != nil {
-		var ce websocket.CloseError
-		if errors.As(err, &ce) {
+		if ce, ok := errors.AsType[websocket.CloseError](err); ok {
 			switch ce.Code {
 			// case 4000:
 			// log.Errorf("Connection rejected - user account not found")

@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -210,8 +211,7 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 		}
 	case -1:
 		txs := block.Transactions()
-		for k := len(txs) - 1; k >= 0; k-- {
-			tx := txs[k]
+		for _, tx := range slices.Backward(txs) {
 			err := i.processTx(ctx, direction, blockHeight, blockHash, tx, c)
 			if err != nil {
 				return err

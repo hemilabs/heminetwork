@@ -234,7 +234,7 @@ func TestPoPNoWitnessDataLeak(t *testing.T) {
 // tight loop catches any hidden state dependency that would surface
 // as non-determinism.
 func TestPoPSighashCacheSafeOnLegacyOnly(t *testing.T) {
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		f := newPoPFixture(t)
 
 		popTx, prevOuts, err := PoPTransactionCreate(f.keystone,

@@ -26,7 +26,7 @@ func procIO(t *testing.T) (syscr, rchar, readBytes int64) {
 	if err != nil {
 		return 0, 0, 0 // non-Linux: deltas report zero
 	}
-	for _, line := range strings.Split(string(b), "\n") {
+	for line := range strings.SplitSeq(string(b), "\n") {
 		var v int64
 		if _, err := fmt.Sscanf(line, "syscr: %d", &v); err == nil {
 			syscr = v
@@ -88,7 +88,7 @@ func TestWindReplay(t *testing.T) {
 		network = "mainnet"
 	}
 	var heights []uint64
-	for _, hs := range strings.Split(os.Getenv("TBC_REPLAY_HEIGHTS"), ",") {
+	for hs := range strings.SplitSeq(os.Getenv("TBC_REPLAY_HEIGHTS"), ",") {
 		hs = strings.TrimSpace(hs)
 		if hs == "" {
 			continue

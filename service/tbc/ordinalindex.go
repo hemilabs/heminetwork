@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -877,7 +878,6 @@ func (i *ordinalIndexer) windBlock(ctx context.Context, blockHeight uint32, bloc
 		outTotal := txOutTotal(tx.MsgTx().TxOut)
 
 		for _, f := range fl {
-			f := f
 			locVout, locOffset, landed := placeInOutputs(tx.MsgTx().TxOut, f.pos)
 
 			if f.isReveal {
@@ -1345,9 +1345,7 @@ func (i *ordinalIndexer) unwindOutpointTracker(ctx context.Context, block *btcut
 
 	// Process txs in reverse order. Coinbase is NOT skipped — fee sats
 	// placed in coinbase outputs during wind must be reversed.
-	for ti := len(txs) - 1; ti >= 0; ti-- {
-		tx := txs[ti]
-
+	for _, tx := range slices.Backward(txs) {
 		for _, ob := range outpointsOf(tx) {
 			if err := i.unwindOutpointEntries(ctx, block, cache, ob.op); err != nil {
 				return err

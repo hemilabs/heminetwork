@@ -1182,7 +1182,7 @@ func TestMergeSatRangesLargeChain(t *testing.T) {
 func TestCoinbaseSatRangeSequential(t *testing.T) {
 	// First 5 blocks should produce non-overlapping contiguous ranges.
 	var prevEnd uint64
-	for h := uint32(0); h < 5; h++ {
+	for h := range uint32(5) {
 		start, count := CoinbaseSatRange(h)
 		if start != prevEnd {
 			t.Errorf("block %d: start=%d expected=%d (gap or overlap)", h, start, prevEnd)
@@ -1407,7 +1407,7 @@ func TestEncodeInscriptionValueZeroSat(t *testing.T) {
 	var bh chainhash.Hash
 	v := encodeInscriptionValue(0, &bh, false, env)
 	// First 8 bytes should all be zero.
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		if v[i] != 0 {
 			t.Errorf("byte %d: got 0x%02x want 0x00", i, v[i])
 		}

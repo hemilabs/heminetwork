@@ -49,7 +49,7 @@ func Elect(seed []byte, peers []Identity, committee int) ([]Identity, error) {
 	})
 
 	// Partial Fisher-Yates: select `committee` entries.
-	for i := 0; i < committee; i++ {
+	for i := range committee {
 		h := sha256.New()
 		h.Write(seed)
 		h.Write([]byte{byte(i)})

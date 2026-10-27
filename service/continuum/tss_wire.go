@@ -32,7 +32,7 @@ type tssWireEnvelope struct {
 // The type discriminator includes the protocol prefix (e.g.,
 // "ecdsa.keygen.KGRound1Message") to disambiguate identically-named
 // types in different packages (ECDSA vs EdDSA keygen).
-func marshalTSSContent(content interface{}) ([]byte, error) {
+func marshalTSSContent(content any) ([]byte, error) {
 	if content == nil {
 		return nil, errors.New("marshal: nil content")
 	}
@@ -53,7 +53,7 @@ func marshalTSSContent(content interface{}) ([]byte, error) {
 }
 
 // unmarshalTSSContent deserializes wire bytes back to a typed Content.
-func unmarshalTSSContent(data []byte) (interface{}, error) {
+func unmarshalTSSContent(data []byte) (any, error) {
 	var env tssWireEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, fmt.Errorf("unmarshal envelope: %w", err)
@@ -75,7 +75,7 @@ func unmarshalTSSContent(data []byte) (interface{}, error) {
 // deliberately lives outside the pure (un)marshal path so serialization can
 // round-trip minimal fixtures. Fail closed: content without ValidateBasic is
 // rejected.
-func validTSSContent(content interface{}) bool {
+func validTSSContent(content any) bool {
 	v, ok := content.(interface{ ValidateBasic() bool })
 	return ok && v.ValidateBasic()
 }
@@ -87,7 +87,7 @@ func validTSSContent(content interface{}) bool {
 // type rather than the attacker-controlled cflagFromNew wire bit, so a sender can
 // only ever occupy its own slot in its own index space. The mapping matches the
 // producing committee the driver sends each round with (round 1/3 old, 2/4 new).
-func reshareContentFromNew(content interface{}) (fromNew, ok bool) {
+func reshareContentFromNew(content any) (fromNew, ok bool) {
 	switch content.(type) {
 	case *ecdsaResharing.DGRound1Message, *eddsaResharing.DGRound1Message,
 		*ecdsaResharing.DGRound3Message1, *ecdsaResharing.DGRound3Message2,
@@ -104,7 +104,7 @@ func reshareContentFromNew(content interface{}) (fromNew, ok bool) {
 }
 
 // newContentByType returns a zero-value pointer for the given type name.
-func newContentByType(typeName string) interface{} {
+func newContentByType(typeName string) any {
 	switch typeName {
 	// ecdsa keygen
 	case "ecdsa.keygen.KGRound1Message":

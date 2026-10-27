@@ -95,11 +95,9 @@ func (s *Server) handleAdminWebsocket(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close(websocket.StatusNormalClosure, "") // Force close connection
 
 	aws := &tbcAdminWs{
-		tbcWs: tbcWs{
-			addr:           r.RemoteAddr,
-			conn:           protocol.NewWSConn(conn),
-			requestContext: r.Context(),
-		},
+		addr:           r.RemoteAddr,
+		conn:           protocol.NewWSConn(conn),
+		requestContext: r.Context(),
 	}
 
 	// Admin connections must receive the notifications, so force notifiers
@@ -217,8 +215,7 @@ func (s *Server) handleAdminWebsocketRead(ctx context.Context, ws *tbcAdminWs) {
 	for {
 		cmd, id, payload, err := tapi.Read(ctx, ws.conn)
 		if err != nil {
-			var ce websocket.CloseError
-			if errors.As(err, &ce) {
+			if _, ok := errors.AsType[websocket.CloseError](err); ok {
 				log.Tracef("handleAdminWebsocketRead: %v", err)
 				return
 			}
