@@ -17,11 +17,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
 	"github.com/tyler-smith/go-bip39"
 )
 
@@ -227,7 +227,7 @@ func (vc *VinzClortho) DerivePath(path string) (*hdkeychain.ExtendedKey, error) 
 
 // AddressAndPublicFromExtended returns the public bits from a private extended
 // key.
-func AddressAndPublicFromExtended(params *chaincfg.Params, ek *hdkeychain.ExtendedKey) (btcutil.Address, *hdkeychain.ExtendedKey, error) {
+func AddressAndPublicFromExtended(params *chaincfg.Params, ek *hdkeychain.ExtendedKey) (btcaddress.Address, *hdkeychain.ExtendedKey, error) {
 	// Generate address
 	addr, err := ek.Address(params)
 	if err != nil {
@@ -253,7 +253,7 @@ func Compressed(pub *hdkeychain.ExtendedKey) ([]byte, error) {
 }
 
 // ScriptFromPubKeyHash creates a spend script for the specified address.
-func ScriptFromPubKeyHash(pkh btcutil.Address) ([]byte, error) {
+func ScriptFromPubKeyHash(pkh btcaddress.Address) ([]byte, error) {
 	payToScript, err := txscript.PayToAddrScript(pkh)
 	if err != nil {
 		return nil, err

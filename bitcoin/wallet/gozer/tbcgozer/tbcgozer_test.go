@@ -20,10 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/btcutil/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/coder/websocket"
 	"github.com/juju/loggo/v2"
 
@@ -246,7 +247,7 @@ func TestTBCGozerAlreadyBroadcast(t *testing.T) {
 func TestTBCGozerCalls(t *testing.T) {
 	testAddrString := "n2BosBT7DvxWk1tZprk1tR1kyQmXwcv8M8"
 
-	testAddr, err := btcutil.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
+	testAddr, err := btcaddress.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatalf("Failed to decode address: %v", err)
 	}

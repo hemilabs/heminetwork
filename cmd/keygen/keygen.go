@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/tyler-smith/go-bip39"
 
@@ -85,7 +85,7 @@ func _main() error {
 		privBytes := privKey.Serialize()
 		pubBytes := privKey.PubKey().SerializeCompressed()
 
-		btcAddress, err := btcutil.NewAddressPubKey(pubBytes, btcChainParams)
+		btcAddress, err := btcaddress.NewAddressPubKey(pubBytes, btcChainParams)
 		if err != nil {
 			return fmt.Errorf("create btc address from public key: %w", err)
 		}

@@ -9,13 +9,13 @@ import (
 	"errors"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -126,8 +126,8 @@ func TestTransactionApplyECDSAP2PKH(t *testing.T) {
 		t.Fatal(err)
 	}
 	pubCompressed := priv.PubKey().SerializeCompressed()
-	pkHash := btcutil.Hash160(pubCompressed)
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(pubCompressed)
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +144,8 @@ func TestTransactionApplyECDSAP2PKH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destHash := btcutil.Hash160(destPriv.PubKey().SerializeCompressed())
-	destAddr, err := btcutil.NewAddressPubKeyHash(destHash, params)
+	destHash := btcaddress.Hash160(destPriv.PubKey().SerializeCompressed())
+	destAddr, err := btcaddress.NewAddressPubKeyHash(destHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,8 +199,8 @@ func TestTransactionApplyECDSAP2WPKH(t *testing.T) {
 		t.Fatal(err)
 	}
 	pubCompressed := priv.PubKey().SerializeCompressed()
-	pkHash := btcutil.Hash160(pubCompressed)
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(pubCompressed)
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,8 +217,8 @@ func TestTransactionApplyECDSAP2WPKH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destHash := btcutil.Hash160(destPriv.PubKey().SerializeCompressed())
-	destAddr, err := btcutil.NewAddressPubKeyHash(destHash, params)
+	destHash := btcaddress.Hash160(destPriv.PubKey().SerializeCompressed())
+	destAddr, err := btcaddress.NewAddressPubKeyHash(destHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,8 +281,8 @@ func TestTransactionApplyECDSAWrongKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pkHash := btcutil.Hash160(ownerPriv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(ownerPriv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestTransactionApplyECDSARejectsP2TR(t *testing.T) {
 	}
 
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		outputKey.SerializeCompressed()[1:], params,
 	)
 	if err != nil {
@@ -460,8 +460,8 @@ func TestTransactionApplyECDSARejectsIdxOutOfRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,8 +508,8 @@ func TestTransactionApplyECDSARejectsEmptyAndMalformedSig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -587,8 +587,8 @@ func TestTransactionApplyECDSARejectsBadSigHashType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,8 +642,8 @@ func TestTransactionApplyECDSARejectsSigHashDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,8 +679,8 @@ func TestTransactionApplyECDSARejectsOversizedSig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -724,8 +724,8 @@ func TestTransactionApplyECDSAAcceptsUnverifiedSig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}

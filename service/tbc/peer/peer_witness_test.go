@@ -12,9 +12,9 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 
 	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
 )

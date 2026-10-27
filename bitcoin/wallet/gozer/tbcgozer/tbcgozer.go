@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo/v2"
 
@@ -191,7 +191,7 @@ func (t *tbcGozer) TxByID(ctx context.Context, txid *chainhash.Hash) (*tbcapi.Tx
 	return resp.Tx, nil
 }
 
-func (t *tbcGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
+func (t *tbcGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcaddress.Address, start, count uint) ([]*tbcapi.UTXO, error) {
 	maxCount := uint(1000)
 	if count > maxCount {
 		return nil, fmt.Errorf("count must not exceed %v", maxCount)

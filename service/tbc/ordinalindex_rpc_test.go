@@ -19,11 +19,11 @@ import (
 	"testing"
 	"time"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/juju/loggo/v2"
@@ -166,8 +166,8 @@ func createFullOrdinalDB(ctx context.Context, t *testing.T, home string) ordinal
 	// Seed the UTXO index so InscriptionsByAddress can find inscriptions.
 	privKeyBytes, _ := hex.DecodeString(privateKey)
 	_, pub := btcec.PrivKeyFromBytes(privKeyBytes)
-	p2pkhAddr, _ := btcutil.NewAddressPubKeyHash(
-		btcutil.Hash160(pub.SerializeCompressed()),
+	p2pkhAddr, _ := btcaddress.NewAddressPubKeyHash(
+		btcaddress.Hash160(pub.SerializeCompressed()),
 		&chaincfg.RegressionNetParams)
 	seed.address = p2pkhAddr.EncodeAddress()
 

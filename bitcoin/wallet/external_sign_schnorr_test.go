@@ -8,13 +8,13 @@ import (
 	"bytes"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 )
 
 // TestTransactionApplySchnorrP2TR exercises the P2TR schnorr
@@ -32,7 +32,7 @@ func TestTransactionApplySchnorrP2TR(t *testing.T) {
 
 	// BIP-86 output key for the address.
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestTransactionApplySchnorrP2TR(t *testing.T) {
 		t.Fatal(err)
 	}
 	destOutputKey := txscript.ComputeTaprootKeyNoScript(destPriv.PubKey())
-	destAddr, err := btcutil.NewAddressTaproot(
+	destAddr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(destOutputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestTransactionApplySchnorrRejectsBadSig(t *testing.T) {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func TestTransactionApplySchnorrWrongKey(t *testing.T) {
 	}
 
 	ownerOut := txscript.ComputeTaprootKeyNoScript(ownerPriv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(ownerOut), params)
 	if err != nil {
 		t.Fatal(err)
@@ -215,8 +215,8 @@ func TestTransactionApplySchnorrRejectsP2PKH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestTransactionApplySchnorrRejectsIdxOutOfRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +306,7 @@ func TestTransactionApplySchnorrRejectsMalformedSig(t *testing.T) {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -379,7 +379,7 @@ func TestTransactionApplySchnorrRejectsNonStandardScript(t *testing.T) {
 	tx.AddTxIn(wire.NewTxIn(op, nil, nil))
 
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -411,7 +411,7 @@ func TestTransactionApplySchnorrRejectsBadSigHashType(t *testing.T) {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)

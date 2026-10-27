@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/chainhash/v2"
 	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/x/leveldb/leveldb"
 	"github.com/hemilabs/x/leveldb/leveldb/util"

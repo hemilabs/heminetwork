@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"

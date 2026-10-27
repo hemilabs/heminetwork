@@ -10,13 +10,13 @@ import (
 	"errors"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul/memory"
@@ -34,14 +34,14 @@ import (
 // newP2TRKey returns a fresh private key plus the BIP-86 tweaked
 // address and pkScript paying to its output key.  No script
 // commitment (nil script root).
-func newP2TRKey(t *testing.T, params *chaincfg.Params) (*btcec.PrivateKey, btcutil.Address, []byte) {
+func newP2TRKey(t *testing.T, params *chaincfg.Params) (*btcec.PrivateKey, btcaddress.Address, []byte) {
 	t.Helper()
 	priv, err := btcec.NewPrivateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(outputKey), params)
+	addr, err := btcaddress.NewAddressTaproot(schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestPubKeyMatchesTaprootAddressRejectsUntweakedKey(t *testing.T) {
 	// to pubKeyMatchesTaprootAddress causes the helper's internal
 	// tweak step to over-tweak and mismatch.
 	rawXOnly := schnorr.SerializePubKey(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(rawXOnly, params)
+	addr, err := btcaddress.NewAddressTaproot(rawXOnly, params)
 	if err != nil {
 		t.Fatal(err)
 	}

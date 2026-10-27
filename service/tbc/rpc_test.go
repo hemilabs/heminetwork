@@ -20,12 +20,12 @@ import (
 	"testing/synctest"
 	"time"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
@@ -441,7 +441,7 @@ func TestBalanceByAddress(t *testing.T) {
 		{
 			name: "Pay to script hash",
 			address: func() string {
-				address, err := btcutil.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -452,7 +452,7 @@ func TestBalanceByAddress(t *testing.T) {
 		{
 			name: "Pay to witness public key hash",
 			address: func() string {
-				address, err := btcutil.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -463,7 +463,7 @@ func TestBalanceByAddress(t *testing.T) {
 		{
 			name: "Pay to witness script hash",
 			address: func() string {
-				address, err := btcutil.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -474,7 +474,7 @@ func TestBalanceByAddress(t *testing.T) {
 		{
 			name: "Pay to taproot",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -485,7 +485,7 @@ func TestBalanceByAddress(t *testing.T) {
 		{
 			name: "no balance",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -514,7 +514,7 @@ func TestBalanceByAddress(t *testing.T) {
 			}()
 
 			// generate to another address to ensure it's not included in our query
-			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
+			someOtherAddress, err := btcaddress.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -634,7 +634,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 		{
 			name: "Pay to script hash",
 			address: func() string {
-				address, err := btcutil.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -646,7 +646,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 		{
 			name: "Pay to witness public key hash",
 			address: func() string {
-				address, err := btcutil.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -658,7 +658,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 		{
 			name: "Pay to witness script hash",
 			address: func() string {
-				address, err := btcutil.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -670,7 +670,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 		{
 			name: "Pay to taproot",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -682,7 +682,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 		{
 			name: "no balance",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -695,7 +695,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 		{
 			name: "small limit",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -707,7 +707,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 		{
 			name: "offset",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -738,7 +738,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			}()
 
 			// generate to another address to ensure it's not included in our query
-			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
+			someOtherAddress, err := btcaddress.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -844,7 +844,7 @@ func TestUtxosByAddress(t *testing.T) {
 		{
 			name: "Pay to script hash",
 			address: func() string {
-				address, err := btcutil.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -856,7 +856,7 @@ func TestUtxosByAddress(t *testing.T) {
 		{
 			name: "Pay to witness public key hash",
 			address: func() string {
-				address, err := btcutil.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -868,7 +868,7 @@ func TestUtxosByAddress(t *testing.T) {
 		{
 			name: "Pay to witness script hash",
 			address: func() string {
-				address, err := btcutil.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -880,7 +880,7 @@ func TestUtxosByAddress(t *testing.T) {
 		{
 			name: "Pay to taproot",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -892,7 +892,7 @@ func TestUtxosByAddress(t *testing.T) {
 		{
 			name: "no balance",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -905,7 +905,7 @@ func TestUtxosByAddress(t *testing.T) {
 		{
 			name: "small limit",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -917,7 +917,7 @@ func TestUtxosByAddress(t *testing.T) {
 		{
 			name: "offset",
 			address: func() string {
-				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcaddress.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -948,7 +948,7 @@ func TestUtxosByAddress(t *testing.T) {
 			}()
 
 			// generate to another address to ensure it's not included in our query
-			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
+			someOtherAddress, err := btcaddress.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2087,7 +2087,7 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 	publicKey := privateKey.PubKey()
 	pubKeyBytes := publicKey.SerializeCompressed()
-	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
+	btcAddress, err := btcaddress.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3766,8 +3766,8 @@ func TestRpcOrdinalInscriptionE2E(t *testing.T) {
 	internalKey := priv.PubKey()
 
 	// P2PKH address (matches what createBitcoindWithInitialBlocks mines to).
-	p2pkhAddr, err := btcutil.NewAddressPubKeyHash(
-		btcutil.Hash160(internalKey.SerializeCompressed()),
+	p2pkhAddr, err := btcaddress.NewAddressPubKeyHash(
+		btcaddress.Hash160(internalKey.SerializeCompressed()),
 		&chaincfg.RegressionNetParams)
 	if err != nil {
 		t.Fatal(err)

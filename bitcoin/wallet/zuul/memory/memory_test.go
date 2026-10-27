@@ -8,10 +8,10 @@ import (
 	"errors"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"github.com/go-test/deep"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/vinzclortho"
@@ -21,7 +21,7 @@ import (
 type keyInfo struct {
 	ek   *hdkeychain.ExtendedKey
 	priv *btcec.PrivateKey
-	addr *btcutil.Address
+	addr *btcaddress.Address
 	nk   *zuul.NamedKey
 }
 

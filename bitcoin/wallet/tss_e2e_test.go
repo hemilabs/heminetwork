@@ -43,12 +43,12 @@ import (
 	"testing"
 	"time"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/hemilabs/x/tss/v3/crypto"
 	"github.com/hemilabs/x/tss/v3/ecdsa/keygen"
 	"github.com/hemilabs/x/tss/v3/ecdsa/signing"
@@ -109,8 +109,8 @@ func TestTSS_E2E_P2WPKH(t *testing.T) {
 	// UTXO.  It is controlled by the TSS committee, not any single
 	// party.
 	params := &chaincfg.TestNet3Params
-	pkHash := btcutil.Hash160(pubKey.SerializeCompressed())
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(pubKey.SerializeCompressed())
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,8 +134,8 @@ func TestTSS_E2E_P2WPKH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipHash := btcutil.Hash160(recipPriv.PubKey().SerializeCompressed())
-	recipAddr, err := btcutil.NewAddressWitnessPubKeyHash(recipHash, params)
+	recipHash := btcaddress.Hash160(recipPriv.PubKey().SerializeCompressed())
+	recipAddr, err := btcaddress.NewAddressWitnessPubKeyHash(recipHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,9 +265,9 @@ func TestTSS_E2E_P2WPKH(t *testing.T) {
 // mustP2PKH returns a P2PKH address for pkHash on the given params.
 // It's a small convenience so the caller above doesn't have to
 // handle the error inline and clutter the flow.
-func mustP2PKH(t *testing.T, params *chaincfg.Params, pkHash []byte) btcutil.Address {
+func mustP2PKH(t *testing.T, params *chaincfg.Params, pkHash []byte) btcaddress.Address {
 	t.Helper()
-	a, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	a, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,12 +316,12 @@ type evidence struct {
 
 	pubX, pubY *big.Int
 	pubKey     *btcec.PublicKey
-	addr       btcutil.Address
+	addr       btcaddress.Address
 
 	fundOutpt   *wire.OutPoint
 	inputAmt    int64
 	outputAmt   int64
-	recipAddr   btcutil.Address
+	recipAddr   btcaddress.Address
 	unsignedHex string
 
 	sighash []byte

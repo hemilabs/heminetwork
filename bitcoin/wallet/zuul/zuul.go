@@ -13,8 +13,8 @@ import (
 	"errors"
 	"fmt"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -32,13 +32,13 @@ var (
 // NamedKeyHD contains a private key with metadata.
 // Implement interface for various keytypes
 // XXX we need an extended key in here somehow at some point
-//type NamedKeyHD struct {
+// type NamedKeyHD struct {
 //	Name string // User defined name
 //
 //	DerivationPath string // Derivation path
 //
 //	PrivateKey *hdkeychain.ExtendedKey
-//}
+// }
 
 // NamedKey contains a private key with metadata.
 type NamedKey struct {
@@ -72,16 +72,16 @@ type TSSNamedKey struct {
 // Zuul is an interface for storing secret material.
 type Zuul interface {
 	PutKey(nk *NamedKey) error
-	GetKey(addr btcutil.Address) (*NamedKey, error)
-	PurgeKey(addr btcutil.Address) error
-	LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) // signing lookup
+	GetKey(addr btcaddress.Address) (*NamedKey, error)
+	PurgeKey(addr btcaddress.Address) error
+	LookupKeyByAddr(addr btcaddress.Address) (*btcec.PrivateKey, bool, error) // signing lookup
 
 	// TSS key enrolment and lookup.  A TSSNamedKey carries no private
 	// material; signing happens externally via the TSS committee and
 	// the produced signature is applied to the transaction through
 	// the wallet's external-signature entry points.
 	PutTSSKey(tnk *TSSNamedKey) error
-	GetTSSKey(addr btcutil.Address) (*TSSNamedKey, error)
-	PurgeTSSKey(addr btcutil.Address) error
-	LookupTSSKeyByAddr(addr btcutil.Address) (*TSSNamedKey, bool, error)
+	GetTSSKey(addr btcaddress.Address) (*TSSNamedKey, error)
+	PurgeTSSKey(addr btcaddress.Address) error
+	LookupTSSKeyByAddr(addr btcaddress.Address) (*TSSNamedKey, bool, error)
 }

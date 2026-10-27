@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
@@ -89,7 +89,7 @@ func mockHttpServer() *httptest.Server {
 func TestBlockstreamGozer(t *testing.T) {
 	testAddrString := "n2BosBT7DvxWk1tZprk1tR1kyQmXwcv8M8"
 
-	testAddr, err := btcutil.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
+	testAddr, err := btcaddress.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatalf("Failed to decode address: %v", err)
 	}

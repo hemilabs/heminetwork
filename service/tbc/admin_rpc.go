@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/golang-jwt/jwt/v5"

@@ -8,12 +8,13 @@ import (
 	"errors"
 	"fmt"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/btcutil/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
 	"github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
@@ -92,7 +93,7 @@ func estimateVSize(numInputs int, script []byte, txOuts []*wire.TxOut) int {
 // address encoded in script.  The returned PrevOuts map is keyed by outpoint
 // string and carries the pkScript and value needed for witness sighash
 // computation.
-func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerVByte float64, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
+func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerVByte float64, address btcaddress.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, PrevOuts, error) {
 	// Create TxOut
 	payToScript, err := txscript.PayToAddrScript(address)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 	"maps"
 	"reflect"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/chainhash/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"

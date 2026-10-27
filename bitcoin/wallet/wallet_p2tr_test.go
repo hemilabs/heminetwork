@@ -7,13 +7,13 @@ package wallet
 import (
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul/memory"
@@ -41,7 +41,7 @@ func TestSignP2TRKeyPath(t *testing.T) {
 
 	// Build the BIP-86 P2TR pkScript matching the stored internal key.
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	p2trAddr, err := btcutil.NewAddressTaproot(
+	p2trAddr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestSignP2TRKeyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	destOutputKey := txscript.ComputeTaprootKeyNoScript(destPriv.PubKey())
-	destAddr, err := btcutil.NewAddressTaproot(
+	destAddr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(destOutputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -133,8 +133,8 @@ func TestSignMixedP2PKHAndP2TR(t *testing.T) {
 	}
 
 	// Legacy pkScript.
-	legacyPKHash := btcutil.Hash160(legacyPriv.PubKey().SerializeCompressed())
-	legacyAddr, err := btcutil.NewAddressPubKeyHash(legacyPKHash, params)
+	legacyPKHash := btcaddress.Hash160(legacyPriv.PubKey().SerializeCompressed())
+	legacyAddr, err := btcaddress.NewAddressPubKeyHash(legacyPKHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestSignMixedP2PKHAndP2TR(t *testing.T) {
 
 	// Taproot pkScript.
 	taprootKey := txscript.ComputeTaprootKeyNoScript(taprootPriv.PubKey())
-	taprootAddr, err := btcutil.NewAddressTaproot(
+	taprootAddr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(taprootKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestSignP2TRKeyPathClearsScriptSig(t *testing.T) {
 
 	// BIP-86 key-path: taproot address derived from tweaked output key.
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	taprootAddr, err := btcutil.NewAddressTaproot(
+	taprootAddr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
@@ -247,8 +247,8 @@ func TestSignP2TRKeyPathClearsScriptSig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destPKHash := btcutil.Hash160(destPriv.PubKey().SerializeCompressed())
-	destAddr, err := btcutil.NewAddressPubKeyHash(destPKHash, params)
+	destPKHash := btcaddress.Hash160(destPriv.PubKey().SerializeCompressed())
+	destAddr, err := btcaddress.NewAddressPubKeyHash(destPKHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}

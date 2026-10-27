@@ -19,10 +19,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/btcutil/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
@@ -156,7 +157,7 @@ func (bs *blockstreamGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*c
 	return txidHash, nil
 }
 
-func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
+func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcaddress.Address, start, count uint) ([]*tbcapi.UTXO, error) {
 	u := fmt.Sprintf("%v/address/%v/utxo", bs.url, addr)
 	utxos, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {

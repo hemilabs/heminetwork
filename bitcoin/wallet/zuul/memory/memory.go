@@ -10,11 +10,11 @@ import (
 	"fmt"
 	"sync"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 )
@@ -57,15 +57,15 @@ func addressesForPubKey(params *chaincfg.Params, pubCompressed []byte) ([]string
 	addrs := make([]string, 0, 3)
 
 	// P2PKH (legacy).
-	pkHash := btcutil.Hash160(pubCompressed)
-	p2pkh, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(pubCompressed)
+	p2pkh, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		return nil, fmt.Errorf("p2pkh address: %w", err)
 	}
 	addrs = append(addrs, p2pkh.EncodeAddress())
 
 	// P2WPKH (native segwit v0).
-	p2wpkh, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	p2wpkh, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		return nil, fmt.Errorf("p2wpkh address: %w", err)
 	}
@@ -77,7 +77,7 @@ func addressesForPubKey(params *chaincfg.Params, pubCompressed []byte) ([]string
 		return nil, fmt.Errorf("parse pubkey: %w", err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(pub)
-	p2tr, err := btcutil.NewAddressTaproot(
+	p2tr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params,
 	)
 	if err != nil {
@@ -130,7 +130,7 @@ func (m *memoryZuul) PutKey(nk *zuul.NamedKey) error {
 // any of the address forms under which the key was enrolled (P2PKH,
 // P2WPKH, P2TR-BIP86); the same key is returned for all of them.
 // Returns ErrKeyDoesntExist if addr is unknown or is TSS-controlled.
-func (m *memoryZuul) GetKey(addr btcutil.Address) (*zuul.NamedKey, error) {
+func (m *memoryZuul) GetKey(addr btcaddress.Address) (*zuul.NamedKey, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -154,7 +154,7 @@ func (m *memoryZuul) GetKey(addr btcutil.Address) (*zuul.NamedKey, error) {
 // deliberate: a caller invoking PurgeKey wants the secret gone,
 // and leaving it in memory for late signers to use would defeat
 // that intent.
-func (m *memoryZuul) PurgeKey(addr btcutil.Address) error {
+func (m *memoryZuul) PurgeKey(addr btcaddress.Address) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -183,7 +183,7 @@ func (m *memoryZuul) PurgeKey(addr btcutil.Address) error {
 // a locally-enrolled key, and (nil, false, ErrKeyDoesntExist) when
 // the address is unknown or TSS-controlled.  Addr may be any of the
 // indexed address forms (P2PKH, P2WPKH, P2TR-BIP86).
-func (m *memoryZuul) LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) {
+func (m *memoryZuul) LookupKeyByAddr(addr btcaddress.Address) (*btcec.PrivateKey, bool, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -203,14 +203,14 @@ func (m *memoryZuul) LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, b
 func ecdsaAddressesForPubKey(params *chaincfg.Params, pubCompressed []byte) ([]string, error) {
 	addrs := make([]string, 0, 2)
 
-	pkHash := btcutil.Hash160(pubCompressed)
-	p2pkh, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(pubCompressed)
+	p2pkh, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		return nil, fmt.Errorf("p2pkh address: %w", err)
 	}
 	addrs = append(addrs, p2pkh.EncodeAddress())
 
-	p2wpkh, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	p2wpkh, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		return nil, fmt.Errorf("p2wpkh address: %w", err)
 	}
@@ -261,7 +261,7 @@ func (m *memoryZuul) PutTSSKey(tnk *zuul.TSSNamedKey) error {
 
 // GetTSSKey returns the TSS key indexed under addr.  If addr maps to
 // a local private key (or nothing), ErrKeyDoesntExist is returned.
-func (m *memoryZuul) GetTSSKey(addr btcutil.Address) (*zuul.TSSNamedKey, error) {
+func (m *memoryZuul) GetTSSKey(addr btcaddress.Address) (*zuul.TSSNamedKey, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -275,7 +275,7 @@ func (m *memoryZuul) GetTSSKey(addr btcutil.Address) (*zuul.TSSNamedKey, error) 
 // PurgeTSSKey removes a TSS key.  Because PutTSSKey indexes under
 // multiple address forms, PurgeTSSKey recomputes all of them from
 // the stored public key and removes every entry.
-func (m *memoryZuul) PurgeTSSKey(addr btcutil.Address) error {
+func (m *memoryZuul) PurgeTSSKey(addr btcaddress.Address) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -299,7 +299,7 @@ func (m *memoryZuul) PurgeTSSKey(addr btcutil.Address) error {
 // returns the TSS key and true when addr is TSS-controlled, or false
 // with ErrKeyDoesntExist when addr is unknown or controlled by a
 // local private key.
-func (m *memoryZuul) LookupTSSKeyByAddr(addr btcutil.Address) (*zuul.TSSNamedKey, bool, error) {
+func (m *memoryZuul) LookupTSSKeyByAddr(addr btcaddress.Address) (*zuul.TSSNamedKey, bool, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 

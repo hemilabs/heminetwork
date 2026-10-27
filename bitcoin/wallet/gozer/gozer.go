@@ -16,9 +16,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/btcutil/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
@@ -29,7 +30,7 @@ import (
 // Gozer is an interface providing access to Bitcoin data.
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
-	UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
+	UtxosByAddress(ctx context.Context, filterMempool bool, addr btcaddress.Address, start, count uint) ([]*tbcapi.UTXO, error)
 	MempoolUtxos(ctx context.Context, scriptHashes []api.ByteSlice) (*tbcapi.MempoolUtxosResponse, error)
 	BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *BlocksByL2AbrevHashesResponse
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) (*KeystonesByHeightResponse, error)

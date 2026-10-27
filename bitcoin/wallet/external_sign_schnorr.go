@@ -7,12 +7,12 @@ package wallet
 import (
 	"fmt"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 )
 
 // TransactionApplySchnorr applies an externally-computed schnorr
@@ -98,7 +98,7 @@ func TransactionApplySchnorr(params *chaincfg.Params, tx *wire.MsgTx, idx int, p
 // pubKeyMatchesTaprootAddress verifies that applying the BIP-86
 // taproot tweak to pubKey produces the same address encoded in
 // pkScript.  Using ExtractPkScriptAddrs plus NewAddressTaproot with
-// the tweaked x-only key gives two btcutil.Address values with
+// the tweaked x-only key gives two btcaddress.Address values with
 // params-matched HRPs; equality of their encoded forms proves the
 // pkScript commits to this internal key under a nil script root.
 func pubKeyMatchesTaprootAddress(params *chaincfg.Params, pkScript []byte, pubKey *btcec.PublicKey) error {
@@ -110,7 +110,7 @@ func pubKeyMatchesTaprootAddress(params *chaincfg.Params, pkScript []byte, pubKe
 		return fmt.Errorf("pkScript extracted %d addresses, expected 1", len(addrs))
 	}
 	tweaked := txscript.ComputeTaprootKeyNoScript(pubKey)
-	want, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(tweaked), params)
+	want, err := btcaddress.NewAddressTaproot(schnorr.SerializePubKey(tweaked), params)
 	if err != nil {
 		return fmt.Errorf("derive address: %w", err)
 	}

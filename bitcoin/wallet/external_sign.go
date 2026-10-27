@@ -7,12 +7,12 @@ package wallet
 import (
 	"fmt"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -187,12 +187,12 @@ func pubKeyMatchesAddress(params *chaincfg.Params, pkScript, pubCompressed []byt
 		return fmt.Errorf("pkScript extracted %d addresses, expected 1", len(addrs))
 	}
 
-	pkHash := btcutil.Hash160(pubCompressed)
-	var want btcutil.Address
+	pkHash := btcaddress.Hash160(pubCompressed)
+	var want btcaddress.Address
 	if segwit {
-		want, err = btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+		want, err = btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	} else {
-		want, err = btcutil.NewAddressPubKeyHash(pkHash, params)
+		want, err = btcaddress.NewAddressPubKeyHash(pkHash, params)
 	}
 	if err != nil {
 		return fmt.Errorf("derive address: %w", err)

@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/txscript/v2"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 
 	"github.com/hemilabs/heminetwork/v2/hemi"

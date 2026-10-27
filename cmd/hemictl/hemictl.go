@@ -25,11 +25,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/x/leveldb/leveldb"
 	"github.com/hemilabs/x/leveldb/leveldb/opt"
@@ -483,21 +483,21 @@ func tbcdb(pctx context.Context, flags []string) error {
 
 		var (
 			sh tbcd.ScriptHash
-			a  btcutil.Address
+			a  btcaddress.Address
 		)
 		switch network {
 		case "testnet3":
-			a, err = btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			a, err = btcaddress.DecodeAddress(address, &chaincfg.TestNet3Params)
 			if err != nil {
 				return err
 			}
 		case "testnet4":
-			a, err = btcutil.DecodeAddress(address, &chaincfg.TestNet4Params)
+			a, err = btcaddress.DecodeAddress(address, &chaincfg.TestNet4Params)
 			if err != nil {
 				return err
 			}
 		case "mainnet":
-			a, err = btcutil.DecodeAddress(address, &chaincfg.MainNetParams)
+			a, err = btcaddress.DecodeAddress(address, &chaincfg.MainNetParams)
 			if err != nil {
 				return err
 			}
@@ -744,7 +744,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		if address != "" {
 			// XXX set params
-			a, err := btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			a, err := btcaddress.DecodeAddress(address, &chaincfg.TestNet3Params)
 			if err != nil {
 				return err
 			}
@@ -800,7 +800,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		if address != "" {
 			// XXX set params
-			a, err := btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			a, err := btcaddress.DecodeAddress(address, &chaincfg.TestNet3Params)
 			if err != nil {
 				return err
 			}
