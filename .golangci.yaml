@@ -85,6 +85,13 @@ linters:
         text: "response body must be closed"
         source: "websocket\\.Dial"
 
+      # Ignore unchecked receives from error channels (`<-errCh`,
+      # `case <-errCh:`). The `_ = <-errCh` alternative is removed by
+      # staticcheck S1005.
+      - linters: [ "errcheck" ]
+        text: "^Error return value is not checked$"
+        source: "^\\s*(case\\s+)?<-"
+
       # Ignore not checking return value of c.CloseNow (websocket) in tests.
       - path: "(.+)_test\\.go"
         linters: [ "errcheck" ]
