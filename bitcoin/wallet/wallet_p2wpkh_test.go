@@ -9,12 +9,12 @@ import (
 	"fmt"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul/memory"
@@ -71,8 +71,8 @@ func TestSignP2WPKHInput(t *testing.T) {
 	}
 
 	// Build the P2WPKH pkScript for the previous output.
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	p2wpkhAddr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	p2wpkhAddr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +93,8 @@ func TestSignP2WPKHInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destPKHash := btcutil.Hash160(destPriv.PubKey().SerializeCompressed())
-	destAddr, err := btcutil.NewAddressPubKeyHash(destPKHash, params)
+	destPKHash := btcaddress.Hash160(destPriv.PubKey().SerializeCompressed())
+	destAddr, err := btcaddress.NewAddressPubKeyHash(destPKHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +159,8 @@ func TestSignMixedP2PKHAndP2WPKH(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	legacyPKHash := btcutil.Hash160(legacyPriv.PubKey().SerializeCompressed())
-	legacyAddr, err := btcutil.NewAddressPubKeyHash(legacyPKHash, params)
+	legacyPKHash := btcaddress.Hash160(legacyPriv.PubKey().SerializeCompressed())
+	legacyAddr, err := btcaddress.NewAddressPubKeyHash(legacyPKHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,8 +169,8 @@ func TestSignMixedP2PKHAndP2WPKH(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	segwitPKHash := btcutil.Hash160(segwitPriv.PubKey().SerializeCompressed())
-	segwitAddr, err := btcutil.NewAddressWitnessPubKeyHash(segwitPKHash, params)
+	segwitPKHash := btcaddress.Hash160(segwitPriv.PubKey().SerializeCompressed())
+	segwitAddr, err := btcaddress.NewAddressWitnessPubKeyHash(segwitPKHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +189,8 @@ func TestSignMixedP2PKHAndP2WPKH(t *testing.T) {
 	const v2 int64 = 80000
 
 	// Throwaway destination.
-	destPKHash := btcutil.Hash160(legacyPriv.PubKey().SerializeCompressed())
-	destAddr, err := btcutil.NewAddressPubKeyHash(destPKHash, params)
+	destPKHash := btcaddress.Hash160(legacyPriv.PubKey().SerializeCompressed())
+	destAddr, err := btcaddress.NewAddressPubKeyHash(destPKHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,8 +266,8 @@ func TestSignP2WPKHClearsScriptSig(t *testing.T) {
 	}
 
 	pubCompressed := priv.PubKey().SerializeCompressed()
-	pubHash := btcutil.Hash160(pubCompressed)
-	p2wpkhAddr, err := btcutil.NewAddressWitnessPubKeyHash(pubHash, params)
+	pubHash := btcaddress.Hash160(pubCompressed)
+	p2wpkhAddr, err := btcaddress.NewAddressWitnessPubKeyHash(pubHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,8 +280,8 @@ func TestSignP2WPKHClearsScriptSig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destPKHash := btcutil.Hash160(destPriv.PubKey().SerializeCompressed())
-	destAddr, err := btcutil.NewAddressPubKeyHash(destPKHash, params)
+	destPKHash := btcaddress.Hash160(destPriv.PubKey().SerializeCompressed())
+	destAddr, err := btcaddress.NewAddressPubKeyHash(destPKHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/chainhash/v2"
 	"github.com/hemilabs/x/leveldb/leveldb"
 	"github.com/juju/loggo/v2"
 

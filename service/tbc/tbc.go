@@ -21,13 +21,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/btcutil/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
 	btcmempool "github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/x/leveldb/leveldb"
@@ -2392,7 +2393,7 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 		return 0, NewExternalHeaderNotAllowedError("BalanceByAddress")
 	}
 
-	addr, err := btcutil.DecodeAddress(encodedAddress, s.g.chain)
+	addr, err := btcaddress.DecodeAddress(encodedAddress, s.g.chain)
 	if err != nil {
 		return 0, err
 	}
@@ -2435,7 +2436,7 @@ func (s *Server) UtxosByAddress(ctx context.Context, filterMempool bool, encoded
 		return nil, NewExternalHeaderNotAllowedError("UtxosByAddress")
 	}
 
-	addr, err := btcutil.DecodeAddress(encodedAddress, s.g.chain)
+	addr, err := btcaddress.DecodeAddress(encodedAddress, s.g.chain)
 	if err != nil {
 		return nil, err
 	}
@@ -4181,7 +4182,7 @@ func (s *Server) InscriptionsByAddress(ctx context.Context, encodedAddress strin
 		return nil, errors.New("ordinal index not enabled")
 	}
 
-	addr, err := btcutil.DecodeAddress(encodedAddress, s.g.chain)
+	addr, err := btcaddress.DecodeAddress(encodedAddress, s.g.chain)
 	if err != nil {
 		return nil, fmt.Errorf("decode address: %w", err)
 	}

@@ -8,12 +8,12 @@ import (
 	"errors"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/btcutil/v2/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 )
@@ -50,13 +50,13 @@ func TestMultiAddressIndexing(t *testing.T) {
 
 	// Derive each address form that zuul should now recognize.
 	pubCompressed := priv.PubKey().SerializeCompressed()
-	pkHash := btcutil.Hash160(pubCompressed)
+	pkHash := btcaddress.Hash160(pubCompressed)
 
-	p2pkh, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	p2pkh, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2wpkh, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	p2wpkh, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestMultiAddressIndexing(t *testing.T) {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(btcecPub)
-	p2tr, err := btcutil.NewAddressTaproot(
+	p2tr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params,
 	)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestMultiAddressIndexing(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		addr btcutil.Address
+		addr btcaddress.Address
 	}{
 		{"P2PKH", p2pkh},
 		{"P2WPKH", p2wpkh},
@@ -110,7 +110,7 @@ func TestMultiAddressIndexing(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		addr btcutil.Address
+		addr btcaddress.Address
 	}{
 		{"P2PKH", p2pkh},
 		{"P2WPKH", p2wpkh},
@@ -153,8 +153,8 @@ func TestPutDuplicateAcrossAddressForms(t *testing.T) {
 	}
 
 	// Ensure the original key is still retrievable and unchanged.
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	p2pkh, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	p2pkh, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,8 +182,8 @@ func TestPurgeKeyUnknownAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,8 +218,8 @@ func TestPurgeKeyZeroesOutstandingReference(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}

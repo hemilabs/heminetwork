@@ -8,14 +8,14 @@ import (
 	"errors"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -274,8 +274,8 @@ func TestVerifyECDSAGatesTransactionApplyECDSA(t *testing.T) {
 		t.Fatal(err)
 	}
 	pubCompressed := priv.PubKey().SerializeCompressed()
-	pkHash := btcutil.Hash160(pubCompressed)
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(pubCompressed)
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestVerifySchnorrGatesTransactionApplySchnorr(t *testing.T) {
 	}
 
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params,
 	)
 	if err != nil {

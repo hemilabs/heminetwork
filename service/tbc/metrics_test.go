@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
@@ -162,7 +162,7 @@ func TestBlockMetricsExpired(t *testing.T) {
 
 func TestBlockMetricsInserted(t *testing.T) {
 	params := checkpointParams()
-	payTo, err := btcutil.NewAddressPubKeyHash(make([]byte, 20), params)
+	payTo, err := btcaddress.NewAddressPubKeyHash(make([]byte, 20), params)
 	if err != nil {
 		t.Fatal(err)
 	}

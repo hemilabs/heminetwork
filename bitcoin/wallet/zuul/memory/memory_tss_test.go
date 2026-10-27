@@ -8,11 +8,11 @@ import (
 	"errors"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 )
@@ -47,17 +47,17 @@ func TestPutTSSKeyIndexing(t *testing.T) {
 		t.Fatalf("PutTSSKey: %v", err)
 	}
 
-	pkHash := btcutil.Hash160(pub.SerializeCompressed())
-	p2pkh, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(pub.SerializeCompressed())
+	p2pkh, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2wpkh, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	p2wpkh, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(pub)
-	p2tr, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(outputKey), params)
+	p2tr, err := btcaddress.NewAddressTaproot(schnorr.SerializePubKey(outputKey), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestPutTSSKeyIndexing(t *testing.T) {
 	// Both P2PKH and P2WPKH must resolve to the TSS key.
 	for _, tc := range []struct {
 		name string
-		addr btcutil.Address
+		addr btcaddress.Address
 	}{
 		{"P2PKH", p2pkh},
 		{"P2WPKH", p2wpkh},
@@ -124,12 +124,12 @@ func TestPutTSSKeyPurgeRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pkHash := btcutil.Hash160(pub.SerializeCompressed())
-	p2pkh, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(pub.SerializeCompressed())
+	p2pkh, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2wpkh, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	p2wpkh, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,8 +245,8 @@ func TestPurgeTSSKeyUnknownAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}

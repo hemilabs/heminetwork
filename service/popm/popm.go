@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	btcaddress "github.com/btcsuite/btcd/address/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -174,7 +174,7 @@ type Server struct {
 
 	// bitcoin
 	params     *chaincfg.Params
-	btcAddress btcutil.Address
+	btcAddress btcaddress.Address
 	ethAddress common.Address
 
 	// Prometheus
@@ -243,7 +243,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	privKey := dcrsecpk256k1.PrivKeyFromBytes(pk)
 	pubBytes := privKey.PubKey().SerializeCompressed()
 
-	btcAddress, err := btcutil.NewAddressPubKey(pubBytes, s.params)
+	btcAddress, err := btcaddress.NewAddressPubKey(pubBytes, s.params)
 	if err != nil {
 		return nil, fmt.Errorf("new address: %w", err)
 	}

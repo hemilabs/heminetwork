@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
+	btcchainhash "github.com/btcsuite/btcd/chainhash/v2"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"

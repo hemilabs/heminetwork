@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/version"

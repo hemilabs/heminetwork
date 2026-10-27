@@ -19,12 +19,13 @@ import (
 	"sync"
 	"time"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/btcutil/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
@@ -505,8 +506,8 @@ func parseArgs(args []string) (string, map[string]string, error) {
 	return action, parsed, nil
 }
 
-func addressToScript(addr string) (btcutil.Address, error) {
-	return btcutil.DecodeAddress(addr, &chaincfg.TestNet3Params)
+func addressToScript(addr string) (btcaddress.Address, error) {
+	return btcaddress.DecodeAddress(addr, &chaincfg.TestNet3Params)
 }
 
 func init() {

@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
@@ -130,8 +130,8 @@ func TestTransactionSignUnknownP2WPKHKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestTransactionSignUnknownP2TRKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		outputKey.SerializeCompressed()[1:], params,
 	)
 	if err != nil {
@@ -254,8 +254,8 @@ func TestTransactionApplyECDSAP2WPKHWrongKey(t *testing.T) {
 	}
 
 	// pkScript is a P2WPKH locked to owner's key.
-	ownerHash := btcutil.Hash160(owner.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(ownerHash, params)
+	ownerHash := btcaddress.Hash160(owner.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(ownerHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestTransactionApplySchnorrNonDefaultSigHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		outputKey.SerializeCompressed()[1:], params,
 	)
 	if err != nil {
@@ -344,8 +344,8 @@ func TestApplyECDSAP2PKHScriptBuilderError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,8 +438,8 @@ func TestTransactionApplyECDSARejectsP2SHP2WPKH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	wpkhAddr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	wpkhAddr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestTransactionApplyECDSARejectsP2SHP2WPKH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2shAddr, err := btcutil.NewAddressScriptHash(redeemScript, params)
+	p2shAddr, err := btcaddress.NewAddressScriptHash(redeemScript, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,8 +507,8 @@ func TestTransactionApplySchnorrRejectsP2WPKH(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +605,7 @@ func TestTransactionApplySchnorrNonDefaultSigHashEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	outputKey := txscript.ComputeTaprootKeyNoScript(priv.PubKey())
-	addr, err := btcutil.NewAddressTaproot(
+	addr, err := btcaddress.NewAddressTaproot(
 		schnorr.SerializePubKey(outputKey), params,
 	)
 	if err != nil {
@@ -662,8 +662,8 @@ func TestTransactionApplyECDSAP2WPKHSigHashNone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -712,8 +712,8 @@ func TestTransactionApplyECDSAP2WPKHSigHashSingle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -762,8 +762,8 @@ func TestTransactionApplyECDSAP2WPKHSigHashAllAnyOneCanPay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkHash := btcutil.Hash160(priv.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, params)
+	pkHash := btcaddress.Hash160(priv.PubKey().SerializeCompressed())
+	addr, err := btcaddress.NewAddressWitnessPubKeyHash(pkHash, params)
 	if err != nil {
 		t.Fatal(err)
 	}

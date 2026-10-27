@@ -20,14 +20,15 @@ import (
 	"testing/synctest"
 	"time"
 
+	btcaddress "github.com/btcsuite/btcd/address/v2"
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/btcutil/v2"
+	"github.com/btcsuite/btcd/chaincfg/v2"
+	"github.com/btcsuite/btcd/chainhash/v2"
 	btcmempool "github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcd/txscript/v2"
+	"github.com/btcsuite/btcd/wire/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/go-test/deep"
@@ -106,7 +107,7 @@ type btcNode struct {
 	gtx            *btcutil.Tx // for printing and diagnostics
 	private        *btcec.PrivateKey
 	public         *btcec.PublicKey
-	address        *btcutil.AddressPubKeyHash
+	address        *btcaddress.AddressPubKeyHash
 
 	msgCh chan string
 
@@ -180,7 +181,7 @@ func newFakeNode(t *testing.T) (*btcNode, error) {
 }
 
 // lookupKey is used by the sign function.
-func (b *btcNode) lookupKey(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+func (b *btcNode) lookupKey(a btcaddress.Address) (*btcec.PrivateKey, bool, error) {
 	nk, ok := b.keys[a.String()]
 	if !ok {
 		return nil, false, fmt.Errorf("key not found: %v", a.String())
@@ -200,13 +201,13 @@ func (b *btcNode) findKeyByName(name string) (*btcec.PrivateKey, error) {
 
 // newKey creates and inserts a new key into the lookup table.
 // Must be called locked
-func (b *btcNode) newKey(name string) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
+func (b *btcNode) newKey(name string) (*btcec.PrivateKey, *btcec.PublicKey, *btcaddress.AddressPubKeyHash, error) {
 	privateKey, err := btcec.NewPrivateKey()
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	publicKey := privateKey.PubKey()
-	address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(publicKey.SerializeCompressed()), b.params)
+	address, err := btcaddress.NewAddressPubKeyHash(btcaddress.Hash160(publicKey.SerializeCompressed()), b.params)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -560,7 +561,7 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 
 var reqDifficulty uint32
 
-func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64, mempool []*btcutil.Tx) (*btcutil.Block, error) {
+func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcaddress.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64, mempool []*btcutil.Tx) (*btcutil.Block, error) {
 	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
 	if err != nil {
 		return nil, err
@@ -653,13 +654,13 @@ func (b *btcNode) Best() []*chainhash.Hash {
 
 // func mkGetKey(keys map[string]addressToKey) txscript.KeyDB {
 // 	if keys == nil {
-// 		return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
+// 		return txscript.KeyClosure(func(addr btcaddress.Address) (*btcec.PrivateKey,
 // 			bool, error,
 // 		) {
 // 			return nil, false, errors.New("nope")
 // 		})
 // 	}
-// 	return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
+// 	return txscript.KeyClosure(func(addr btcaddress.Address) (*btcec.PrivateKey,
 // 		bool, error,
 // 	) {
 // 		a2k, ok := keys[addr.EncodeAddress()]
@@ -672,11 +673,11 @@ func (b *btcNode) Best() []*chainhash.Hash {
 //
 // func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
 // 	if scripts == nil {
-// 		return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
+// 		return txscript.ScriptClosure(func(addr btcaddress.Address) ([]byte, error) {
 // 			return nil, errors.New("nope")
 // 		})
 // 	}
-// 	return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
+// 	return txscript.ScriptClosure(func(addr btcaddress.Address) ([]byte, error) {
 // 		script, ok := scripts[addr.EncodeAddress()]
 // 		if !ok {
 // 			return nil, errors.New("nope")
@@ -743,16 +744,16 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 
 	privateKey := secp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 	publicKey := privateKey.PubKey() // just send it back to the miner
-	var btcAddress *btcutil.AddressPubKey
+	var btcAddress *btcaddress.AddressPubKey
 	if recipient == nil {
 		pubKeyBytes := publicKey.SerializeCompressed()
-		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
+		btcAddress, err = btcaddress.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		pubKeyBytes := recipient.SerializeCompressed()
-		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
+		btcAddress, err = btcaddress.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
 		if err != nil {
 			return nil, err
 		}
@@ -791,7 +792,7 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 	return tx, nil
 }
 
-func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcaddress.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
 		return nil, errors.New("parent hash not found")
@@ -851,7 +852,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	return blk, nil
 }
 
-func (b *btcNode) mineMultiple(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+func (b *btcNode) mineMultiple(name string, from *chainhash.Hash, payToAddress btcaddress.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
 		return nil, errors.New("parent hash not found")
@@ -918,7 +919,7 @@ func (b *btcNode) mineMultiple(name string, from *chainhash.Hash, payToAddress b
 	return blk, nil
 }
 
-func (b *btcNode) mineKss(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+func (b *btcNode) mineKss(name string, from *chainhash.Hash, payToAddress btcaddress.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
 		return nil, errors.New("parent hash not found")
@@ -1051,7 +1052,7 @@ func (b *btcNode) mineKss(name string, from *chainhash.Hash, payToAddress btcuti
 	return blk, nil
 }
 
-func (b *btcNode) mineN(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
+func (b *btcNode) mineN(count int, from *chainhash.Hash, payToAddress btcaddress.Address) ([]*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
 		return nil, errors.New("parent hash not found")
@@ -1111,7 +1112,7 @@ func buildInscriptionWitness(contentType, content string) wire.TxWitness {
 // mineInscription mines a block containing an inscription transaction.
 // At height >= 2, spends the parent's coinbase and adds inscription
 // witness data. Also creates a zero-value output for edge case testing.
-func (b *btcNode) mineInscription(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+func (b *btcNode) mineInscription(name string, from *chainhash.Hash, payToAddress btcaddress.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
 		return nil, errors.New("parent hash not found")
@@ -1174,7 +1175,7 @@ const (
 	MineWithInscription
 )
 
-func (b *btcNode) Mine(name string, parent *chainhash.Hash, payToAddress btcutil.Address, mineType int) (*block, error) {
+func (b *btcNode) Mine(name string, parent *chainhash.Hash, payToAddress btcaddress.Address, mineType int) (*block, error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	switch mineType {
@@ -1189,13 +1190,13 @@ func (b *btcNode) Mine(name string, parent *chainhash.Hash, payToAddress btcutil
 	}
 }
 
-func (b *btcNode) MineN(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
+func (b *btcNode) MineN(count int, from *chainhash.Hash, payToAddress btcaddress.Address) ([]*block, error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	return b.mineN(count, from, payToAddress)
 }
 
-func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhash.Hash, payToAddress btcutil.Address, mineType int) (*block, error) {
+func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhash.Hash, payToAddress btcaddress.Address, mineType int) (*block, error) {
 	blk, err := b.Mine(name, parent, payToAddress, mineType)
 	if err != nil {
 		return nil, err
@@ -3361,8 +3362,8 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	payToKeyPublic := payToKey.PubKey()
-	payToAddress, err := btcutil.NewAddressPubKeyHash(
-		btcutil.Hash160(payToKeyPublic.SerializeCompressed()), params)
+	payToAddress, err := btcaddress.NewAddressPubKeyHash(
+		btcaddress.Hash160(payToKeyPublic.SerializeCompressed()), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3386,7 +3387,7 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	redeemKeyPublic := redeemKey.PubKey()
-	redeemAddress, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(redeemKeyPublic.SerializeCompressed()), params)
+	redeemAddress, err := btcaddress.NewAddressPubKeyHash(btcaddress.Hash160(redeemKeyPublic.SerializeCompressed()), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3415,7 +3416,7 @@ func TestTransactions(t *testing.T) {
 	txOutChange := wire.NewTxOut(2000000000, changeScript)
 	redeemTx.AddTxOut(txOutChange)
 	// sign
-	lookupKey := func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+	lookupKey := func(a btcaddress.Address) (*btcec.PrivateKey, bool, error) {
 		return payToKey, true, nil
 	}
 	sigScript, err := txscript.SignTxOutput(&chaincfg.MainNetParams,
@@ -4499,7 +4500,7 @@ func standardCoinbaseScript(nextBlockHeight int32, extraNonce uint64) ([]byte, e
 		Script()
 }
 
-func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockHeight int32, addr btcutil.Address) (*btcutil.Tx, error) {
+func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockHeight int32, addr btcaddress.Address) (*btcutil.Tx, error) {
 	// Create the script to pay to the provided payment address if one was
 	// specified.  Otherwise, create a script that allows the coinbase to be
 	// redeemable by anyone.
@@ -5144,7 +5145,7 @@ func TestOrdinalIndexForkTinyCache(t *testing.T) {
 // mineWithSplitterBlock creates a block containing a tx that splits the
 // parent's coinbase into numOutputs equal-value outputs. The splitter tx
 // is at block index 1 (after coinbase). Must be called with b.mtx held.
-func (b *btcNode) mineWithSplitterBlock(name string, parentBlk *block, payToAddress btcutil.Address, numOutputs int) (*block, error) {
+func (b *btcNode) mineWithSplitterBlock(name string, parentBlk *block, payToAddress btcaddress.Address, numOutputs int) (*block, error) {
 	parentHash := parentBlk.Hash()
 	parent, ok := b.chain[parentHash.String()]
 	if !ok {
@@ -5181,7 +5182,7 @@ func (b *btcNode) mineWithSplitterBlock(name string, parentBlk *block, payToAddr
 	}
 	sigScript, err := txscript.SignTxOutput(b.params, redeemTx, 0,
 		prevPkScript, txscript.SigHashAll,
-		txscript.KeyClosure(func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+		txscript.KeyClosure(func(a btcaddress.Address) (*btcec.PrivateKey, bool, error) {
 			return nk.key, true, nil
 		}), nil, nil)
 	if err != nil {
@@ -5214,7 +5215,7 @@ func (b *btcNode) mineWithSplitterBlock(name string, parentBlk *block, payToAddr
 // tx that spends all outputs of the splitter tx from parentBlk. The
 // inscription witness is on input inscInputIdx. Must be called with
 // b.mtx held.
-func (b *btcNode) mineWithMultiInputInscriptionBlock(name string, parentBlk *block, payToAddress btcutil.Address, inscInputIdx int) (*block, error) {
+func (b *btcNode) mineWithMultiInputInscriptionBlock(name string, parentBlk *block, payToAddress btcaddress.Address, inscInputIdx int) (*block, error) {
 	parentHash := parentBlk.Hash()
 	parent, ok := b.chain[parentHash.String()]
 	if !ok {
@@ -5262,7 +5263,7 @@ func (b *btcNode) mineWithMultiInputInscriptionBlock(name string, parentBlk *blo
 		}
 		sigScript, err := txscript.SignTxOutput(b.params, redeemTx, i,
 			prevPkScript, txscript.SigHashAll,
-			txscript.KeyClosure(func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+			txscript.KeyClosure(func(a btcaddress.Address) (*btcec.PrivateKey, bool, error) {
 				return nk.key, true, nil
 			}), nil, nil)
 		if err != nil {
@@ -5948,7 +5949,7 @@ func TestOrdinalBigOLifecycle(t *testing.T) {
 // tx1 reveals an inscription (spending parent's coinbase), and tx2
 // immediately spends tx1's inscription output (same-block transfer).
 // Must be called with b.mtx held.
-func (b *btcNode) mineWithInscriptionAndTransfer(name string, parentBlk *block, payToAddress btcutil.Address) (*block, error) {
+func (b *btcNode) mineWithInscriptionAndTransfer(name string, parentBlk *block, payToAddress btcaddress.Address) (*block, error) {
 	parentHash := parentBlk.Hash()
 	parent, ok := b.chain[parentHash.String()]
 	if !ok {
@@ -5992,7 +5993,7 @@ func (b *btcNode) mineWithInscriptionAndTransfer(name string, parentBlk *block, 
 	}
 	sigScript, err := txscript.SignTxOutput(b.params, tx2, 0,
 		tx1Out0.PkScript, txscript.SigHashAll,
-		txscript.KeyClosure(func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+		txscript.KeyClosure(func(a btcaddress.Address) (*btcec.PrivateKey, bool, error) {
 			return nk.key, true, nil
 		}), nil, nil)
 	if err != nil {
