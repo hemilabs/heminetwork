@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chainhash/v2"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/davecgh/go-spew/spew"
 	opbindings "github.com/ethereum-optimism/optimism/op-bindings/bindings"
