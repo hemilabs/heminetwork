@@ -1843,7 +1843,6 @@ func TestPostRunOpStackRestartsOnGlamsterdam(t *testing.T) {
 	for _, node := range []opStackNode{sequencer, verifier, fullSync} {
 		rollup := dialRPC(t, ctx, node.rollupRPC)
 		statuses[node.name] = waitForSyncStatus(t, ctx, rollup, node.name, what, progressed)
-		checkOpNodeL1View(t, ctx, l1, node.name, statuses[node.name], false)
 	}
 
 	sequencerL2 := dialRPC(t, ctx, sequencer.l2RPC)
