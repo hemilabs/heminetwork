@@ -57,10 +57,10 @@ const (
 
 	bhsCanonicalTipKey = "canonicaltip"
 
-	heighthashSize         = 8 + 1 + chainhash.HashSize
-	blockheaderSize        = 120
-	keystoneSize           = 4 + chainhash.HashSize + hemi.L2KeystoneAbrevSize
-	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize // h uint32(height) block_hash
+	heighthashSize      = 8 + 1 + chainhash.HashSize
+	blockheaderSize     = 120
+	keystoneSize        = 4 + chainhash.HashSize + hemi.L2KeystoneAbrevSize
+	indexHeightHashSize = 1 + 4 + chainhash.HashSize // h uint32(height) hash, keystones and blockheaders
 )
 
 type IteratorError error
@@ -726,22 +726,23 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 	log.Tracef("BlockHeadersByHeight")
 	defer log.Tracef("BlockHeadersByHeight exit")
 
-	bhs := make([]tbcd.BlockHeader, 0, 4)
-	start := make([]byte, 8)
-	binary.BigEndian.PutUint64(start, height)
-	limit := make([]byte, 8)
-	binary.BigEndian.PutUint64(limit, height+2)
+	if height >= math.MaxUint32 {
+		return nil, database.NotFoundError("block headers not found")
+	}
 
-	hhDB := l.pool[level.HeightHashDB]
-	it := hhDB.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
+	bhs := make([]tbcd.BlockHeader, 0, 4)
+	bhsDB := l.pool[level.BlockHeadersDB]
+	it := bhsDB.NewIterator(&util.Range{
+		Start: encodeIndexHeightHashSlice(uint32(height), chainhash.Hash{}),
+		Limit: encodeIndexHeightHashSlice(uint32(height+1), chainhash.Hash{}),
+	}, nil)
 	defer it.Release()
 	for it.Next() {
-		fh, hash := keyToHeightHash(it.Key())
-		if fh != height {
-			// all done
-			break
+		if len(it.Key()) != indexHeightHashSize {
+			continue
 		}
-		bh, err := l.BlockHeaderByHash(ctx, *hash)
+		_, hash := decodeIndexHeightHash(it.Key())
+		bh, err := l.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return nil, fmt.Errorf("headers by height: %w", err)
 		}
@@ -846,15 +847,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	}
 	defer bmDiscard()
 
-	// height hash
-	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
-	if err != nil {
-		return fmt.Errorf("height hash open transaction: %w", err)
-	}
-	defer hhDiscard()
-
 	// Insert height hash, missing, block header
-	hhBatch := new(leveldb.Batch)
 	bmBatch := new(leveldb.Batch)
 	bhBatch := new(leveldb.Batch)
 
@@ -864,8 +857,8 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	// instance to maintain Bitcoin consensus starting from a non-genesis block rather
 	// than requiring all historical state which is irrelevant to conesnsus assuming the
 	// effective genesis block is never forked.
-	hhKey := heightHashToKey(height, bhash[:])
-	hhBatch.Put(hhKey, []byte{})
+	hhKey := encodeIndexHeightHashSlice(uint32(height), bhash)
+	bhBatch.Put(hhKey, []byte{})
 
 	// Handle the default case where the passed-in block is actually the genesis
 	cdiff := blockchain.CalcWork(wbh.Bits)
@@ -885,11 +878,6 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
 
-	// Write height hash batch
-	if err = hhTx.Write(hhBatch, nil); err != nil {
-		return fmt.Errorf("height hash batch: %w", err)
-	}
-
 	// Write missing blocks batch
 	if err = bmTx.Write(bmBatch, nil); err != nil {
 		return fmt.Errorf("blocks missing batch: %w", err)
@@ -898,11 +886,6 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	// Write block headers batch
 	if err = bhsTx.Write(bhBatch, nil); err != nil {
 		return fmt.Errorf("block header insert: %w", err)
-	}
-
-	// height hash commit
-	if err = hhCommit(); err != nil {
-		return fmt.Errorf("height hash commit: %w", err)
 	}
 
 	// blocks missing commit
@@ -1048,14 +1031,6 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	}
 	defer bhsDiscard()
 
-	// height hash
-	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
-	if err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to start height hash leveldb transaction, err: %w", err)
-	}
-	defer hhDiscard()
-
 	// <MAXMADNESS>
 
 	// Get current canonical tip for later use
@@ -1197,7 +1172,6 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 	mdBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
-	hhBatch := new(leveldb.Batch)
 
 	var bhCacheBatch []*chainhash.Hash
 	if l.cfg.headerCacheSize > 0 {
@@ -1220,8 +1194,8 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		}
 
 		// Delete height mapping for header i
-		hhKey := heightHashToKey(fh.Height, bhash[:])
-		hhBatch.Delete(hhKey)
+		hhKey := encodeIndexHeightHashSlice(uint32(fh.Height), bhash)
+		bhsBatch.Delete(hhKey)
 	}
 	if l.cfg.headerCacheSize > 0 {
 		// Delete right away. Cache can always be rehydrated.
@@ -1277,19 +1251,11 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		dbBatches := map[string]tbcd.Batch{
 			level.MetadataDB:     {Batch: mdBatch},
 			level.BlockHeadersDB: {Batch: bhsBatch},
-			level.HeightHashDB:   {Batch: hhBatch},
 		}
 		err := batchHook(ctx, dbBatches)
 		if err != nil {
 			return tbcd.RTInvalid, nil, fmt.Errorf("post hook: %w", err)
 		}
-	}
-
-	// Write height hash batch
-	err = hhTx.Write(hhBatch, nil)
-	if err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to write height hash batch: %w", err)
 	}
 
 	// Write block headers batch
@@ -1304,12 +1270,6 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: unable to write metadata batch: %w", err)
-	}
-
-	// height hash commit
-	if err = hhCommit(); err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to commit height hash modifications: %w", err)
 	}
 
 	// block headers commit
@@ -1406,14 +1366,6 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	}
 	defer bmDiscard()
 
-	// height hash
-	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash open transaction: %w", err)
-	}
-	defer hhDiscard()
-
 	// blocks
 	blocksDB := l.rawPool[level.BlocksDB]
 
@@ -1444,7 +1396,6 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	}
 
 	// Insert missing blocks and block headers
-	hhBatch := new(leveldb.Batch)
 	bmBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
 	mdBatch := new(leveldb.Batch)
@@ -1466,25 +1417,25 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		height++
 		cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
 
-		// Store height_hash for future reference
-		hhKey := heightHashToKey(height, bhash[:])
-		ok, err := hhTx.Has(hhKey, nil)
+		// Store height_hash index for future reference
+		hhKey := encodeIndexHeightHashSlice(uint32(height), bhash)
+		ok, err := bhsTx.Has(hhKey, nil)
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("height hash has: %w", err)
 		} else if !ok {
-			hhBatch.Put(hhKey, []byte{})
+			bhsBatch.Put(hhKey, []byte{})
 		}
 
 		// Mark the block as missing unless we already have it on
 		// disk. The rawdb indexes blocks by their 32-byte hash,
-		// so we check with bhash (not the height+hash hhKey).
+		// so we check with bhash (not the height+hash bmKey).
 		ok, err = blocksDB.Has(bhash[:])
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("blocks has: %w", err)
 		} else if !ok {
-			bmBatch.Put(hhKey, []byte{})
+			bmBatch.Put(heightHashToKey(height, bhash[:]), []byte{})
 		}
 
 		// XXX reason about pre encoding. Due to the caller code being
@@ -1547,19 +1498,12 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			level.MetadataDB:      {Batch: mdBatch},
 			level.BlockHeadersDB:  {Batch: bhsBatch},
 			level.BlocksMissingDB: {Batch: bmBatch},
-			level.HeightHashDB:    {Batch: hhBatch},
 		}
 		err := batchHook(ctx, dbBatches)
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("post hook: %w", err)
 		}
-	}
-
-	// Write height hash batch
-	if err = hhTx.Write(hhBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash batch: %w", err)
 	}
 
 	// Write missing blocks batch
@@ -1593,13 +1537,6 @@ func (l *ldb) blockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
 	testCommitted(level.BlocksMissingDB)
-
-	// height hash commit
-	if err = hhCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash commit: %w", err)
-	}
-	testCommitted(level.HeightHashDB)
 
 	if tipBatch.Len() > 0 {
 		err = l.pool[level.BlockHeadersDB].Write(tipBatch, nil)
@@ -2193,7 +2130,7 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	return ks
 }
 
-func encodeKeystoneHeightHash(height uint32, hash chainhash.Hash) (e [keystoneHeightHashSize]byte) {
+func encodeIndexHeightHash(height uint32, hash chainhash.Hash) (e [indexHeightHashSize]byte) {
 	var h [4]byte
 	binary.BigEndian.PutUint32(h[:], height)
 	e[0] = 'h'
@@ -2202,13 +2139,13 @@ func encodeKeystoneHeightHash(height uint32, hash chainhash.Hash) (e [keystoneHe
 	return e
 }
 
-func encodeKeystoneHeightHashSlice(height uint32, hash chainhash.Hash) []byte {
-	e := encodeKeystoneHeightHash(height, hash)
+func encodeIndexHeightHashSlice(height uint32, hash chainhash.Hash) []byte {
+	e := encodeIndexHeightHash(height, hash)
 	return e[:]
 }
 
-func decodeKeystoneHeightHash(v []byte) (uint32, chainhash.Hash) {
-	if len(v) != keystoneHeightHashSize {
+func decodeIndexHeightHash(v []byte) (uint32, chainhash.Hash) {
+	if len(v) != indexHeightHashSize {
 		panic(fmt.Errorf("invalid height hash size: %x", v))
 	}
 	if v[0] != 'h' {
@@ -2231,8 +2168,8 @@ func keystoneHeightRange(height int64, depth int64) *util.Range {
 		end = height
 	}
 	return &util.Range{
-		Start: encodeKeystoneHeightHashSlice(uint32(start), chainhash.Hash{}),
-		Limit: encodeKeystoneHeightHashSlice(uint32(end), chainhash.Hash{}),
+		Start: encodeIndexHeightHashSlice(uint32(start), chainhash.Hash{}),
+		Limit: encodeIndexHeightHashSlice(uint32(end), chainhash.Hash{}),
 	}
 }
 
@@ -2266,11 +2203,11 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 	for i.Next() {
 		// Skip primary keystone hash keys (32 bytes) that happen to
 		// fall within the height-index range. Height-index keys are
-		// always exactly keystoneHeightHashSize (37 bytes).
-		if len(i.Key()) != keystoneHeightHashSize {
+		// always exactly indexHeightHashSize (37 bytes).
+		if len(i.Key()) != indexHeightHashSize {
 			continue
 		}
-		_, hash := decodeKeystoneHeightHash(i.Key())
+		_, hash := decodeIndexHeightHash(i.Key())
 		eks, err := kssDB.Get(hash[:], nil)
 		if err != nil {
 			// mismatch between heighthash and hash indexes
@@ -2320,7 +2257,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// previously found block.
 				if ks.BlockHash.IsEqual(&v.BlockHash) {
 					kssBatch.Delete(k[:])
-					kssBatch.Delete(encodeKeystoneHeightHashSlice(v.BlockHeight, k))
+					kssBatch.Delete(encodeIndexHeightHashSlice(v.BlockHeight, k))
 				}
 			}
 		case 1:
@@ -2328,7 +2265,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 			if !has {
 				// Only store unknown keystones and indexes
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
-				kssBatch.Put(encodeKeystoneHeightHashSlice(v.BlockHeight, k), nil)
+				kssBatch.Put(encodeIndexHeightHashSlice(v.BlockHeight, k), nil)
 			}
 		}
 

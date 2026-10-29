@@ -30,7 +30,6 @@ const (
 	BlocksMissingDB = "blocksmissing"
 	MetadataDB      = "metadata"
 	KeystonesDB     = "keystones"
-	HeightHashDB    = "heighthash"
 	OutputsDB       = "outputs"
 	TransactionsDB  = "transactions"
 	ZKDB            = "zkindex"
@@ -351,10 +350,6 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	err = l.openDB(BlocksMissingDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", BlocksMissingDB, err)
-	}
-	err = l.openDB(HeightHashDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", HeightHashDB, err)
 	}
 	err = l.openDB(OutputsDB)
 	if err != nil {
