@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"codeberg.org/miekg/dns"
+	"codeberg.org/miekg/dns/rdata"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"golang.org/x/crypto/nacl/box"
@@ -2520,14 +2521,14 @@ func TestDNSTXTRecord(t *testing.T) {
 				Name:  node1.DNSName,
 				Class: dns.ClassINET,
 			},
-			A: node1.IP,
+			A: rdata.A{Addr: node1.IP},
 		},
 		&dns.TXT{
 			Hdr: dns.Header{
 				Name:  node1.DNSName,
 				Class: dns.ClassINET,
 			},
-			Txt: []string{"k=ppp"},
+			TXT: rdata.TXT{Txt: []string{"k=ppp"}},
 		},
 	}
 	m, err = TXTRecordFromAddress(t.Context(), r, addr)
@@ -2545,14 +2546,14 @@ func TestDNSTXTRecord(t *testing.T) {
 				Name:  node1.DNSName,
 				Class: dns.ClassINET,
 			},
-			A: node1.IP,
+			A: rdata.A{Addr: node1.IP},
 		},
 		&dns.TXT{
 			Hdr: dns.Header{
 				Name:  node1.DNSName,
 				Class: dns.ClassINET,
 			},
-			Txt: []string{"x"},
+			TXT: rdata.TXT{Txt: []string{"x"}},
 		},
 	}
 	_, err = TXTRecordFromAddress(t.Context(), r, addr)

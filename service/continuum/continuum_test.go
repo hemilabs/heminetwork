@@ -19,6 +19,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,6 +32,7 @@ import (
 
 	"codeberg.org/miekg/dns"
 	"codeberg.org/miekg/dns/dnsutil"
+	"codeberg.org/miekg/dns/rdata"
 	"github.com/btcsuite/btcd/chainhash/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -49,14 +51,10 @@ import (
 // DNS test helpers.  These may move to a shared testutil package
 // when the DNS rework lands.
 
-var (
-	defaultPort = uint16(45067)
-	// seed1 = "seed.bark.gfy." // Placeholder for DNS seed discovery.
+var defaultPort = uint16(45067)
 
-	// wellKnownSeeds = []string{seed1}
-
-	inAddrArpa = "in-addr.arpa"
-)
+// seed1 = "seed.bark.gfy." // Placeholder for DNS seed discovery.
+// wellKnownSeeds = []string{seed1}
 
 // testConfig returns a Config with DNS disabled for unit tests that
 // don't exercise DNS verification.
@@ -70,17 +68,15 @@ type node struct {
 	DNSName           string
 	ReverseDNSName    string
 	ReverseDNSPtrName string
-	IP                net.IP
+	IP                netip.Addr
 	Port              uint16
 	Secret            *Secret
 }
 
-func createNode(name, domain string, ip net.IP, port uint16) (*node, error) {
-	i := []byte(ip.To4())
+func createNode(name, domain string, ip netip.Addr, port uint16) (*node, error) {
 	n := &node{
-		DNSName: fmt.Sprintf("%v.%v.", name, domain),
-		ReverseDNSName: fmt.Sprintf("%v.%v.%v.%v.%v.",
-			i[3], i[2], i[1], i[0], inAddrArpa),
+		DNSName:           fmt.Sprintf("%v.%v.", name, domain),
+		ReverseDNSName:    dnsutil.ReverseAddr(ip),
 		ReverseDNSPtrName: fmt.Sprintf("%v.%v.", name, domain),
 		IP:                ip,
 		Port:              port,
@@ -108,15 +104,15 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 					Name:  n.DNSName,
 					Class: dns.ClassINET,
 				},
-				A: n.IP,
+				A: rdata.A{Addr: n.IP},
 			},
 			&dns.TXT{
 				Hdr: dns.Header{
 					Name:  n.DNSName,
 					Class: dns.ClassINET,
 				},
-				Txt: []string{"v=" + dnsAppName + "; identity=" +
-					n.Secret.String() + port},
+				TXT: rdata.TXT{Txt: []string{"v=" + dnsAppName + "; identity=" +
+					n.Secret.String() + port}},
 			},
 		},
 		[]dns.RR{
@@ -125,7 +121,7 @@ func nodeToDNS(n *node) ([]dns.RR, []dns.RR) {
 					Name:  n.ReverseDNSName,
 					Class: dns.ClassINET,
 				},
-				Ptr: n.ReverseDNSPtrName,
+				PTR: rdata.PTR{Ptr: n.ReverseDNSPtrName},
 			},
 		}
 }
@@ -176,7 +172,7 @@ func createDNSNodes(domain string, count byte) *dnsHandler {
 	}
 	for i := range count {
 		nodename := fmt.Sprintf("node%v", i+1)
-		n, err := createNode(nodename, domain, net.IPv4(127, 0, 1, i+1),
+		n, err := createNode(nodename, domain, netip.AddrFrom4([4]byte{127, 0, 1, i + 1}),
 			defaultPort)
 		if err != nil {
 			panic(err)
@@ -1237,23 +1233,16 @@ func TestDNSSeeding(t *testing.T) {
 	t.Logf("A: %v at %s", serverA.Identity(), addrA)
 
 	// Parse A's listen address for DNS records.
-	host, port, err := net.SplitHostPort(addrA)
+	addrPortA, err := netip.ParseAddrPort(addrA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		t.Fatalf("failed to parse IP: %v", host)
-	}
+	port := strconv.Itoa(int(addrPortA.Port()))
 
 	// Build a mock DNS handler with A's identity at seed1.test.gfy.
 	seedDomain := "test.gfy"
 	seedName := "seed1"
 	seedFQDN := seedName + "." + seedDomain + "."
-	portNum, err := strconv.Atoi(port)
-	if err != nil {
-		t.Fatal(err)
-	}
 	handler := &dnsHandler{
 		lookup: make(map[string][]dns.RR),
 		nodes:  make(map[string]*node),
@@ -1264,15 +1253,15 @@ func TestDNSSeeding(t *testing.T) {
 				Name:  seedFQDN,
 				Class: dns.ClassINET,
 			},
-			A: ip,
+			A: rdata.A{Addr: addrPortA.Addr()},
 		},
 		&dns.TXT{
 			Hdr: dns.Header{
 				Name:  seedFQDN,
 				Class: dns.ClassINET,
 			},
-			Txt: []string{fmt.Sprintf("v=%v; identity=%v; port=%v",
-				dnsAppName, serverA.Identity(), portNum)},
+			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v; port=%v",
+				dnsAppName, serverA.Identity(), port)}},
 		},
 	}
 
@@ -1399,12 +1388,12 @@ func TestDNSForwardWithValidHostname(t *testing.T) {
 	handler.lookup[bFQDN] = []dns.RR{
 		&dns.A{
 			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
-			A:   net.IPv4(127, 0, 0, 1),
+			A:   rdata.A{Addr: netip.MustParseAddr("127.0.0.1")},
 		},
 		&dns.TXT{
 			Hdr: dns.Header{Name: bFQDN, Class: dns.ClassINET},
-			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-				dnsAppName, serverB.Identity())},
+			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v",
+				dnsAppName, serverB.Identity())}},
 		},
 	}
 
@@ -1466,7 +1455,7 @@ func TestDNSReverseIdentityMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nodeB, err := createNode("nodeB", domain, net.IPv4(10, 0, 0, 99), 12345)
+	nodeB, err := createNode("nodeB", domain, netip.MustParseAddr("10.0.0.99"), 12345)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3933,7 +3922,7 @@ func TestVerifyDNSIdentityErrors(t *testing.T) {
 		handler.lookup[fqdn] = []dns.RR{
 			&dns.A{
 				Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
-				A:   net.IPv4(127, 0, 0, 1),
+				A:   rdata.A{Addr: netip.MustParseAddr("127.0.0.1")},
 			},
 		}
 		srv := newDNSServer(ctx, handler)
@@ -3967,8 +3956,8 @@ func TestVerifyDNSIdentityErrors(t *testing.T) {
 		handler.lookup[fqdn] = []dns.RR{
 			&dns.TXT{
 				Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
-				Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-					dnsAppName, wrongID)},
+				TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v",
+					dnsAppName, wrongID)}},
 			},
 		}
 		srv := newDNSServer(ctx, handler)
@@ -3994,8 +3983,8 @@ func TestVerifyDNSIdentityErrors(t *testing.T) {
 		handler.lookup[fqdn] = []dns.RR{
 			&dns.TXT{
 				Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
-				Txt: []string{fmt.Sprintf("v=wrongapp; identity=%v",
-					secret.Identity)},
+				TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=wrongapp; identity=%v",
+					secret.Identity)}},
 			},
 		}
 		srv := newDNSServer(ctx, handler)
@@ -4021,8 +4010,8 @@ func TestVerifyDNSIdentityErrors(t *testing.T) {
 		handler.lookup[fqdn] = []dns.RR{
 			&dns.TXT{
 				Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
-				Txt: []string{fmt.Sprintf("v=%v; identity=ZZZZ",
-					dnsAppName)},
+				TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=ZZZZ",
+					dnsAppName)}},
 			},
 		}
 		srv := newDNSServer(ctx, handler)
@@ -4181,7 +4170,7 @@ func TestVerifyDNSIdentityMalformedTXT(t *testing.T) {
 	handler.lookup[fqdn] = []dns.RR{
 		&dns.TXT{
 			Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
-			Txt: []string{"garbage-no-equals-sign"},
+			TXT: rdata.TXT{Txt: []string{"garbage-no-equals-sign"}},
 		},
 	}
 	srv := newDNSServer(ctx, handler)
@@ -4632,8 +4621,8 @@ func TestConnectPeerDNSVerifyError(t *testing.T) {
 	handler.lookup[fqdn] = []dns.RR{
 		&dns.TXT{
 			Hdr: dns.Header{Name: fqdn, Class: dns.ClassINET},
-			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-				dnsAppName, wrongID)},
+			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v",
+				dnsAppName, wrongID)}},
 		},
 	}
 	dnsSrv := newDNSServer(ctx, handler)
@@ -5039,13 +5028,13 @@ func TestVerifyRemoteDNSIdentityFullPath(t *testing.T) {
 						Class: dns.ClassINET,
 						TTL:   300,
 					},
-					Txt: []string{"v=wrongapp; identity=" + n.Secret.String()},
+					TXT: rdata.TXT{Txt: []string{"v=wrongapp; identity=" + n.Secret.String()}},
 				}
 			}
 		}
 		dnsH.insertDNS(n, forward, reverse)
 
-		addr := &net.TCPAddr{IP: n.IP, Port: int(n.Port)}
+		addr := net.TCPAddrFromAddrPort(netip.AddrPortFrom(n.IP, n.Port))
 		_, err := VerifyRemoteDNSIdentity(ctx, resolver, addr, n.Secret.Identity)
 		if err == nil || !strings.Contains(err.Error(), "dns invalid app name") {
 			t.Fatalf("expected 'dns invalid app name', got: %v", err)
@@ -5063,13 +5052,13 @@ func TestVerifyRemoteDNSIdentityFullPath(t *testing.T) {
 						Class: dns.ClassINET,
 						TTL:   300,
 					},
-					Txt: []string{"v=transfunctioner; identity=notvalidhex!!!"},
+					TXT: rdata.TXT{Txt: []string{"v=transfunctioner; identity=notvalidhex!!!"}},
 				}
 			}
 		}
 		dnsH.insertDNS(n, forward, reverse)
 
-		addr := &net.TCPAddr{IP: n.IP, Port: int(n.Port)}
+		addr := net.TCPAddrFromAddrPort(netip.AddrPortFrom(n.IP, n.Port))
 		_, err := VerifyRemoteDNSIdentity(ctx, resolver, addr, n.Secret.Identity)
 		if err == nil || !strings.Contains(err.Error(), "dns invalid identity") {
 			t.Fatalf("expected 'dns invalid identity', got: %v", err)
@@ -9183,8 +9172,8 @@ func TestConnectDNSVerifyError(t *testing.T) {
 	handler.lookup["localhost."] = []dns.RR{
 		&dns.TXT{
 			Hdr: dns.Header{Name: "localhost.", Class: dns.ClassINET},
-			Txt: []string{fmt.Sprintf("v=%v; identity=%v",
-				dnsAppName, wrongID)},
+			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v",
+				dnsAppName, wrongID)}},
 		},
 	}
 	dnsSrv := newDNSServer(ctx, handler)
@@ -11228,12 +11217,12 @@ func TestTXTRecordFromAddressReverseLookup(t *testing.T) {
 	dnsSrv := newDNSServer(ctx, handler)
 	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
 	resolver := newResolver(dnsSrv.Listener.Addr().String())
-	var nodeIP net.IP
+	var nodeIP netip.Addr
 	for _, n := range handler.nodes {
 		nodeIP = n.IP
 		break
 	}
-	addr := &net.TCPAddr{IP: nodeIP, Port: 45067}
+	addr := net.TCPAddrFromAddrPort(netip.AddrPortFrom(nodeIP, 45067))
 	m, err := TXTRecordFromAddress(ctx, resolver, addr)
 	if err != nil {
 		t.Fatal(err)
@@ -11250,14 +11239,14 @@ func TestVerifyRemoteDNSIdentityFlow(t *testing.T) {
 	dnsSrv := newDNSServer(ctx, handler)
 	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
 	resolver := newResolver(dnsSrv.Listener.Addr().String())
-	var nodeIP net.IP
+	var nodeIP netip.Addr
 	var nodeSecret *Secret
 	for _, n := range handler.nodes {
 		nodeIP = n.IP
 		nodeSecret = n.Secret
 		break
 	}
-	addr := &net.TCPAddr{IP: nodeIP, Port: 45067}
+	addr := net.TCPAddrFromAddrPort(netip.AddrPortFrom(nodeIP, 45067))
 	ok, err := VerifyRemoteDNSIdentity(ctx, resolver, addr, nodeSecret.Identity)
 	if err != nil || !ok {
 		t.Fatalf("should match: ok=%v err=%v", ok, err)
@@ -12712,18 +12701,18 @@ func (h *multiTXTHandler) ServeDNS(_ context.Context, w dns.ResponseWriter, r *d
 			// PTR query — return a hostname.
 			m.Answer = append(m.Answer, &dns.PTR{
 				Hdr: dns.Header{Name: q.Header().Name, Class: dns.ClassINET},
-				Ptr: "node.example.com.",
+				PTR: rdata.PTR{Ptr: "node.example.com."},
 			})
 		} else {
 			// TXT query — return 2 records.
 			m.Answer = append(m.Answer,
 				&dns.TXT{
 					Hdr: dns.Header{Name: q.Header().Name, Class: dns.ClassINET},
-					Txt: []string{"v=continuum;id=aabb"},
+					TXT: rdata.TXT{Txt: []string{"v=continuum;id=aabb"}},
 				},
 				&dns.TXT{
 					Hdr: dns.Header{Name: q.Header().Name, Class: dns.ClassINET},
-					Txt: []string{"v=continuum;id=ccdd"},
+					TXT: rdata.TXT{Txt: []string{"v=continuum;id=ccdd"}},
 				},
 			)
 		}
@@ -12775,12 +12764,12 @@ func TestVerifyOutboundDNSIPReverseMismatch(t *testing.T) {
 	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
 	s.resolver = newResolver(dnsSrv.Listener.Addr().String())
 
-	var nodeIP net.IP
+	var nodeIP netip.Addr
 	for _, n := range handler.nodes {
 		nodeIP = n.IP
 		break
 	}
-	addr := &net.TCPAddr{IP: nodeIP, Port: 9090}
+	addr := net.TCPAddrFromAddrPort(netip.AddrPortFrom(nodeIP, 9090))
 	wrongID := Identity{0xFF}
 
 	err = s.verifyOutboundDNS(ctx, nodeIP.String()+":9090", addr, wrongID)
@@ -12809,14 +12798,14 @@ func TestVerifyOutboundDNSIPReverseSuccess(t *testing.T) {
 	t.Cleanup(func() { dnsSrv.Shutdown(ctx) })
 	s.resolver = newResolver(dnsSrv.Listener.Addr().String())
 
-	var nodeIP net.IP
+	var nodeIP netip.Addr
 	var nodeID Identity
 	for _, n := range handler.nodes {
 		nodeIP = n.IP
 		nodeID = n.Secret.Identity
 		break
 	}
-	addr := &net.TCPAddr{IP: nodeIP, Port: 9090}
+	addr := net.TCPAddrFromAddrPort(netip.AddrPortFrom(nodeIP, 9090))
 
 	err = s.verifyOutboundDNS(ctx, nodeIP.String()+":9090", addr, nodeID)
 	if err != nil {
@@ -13068,7 +13057,6 @@ func TestSeedForwardModePreservesHostname(t *testing.T) {
 
 	// Mock DNS: resolve seed1.test.gfy to A's listen IP and
 	// serve a TXT record with A's identity for forward verification.
-	ip := net.ParseIP("127.0.0.1")
 	seedFQDN := "seed1.test.gfy."
 	portNum, err := strconv.Atoi(port)
 	if err != nil {
@@ -13081,12 +13069,12 @@ func TestSeedForwardModePreservesHostname(t *testing.T) {
 	handler.lookup[seedFQDN] = []dns.RR{
 		&dns.A{
 			Hdr: dns.Header{Name: seedFQDN, Class: dns.ClassINET},
-			A:   ip,
+			A:   rdata.A{Addr: netip.MustParseAddr("127.0.0.1")},
 		},
 		&dns.TXT{
 			Hdr: dns.Header{Name: seedFQDN, Class: dns.ClassINET},
-			Txt: []string{fmt.Sprintf("v=%v; identity=%v; port=%v",
-				dnsAppName, serverA.Identity(), portNum)},
+			TXT: rdata.TXT{Txt: []string{fmt.Sprintf("v=%v; identity=%v; port=%v",
+				dnsAppName, serverA.Identity(), portNum)}},
 		},
 	}
 	dnsSrv := newDNSServer(ctx, handler)
