@@ -156,7 +156,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   controlled measurement of slow blocks
   ([#1053](https://github.com/hemilabs/heminetwork/pull/1053)).
 
-
 - `BlockTxUpdate` uses stack-allocated reusable buffers instead of slicing
   loop variables, avoiding potential data integrity issues
   ([#1052](https://github.com/hemilabs/heminetwork/pull/1052),
@@ -180,8 +179,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved signal handling in the daemons ([#763](https://github.com/hemilabs/heminetwork/pull/763)).
 
 - Bump tbcd database schema to v5; first start after upgrade wipes the stored block bodies and re-downloads them
-  with witness data, triggered by the witness-download fix below
-  ([#972](https://github.com/hemilabs/heminetwork/pull/972)).
+  with witness data, triggered by the witness-download fix below. Also deletes and rolls the heighthash
+  database into the blockheaders database.
+  ([#972](https://github.com/hemilabs/heminetwork/pull/972), [#1247](https://github.com/hemilabs/heminetwork/pull/1247)).
 
 ### Fixed
 
@@ -401,7 +401,7 @@ Thank you to everyone who contributed to this release!
 
 ---
 
-_Looking for the changelog for an older version? Check <https://github.com/hemilabs/heminetwork/releases>_
+*Looking for the changelog for an older version? Check <https://github.com/hemilabs/heminetwork/releases>*
 
 [Unreleased]: https://github.com/hemilabs/heminetwork/compare/v2.0.0...HEAD
 [v2.0.0]: https://github.com/hemilabs/heminetwork/releases/tag/v2.0.0

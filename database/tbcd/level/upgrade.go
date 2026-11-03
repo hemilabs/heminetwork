@@ -44,6 +44,10 @@ var (
 	keystoneSizeV3 = chainhash.HashSize + hemi.L2KeystoneAbrevSize
 )
 
+// legacyHeightHashDB is the pre-v5 height to hash index database that v5
+// folds into the block headers database.
+const legacyHeightHashDB = "heighthash"
+
 func init() {
 	if testing.Testing() {
 		requiredDiskSpace = 100 * mib
@@ -603,7 +607,7 @@ func (l *ldb) v4(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("hash: %w", err)
 		}
-		ehh := encodeKeystoneHeightHash(uint32(bh.Height), *ksHash)
+		ehh := encodeIndexHeightHash(uint32(bh.Height), *ksHash)
 		err = ksdb.Put(ehh[:], nil, nil)
 		if err != nil {
 			return fmt.Errorf("put: %w", err)
@@ -641,7 +645,6 @@ func (l *ldb) v4(ctx context.Context) error {
 // untouched:
 //
 //   - BlockHeadersDB  kept: 80-byte headers, no witness
-//   - HeightHashDB    kept: derived from headers
 //   - TransactionsDB  kept: txid maps over the non-witness tx
 //     serialisation; txid and spent-outpoint records do not
 //     observe the witness
@@ -658,6 +661,10 @@ func (l *ldb) v4(ctx context.Context) error {
 //   - BlocksMissingDB: wipe, then repopulate from every row in
 //     BlockHeadersDB. The next BlocksMissing call the sync loop
 //     makes returns the full set for download.
+//   - HeightHashDB: wipe. The height to hash index is rebuilt
+//     inside BlockHeadersDB as h[uint32 BE height][hash] keys,
+//     derived from the header rows, so block header writes only
+//     need a single database transaction.
 //
 // First start after the upgrade triggers a full re-download of the
 // chain's block bodies. BlockByHash and TxById return NotFound for
@@ -668,18 +675,19 @@ func (l *ldb) v5(ctx context.Context) error {
 
 	log.Infof("Upgrading database from v4 to v5")
 
-	// 1. Close all database handles, delete the BlocksDB rawdb
-	// and BlocksMissingDB trees, then reopen everything via
-	// level.New.  Tables whose directories still exist come
-	// back with their data; deleted directories are recreated
-	// empty.  This avoids iterating BlocksMissing to batch-
-	// delete every key and keeps both the Database and ldb
-	// pools pointing at the same handles.
+	// 1. Close all database handles, delete the BlocksDB rawdb,
+	// BlocksMissingDB and HeightHashDB trees, then reopen
+	// everything via level.New.  Tables whose directories still
+	// exist come back with their data; deleted directories are
+	// recreated empty (HeightHashDB is no longer opened).  This
+	// avoids iterating BlocksMissing to batch-delete every key
+	// and keeps both the Database and ldb pools pointing at the
+	// same handles.
 	lcfg := l.Config()
 	if err := l.Close(); err != nil {
 		return fmt.Errorf("close database: %w", err)
 	}
-	for _, sub := range []string{level.BlocksDB, level.BlocksMissingDB} {
+	for _, sub := range []string{level.BlocksDB, level.BlocksMissingDB, legacyHeightHashDB} {
 		home := filepath.Clean(l.cfg.Home)
 		target := filepath.Join(home, sub)
 		if !strings.HasPrefix(target, home+string(os.PathSeparator)) {
@@ -701,9 +709,11 @@ func (l *ldb) v5(ctx context.Context) error {
 	l.pool = ld.DB()
 	l.rawPool = ld.RawDB()
 
-	// 2. Repopulate BlocksMissingDB from BlockHeadersDB.  For
-	// every header row (key=hash[32], value starts with height
-	// in 8 BE bytes), insert a heightHashToKey entry exactly as
+	// 2. Repopulate BlocksMissingDB and the BlockHeadersDB
+	// height index from BlockHeadersDB.  For every header row
+	// (key=hash[32], value starts with height in 8 BE bytes),
+	// insert a heightHashToKey entry into BlocksMissingDB and an
+	// h[height][hash] entry into BlockHeadersDB exactly as
 	// BlockHeadersInsert would on first receipt.  BlocksMissing
 	// picks these up in ascending height order.
 	bhsDB, ok := l.pool[level.BlockHeadersDB]
@@ -715,8 +725,21 @@ func (l *ldb) v5(ctx context.Context) error {
 		return fmt.Errorf("db not found: %v", level.BlocksMissingDB)
 	}
 	bmBatch := new(leveldb.Batch)
+	bhsBatch := new(leveldb.Batch)
+	flush := func() error {
+		if err := bmDB.Write(bmBatch, nil); err != nil {
+			return fmt.Errorf("blocksmissing repopulate: %w", err)
+		}
+		if err := bhsDB.Write(bhsBatch, nil); err != nil {
+			return fmt.Errorf("blockheaders height index: %w", err)
+		}
+		bmBatch.Reset()
+		bhsBatch.Reset()
+		return nil
+	}
 	var records int
 	it := bhsDB.NewIterator(nil, nil)
+	defer it.Release()
 	for it.Next() {
 		key := it.Key()
 		val := it.Value()
@@ -733,17 +756,27 @@ func (l *ldb) v5(ctx context.Context) error {
 				len(val), blockheaderSize)
 		}
 		height := binary.BigEndian.Uint64(val[0:8])
+		hash, err := chainhash.NewHash(key)
+		if err != nil {
+			return fmt.Errorf("blockheader hash: %w", err)
+		}
 		bmBatch.Put(heightHashToKey(height, key), []byte{})
+		bhsBatch.Put(encodeIndexHeightHashSlice(uint32(height), *hash),
+			[]byte{})
 		records++
+		if records%batchSize == 0 {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
 	}
-	it.Release()
 	if err := it.Error(); err != nil {
 		return fmt.Errorf("blockheaders iterator: %w", err)
 	}
-	if err := bmDB.Write(bmBatch, nil); err != nil {
-		return fmt.Errorf("blocksmissing repopulate: %w", err)
+	if err := flush(); err != nil {
+		return err
 	}
-	log.Infof("v5: marked %v blocks for re-download", records)
+	log.Infof("v5: marked %v blocks for re-download and indexed by height", records)
 
 	// 3. Bump version.
 	v := make([]byte, 8)
