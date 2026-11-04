@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 
 	"codeberg.org/miekg/dns"
 	"codeberg.org/miekg/dns/dnsutil"
+	"codeberg.org/miekg/dns/rdata"
 	dockerclient "github.com/moby/moby/client"
 
 	"github.com/hemilabs/heminetwork/v2/service/continuum"
@@ -63,25 +65,34 @@ func (h *DNSHandler) txtContent(sec *continuum.Secret, port uint16) string {
 	return s
 }
 
-// addNode registers A and TXT forward records for a node with a known IP.
-func (h *DNSHandler) addNode(name string, ip net.IP, port uint16, sec *continuum.Secret) {
-	fqdn := h.dnsName(name)
-	h.records[fqdn] = []dns.RR{
+// nodeRecords returns the A and TXT forward records for a node.
+func (h *DNSHandler) nodeRecords(fqdn string, ip netip.Addr, port uint16, sec *continuum.Secret) []dns.RR {
+	return []dns.RR{
 		&dns.A{
 			Hdr: dns.Header{
 				Name:  fqdn,
 				Class: dns.ClassINET,
 			},
-			A: ip.To4(),
+			A: rdata.A{Addr: ip},
 		},
 		&dns.TXT{
 			Hdr: dns.Header{
 				Name:  fqdn,
 				Class: dns.ClassINET,
 			},
-			Txt: []string{h.txtContent(sec, port)},
+			TXT: rdata.TXT{Txt: []string{h.txtContent(sec, port)}},
 		},
 	}
+}
+
+// addNode registers A and TXT forward records for a node with a known IP.
+func (h *DNSHandler) addNode(name string, ip net.IP, port uint16, sec *continuum.Secret) {
+	addr, ok := netip.AddrFromSlice(ip.To4())
+	if !ok {
+		panic(fmt.Sprintf("invalid IPv4 address for %s: %v", name, ip))
+	}
+	fqdn := h.dnsName(name)
+	h.records[fqdn] = h.nodeRecords(fqdn, addr, port, sec)
 	h.nodes[fqdn] = &nodeEntry{secret: sec, port: port}
 }
 
@@ -99,7 +110,7 @@ func (h *DNSHandler) addPTR(ip net.IP, name string) {
 				Name:  rev,
 				Class: dns.ClassINET,
 			},
-			Ptr: h.dnsName(name),
+			PTR: rdata.PTR{Ptr: h.dnsName(name)},
 		},
 	}
 }
@@ -137,20 +148,19 @@ func (h *DNSHandler) dockerResolve(ctx context.Context, queryName string) ([]dns
 
 	// If querying for IP, returns a PTR record for reverse lookup
 	if strings.HasSuffix(queryName, ".in-addr.arpa.") {
-		queryIP := arpaToIPv4(queryName)
-		if queryIP == nil {
+		queryIP, ok := arpaToIPv4(queryName)
+		if !ok {
 			return nil, fmt.Errorf("invalid arpa name: %s", queryName)
 		}
 		for _, ep := range netInfo.Network.Containers {
-			ipStr := ep.IPv4Address.Addr().String()
-			if net.ParseIP(ipStr).To4().Equal(queryIP) {
+			if ep.IPv4Address.Addr() == queryIP {
 				return []dns.RR{
 					&dns.PTR{
 						Hdr: dns.Header{
 							Name:  queryName,
 							Class: dns.ClassINET,
 						},
-						Ptr: ep.Name + suffix,
+						PTR: rdata.PTR{Ptr: ep.Name + suffix},
 					},
 				}, nil
 			}
@@ -168,49 +178,34 @@ func (h *DNSHandler) dockerResolve(ctx context.Context, queryName string) ([]dns
 		if ep.Name != containerName {
 			continue
 		}
-		ipStr := ep.IPv4Address.Addr().String()
-		ip := net.ParseIP(ipStr).To4()
-		if ip == nil {
+		ip := ep.IPv4Address.Addr()
+		if !ip.Is4() {
 			return nil, fmt.Errorf("invalid IP %q for %s", ep.IPv4Address, containerName)
 		}
 		entry, ok := h.nodes[queryName]
 		if !ok {
 			return nil, fmt.Errorf("no node registered for %s", queryName)
 		}
-		return []dns.RR{
-			&dns.A{
-				Hdr: dns.Header{
-					Name:  queryName,
-					Class: dns.ClassINET,
-				},
-				A: ip,
-			},
-			&dns.TXT{
-				Hdr: dns.Header{
-					Name: queryName, Class: dns.ClassINET,
-				},
-				Txt: []string{h.txtContent(entry.secret, entry.port)},
-			},
-		}, nil
+		return h.nodeRecords(queryName, ip, entry.port, entry.secret), nil
 	}
 	return nil, fmt.Errorf("no container %q on network %s", containerName, h.DockerNetwork)
 }
 
-func arpaToIPv4(arpa string) net.IP {
+func arpaToIPv4(arpa string) (netip.Addr, bool) {
 	s := strings.TrimSuffix(arpa, ".in-addr.arpa.")
 	parts := strings.Split(s, ".")
 	if len(parts) != 4 {
-		return nil
+		return netip.Addr{}, false
 	}
-	b := make([]byte, 4)
+	var b [4]byte
 	for i, p := range parts {
-		v, err := strconv.Atoi(p)
-		if err != nil || v < 0 || v > 255 {
-			return nil
+		v, err := strconv.ParseUint(p, 10, 8)
+		if err != nil {
+			return netip.Addr{}, false
 		}
 		b[3-i] = byte(v)
 	}
-	return net.IPv4(b[0], b[1], b[2], b[3]).To4()
+	return netip.AddrFrom4(b), true
 }
 
 func NewDNSServer(ctx context.Context, handler dns.Handler) *dns.Server {
