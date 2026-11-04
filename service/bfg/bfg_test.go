@@ -70,7 +70,7 @@ func TestBFG(t *testing.T) {
 		}
 	}()
 
-	for !s.Connected() {
+	for !s.Connected() || s.HTTPAddress() == nil {
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -131,7 +131,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 		}
 	}()
 
-	for !s.Connected() {
+	for !s.Connected() || s.HTTPAddress() == nil {
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -181,7 +181,7 @@ func TestFullMockIntegration(t *testing.T) {
 		}
 	}()
 
-	for !s.Connected() {
+	for !s.Connected() || s.HTTPAddress() == nil {
 		time.Sleep(10 * time.Millisecond)
 	}
 
