@@ -211,25 +211,28 @@ func startDockerNetwork(ctx context.Context, t *testing.T) (*dockerclient.Client
 func startNodes(ctx context.Context, t *testing.T, cli *dockerclient.Client, networkName, dnsPort string, nodes []nodeInfo) []string {
 	t.Helper()
 	debug := "1"
+	var image string
+	build := testcontainers.FromDockerfile{
+		Tag:        "latest",
+		Repo:       "hemilabs/transfunctionerd",
+		Dockerfile: "./docker/transfunctionerd/Dockerfile",
+		Context:    "./../../..",
+		KeepImage:  true,
+		BuildArgs: map[string]*string{
+			"GO_LDFLAGS":      new(string),
+			"CONTINUUM_DEBUG": &debug,
+		},
+	}
 	var prevPeer string
 	var nodeIPs []string
 	for _, n := range nodes[1:] {
 		c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 			ContainerRequest: testcontainers.ContainerRequest{
-				FromDockerfile: testcontainers.FromDockerfile{
-					Tag:        "latest",
-					Repo:       "hemilabs/transfunctionerd",
-					Dockerfile: "./docker/transfunctionerd/Dockerfile",
-					Context:    "./../../..",
-					KeepImage:  true,
-					BuildArgs: map[string]*string{
-						"GO_LDFLAGS":      new(string),
-						"CONTINUUM_DEBUG": &debug,
-					},
-				},
-				Name:         n.name,
-				Networks:     []string{networkName},
-				ExposedPorts: []string{strconv.Itoa(trfListenPort)},
+				Image:          image,
+				FromDockerfile: build,
+				Name:           n.name,
+				Networks:       []string{networkName},
+				ExposedPorts:   []string{strconv.Itoa(trfListenPort)},
 				Env: map[string]string{
 					"TRF_LISTEN_ADDRESS": fmt.Sprintf("0.0.0.0:%d", trfListenPort),
 					"TRF_DNS":            "all",
@@ -267,6 +270,7 @@ func startNodes(ctx context.Context, t *testing.T, cli *dockerclient.Client, net
 			}
 		})
 
+		image, build = "hemilabs/transfunctionerd:latest", testcontainers.FromDockerfile{}
 		prevPeer = fmt.Sprintf("%s:%d", n.hostname, trfListenPort)
 		info, err := cli.ContainerInspect(ctx, c.GetContainerID(), dockerclient.ContainerInspectOptions{})
 		if err != nil {
@@ -381,7 +385,7 @@ func TestE2EPeers(t *testing.T) {
 
 	const nodeCount = 10
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 	defer cancel()
 
 	setup := setupTSSNodes(ctx, t, nodeCount)
@@ -414,7 +418,7 @@ func TestE2EKeygen(t *testing.T) {
 
 	const nodeCount = 4
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 	defer cancel()
 
 	setup := setupTSSNodes(ctx, t, nodeCount)
