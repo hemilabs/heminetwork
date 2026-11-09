@@ -1,11 +1,11 @@
 module github.com/hemilabs/heminetwork/synctest
 
-go 1.26
+go 1.26.0
 
 toolchain go1.26.6
 
 require (
-	github.com/caarlos0/env/v11 v11.4.1
+	github.com/caarlos0/env/v11 v11.4.2
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.17.4
