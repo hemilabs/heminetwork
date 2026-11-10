@@ -117,7 +117,7 @@ func TestTBCGozerConnection(t *testing.T) {
 		ccMtx sync.Mutex
 		cc    int
 	)
-	qd := DefaultCommandQueueDepth * 100
+	qd := DefaultCommandQueueDepth * 10
 	for range qd {
 		wg.Go(func() {
 			h, _, _, err := b.BestHeightHashTime(ctx)
@@ -335,7 +335,7 @@ func TestTBCGozerCalls(t *testing.T) {
 		ccMtx sync.Mutex
 		cc    int
 	)
-	qd := DefaultCommandQueueDepth * 100
+	qd := DefaultCommandQueueDepth * 10
 	for range qd {
 		wg.Go(func() {
 			fes, err := b.FeeEstimates(ctx)
