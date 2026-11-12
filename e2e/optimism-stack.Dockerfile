@@ -10,7 +10,7 @@
 # Glamsterdam.  The optimism commit pins exactly this op-geth commit in its
 # go.mod, so op-node, op-batcher and op-proposer are linked against the
 # same code that runs as the L2 execution client.
-ARG OP_GETH_COMMIT=cbbe44775d4f5b06abe80c9b48e8cf1a200c7450
+ARG OP_GETH_COMMIT=404b6819769fe16b3f2e3a93cc76cf7c7343d1d0
 ARG OPTIMISM_COMMIT=f04d7b3a8dd75a24b80f8fa0f7fd7f6d6346394c
 
 # commit near tip on "master" (main) branch.  the most recent release is
