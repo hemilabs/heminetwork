@@ -386,7 +386,8 @@ func l1GlamsterdamFork(t *testing.T, ctx context.Context) glamsterdamFork {
 // ---- op-node ---------------------------------------------------------------
 
 type opNodeL1Ref struct {
-	Number uint64 `json:"number"`
+	Hash   common.Hash `json:"hash"`
+	Number uint64      `json:"number"`
 }
 
 type opNodeL2Ref struct {
@@ -403,6 +404,8 @@ type opNodeL2Ref struct {
 type opNodeSyncStatus struct {
 	CurrentL1   opNodeL1Ref `json:"current_l1"`
 	HeadL1      opNodeL1Ref `json:"head_l1"`
+	SafeL1      opNodeL1Ref `json:"safe_l1"`
+	FinalizedL1 opNodeL1Ref `json:"finalized_l1"`
 	UnsafeL2    opNodeL2Ref `json:"unsafe_l2"`
 	SafeL2      opNodeL2Ref `json:"safe_l2"`
 	FinalizedL2 opNodeL2Ref `json:"finalized_l2"`
@@ -1997,7 +2000,7 @@ func TestPostRunL1ReorgOnGlamsterdam(t *testing.T) {
 	target := before.UnsafeL2.Number
 	for _, node := range opStackNodes {
 		rollup := dialRPC(t, ctx, node.rollupRPC)
-		status := waitForSyncStatus(t, ctx, rollup, node.name,
+		waitForSyncStatus(t, ctx, rollup, node.name,
 			fmt.Sprintf("for it to follow the l1 past the reorg and derive l2 block %d", target),
 			func(s *opNodeSyncStatus) bool {
 				return s.HeadL1.Number > uint64(head.Number)+2 &&
@@ -2006,7 +2009,6 @@ func TestPostRunL1ReorgOnGlamsterdam(t *testing.T) {
 					s.SafeL2.L1Origin.Number > uint64(head.Number) &&
 					onL1(s.SafeL1) && onL1(s.FinalizedL1)
 			})
-		checkOpNodeL1View(t, ctx, l1, node.name, status, false)
 	}
 
 	sequencerL2 := dialRPC(t, ctx, sequencer.l2RPC)
