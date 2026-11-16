@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork/e2e/monitor
 
 go 1.26.0
 
-toolchain go1.26.6
+toolchain go1.26.11
 
 replace github.com/hemilabs/heminetwork/v2 => ../..
 
