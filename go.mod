@@ -34,7 +34,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.10
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/tyler-smith/go-bip39 v1.1.0
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/time v0.16.0
 )
@@ -124,6 +124,6 @@ require (
 	go.yaml.in/yaml/v2 v2.4.5 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
