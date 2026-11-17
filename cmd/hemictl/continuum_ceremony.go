@@ -107,17 +107,46 @@ import (
 )
 
 func init() {
-	continuumActions["keygen"] = continuumKeygen
-	continuumActions["sign"] = continuumSign
-	continuumActions["reshare"] = continuumReshare
-	continuumActions["suggest"] = continuumSuggestPeer
-
-	continuumActionHelp = append(continuumActionHelp,
-		"\tkeygen\t\tTrigger keygen (members=<id1>,<id2>,... OR auto=<n> threshold=<n>)",
-		"\tsign\t\tTrigger sign (members=... OR auto=<n> threshold=<n> key_id=<hex> data=<hex>)",
-		"\treshare\t\tTrigger reshare (old_members=... new_members=... OR old_auto=<n> new_auto=<n> old_threshold=<n> new_threshold=<n> key_id=<hex>)",
-		"\tsuggest\t\tSuggest a peer for continuum to connect to (address=<host:port>)",
-	)
+	continuumCommands["keygen"] = command{
+		help: "Trigger a keygen ceremony.",
+		args: map[string]argument{
+			"members":   {required: true, order: 1, help: "comma-separated committee identities (hex)"},
+			"auto":      {required: true, order: 1, help: "auto-select the first n connected peers"},
+			"threshold": {required: true, help: "signing threshold"},
+		},
+		run: continuumKeygen,
+	}
+	continuumCommands["sign"] = command{
+		help: "Trigger a sign ceremony.",
+		args: map[string]argument{
+			"members":   {required: true, order: 1, help: "comma-separated committee identities (hex)"},
+			"auto":      {required: true, order: 1, help: "auto-select the first n connected peers"},
+			"threshold": {required: true, help: "signing threshold"},
+			"key_id":    {required: true, help: "key id (hex)"},
+			"data":      {required: true, help: "32-byte hash to sign (hex)"},
+		},
+		run: continuumSign,
+	}
+	continuumCommands["reshare"] = command{
+		help: "Trigger a reshare ceremony.",
+		args: map[string]argument{
+			"old_members":   {required: true, order: 1, help: "comma-separated old committee identities (hex)"},
+			"old_auto":      {required: true, order: 1, help: "auto-select the first n connected peers for the old committee"},
+			"new_members":   {required: true, order: 2, help: "comma-separated new committee identities (hex)"},
+			"new_auto":      {required: true, order: 2, help: "auto-select the first n connected peers for the new committee"},
+			"old_threshold": {required: true, help: "old committee signing threshold"},
+			"new_threshold": {required: true, help: "new committee signing threshold"},
+			"key_id":        {required: true, help: "key id (hex)"},
+		},
+		run: continuumReshare,
+	}
+	continuumCommands["suggest"] = command{
+		help: "Suggest a peer for continuum to connect to.",
+		args: map[string]argument{
+			"address": {required: true, help: "peer address (host:port)"},
+		},
+		run: continuumSuggestPeer,
+	}
 }
 
 // =============================================================================
