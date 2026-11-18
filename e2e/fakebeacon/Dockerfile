@@ -25,7 +25,7 @@ RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off \
 	go build -trimpath -o /build/bin/fakebeacon ./e2e/fakebeacon
 
 # Run stage
-FROM cgr.dev/chainguard/static@sha256:60582b2ae6074f641094af0f370d4ab241aab271858a66223dcde7eee9f51638
+FROM cgr.dev/chainguard/static@sha256:fc42af33e643f20d08baf03cddcc1c02ba57052dfb02edb0d79f3fc47bcea8d9
 
 COPY --from=builder /build/bin/fakebeacon /usr/local/bin/fakebeacon
 
