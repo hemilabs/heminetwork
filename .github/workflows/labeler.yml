@@ -39,7 +39,7 @@ jobs:
         uses: actions/labeler@b8dd2d9be0f68b860e7dae5dae7d772984eacd6d # v6.2.0
 
       - name: "Update changelog labels"
-        uses: hemilabs/actions/changelog-labeler@8f87619b7f0122c39e14a32514ab3e4e0d4c3966 # v2.3.0
+        uses: hemilabs/actions/changelog-labeler@4b975d74c198afc6b2908cea6b3948f9af0d1e6f # v3.1.0
         with:
           changelog-path: "CHANGELOG.md"
           label-required: "changelog: required"
